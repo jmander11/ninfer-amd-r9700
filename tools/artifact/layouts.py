@@ -98,7 +98,7 @@ Payload: TypeAlias = bytes | bytearray | memoryview | Any
 
 
 def _require_torch() -> None:
-    global torch
+    global torch  # noqa: PLW0603  lazy optional import; framing works without torch
     if torch is None:
         try:
             torch = importlib.import_module("torch")

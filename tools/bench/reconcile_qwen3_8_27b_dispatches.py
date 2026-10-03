@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -616,10 +617,8 @@ def _publish(path: Path, value: dict[str, Any]) -> None:
             os.close(directory)
         durable = True
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
         if published and not durable and created_inode is not None:
             try:
                 current = os.stat(path, follow_symlinks=False)

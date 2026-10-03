@@ -349,7 +349,7 @@ class QwenRooflineTest(unittest.TestCase):
                     {"tokens": 2048, "rows": 7168, "columns": 5120},
                 ),
             ]
-            timing, inventory, _ = self.fixture(root, operations, overlap=True)
+            timing, _, _ = self.fixture(root, operations, overlap=True)
             result = model(timing)
             rows = {row["operation"]: row for row in result["dispatches"]}
             q4 = requested_traffic(Shape(2048, 34816, 5120), M64_N64)
@@ -366,7 +366,7 @@ class QwenRooflineTest(unittest.TestCase):
 
     def test_dense_causal_attention_formula(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            timing, inventory, _ = self.fixture(
+            timing, _, _ = self.fixture(
                 Path(directory),
                 [
                     (
@@ -399,71 +399,69 @@ class QwenRooflineTest(unittest.TestCase):
             self.assertEqual(row["counts"]["special_functions"]["softmax_exp_arguments"], 18)
 
     def test_sparse_pack_rank_and_keep_derived_consumer(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            keep_rows = {
-                "d0": {
-                    "retained_key_counts_per_query": [1, 2, 3, 4],
-                    "represented_unique_kv_token_heads": 6,
-                    "consumer_tiles": [
-                        {"query_rows": 2, "key_rows": 16},
-                        {"query_rows": 1, "key_rows": 8},
-                    ],
-                }
+        keep_rows = {
+            "d0": {
+                "retained_key_counts_per_query": [1, 2, 3, 4],
+                "represented_unique_kv_token_heads": 6,
+                "consumer_tiles": [
+                    {"query_rows": 2, "key_rows": 16},
+                    {"query_rows": 1, "key_rows": 8},
+                ],
             }
-            consumer = _counts(
-                "sparse_consumer",
-                {
-                    "tokens": 2,
-                    "query_heads": 2,
-                    "kv_heads": 1,
-                    "head_dimension": 4,
-                    "value_group": 2,
-                    "represented_metadata_bytes": 0,
-                    "source_metadata_bytes": 0,
-                },
-                "d0",
-                keep_rows,
-            )
-            self.assertEqual(consumer["logical_ops"], 4 * 4 * 10)
-            self.assertEqual(consumer["issued_ops"]["bf16_matrix"], 2 * 16 * 16 * 4 * 2)
-            self.assertEqual(consumer["issued_ops"]["fp32_vector_arithmetic"], 2 * 4 * 10)
+        }
+        consumer = _counts(
+            "sparse_consumer",
+            {
+                "tokens": 2,
+                "query_heads": 2,
+                "kv_heads": 1,
+                "head_dimension": 4,
+                "value_group": 2,
+                "represented_metadata_bytes": 0,
+                "source_metadata_bytes": 0,
+            },
+            "d0",
+            keep_rows,
+        )
+        self.assertEqual(consumer["logical_ops"], 4 * 4 * 10)
+        self.assertEqual(consumer["issued_ops"]["bf16_matrix"], 2 * 16 * 16 * 4 * 2)
+        self.assertEqual(consumer["issued_ops"]["fp32_vector_arithmetic"], 2 * 4 * 10)
 
-            pack = _counts(
-                "sparse_pack",
-                {
-                    "context_tokens": 8,
-                    "kv_heads": 1,
-                    "head_dimension": 4,
-                    "represented_metadata_bytes": 0,
-                    "source_metadata_bytes": 0,
-                },
-                "pack",
-                {},
-            )
-            rank = _counts(
-                "sparse_rank",
-                {
-                    "head_dimension": 4,
-                    "logical_qk_pairs": 20,
-                    "issued_wmma_16x16_tiles": 3,
-                    "represented_query_elements": 8,
-                    "represented_packed_key_elements": 32,
-                    "represented_scratch_bytes": 24,
-                    "source_query_elements": 16,
-                    "source_packed_key_elements": 64,
-                    "source_scratch_read_bytes": 11,
-                    "source_scratch_write_bytes": 13,
-                    "represented_metadata_bytes": 5,
-                    "source_metadata_bytes": 7,
-                    "estimator_exp_arguments": 7,
-                },
-                "rank",
-                {},
-            )
-            self.assertEqual(pack["represented_minimum_bytes"], 96)
-            self.assertEqual(rank["logical_ops"], 160)
-            self.assertEqual(rank["issued_ops"]["bf16_matrix"], 2 * 16 * 16 * 4 * 3)
+        pack = _counts(
+            "sparse_pack",
+            {
+                "context_tokens": 8,
+                "kv_heads": 1,
+                "head_dimension": 4,
+                "represented_metadata_bytes": 0,
+                "source_metadata_bytes": 0,
+            },
+            "pack",
+            {},
+        )
+        rank = _counts(
+            "sparse_rank",
+            {
+                "head_dimension": 4,
+                "logical_qk_pairs": 20,
+                "issued_wmma_16x16_tiles": 3,
+                "represented_query_elements": 8,
+                "represented_packed_key_elements": 32,
+                "represented_scratch_bytes": 24,
+                "source_query_elements": 16,
+                "source_packed_key_elements": 64,
+                "source_scratch_read_bytes": 11,
+                "source_scratch_write_bytes": 13,
+                "represented_metadata_bytes": 5,
+                "source_metadata_bytes": 7,
+                "estimator_exp_arguments": 7,
+            },
+            "rank",
+            {},
+        )
+        self.assertEqual(pack["represented_minimum_bytes"], 96)
+        self.assertEqual(rank["logical_ops"], 160)
+        self.assertEqual(rank["issued_ops"]["bf16_matrix"], 2 * 16 * 16 * 4 * 3)
 
     def test_gdn_and_elementwise_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -491,7 +489,7 @@ class QwenRooflineTest(unittest.TestCase):
                 ("residual_rmsnorm", "residual_norm", {"elements": 16, "features": 8}),
                 ("gated_rmsnorm", "gated_norm", {"elements": 16, "features": 8}),
             ]
-            timing, inventory, _ = self.fixture(Path(directory), operations)
+            timing, _, _ = self.fixture(Path(directory), operations)
             rows = {row["operation"]: row for row in model(timing)["dispatches"]}
             self.assertEqual(
                 rows["gdn_recurrence"]["counts"]["logical_ops"], 2 * 4 * 8 * (7 * 8 + 4)
@@ -513,7 +511,7 @@ class QwenRooflineTest(unittest.TestCase):
     def test_rejects_ambiguous_or_unbound_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            timing, inventory, _ = self.fixture(
+            timing, _, _ = self.fixture(
                 root, [("q4_linear", "projection", {"tokens": 64, "rows": 64, "columns": 64})]
             )
             value = json.loads(timing.read_text(encoding="utf-8"))
@@ -522,7 +520,7 @@ class QwenRooflineTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "inventory row d0 differs"):
                 model(timing)
 
-            timing2, inventory2, _ = self.fixture(
+            timing2, _, _ = self.fixture(
                 root / "nonauto",
                 [("q4_linear", "projection", {"tokens": 64, "rows": 64, "columns": 64})],
                 auto=False,
@@ -530,7 +528,7 @@ class QwenRooflineTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "required/observed/rechecked_after auto"):
                 model(timing2)
 
-            timing3, inventory3, _ = self.fixture(
+            timing3, _, _ = self.fixture(
                 root / "sparse",
                 [
                     (
@@ -554,9 +552,7 @@ class QwenRooflineTest(unittest.TestCase):
     def test_probe_reference_is_bound_and_source_hashes_are_rechecked(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            timing, inventory, _ = self.fixture(
-                root, [("residual_add", "residual", {"elements": 16})]
-            )
+            timing, _, _ = self.fixture(root, [("residual_add", "residual", {"elements": 16})])
             probe = root / "probe.json"
             probe.write_text(
                 json.dumps(

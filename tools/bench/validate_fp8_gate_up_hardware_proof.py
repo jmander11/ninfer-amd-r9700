@@ -22,8 +22,12 @@ SOURCE_ROOT = Path(__file__).resolve().parents[2]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from tools.bench.decide_fp8_post_gate_up import validate_qualifier as validate_projection
-from tools.bench.validate_fp8_gate_up_comparison import validate as validate_comparison
+from tools.bench.decide_fp8_post_gate_up import (  # noqa: E402  sys.path bootstrap
+    validate_qualifier as validate_projection,
+)
+from tools.bench.validate_fp8_gate_up_comparison import (  # noqa: E402  sys.path bootstrap
+    validate as validate_comparison,
+)
 
 FP8_QUANTIZE = "fp8_quantize_activation_kernel"
 FP8_POISON_BOUNDARIES = (
@@ -211,8 +215,7 @@ def _disassemble(
         symbols = subprocess.run(
             [nm_id["path"], "-n", str(code)],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
         )
         entries: list[tuple[int, str]] = []
@@ -236,9 +239,7 @@ def _disassemble(
             f"--stop-address=0x{stop:x}",
             str(code),
         ]
-        result = subprocess.run(
-            command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
     if not result.stdout.strip():
         raise ValueError("llvm-objdump produced no dispatched-symbol interval")
     return result.stdout, objdump_id, {"llvm_nm": nm_id, "start": start, "stop": stop}

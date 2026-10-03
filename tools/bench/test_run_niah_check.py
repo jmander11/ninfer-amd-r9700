@@ -593,9 +593,12 @@ class NiahEvidenceTest(unittest.TestCase):
             "--out",
             str(output),
         ]
-        with mock.patch.object(sys, "argv", argv), mock.patch.object(niah, "post") as post:
-            with self.assertRaises(SystemExit):
-                niah.main()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(niah, "post") as post,
+            self.assertRaises(SystemExit),
+        ):
+            niah.main()
         post.assert_not_called()
         self.assertTrue(output.is_symlink())
 

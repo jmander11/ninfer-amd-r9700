@@ -61,11 +61,11 @@ class PreparationTest(unittest.TestCase):
     def test_terminal_gate_precedes_output_creation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "campaign"
-            with patch.object(prep, "selected_base_route", side_effect=ValueError("nonterminal")):
-                with self.assertRaisesRegex(ValueError, "nonterminal"):
-                    prep.prepare(
-                        Path(directory), root, bench=Path("bench"), planner=Path("planner")
-                    )
+            with (
+                patch.object(prep, "selected_base_route", side_effect=ValueError("nonterminal")),
+                self.assertRaisesRegex(ValueError, "nonterminal"),
+            ):
+                prep.prepare(Path(directory), root, bench=Path("bench"), planner=Path("planner"))
             self.assertFalse(root.exists())
 
     def test_same_selected_base_evaluator_plan_roundtrips_and_revalidates_inputs(self):
@@ -158,7 +158,7 @@ class PreparationTest(unittest.TestCase):
             manifest["dry_run"] = False
             (output / "manifest.json").write_text(json.dumps(manifest))
 
-            def rows(path, case, group, a4, a8, fp8, c, *args):
+            def rows(_path, case, _group, _a4, _a8, _fp8, c, *_args):
                 if case.suite == "dflash_pareto_prefill":
                     return []
                 phase = "whole_output" if "whole" in case.suite else "decode_output"
@@ -215,7 +215,9 @@ class PreparationTest(unittest.TestCase):
                 + "; } || test -f "
                 + str(output / "failures.json")
             )
-            completed = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+            completed = subprocess.run(
+                ["bash", "-c", script], capture_output=True, text=True, check=False
+            )
             self.assertNotEqual(completed.returncode, 0)
             self.assertFalse(marker.exists())
             self.assertEqual(retained.read_text(), "failed retained evidence")
@@ -286,7 +288,7 @@ class PreparationTest(unittest.TestCase):
                 for k, w in prep.DFLASH_PRODUCTION_PROFILES
             ]
 
-            def performance(route, evidence, k, *args):
+            def performance(_route, _evidence, k, *_args):
                 return {"matched_speed_by_concurrency": {"1": {"pass": k == 5}}}
 
             with (

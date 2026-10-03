@@ -15,7 +15,7 @@ from .base import BackendRun, RunContext, WorkPlan
 class MockBackend:
     name = "mock"
 
-    _ALLOWED = {"items", "sleep_seconds", "wrong_every", "unknown_total", "fail_at"}
+    _ALLOWED = frozenset({"items", "sleep_seconds", "wrong_every", "unknown_total", "fail_at"})
 
     def validate(
         self, job: JobConfig, target: ResolvedTarget | None, for_run: bool = False

@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.convert.qwen3_8_27b_r9700 import (
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
     dflash2_q4_inventory,
     fp8_hybrid_inventory,
     inventory,
@@ -79,7 +79,8 @@ def build_objects(
 ) -> tuple[dict[str, object], ...]:
     objects: list[dict[str, object]] = []
     cursor = 0
-    for spec in specs:
+    for source_spec in specs:
+        spec = source_spec
         if wrong_selected_format and spec.name == "text/layers/63/mlp/down":
             from tools.convert.qwen3.common.inventory import tensor_spec
 

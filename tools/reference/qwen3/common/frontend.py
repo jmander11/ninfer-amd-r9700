@@ -29,7 +29,7 @@ def _fetch_videos_opencv(_processor, video_or_videos, sample_indices_fn=None):
             _fetch_videos_opencv(_processor, item, sample_indices_fn=sample_indices_fn)
             for item in video_or_videos
         ]
-        return list(zip(*fetched))
+        return list(zip(*fetched, strict=True))
     return load_video(
         video_or_videos,
         backend="opencv",

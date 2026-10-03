@@ -35,8 +35,8 @@ def _chat_request(path: Path) -> dict:
 def _messages(messages: list[dict]) -> list[dict]:
     """Tool-call arguments as mappings, as the chat template requires."""
     result = []
-    for message in messages:
-        message = json.loads(json.dumps(message))
+    for source in messages:
+        message = json.loads(json.dumps(source))
         for call in message.get("tool_calls") or []:
             function = call.get("function", call)
             if isinstance(function.get("arguments"), str):

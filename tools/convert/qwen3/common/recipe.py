@@ -157,7 +157,7 @@ def expression_shape(expression: Expression) -> tuple[int, ...]:
         for shape in shapes:
             if len(shape) != rank:
                 raise ValueError("concat sources have different ranks")
-            for axis, (got, expected) in enumerate(zip(shape, shapes[0])):
+            for axis, (got, expected) in enumerate(zip(shape, shapes[0], strict=True)):
                 if axis != expression.axis and got != expected:
                     raise ValueError("concat sources have incompatible shapes")
             output[expression.axis] += shape[expression.axis]

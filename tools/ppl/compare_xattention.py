@@ -338,12 +338,14 @@ def _route_stats(
 ) -> dict[str, Any]:
     if not (len(dense_nll) == len(sparse_nll) == len(dense_argmax) == len(sparse_argmax)):
         raise ValueError("dense/XAttention sidecars lost position alignment")
-    deltas = [sparse - dense for dense, sparse in zip(dense_nll, sparse_nll)]
+    deltas = [sparse - dense for dense, sparse in zip(dense_nll, sparse_nll, strict=True)]
     absolute = [abs(value) for value in deltas]
     dense_severe = {i for i, value in enumerate(dense_nll) if value >= threshold}
     sparse_severe = {i for i, value in enumerate(sparse_nll) if value >= threshold}
     flips = [
-        i for i, (dense, sparse) in enumerate(zip(dense_argmax, sparse_argmax)) if dense != sparse
+        i
+        for i, (dense, sparse) in enumerate(zip(dense_argmax, sparse_argmax, strict=True))
+        if dense != sparse
     ]
     return {
         "comparison_kind": "xattention-minus-dense",

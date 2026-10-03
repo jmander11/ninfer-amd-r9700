@@ -219,9 +219,11 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             root = Path(directory)
             (root / "manifest.json").write_text("{}", encoding="utf-8")
             (root / "failures.json").write_text("[]", encoding="utf-8")
-            with patch("tools.bench.select_prefill_chunk._manifest") as load:
-                with self.assertRaisesRegex(ValueError, "retains a failed matrix marker"):
-                    _stable_manifest(root, 8192, (1024, 2048, 4096, 8192))
+            with (
+                patch("tools.bench.select_prefill_chunk._manifest") as load,
+                self.assertRaisesRegex(ValueError, "retains a failed matrix marker"),
+            ):
+                _stable_manifest(root, 8192, (1024, 2048, 4096, 8192))
             load.assert_not_called()
 
     def test_stable_manifest_rejects_dangling_failure_marker_symlink(self) -> None:
@@ -229,9 +231,11 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             root = Path(directory)
             (root / "manifest.json").write_text("{}", encoding="utf-8")
             (root / "failures.json").symlink_to(root / "missing-outside-campaign")
-            with patch("tools.bench.select_prefill_chunk._manifest") as load:
-                with self.assertRaisesRegex(ValueError, "retains a failed matrix marker"):
-                    _stable_manifest(root, 8192, (1024, 2048, 4096, 8192))
+            with (
+                patch("tools.bench.select_prefill_chunk._manifest") as load,
+                self.assertRaisesRegex(ValueError, "retains a failed matrix marker"),
+            ):
+                _stable_manifest(root, 8192, (1024, 2048, 4096, 8192))
             load.assert_not_called()
 
     def test_global_maximin_uses_all_candidates_and_both_prompts(self) -> None:
@@ -349,9 +353,9 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 ),
             ),
             patch("tools.bench.select_prefill_chunk.file_sha256", return_value="f" * 64),
+            self.assertRaisesRegex(ValueError, "duplicate prefill-chunk candidate"),
         ):
-            with self.assertRaisesRegex(ValueError, "duplicate prefill-chunk candidate"):
-                build_selection(roots)
+            build_selection(roots)
 
     def test_workspace_then_smaller_chunk_break_exact_throughput_tie(self) -> None:
         rows = {

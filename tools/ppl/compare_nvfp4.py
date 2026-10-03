@@ -58,7 +58,7 @@ def run(command, directory):
     write_json(directory / "command.json", command)
     start = time.time()
     with (directory / "stdout.log").open("x") as out, (directory / "stderr.log").open("x") as err:
-        result = subprocess.run(command, cwd=ROOT, stdout=out, stderr=err)
+        result = subprocess.run(command, cwd=ROOT, stdout=out, stderr=err, check=False)
     write_json(
         directory / "receipt.json",
         dict(
@@ -317,7 +317,7 @@ def analyze(out):
         )
         for sample in SAMPLES:
 
-            def quality_path(schedule):
+            def quality_path(schedule, *, name=name, sample=sample):
                 selection = out / f"quality-selection-{name}-{schedule}.json"
                 prefix = "quality" if schedule == "prefill" else "decode-quality"
                 return out / (
@@ -328,7 +328,7 @@ def analyze(out):
 
             quality, values = nlls(quality_path("prefill"))
             reference, ref = references[sample]
-            deltas = [x - y for x, y in zip(values, ref)]
+            deltas = [x - y for x, y in zip(values, ref, strict=True)]
             decode, dv = nlls(quality_path("decode"), "decode")
             decode_reference, dr = decode_references[sample]
             selection = out / f"speed-selection-{name}.json"
@@ -357,13 +357,19 @@ def analyze(out):
                 nvfp4_ppl=reference["ppl"],
                 mean_nll_delta=statistics.mean(deltas),
                 ppl_ratio=math.exp(statistics.mean(deltas)),
-                new_severe_positions=sum(x >= 10 and y < 10 for x, y in zip(values, ref)),
-                resolved_severe_positions=sum(x < 10 and y >= 10 for x, y in zip(values, ref)),
+                new_severe_positions=sum(
+                    x >= 10 and y < 10 for x, y in zip(values, ref, strict=True)
+                ),
+                resolved_severe_positions=sum(
+                    x < 10 and y >= 10 for x, y in zip(values, ref, strict=True)
+                ),
                 decode_ppl=decode["ppl"],
                 nvfp4_decode_ppl=decode_reference["ppl"],
-                decode_mean_nll_delta=statistics.mean(x - y for x, y in zip(dv, dr)),
+                decode_mean_nll_delta=statistics.mean(x - y for x, y in zip(dv, dr, strict=True)),
                 decode_ppl_ratio=decode["ppl"] / decode_reference["ppl"],
-                decode_new_severe_positions=sum(x >= 10 and y < 10 for x, y in zip(dv, dr)),
+                decode_new_severe_positions=sum(
+                    x >= 10 and y < 10 for x, y in zip(dv, dr, strict=True)
+                ),
                 prefill_tok_s=statistics.median(pp),
                 decode_tok_s=statistics.median(tg),
                 prefill_range=[min(pp), max(pp)],
@@ -416,8 +422,8 @@ def analyze(out):
                 other
                 for other, r in rows.items()
                 if other != name
-                and all(x <= y for x, y in zip(objectives(r, include_decode), v))
-                and any(x < y for x, y in zip(objectives(r, include_decode), v))
+                and all(x <= y for x, y in zip(objectives(r, include_decode), v, strict=True))
+                and any(x < y for x, y in zip(objectives(r, include_decode), v, strict=True))
             ]
     result = dict(
         rows=rows,
@@ -454,7 +460,7 @@ def analyze(out):
         pp = [v["prefill_tok_s"] for v in values]
         tg = [v["decode_tok_s"] for v in values]
         lines.append(
-            f"| {name} | {row['file_gb']:.2f} | {(max(v['ppl_ratio'] for v in values) - 1) * 100:+.2f}% | {(max(v['decode_ppl_ratio'] for v in values) - 1) * 100:+.2f}% | {min(pp):.0f}–{max(pp):.0f} | {min(tg):.2f}–{max(tg):.2f} |"
+            f"| {name} | {row['file_gb']:.2f} | {(max(v['ppl_ratio'] for v in values) - 1) * 100:+.2f}% | {(max(v['decode_ppl_ratio'] for v in values) - 1) * 100:+.2f}% | {min(pp):.0f}–{max(pp):.0f} | {min(tg):.2f}–{max(tg):.2f} |"  # noqa: RUF001  en dash is the intended range separator in the report
         )
     lines += [
         "",

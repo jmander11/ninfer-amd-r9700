@@ -13,16 +13,21 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.convert.qwen3_8_27b_r9700 import fp8_hybrid_decision, fp8_hybrid_inventory
-from tools.convert.qwen3_8_27b_r9700.fp8_hybrid_decision import DECISION
-from tools.ppl.compare_q4_group_source import (
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
+    fp8_hybrid_decision,
+    fp8_hybrid_inventory,
+)
+from tools.convert.qwen3_8_27b_r9700.fp8_hybrid_decision import (  # noqa: E402  after sys.path setup
+    DECISION,
+)
+from tools.ppl.compare_q4_group_source import (  # noqa: E402  after sys.path setup
     _against,
     _exact_int,
     _load_bf16,
     _sidecar_values,
     _source_key,
 )
-from tools.ppl.fp8_hybrid_source_diagnostic import (
+from tools.ppl.fp8_hybrid_source_diagnostic import (  # noqa: E402  after sys.path setup
     ARTIFACT_TYPE,
     COMPARISON_TYPE,
     QUANTIZATION,
@@ -30,7 +35,7 @@ from tools.ppl.fp8_hybrid_source_diagnostic import (
     TOKENS,
     _matrix_scope,
 )
-from tools.ppl.q4_group_source_diagnostic import (
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
     TERRIBLE_NLL,
     _atomic_new,
     sha256_file,

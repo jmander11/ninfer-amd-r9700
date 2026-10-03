@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.run_ninfer_bench_matrix import (
+from tools.bench.run_ninfer_bench_matrix import (  # noqa: E402  sys.path bootstrap
     DECODE_ATTENTION_PROFILE,
     MATRIX_SCHEMA_VERSION,
     PACKED_DECODE_MIN_CONTEXT,

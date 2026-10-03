@@ -14,8 +14,10 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.bench import produce_fp8_hybrid_capacity as capacity_tool
-from tools.ppl import run as ppl
+from tools.bench import (  # noqa: E402  after sys.path setup
+    produce_fp8_hybrid_capacity as capacity_tool,
+)
+from tools.ppl import run as ppl  # noqa: E402  after sys.path setup
 
 
 def sha256(path: Path) -> str:

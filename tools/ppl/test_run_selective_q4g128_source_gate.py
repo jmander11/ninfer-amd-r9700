@@ -31,18 +31,18 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
                 patch.object(runner, "OUTPUT", output),
                 patch.object(runner, "ARMS", arms),
                 patch.object(runner, "COMPARISON", comparison),
+                self.assertRaisesRegex(ValueError, "partial"),
             ):
-                with self.assertRaisesRegex(ValueError, "partial"):
-                    runner.run()
+                runner.run()
             arms["q4g64-absmax"].unlink()
             (output / "foreign").write_text("x")
             with (
                 patch.object(runner, "OUTPUT", output),
                 patch.object(runner, "ARMS", arms),
                 patch.object(runner, "COMPARISON", comparison),
+                self.assertRaisesRegex(ValueError, "unexpected"),
             ):
-                with self.assertRaisesRegex(ValueError, "unexpected"):
-                    runner.run()
+                runner.run()
 
     def test_resume_revalidates_complete_arm_and_runs_only_missing_work(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -51,7 +51,7 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
             self._write_triplet(arms["q4g64-absmax"])
             commands = []
 
-            def fake_run(command, **kwargs):
+            def fake_run(command, **_kwargs):
                 commands.append(command)
                 if any(item.endswith("selective_q4g128_source_diagnostic") for item in command):
                     self._write_triplet(arms["q4g128-mse"])

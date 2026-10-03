@@ -63,19 +63,29 @@ EXPECTED_CLAIMS = {
     ),
 }
 EXPECTED_LIMITATIONS = [
-    "The only exact local artifact/build pair is the retained legacy row-split canonical-Q4 "
-    "evaluator; current N16/K16 DFlash companions are absent.",
+    (
+        "The only exact local artifact/build pair is the retained legacy row-split canonical-Q4 "
+        "evaluator; current N16/K16 DFlash companions are absent."
+    ),
     "The all-Q4 base is an evaluation control and has not won terminal production selection.",
-    "Eager execution is required so per-layer ROCTX ranges remain attributable; its profiled "
-    "timing is not a Device-Graph performance result.",
-    "Empty or outer-round-associated dispatches are conservatively combined as "
-    "proposal/head/round service or unattributed; symbols refine operators but cannot invent "
-    "a missing semantic marker.",
-    "The trace contains no performance counters and makes no memory-bandwidth, cache-hit, or "
-    "stall claim.",
-    "A bounded terminal selected-region asynchronous GPU drain/reordering after the measured host "
-    "marker is retained rather than discarded; empty-region rows remain conservatively "
-    "unattributed service.",
+    (
+        "Eager execution is required so per-layer ROCTX ranges remain attributable; its profiled "
+        "timing is not a Device-Graph performance result."
+    ),
+    (
+        "Empty or outer-round-associated dispatches are conservatively combined as "
+        "proposal/head/round service or unattributed; symbols refine operators but cannot invent "
+        "a missing semantic marker."
+    ),
+    (
+        "The trace contains no performance counters and makes no memory-bandwidth, cache-hit, or "
+        "stall claim."
+    ),
+    (
+        "A bounded terminal selected-region asynchronous GPU drain/reordering after the measured host "
+        "marker is retained rather than discarded; empty-region rows remain conservatively "
+        "unattributed service."
+    ),
 ]
 MAX_TERMINAL_ASYNC_DRAIN_CALLS = 32
 MAX_TERMINAL_ASYNC_DRAIN_DISPATCH_WINDOW = 128

@@ -64,7 +64,7 @@ def test_success_is_exclusively_published_and_validated(
         monkeypatch.setattr(
             publication,
             "validate_terminal_production_authority",
-            lambda value: (
+            lambda _value: (
                 {
                     "winner": "winner",
                     "winner_cache_profile": {"value_group": 16},
@@ -121,7 +121,7 @@ def test_publication_failure_preserves_replacement_output(
         monkeypatch.setattr(
             publication,
             "validate_terminal_production_authority",
-            lambda value: (
+            lambda _value: (
                 {
                     "winner": "winner",
                     "winner_cache_profile": {"value_group": 16},
@@ -163,7 +163,7 @@ def test_pending_is_inode_owned_before_write_fsync(
         monkeypatch.setattr(
             publication,
             "validate_terminal_production_authority",
-            lambda value: (
+            lambda _value: (
                 {
                     "winner": "winner",
                     "winner_cache_profile": {"value_group": 16},

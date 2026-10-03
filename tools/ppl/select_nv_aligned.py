@@ -69,8 +69,10 @@ def summarize(out, name):
                 mean_nll_delta=delta,
                 severe=sum(c >= 10 for c in values),
                 reference_severe=sum(r >= 10 for r in baseline),
-                new_severe=sum(c >= 10 and r < 10 for c, r in zip(values, baseline)),
-                resolved_severe=sum(c < 10 and r >= 10 for c, r in zip(values, baseline)),
+                new_severe=sum(c >= 10 and r < 10 for c, r in zip(values, baseline, strict=True)),
+                resolved_severe=sum(
+                    c < 10 and r >= 10 for c, r in zip(values, baseline, strict=True)
+                ),
             )
     result["within_2pct"] = (
         max(r["ratio"] for s in result["samples"].values() for r in s.values()) <= 1.02

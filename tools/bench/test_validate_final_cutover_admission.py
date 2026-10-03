@@ -291,7 +291,7 @@ def test_current_quality_map_retains_mixed_sparse_exclusion_without_waiver(tmp_p
     }
     path.write_text(json.dumps(value))
     sources = []
-    for name, (weights_id, profile) in gate.EXPECTED_AUTHORITIES.items():
+    for name, (_weights_id, profile) in gate.EXPECTED_AUTHORITIES.items():
         item = value["authorities"][name]
         for group in (16, 32):
             sources.append(

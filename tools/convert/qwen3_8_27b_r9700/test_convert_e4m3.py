@@ -80,7 +80,7 @@ class E4M3ConverterTest(unittest.TestCase):
                 mock.patch.object(
                     convert_e4m3.source,
                     "materialize_tensor",
-                    side_effect=lambda spec, reader, draft: reader.get(spec.name),
+                    side_effect=lambda spec, reader, _draft: reader.get(spec.name),
                 ),
                 redirect_stdout(io.StringIO()),
             ):

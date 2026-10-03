@@ -13,7 +13,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.r9700.check_prefill_cta_static import _function, _one_integer
+from tools.r9700.check_prefill_cta_static import (  # noqa: E402  after sys.path setup
+    _function,
+    _one_integer,
+)
 
 # One loop body per 32-key block: S^T = K Q^T as 2 key tiles x 16 feature tiles of BF16 WMMA,
 # then O += P V as 16 feature tiles x 2 key tiles of FP16 WMMA.

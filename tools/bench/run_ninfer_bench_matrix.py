@@ -51,16 +51,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.matrix_contract import (
+from tools.bench.matrix_contract import (  # noqa: E402  sys.path bootstrap
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     PRODUCTION_PREFILL_CHUNKS,
     R9700_KV_PLANE_LAYOUTS,
 )
-from tools.bench.prefill_chunk_authority import inspect_prefill_chunk_authority
-from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes, dflash2_q4_inventory
-from tools.ppl import run as ppl_run
-from tools.ppl.validate_fp8_hybrid_execution_gate import query_widths
+from tools.bench.prefill_chunk_authority import (  # noqa: E402  sys.path bootstrap
+    inspect_prefill_chunk_authority,
+)
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  sys.path bootstrap
+    dflash2_matrix_recipes,
+    dflash2_q4_inventory,
+)
+from tools.ppl import run as ppl_run  # noqa: E402  sys.path bootstrap
+from tools.ppl.validate_fp8_hybrid_execution_gate import (  # noqa: E402  sys.path bootstrap
+    query_widths,
+)
 
 DEFAULT_BENCH = REPO_ROOT / "build-r9700/bench/ninfer_bench"
 DEFAULT_CORPUS = REPO_ROOT / "bench/fixtures/bench_corpus.ids"
@@ -884,7 +891,7 @@ def validate_hybrid_shared_workspace_authority(
             "mtp3": [1, 2, 3, 4, 8, 12, 16, chunk],
             **{
                 f"dflash-w{width}": sorted(
-                    set((1, 2, 3, 4, width, 2 * width, 3 * width, 4 * width, chunk))
+                    {1, 2, 3, 4, width, 2 * width, 3 * width, 4 * width, chunk}
                 )
                 for width in widths
             },
@@ -949,7 +956,7 @@ def build_hybrid_shared_workspace_authority(
             "mtp3": [1, 2, 3, 4, 8, 12, 16, chunk],
             **{
                 f"dflash-w{width}": sorted(
-                    set((1, 2, 3, 4, width, 2 * width, 3 * width, 4 * width, chunk))
+                    {1, 2, 3, 4, width, 2 * width, 3 * width, 4 * width, chunk}
                 )
                 for width in widths
             },
@@ -1645,9 +1652,7 @@ def _finite_number(value: object, *, positive: bool = False, nonnegative: bool =
         return False
     if positive and number <= 0.0:
         return False
-    if nonnegative and number < 0.0:
-        return False
-    return True
+    return not (nonnegative and number < 0.0)
 
 
 def _nonnegative_integer(value: object) -> bool:
@@ -2083,7 +2088,7 @@ def load_bench_report(
             f"expected compiled A{expected_q4_activation_bits}"
         )
     q4_prefill_cta_profile = config.get("q4_prefill_cta_profile")
-    if q4_prefill_cta_profile not in ("m64n128-pingpong-n16-k16-scalar-base-production",):
+    if q4_prefill_cta_profile != "m64n128-pingpong-n16-k16-scalar-base-production":
         raise ValueError(
             f"benchmark report has invalid q4_prefill_cta_profile={q4_prefill_cta_profile!r}"
         )
@@ -3932,7 +3937,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (FileNotFoundError, ValueError):
             raise SystemExit(
                 f"--resume requires the existing schema-v{MATRIX_SCHEMA_VERSION} matrix manifest"
-            )
+            ) from None
         try:
             prior_manifest = json.loads(prior_manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:

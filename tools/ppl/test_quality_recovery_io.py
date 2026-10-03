@@ -157,9 +157,11 @@ class QualityRecoveryIoTest(unittest.TestCase):
             checkpoint.mkdir()
             output = root / "output"
             output.symlink_to(root / "missing")
-            with patch("tools.ppl.quality_recovery_io.validate_checkpoint_files") as validate:
-                with self.assertRaisesRegex(ValueError, "occupied"):
-                    require_preflight(checkpoint, [output])
+            with (
+                patch("tools.ppl.quality_recovery_io.validate_checkpoint_files") as validate,
+                self.assertRaisesRegex(ValueError, "occupied"),
+            ):
+                require_preflight(checkpoint, [output])
             validate.assert_called_once_with(checkpoint.resolve())
 
     def test_publish_is_exclusive_and_removes_pending(self) -> None:
@@ -174,9 +176,11 @@ class QualityRecoveryIoTest(unittest.TestCase):
             self.assertFalse(pending.exists())
             new_pending = root / "pending.json"
             new_pending.write_bytes(b"replacement")
-            with patch("tools.ppl.quality_recovery_io.validate_authority_map"):
-                with self.assertRaisesRegex(ValueError, "already exists"):
-                    publish(new_pending, final)
+            with (
+                patch("tools.ppl.quality_recovery_io.validate_authority_map"),
+                self.assertRaisesRegex(ValueError, "already exists"),
+            ):
+                publish(new_pending, final)
             self.assertEqual(final.read_bytes(), b"authority")
 
     def test_publish_rejects_symlink_pending(self) -> None:

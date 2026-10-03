@@ -55,9 +55,10 @@ def check(path: Path) -> dict[str, int | str]:
         for line in body.splitlines()
         if line.strip() and not line.lstrip().startswith((";", "."))
     ]
-    positions = lambda prefix: [
-        index for index, line in enumerate(instructions) if line.startswith(prefix)
-    ]
+
+    def positions(prefix):
+        return [index for index, line in enumerate(instructions) if line.startswith(prefix)]
+
     stores = positions("ds_store_b32")
     loads = positions("ds_load_b")
     signals = positions("s_barrier_signal -1")

@@ -148,7 +148,7 @@ def exact_json_value(actual: object, expected: object) -> bool:
         return False
     if isinstance(expected, list):
         return len(actual) == len(expected) and all(
-            exact_json_value(left, right) for left, right in zip(actual, expected)
+            exact_json_value(left, right) for left, right in zip(actual, expected, strict=True)
         )
     return actual == expected
 
@@ -479,7 +479,9 @@ def compare(left_path: Path, right_path: Path, diagnostic: str) -> dict:
         left_values = struct.unpack_from(f"<{HIDDEN}H", left_data, begin)
         right_values = struct.unpack_from(f"<{HIDDEN}H", right_data, begin)
         mismatches = [
-            index for index, pair in enumerate(zip(left_values, right_values)) if pair[0] != pair[1]
+            index
+            for index, pair in enumerate(zip(left_values, right_values, strict=True))
+            if pair[0] != pair[1]
         ]
         layer, half = boundary(first)
         classification = (
@@ -551,7 +553,9 @@ def compare_gdn(left_path: Path, right_path: Path, diagnostic: str) -> dict:
         if left_field == right_field:
             continue
         mismatches = [
-            index for index, pair in enumerate(zip(left_values, right_values)) if pair[0] != pair[1]
+            index
+            for index, pair in enumerate(zip(left_values, right_values, strict=True))
+            if pair[0] != pair[1]
         ]
         first = mismatches[0]
         classification = GDN_CLASSIFICATIONS[name]
@@ -566,7 +570,7 @@ def compare_gdn(left_path: Path, right_path: Path, diagnostic: str) -> dict:
             "right_value": right_decoded[first],
             "maximum_absolute_difference": max(
                 abs(left_value - right_value)
-                for left_value, right_value in zip(left_decoded, right_decoded)
+                for left_value, right_value in zip(left_decoded, right_decoded, strict=True)
             ),
             "preceding_fields_exact": all(
                 left_data[prior_offset : prior_offset + prior_bytes]
@@ -628,7 +632,9 @@ def compare_recurrent_state(left_path: Path, right_path: Path, diagnostic: str =
     left_bits = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}I", left_data)
     right_bits = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}I", right_data)
     mismatches = [
-        index for index, pair in enumerate(zip(left_bits, right_bits)) if pair[0] != pair[1]
+        index
+        for index, pair in enumerate(zip(left_bits, right_bits, strict=True))
+        if pair[0] != pair[1]
     ]
     detail = None
     classification = f"layer{layer}_recurrent_prefix_state_exact"
@@ -645,7 +651,7 @@ def compare_recurrent_state(left_path: Path, right_path: Path, diagnostic: str =
             "left_value": left_values[first],
             "right_value": right_values[first],
             "maximum_absolute_difference": max(
-                abs(a - b) for a, b in zip(left_values, right_values)
+                abs(a - b) for a, b in zip(left_values, right_values, strict=True)
             ),
         }
     return {
@@ -782,7 +788,7 @@ def compare_selected_attention(left_path: Path, right_path: Path) -> dict:
             list(struct.iter_unpack(fmt, a[start : start + size])),
             list(struct.iter_unpack(fmt, b[start : start + size])),
         )
-        mismatches = [i for i, (av, bv) in enumerate(zip(x, y)) if av != bv]
+        mismatches = [i for i, (av, bv) in enumerate(zip(x, y, strict=True)) if av != bv]
         stages.append(
             dict(
                 name=field["name"],

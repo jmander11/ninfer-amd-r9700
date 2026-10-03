@@ -35,7 +35,7 @@ def test_publishes_exact_inode_and_removes_pending(
 ) -> None:
     pending, output, manifest, executable, artifact, selection = _arguments(tmp_path)
     expected = {"passes_p2048_gate": True}
-    monkeypatch.setattr(publication, "validate_ladder", lambda *args: expected)
+    monkeypatch.setattr(publication, "validate_ladder", lambda *_args: expected)
     publication.publish(pending, output, manifest, executable, artifact, selection, 2000.0)
     assert json.loads(output.read_text()) == expected
     assert not pending.exists()
@@ -46,7 +46,7 @@ def test_preserves_occupied_or_dangling_output(
 ) -> None:
     pending, output, manifest, executable, artifact, selection = _arguments(tmp_path)
     output.symlink_to(tmp_path / "missing")
-    monkeypatch.setattr(publication, "validate_ladder", lambda *args: {"passes_p2048_gate": True})
+    monkeypatch.setattr(publication, "validate_ladder", lambda *_args: {"passes_p2048_gate": True})
     with pytest.raises(ValueError, match="occupied"):
         publication.publish(pending, output, manifest, executable, artifact, selection, 2000.0)
     assert output.is_symlink()
@@ -59,7 +59,7 @@ def test_post_publish_validation_failure_rolls_back_owned_inode(
     pending, output, manifest, executable, artifact, selection = _arguments(tmp_path)
     calls = 0
 
-    def validate(*args):
+    def validate(*_args):
         nonlocal calls
         calls += 1
         return {"passes_p2048_gate": True} if calls == 1 else {"passes_p2048_gate": False}

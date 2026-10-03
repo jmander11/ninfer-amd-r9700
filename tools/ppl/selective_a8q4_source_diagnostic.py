@@ -26,13 +26,16 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.artifact.numeric import QuantFormat, get_format
-from tools.convert.qwen3_8_27b_r9700 import mse_quantize
-from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (
+from tools.artifact.numeric import (  # noqa: E402  after sys.path setup
+    QuantFormat,
+    get_format,
+)
+from tools.convert.qwen3_8_27b_r9700 import mse_quantize  # noqa: E402  after sys.path setup
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (  # noqa: E402  after sys.path setup
     Q4G128_DIAGNOSTIC,
 )
-from tools.ppl.compare_q4_group_source import _against
-from tools.ppl.q4_group_source_diagnostic import (
+from tools.ppl.compare_q4_group_source import _against  # noqa: E402  after sys.path setup
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
     MAXIMUM_MEAN_NLL_DELTA,
     MAXIMUM_NEW_SEVERE_RATE,
     TERRIBLE_NLL,
@@ -41,14 +44,14 @@ from tools.ppl.q4_group_source_diagnostic import (
     sha256_file,
     validate_source_metadata,
 )
-from tools.ppl.selective_q4g128_source_diagnostic import (
+from tools.ppl.selective_q4g128_source_diagnostic import (  # noqa: E402  after sys.path setup
     SELECTED_SOURCE_ROWS,
     TOKENS,
     _load_bf16_authority,
     _load_screen,
     _scope,
 )
-from tools.reference.qwen3_8_27b_bf16 import protocol
+from tools.reference.qwen3_8_27b_bf16 import protocol  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_selective_a8q4_source_diagnostic"
 SCHEMA_VERSION = 1

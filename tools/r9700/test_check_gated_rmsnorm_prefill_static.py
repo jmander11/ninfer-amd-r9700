@@ -57,9 +57,11 @@ class StaticCheckTest(unittest.TestCase):
 
     def test_rejects_scratch_or_lds(self):
         for text in (fixture(scratch=16), fixture(lds=16)):
-            with self.subTest(text=text):
-                with self.assertRaisesRegex(ValueError, "must be zero"):
-                    self.run_check(text)
+            with (
+                self.subTest(text=text),
+                self.assertRaisesRegex(ValueError, "must be zero"),
+            ):
+                self.run_check(text)
 
     def test_rejects_cross_wave_barrier(self):
         with self.assertRaisesRegex(ValueError, "workgroup barrier"):

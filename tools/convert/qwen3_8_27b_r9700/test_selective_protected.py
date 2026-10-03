@@ -39,7 +39,7 @@ class SelectiveProtectedTest(unittest.TestCase):
         inventory.validate_inventory()
         changed = {
             new.name
-            for old, new in zip(q4_inventory.TENSOR_SPECS, inventory.TENSOR_SPECS)
+            for old, new in zip(q4_inventory.TENSOR_SPECS, inventory.TENSOR_SPECS, strict=True)
             if old != new
         }
         self.assertEqual(changed, set(inventory.CHANGED_FORMATS))
@@ -95,7 +95,7 @@ class SelectiveProtectedTest(unittest.TestCase):
                 else:
                     expected = codec.encode_e4m3_rowwise_reference(represented, rows, columns)
                     decoded, _, _ = codec.decode_e4m3_rowwise_reference(payload, rows, columns)
-                    squared = sum((a - b) ** 2 for a, b in zip(represented, decoded))
+                    squared = sum((a - b) ** 2 for a, b in zip(represented, decoded, strict=True))
                     self.assertLess(squared / sum(v * v for v in represented), 0.002)
                 self.assertEqual(payload, expected)
         self.assertEqual(torch.cuda.is_initialized(), initialized)
@@ -125,11 +125,12 @@ class SelectiveProtectedTest(unittest.TestCase):
             with ArtifactWriter(
                 base, ArtifactIdentity(inventory.MODEL_ID, q4_inventory.WEIGHTS_ID), specs
             ) as writer:
-                for spec, payload in zip(specs, payloads):
+                for spec, payload in zip(specs, payloads, strict=True):
                     writer.write(spec.name, payload)
             target = tensor_spec("text/token_embedding", (2, 128), W8)
             tensor = torch.arange(256, dtype=torch.bfloat16).reshape(2, 128)
-            output_specs = specs[:-1] + (
+            output_specs = (
+                *specs[:-1],
                 StoredTensor(target.name, target.shape, target.format, target.layout),
             )
             with (
@@ -147,7 +148,9 @@ class SelectiveProtectedTest(unittest.TestCase):
                 records = conversion.write_payloads(artifact, writer, None)
             self.assertEqual(materialize.call_count, 1)
             with Artifact(output) as artifact:
-                for obj, payload, record in zip(artifact.objects[:-1], payloads[:-1], records[:-1]):
+                for obj, payload, record in zip(
+                    artifact.objects[:-1], payloads[:-1], records[:-1], strict=True
+                ):
                     self.assertEqual(bytes(artifact.payload(obj)), payload)
                     self.assertEqual(record["operation"], "copy-exact")
                     self.assertEqual(record["payload_sha256"], hashlib.sha256(payload).hexdigest())
@@ -160,10 +163,11 @@ class SelectiveProtectedTest(unittest.TestCase):
                 conversion.preflight(base, root, output)
             with Artifact(output) as artifact:
                 self.assertEqual(bytes(artifact.payload("text/token_embedding")), actual)
-            original_specs = (InventoryResource(specs[0].name),) + tuple(
-                TensorSpec(s.name, s.shape, s.format, s.layout) for s in specs[1:]
+            original_specs = (
+                InventoryResource(specs[0].name),
+                *(TensorSpec(s.name, s.shape, s.format, s.layout) for s in specs[1:]),
             )
-            changed_specs = original_specs[:-1] + (target,)
+            changed_specs = (*original_specs[:-1], target)
             report = {
                 "artifact_type": "ninfer_r9700_selective_protected_conversion",
                 "schema_version": 1,

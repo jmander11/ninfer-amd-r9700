@@ -58,9 +58,11 @@ class StaticCheckTest(unittest.TestCase):
             fixture(lds=16),
             fixture(scratch=16),
         ):
-            with self.subTest(text=text):
-                with self.assertRaisesRegex(ValueError, "resources|must be zero"):
-                    self.run_check(text)
+            with (
+                self.subTest(text=text),
+                self.assertRaisesRegex(ValueError, "resources|must be zero"),
+            ):
+                self.run_check(text)
 
 
 if __name__ == "__main__":

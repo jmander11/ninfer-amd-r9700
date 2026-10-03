@@ -22,6 +22,9 @@ from tools.convert.qwen3.common.recipe import (
     source,
 )
 from tools.convert.qwen3.common.recipe import (
+    materialize_recipe as materialize_recipe,  # re-exported: the converters call source_recipe.materialize_recipe
+)
+from tools.convert.qwen3.common.recipe import (
     preflight_sources as _preflight_recipe_sources,
 )
 from tools.convert.qwen3.common.recipe import (

@@ -120,9 +120,11 @@ class Q4W8MseConverterTest(unittest.TestCase):
         self.assertEqual(len(summary["object_plan_sha256"]), 64)
         self.assertEqual(summary["format_counts"]["Q4G64_F16S"], 183)
         self.assertEqual(summary["format_counts"]["W8G32_F16S"], 256)
-        with mock.patch.object(convert_q4_w8_mse, "_checkpoint_receipt", return_value=checkpoint):
-            with self.assertRaisesRegex(ValueError, "18-shard"):
-                convert_q4_w8_mse.preflight_summary(self.synthetic_preflight(shards=17))
+        with (
+            mock.patch.object(convert_q4_w8_mse, "_checkpoint_receipt", return_value=checkpoint),
+            self.assertRaisesRegex(ValueError, "18-shard"),
+        ):
+            convert_q4_w8_mse.preflight_summary(self.synthetic_preflight(shards=17))
 
     def test_preflight_only_is_machine_readable_and_never_selects_device_or_output(self) -> None:
         summary = {

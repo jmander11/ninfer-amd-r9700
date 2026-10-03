@@ -106,8 +106,8 @@ def check(source: str, assembly: str) -> tuple[int, int, int, int]:
     source_gate(source)
     pvgpr, prefill = isa_gate(assembly, PREFILL, 17152, 96, 8)
     wvgpr, wave = isa_gate(assembly, WAVE, 0, 96, 4)
-    ovgpr, ordinary = isa_gate(assembly, ORDINARY, 0, 32, 0)
-    fvgpr, fused = isa_gate(assembly, FUSED, 0, 32, 0)
+    ovgpr, _ordinary = isa_gate(assembly, ORDINARY, 0, 32, 0)
+    fvgpr, _fused = isa_gate(assembly, FUSED, 0, 32, 0)
     need(
         len(re.findall(r"(?m)^\s*s_barrier_signal\s+-1", prefill)) == 2
         and len(re.findall(r"(?m)^\s*s_barrier_wait\s+-1", prefill)) == 2,

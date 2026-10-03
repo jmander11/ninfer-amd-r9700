@@ -45,7 +45,7 @@ def check(base: bytes, cand: bytes, bd: str, cd: str, notes: str) -> dict[str, i
     bl, cl = loads(bd), loads(cd)
     need(len(bl) == len(cl) == 2, "exact W b64 inventory")
     expected = []
-    for b, c in zip(bl, cl):
+    for b, c in zip(bl, cl, strict=True):
         ba, b0, b1, b2, _ = b
         ca, c0, c1, c2, line = c
         need(ba == ca and (c0, c1, c2) == (b0, b1 | POLICY, b2), "modifier encoding only")
@@ -55,7 +55,7 @@ def check(base: bytes, cand: bytes, bd: str, cd: str, notes: str) -> dict[str, i
         need(cand[off : off + 12] == struct.pack("<III", c0, c1, c2), "candidate bytes")
         expected.extend(i for i in range(off, off + 12) if base[i] != cand[i])
     need(
-        [i for i, (a, b) in enumerate(zip(base, cand)) if a != b] == expected,
+        [i for i, (a, b) in enumerate(zip(base, cand, strict=True)) if a != b] == expected,
         "complete HSACO equality beyond policy bytes",
     )
     cb = block(cd)

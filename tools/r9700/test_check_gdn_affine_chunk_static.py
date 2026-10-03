@@ -82,9 +82,11 @@ class StaticCheckTest(unittest.TestCase):
 
     def test_rejects_wrong_execution_geometry(self):
         for arguments in ({"wave32": 0}, {"wgp": 0}, {"maximum_workgroup": 128}):
-            with self.subTest(arguments=arguments):
-                with self.assertRaisesRegex(ValueError, "geometry fails"):
-                    self.run_check(fixture(**arguments))
+            with (
+                self.subTest(arguments=arguments),
+                self.assertRaisesRegex(ValueError, "geometry fails"),
+            ):
+                self.run_check(fixture(**arguments))
 
     def test_rejects_ambiguous_stage_symbol(self):
         with self.assertRaisesRegex(ValueError, "build: expected one exact stage symbol"):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import mmap
 import os
@@ -423,22 +424,18 @@ class ArtifactWriter:
             self._file.close()
             os.link(self._temporary_path, self.path)
         except BaseException:
-            try:
+            with contextlib.suppress(BaseException):
                 self.close()
-            except BaseException:
-                pass
             raise
         self._finished = True
         self._remove_temporary_best_effort()
 
     def _remove_temporary_best_effort(self) -> None:
-        try:
+        # Publication is the commit point. A staging hard link that cannot
+        # be removed must never turn a complete destination into a reported
+        # failure or motivate deletion of that destination.
+        with contextlib.suppress(OSError):
             self._temporary_path.unlink(missing_ok=True)
-        except OSError:
-            # Publication is the commit point. A staging hard link that cannot
-            # be removed must never turn a complete destination into a reported
-            # failure or motivate deletion of that destination.
-            pass
 
     def close(self) -> None:
         try:

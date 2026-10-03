@@ -452,19 +452,17 @@ class CompiledKvGroupTest(unittest.TestCase):
                 self.assertEqual(concurrency, 4)
                 if dflash_width:
                     return sorted(
-                        set(
-                            (
-                                1,
-                                2,
-                                3,
-                                4,
-                                dflash_width,
-                                2 * dflash_width,
-                                3 * dflash_width,
-                                4 * dflash_width,
-                                chunk,
-                            )
-                        )
+                        {
+                            1,
+                            2,
+                            3,
+                            4,
+                            dflash_width,
+                            2 * dflash_width,
+                            3 * dflash_width,
+                            4 * dflash_width,
+                            chunk,
+                        }
                     )
                 return [1, 2, 3, 4, chunk] if drafts == 0 else [1, 2, 3, 4, 8, 12, 16, chunk]
 
@@ -2686,7 +2684,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 root, parity_records, artifact=artifact, bench=bench
             )
             self.assertFalse(failures)
-            actual_quality, failures = write_dflash_quality_evidence(
+            _actual_quality, failures = write_dflash_quality_evidence(
                 root,
                 records,
                 actual_parity,

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -369,7 +370,7 @@ def _load(path: Path, kind: str) -> tuple[dict, bytes, list[int]]:
 def _difference(field: dict, left: bytes, right: bytes) -> dict:
     begin, end = field["offset"], field["offset"] + field["bytes"]
     lhs, rhs = left[begin:end], right[begin:end]
-    indices = [index for index, pair in enumerate(zip(lhs, rhs)) if pair[0] != pair[1]]
+    indices = [index for index, pair in enumerate(zip(lhs, rhs, strict=True)) if pair[0] != pair[1]]
     detail = {
         "field": field["name"],
         "first_byte_index": indices[0],
@@ -385,7 +386,9 @@ def _difference(field: dict, left: bytes, right: bytes) -> dict:
                 "first_element_index": element,
                 "left_bits": bits_l[element],
                 "right_bits": bits_r[element],
-                "maximum_absolute_difference": max(abs(a - b) for a, b in zip(values_l, values_r)),
+                "maximum_absolute_difference": max(
+                    abs(a - b) for a, b in zip(values_l, values_r, strict=True)
+                ),
             }
         )
     return detail
@@ -424,7 +427,7 @@ def analyze(ordinary_path: Path, dflash_path: Path) -> dict:
             token_stride = field["bytes"] // 130
             mismatch = next(
                 index
-                for index, pair in enumerate(zip(left[begin:end], right[begin:end]))
+                for index, pair in enumerate(zip(left[begin:end], right[begin:end], strict=True))
                 if pair[0] != pair[1]
             )
             logical_position = mismatch // token_stride
@@ -467,10 +470,8 @@ def _write_new(path: Path, value: dict) -> None:
             json.dump(value, output, indent=2, sort_keys=True, allow_nan=False)
             output.write("\n")
     except Exception:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(path)
-        except FileNotFoundError:
-            pass
         raise
 
 

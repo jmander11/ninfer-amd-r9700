@@ -128,7 +128,7 @@ def assemble_report(
     comparisons = {}
     for group in GROUPS[1:]:
         codec = f"q4g{group}"
-        candidates = [item for item in ordered]
+        candidates = list(ordered)
         comparisons[codec] = {
             "aggregate_candidate_over_q4g64": {
                 metric: aggregates[codec][metric] / control[metric]

@@ -32,7 +32,7 @@ class CompareTest(unittest.TestCase):
                 )
                 offset += size
             paths = []
-            for role, width in zip(ROLES["selected"], (1, 5)):
+            for role, width in zip(ROLES["selected"], (1, 5), strict=True):
                 path = directory / f"{role}.json"
                 data = bytes(offset)
                 path.with_suffix(".bin").write_bytes(data)
@@ -352,7 +352,7 @@ class CompareTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
             paths = []
-            for role, width in zip(ROLES["selected"], (1, 5)):
+            for role, width in zip(ROLES["selected"], (1, 5), strict=True):
                 path = self.recurrent_state_fixture(
                     directory, "text-append-frontier129-column0", role, layer=1
                 )
@@ -406,7 +406,7 @@ class CompareTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
             paths = []
-            for role, width in zip(ROLES["selected"], (1, 5)):
+            for role, width in zip(ROLES["selected"], (1, 5), strict=True):
                 path = self.gdn_fixture(directory, (role, width, 0, 90, 89), role)
                 value = json.loads(path.read_text())
                 value.update(

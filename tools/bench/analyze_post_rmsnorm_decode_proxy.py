@@ -21,7 +21,12 @@ SCRIPT_REPO = Path(__file__).resolve().parents[2]
 if str(SCRIPT_REPO) not in sys.path:
     sys.path.insert(0, str(SCRIPT_REPO))
 
-from tools.bench.prepare_post_rmsnorm_decode_proxy import PASSES, REPO, identity, sha
+from tools.bench.prepare_post_rmsnorm_decode_proxy import (  # noqa: E402  sys.path bootstrap
+    PASSES,
+    REPO,
+    identity,
+    sha,
+)
 
 ROUNDS = 256
 ONE_ROUND_DISPATCHES = 1806

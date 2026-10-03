@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -16,7 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl import run
+from tools.ppl import run  # noqa: E402  after sys.path setup
 
 OUTPUT_TYPE = "ninfer_qwen3_8_fp8_hybrid_greedy_diagnostic"
 OUTPUT_SCHEMA = 1
@@ -284,10 +285,8 @@ def _write_new(path: Path, value: dict) -> None:
             os.fsync(output.fileno())
         os.replace(temporary, path)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
 
 
 def main() -> None:

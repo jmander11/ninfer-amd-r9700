@@ -49,7 +49,7 @@ def test_selected_only_writer_reopens_exact_isa_and_is_create_only(tmp_path):
         "terminal_selection": {"path": "/real-selection-boundary", "sha256": "a" * 64},
     }
 
-    def extract(source, out, *, code_symbol):
+    def extract(_source, out, **_kwargs):
         out.write_bytes(b"code")
         return {"code_object_sha256": "b" * 64}
 
@@ -67,7 +67,7 @@ def test_selected_only_writer_reopens_exact_isa_and_is_create_only(tmp_path):
         patch.object(audit, "selected_route", return_value=route),
         patch.object(audit, "extract", side_effect=extract),
         patch.object(
-            audit, "inspect_symbol", side_effect=lambda code, symbol, name: dict(proofs[name])
+            audit, "inspect_symbol", side_effect=lambda _code, _symbol, name: dict(proofs[name])
         ),
     ):
         value = audit.prepare(tmp_path / "selection.json", output)

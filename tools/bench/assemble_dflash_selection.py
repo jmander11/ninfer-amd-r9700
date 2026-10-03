@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import os
@@ -17,8 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
-from tools.bench.run_ninfer_bench_matrix import (
+from tools.bench.prefill_chunk_authority import (  # noqa: E402  sys.path bootstrap
+    validate_prefill_chunk_authority,
+)
+from tools.bench.run_ninfer_bench_matrix import (  # noqa: E402  sys.path bootstrap
     DFLASH_COMPANIONS,
     DFLASH_PRODUCTION_PROFILES,
     DFLASH_SHORTLIST_SCHEMA_VERSION,
@@ -42,9 +45,14 @@ from tools.bench.run_ninfer_bench_matrix import (
     write_dflash_quality_evidence,
     write_dflash_shortlist,
 )
-from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes
-from tools.ppl.assemble_pareto import _manifest_prefill_chunk, _missing_capacity_provenance
-from tools.ppl.pareto import validate_terminal_production_authority
+from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes  # noqa: E402  sys.path bootstrap
+from tools.ppl.assemble_pareto import (  # noqa: E402  sys.path bootstrap
+    _manifest_prefill_chunk,
+    _missing_capacity_provenance,
+)
+from tools.ppl.pareto import (  # noqa: E402  sys.path bootstrap
+    validate_terminal_production_authority,
+)
 
 ARTIFACT_TYPE = "ninfer_r9700_dflash_selection"
 SCHEMA_VERSION = 5
@@ -932,7 +940,7 @@ def performance_cells(
     )
     corpus = _identity(Path(manifest["corpus"]))
     if manifest.get("corpus_sha256") != corpus["sha256"] or any(
-        [value for key, value in zip(record["command"], record["command"][1:]) if key == "--corpus"]
+        [value for key, value in itertools.pairwise(record["command"]) if key == "--corpus"]
         != [corpus["path"]]
         for record in manifest["commands"]
     ):

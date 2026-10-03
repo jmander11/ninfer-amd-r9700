@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 from tools.bench import assemble_dflash_selection as selection
@@ -98,15 +99,19 @@ class DFlashSelectionTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "recipe, base, or conversion receipt"):
                     selection.recipe_evidence(route, selection.RECIPES[1], conversion, root)
 
-    artifact = {
+    artifact: ClassVar[dict[str, Any]] = {
         "path": "/dflash.ninfer",
         "file_size_bytes": 200,
         "sha256": "d" * 64,
         "model_id": "qwen3.8-27b",
         "weights_id": "r9700-q4g64-n16k16-dflash2-q4-eval",
     }
-    bench = {"path": "/build/bench/ninfer_bench", "file_size_bytes": 300, "sha256": "e" * 64}
-    auto_power = {
+    bench: ClassVar[dict[str, Any]] = {
+        "path": "/build/bench/ninfer_bench",
+        "file_size_bytes": 300,
+        "sha256": "e" * 64,
+    }
+    auto_power: ClassVar[dict[str, str]] = {
         "required": "auto",
         "sysfs_path": str(R9700_POWER_PROFILE),
         "observed": "auto",
@@ -134,7 +139,7 @@ class DFlashSelectionTest(unittest.TestCase):
         if not c1_win:
             pareto = []
 
-        def evidence(route, recipe, *_):
+        def evidence(_route, recipe, *_):
             return {"recipe": recipe, "benchmark": self.bench}
 
         def cells(*_):
@@ -151,7 +156,7 @@ class DFlashSelectionTest(unittest.TestCase):
                 },
             }
 
-        def performance(route, evidence, k, w, root, declared):
+        def performance(_route, evidence, k, _w, _root, declared):
             # Canonical K4 is C1 winner but slower at C2, without erasing its C1 result.
             fastest = evidence["recipe"] == selection.RECIPES[0] and k == 4
             return {
@@ -217,17 +222,17 @@ class DFlashSelectionTest(unittest.TestCase):
         with (
             patch.object(selection, "build_cases", return_value=[case]),
             patch.object(selection, "load_bench_report", return_value={}),
+            self.assertRaisesRegex(ValueError, "exact dflash-pareto point set"),
         ):
-            with self.assertRaisesRegex(ValueError, "exact dflash-pareto point set"):
-                _records(
-                    Path("matrix"),
-                    manifest,
-                    "dflash-pareto",
-                    4,
-                    5,
-                    2048,
-                    required_concurrency=[1, 2],
-                )
+            _records(
+                Path("matrix"),
+                manifest,
+                "dflash-pareto",
+                4,
+                5,
+                2048,
+                required_concurrency=[1, 2],
+            )
 
     def test_capacity_retains_each_bound_failure_not_entire_profile(self):
         route = {

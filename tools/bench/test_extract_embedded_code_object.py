@@ -168,7 +168,7 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             original = executable.read_bytes()
             output = root / "selected.hip_fatbin"
 
-            def replace(command, **kwargs):
+            def replace(command, **_kwargs):
                 Path(command[2].split("=", 1)[1]).write_bytes(payload)
                 Path(command[-1]).write_bytes(b"distinct rewritten output")
                 replacement = root / "replacement"
@@ -211,17 +211,17 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
     def test_rejects_missing_section_or_failed_tool(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            executable, objcopy, payload = self.fixture(root)
+            executable, objcopy, _payload = self.fixture(root)
             output = root / "selected.hip_fatbin"
 
-            def missing(command, **kwargs):
+            def missing(command, **_kwargs):
                 Path(command[-1]).write_bytes(b"distinct rewritten output")
                 return subprocess.CompletedProcess(command, 0, b"", b"")
 
             with self.assertRaisesRegex(ValueError, "no nonempty"):
                 extract(executable, output, objcopy=objcopy, runner=missing)
 
-            def failed(command, **kwargs):
+            def failed(command, **_kwargs):
                 raise subprocess.CalledProcessError(1, command, stderr=b"bad ELF")
 
             with self.assertRaisesRegex(ValueError, "bad ELF"):
@@ -234,7 +234,7 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             executable, objcopy, payload = self.fixture(root)
             output = root / "selected.hip_fatbin"
 
-            def section_alias(command, **kwargs):
+            def section_alias(command, **_kwargs):
                 Path(command[2].split("=", 1)[1]).symlink_to(executable)
                 Path(command[-1]).write_bytes(b"distinct rewritten output")
                 return subprocess.CompletedProcess(command, 0, b"", b"")
@@ -242,7 +242,7 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "private regular file"):
                 extract(executable, output, objcopy=objcopy, runner=section_alias)
 
-            def output_alias(command, **kwargs):
+            def output_alias(command, **_kwargs):
                 Path(command[2].split("=", 1)[1]).write_bytes(payload)
                 os.link(executable, command[-1])
                 return subprocess.CompletedProcess(command, 0, b"", b"")
@@ -257,7 +257,7 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             executable, objcopy, payload = self.fixture(root)
             output = root / "selected.hip_fatbin"
 
-            def occupy(command, **kwargs):
+            def occupy(command, **_kwargs):
                 Path(command[2].split("=", 1)[1]).write_bytes(payload)
                 Path(command[-1]).write_bytes(b"distinct rewritten output")
                 output.write_bytes(b"concurrent owner")
@@ -287,8 +287,7 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
                     str(executable),
                 ],
                 check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
             )
             before = (executable.stat().st_dev, executable.stat().st_ino, executable.read_bytes())
             output = root / "selected.hip_fatbin"

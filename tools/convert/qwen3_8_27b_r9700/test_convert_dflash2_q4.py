@@ -462,11 +462,13 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                         ),
                     },
                 )
-                with patch.object(conversion, "preflight", return_value=selected):
-                    with self.assertRaisesRegex(ValueError, "receipt differs"):
-                        conversion.finalize_report(
-                            base_path, root / "source", output, matrix_recipe=recipe.key
-                        )
+                with (
+                    patch.object(conversion, "preflight", return_value=selected),
+                    self.assertRaisesRegex(ValueError, "receipt differs"),
+                ):
+                    conversion.finalize_report(
+                        base_path, root / "source", output, matrix_recipe=recipe.key
+                    )
                 recipe_report = conversion._report_value(
                     selected, output, _sha256(base_path), output_sha256, {}
                 )

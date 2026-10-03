@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -187,7 +188,7 @@ def _static_report(value: dict[str, Any], workload: dict[str, Any], label: str) 
     hardware = value.get("intended_hardware")
     if not isinstance(hardware, dict) or hardware.get("classification") not in CLASSIFICATIONS:
         raise ValueError(f"{label}.intended_hardware classification is invalid")
-    arithmetic = _text(hardware.get("arithmetic"), f"{label}.intended_hardware.arithmetic")
+    _text(hardware.get("arithmetic"), f"{label}.intended_hardware.arithmetic")
     opcodes = hardware.get("expected_opcodes")
     if (
         not isinstance(opcodes, list)
@@ -597,10 +598,8 @@ def _publish(path: Path, value: dict[str, Any]) -> None:
             os.fsync(output.fileno())
         os.link(temporary, path)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
 
 
 def validate(

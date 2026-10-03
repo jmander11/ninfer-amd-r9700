@@ -124,7 +124,6 @@ def _remove_owned(path: Path, owner: tuple[int, int]) -> None:
 def _validate_plan(
     plan: dict,
     route: dict,
-    plan_path: Path,
     raw: Path,
     assembly: Path,
     metadata: Path,
@@ -318,7 +317,6 @@ def _assemble(
     command = _validate_plan(
         plan,
         route,
-        plan_path,
         raw,
         assembly,
         metadata,

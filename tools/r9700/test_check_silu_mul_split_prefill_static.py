@@ -55,9 +55,11 @@ class StaticCheckTest(unittest.TestCase):
 
     def test_rejects_resources(self):
         for text in (fixture(vgprs=65), fixture(lds=16), fixture(scratch=16)):
-            with self.subTest(text=text):
-                with self.assertRaisesRegex(ValueError, "resources|must be zero"):
-                    self.run_check(text)
+            with (
+                self.subTest(text=text),
+                self.assertRaisesRegex(ValueError, "resources|must be zero"),
+            ):
+                self.run_check(text)
 
     def test_rejects_geometry(self):
         with self.assertRaisesRegex(ValueError, "geometry"):

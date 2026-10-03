@@ -175,7 +175,7 @@ def validate(raw: dict) -> dict:
             }
         )
     bounds = []
-    for x, cs, ns, cm, nm, cmd, nmd in normalized.values():
+    for x, _cs, _ns, cm, nm, cmd, nmd in normalized.values():
         cu = UNCERTAINTY_FACTOR * cmd
         nu = UNCERTAINTY_FACTOR * nmd
         if cm <= cu or nm <= nu:

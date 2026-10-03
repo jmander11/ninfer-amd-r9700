@@ -220,7 +220,7 @@ def prepare(selection_path: Path, receipt_path: Path, out: Path) -> dict:
     selection_path = selection_path.resolve(strict=True)
     selection_raw = selection_path.read_bytes()
     selection = load_payload(selection_raw.decode("utf-8"))
-    terminal, selected = validate_terminal_production_authority(selection)
+    terminal, _selected = validate_terminal_production_authority(selection)
     winner = terminal["winner"]
     sources = [row for row in selection["source_provenance"] if row.get("candidate") == winner]
     if len(sources) != 1:

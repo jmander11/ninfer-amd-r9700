@@ -307,7 +307,8 @@ def _layer_names(layer: int) -> tuple[str, ...]:
         prefix + "mlp.down_proj.weight",
     )
     if layer in FULL_ATTENTION_LAYERS:
-        return common + (
+        return (
+            *common,
             prefix + "self_attn.q_proj.weight",
             prefix + "self_attn.k_proj.weight",
             prefix + "self_attn.v_proj.weight",
@@ -315,7 +316,8 @@ def _layer_names(layer: int) -> tuple[str, ...]:
             prefix + "self_attn.k_norm.weight",
             prefix + "self_attn.o_proj.weight",
         )
-    return common + (
+    return (
+        *common,
         prefix + "linear_attn.A_log",
         prefix + "linear_attn.dt_bias",
         prefix + "linear_attn.conv1d.weight",

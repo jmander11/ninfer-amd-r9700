@@ -98,15 +98,17 @@ class SelectiveA8Q4SourceDiagnosticTest(unittest.TestCase):
     def test_scoped_dispatch_restores_after_exception(self) -> None:
         class Backend:
             @staticmethod
-            def _linear(x, weight):
+            def _linear(x, _weight):
                 return x
 
         backend = Backend()
         checkpoint = diagnostic.ActivationInclusiveCheckpoint(None, "a8g128-q4g128-mse")
         original = backend._linear
-        with self.assertRaisesRegex(RuntimeError, "fixture"):
-            with diagnostic.ScopedLinearDispatcher(backend, checkpoint):
-                raise RuntimeError("fixture")
+        with (
+            self.assertRaisesRegex(RuntimeError, "fixture"),
+            diagnostic.ScopedLinearDispatcher(backend, checkpoint),
+        ):
+            raise RuntimeError("fixture")
         self.assertIs(backend._linear, original)
 
 

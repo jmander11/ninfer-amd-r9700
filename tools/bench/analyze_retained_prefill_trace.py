@@ -20,6 +20,8 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import itertools
+
 from tools.bench.analyze_whole_profile import analyze
 from tools.bench.run_ninfer_bench_matrix import R9700_KV_PLANE_LAYOUTS
 from tools.bench.validate_profile_trace import _parse_database
@@ -40,8 +42,10 @@ EXPECTED_MARKERS = {
 EMPTY_REGION_INFRASTRUCTURE = {
     "__amd_rocclr_fillBufferUnAligned",
     "__amd_rocclr_copyBuffer",
-    "void ninfer::ops::r9700::eager::(anonymous namespace)::fill_kernel<int>"
-    "(int*, unsigned long, int)",
+    (
+        "void ninfer::ops::r9700::eager::(anonymous namespace)::fill_kernel<int>"
+        "(int*, unsigned long, int)"
+    ),
 }
 MAX_EMPTY_REGION_INFRASTRUCTURE_DISPATCHES = 112
 EXPECTED_WORKLOAD = {
@@ -298,7 +302,7 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
             if not (outer[0] <= inner[0] < inner[1] <= post[0] < post[1] <= outer[1]):
                 raise ValueError("layer leaf/post-mixer marker order or nesting is invalid")
             layer_ranges.append(outer)
-        if any(left[1] > right[0] for left, right in zip(layer_ranges, layer_ranges[1:])):
+        if any(left[1] > right[0] for left, right in itertools.pairwise(layer_ranges)):
             raise ValueError("layer marker ranges overlap or are not sequential")
 
         kernel_rows = list(

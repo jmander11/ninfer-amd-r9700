@@ -25,7 +25,7 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.reference.qwen3_8_27b_bf16 import protocol
+from tools.reference.qwen3_8_27b_bf16 import protocol  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_q4_group_source_diagnostic"
 COMPARISON_TYPE = "ninfer_qwen3_8_q4_group_source_comparison"

@@ -73,7 +73,6 @@ class SelectiveQ4G128SourceDiagnosticTest(unittest.TestCase):
 
     def test_gate_is_direct_capacity_speed_against_bf16(self) -> None:
         bf16 = [1.0, 1.0, 11.0, 1.0]
-        control = [1.01, 1.01, 11.0, 1.01]
         candidate = [1.02, 1.02, 9.0, 1.02]
         gate = diagnostic._gate(candidate, [1, 2, 3, 4], bf16, [1, 2, 3, 4])
         self.assertTrue(gate["pass"])

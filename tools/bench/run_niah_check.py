@@ -631,12 +631,13 @@ def main() -> int:
     args = ap.parse_args()
 
     durable_values = (args.server_log, args.artifact, args.serve_bin, args.selection)
-    if any(value is not None for value in durable_values):
-        if any(value is None for value in durable_values) or args.out is None:
-            ap.error(
-                "durable evidence requires --out, --server-log, --artifact, --serve-bin, "
-                "and --selection"
-            )
+    if any(value is not None for value in durable_values) and (
+        any(value is None for value in durable_values) or args.out is None
+    ):
+        ap.error(
+            "durable evidence requires --out, --server-log, --artifact, --serve-bin, "
+            "and --selection"
+        )
 
     binding = None
     log_offset = 0
@@ -668,10 +669,10 @@ def main() -> int:
             else list(NIAH_POSITIONS)
         )
         # validate against the known sets so a typo fails fast
-        for l in lengths:
-            if l not in known_lengths:
+        for length in lengths:
+            if length not in known_lengths:
                 raise SystemExit(
-                    f"unknown NIAH length {l!r} (choose from {', '.join(known_lengths)})"
+                    f"unknown NIAH length {length!r} (choose from {', '.join(known_lengths)})"
                 )
         for p in positions:
             if p not in NIAH_POSITIONS:

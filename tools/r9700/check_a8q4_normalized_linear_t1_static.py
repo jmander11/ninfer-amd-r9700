@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/bench"))
-from extract_embedded_code_object import extract
+from extract_embedded_code_object import extract  # noqa: E402  after sys.path setup
 
 KERNELS = ("a8g64_normalized_prepare_t1_kernel", "a8q4g64_linear_decode_dot8_t1_kernel")
 

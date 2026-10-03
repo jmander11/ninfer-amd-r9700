@@ -354,22 +354,24 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             def write_wrong_group(*_args, **_kwargs) -> None:
                 self.write_cell(cell_path, scheme="r9700-g32", group=16)
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_group):
-                with self.assertRaisesRegex(SystemExit, "kv_value_group=16"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g32"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g32",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_wrong_group),
+                self.assertRaisesRegex(SystemExit, "kv_value_group=16"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g32"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g32",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                )
 
     def test_candidate_accepts_matching_compiled_group(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -454,22 +456,24 @@ class CompiledProfileIdentityTest(unittest.TestCase):
                 cell["kv_plane_layouts"]["key"] = "feature-fastest-page-major"
                 cell_path.write_text(json.dumps(cell), encoding="utf-8")
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_layout):
-                with self.assertRaisesRegex(SystemExit, "kv_plane_layouts"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g16"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g16",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_wrong_layout),
+                self.assertRaisesRegex(SystemExit, "kv_plane_layouts"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                )
 
     def test_candidate_rejects_mislabeled_q4_activation_width(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -478,23 +482,25 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             def write_wrong_width(*_args, **_kwargs) -> None:
                 self.write_cell(cell_path, scheme="r9700-g16", group=16, q4_activation_bits=4)
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_width):
-                with self.assertRaisesRegex(SystemExit, "expected compiled A8"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g16"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g16",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                        8,
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_wrong_width),
+                self.assertRaisesRegex(SystemExit, "expected compiled A8"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                    8,
+                )
 
     def test_candidate_rejects_mislabeled_w8_activation_width(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -503,25 +509,27 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             def write_wrong_width(*_args, **_kwargs) -> None:
                 self.write_cell(cell_path, scheme="r9700-g16", group=16, w8_activation_bits=16)
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_width):
-                with self.assertRaisesRegex(SystemExit, "w8_activation_bits=16"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g16"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g16",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                        8,
-                        8,
-                        True,
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_wrong_width),
+                self.assertRaisesRegex(SystemExit, "w8_activation_bits=16"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                    8,
+                    8,
+                    True,
+                )
 
     def test_candidate_rejects_mislabeled_fp8_qk_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -530,25 +538,27 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             def write_wrong_profile(*_args, **_kwargs) -> None:
                 self.write_cell(cell_path, scheme="r9700-g16", group=16, fp8_qk_wmma=False)
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_profile):
-                with self.assertRaisesRegex(SystemExit, "split512_enabled=False"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g16"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g16",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                        8,
-                        8,
-                        True,
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_wrong_profile),
+                self.assertRaisesRegex(SystemExit, "split512_enabled=False"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                    8,
+                    8,
+                    True,
+                )
 
     def test_candidate_rejects_stale_fp8_qk_classifier(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -560,25 +570,27 @@ class CompiledProfileIdentityTest(unittest.TestCase):
                 payload["split512_min_context"] = 1
                 cell_path.write_text(json.dumps(payload), encoding="utf-8")
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_stale_classifier):
-                with self.assertRaisesRegex(SystemExit, "split512_min_context=1"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g16"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g16",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                        8,
-                        8,
-                        True,
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_stale_classifier),
+                self.assertRaisesRegex(SystemExit, "split512_min_context=1"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                    8,
+                    8,
+                    True,
+                )
 
     def test_candidate_requires_compile_bound_xattention_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -608,22 +620,24 @@ class CompiledProfileIdentityTest(unittest.TestCase):
                 )
             self.assertEqual(cell["xattention_profile"], "b128-s16-tau900")
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_xattention):
-                with self.assertRaisesRegex(SystemExit, "xattention_qualification=True"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g16"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g16",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_xattention),
+                self.assertRaisesRegex(SystemExit, "xattention_qualification=True"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                )
 
             def write_stale_dense(*_args, **_kwargs) -> None:
                 self.write_cell(cell_path, scheme="r9700-g16", group=16)
@@ -631,22 +645,24 @@ class CompiledProfileIdentityTest(unittest.TestCase):
                 payload["xattention_profile"] = "stale-profile"
                 cell_path.write_text(json.dumps(payload), encoding="utf-8")
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_stale_dense):
-                with self.assertRaisesRegex(SystemExit, "dense report retains XAttention fields"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g16"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g16",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_stale_dense),
+                self.assertRaisesRegex(SystemExit, "dense report retains XAttention fields"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                )
 
     def test_candidate_rejects_skip_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -655,22 +671,24 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             def write_wrong_skip(*_args, **_kwargs) -> None:
                 self.write_cell(cell_path, scheme="r9700-g16", group=16, skip_tokens=127)
 
-            with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_skip):
-                with self.assertRaisesRegex(SystemExit, "skip_tokens=127"):
-                    run.run_cell(
-                        Path("ninfer-ppl-g16"),
-                        Path("model.ninfer"),
-                        Path("corpus.ids"),
-                        "r9700-g16",
-                        "decode",
-                        "half",
-                        257,
-                        4096,
-                        0,
-                        cell_path,
-                        [],
-                        "candidate",
-                    )
+            with (
+                mock.patch.object(run.subprocess, "run", side_effect=write_wrong_skip),
+                self.assertRaisesRegex(SystemExit, "skip_tokens=127"),
+            ):
+                run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                )
 
 
 class WeightInputBoundaryTest(unittest.TestCase):

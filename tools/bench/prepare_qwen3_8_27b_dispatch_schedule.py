@@ -367,7 +367,7 @@ def build_schedule(
     actual = [marker for marker, _ in blocks]
     if actual != expected:
         mismatch = next(
-            (i for i, pair in enumerate(zip(actual, expected)) if pair[0] != pair[1]),
+            (i for i, pair in enumerate(zip(actual, expected, strict=False)) if pair[0] != pair[1]),
             min(len(actual), len(expected)),
         )
         raise ValueError(

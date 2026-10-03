@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.bench.analyze_whole_profile import analyze
-from tools.bench.validate_profile_trace import _parse_database
+from tools.bench.analyze_whole_profile import analyze  # noqa: E402  sys.path bootstrap
+from tools.bench.validate_profile_trace import _parse_database  # noqa: E402  sys.path bootstrap
 
 ROCPROFV3 = Path("/opt/rocm/bin/rocprofv3")
 POWER_PROFILE = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")

@@ -385,8 +385,8 @@ def advance_pareto(path: Path) -> None:
             survivors.append((recipe, k, w, capacity["eligible_concurrency"]))
     licensed = any(k == 4 for _, k, _, _ in survivors)
     lines = [_stage(plan, root, "validate-plan")]
-    for recipe, k, w, concurrency in survivors if licensed else []:
-        concurrency = [c for c in concurrency if c != 1]
+    for recipe, k, w, survivor_concurrency in survivors if licensed else []:
+        concurrency = [c for c in survivor_concurrency if c != 1]
         if not concurrency:
             continue
         output = root / recipe / f"pareto-k{k}-w{w}"

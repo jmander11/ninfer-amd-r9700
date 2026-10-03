@@ -345,7 +345,7 @@ class Q4N16K16TranscodeTest(unittest.TestCase):
             ):
                 transcode(source, output)
                 with output.open("r+b") as stream:
-                    magic, size = PREFIX.unpack(stream.read(PREFIX.size))
+                    _magic, size = PREFIX.unpack(stream.read(PREFIX.size))
                     directory = json.loads(stream.read(size))
                     directory["objects"][1]["offset"] += 1
                     encoded = json.dumps(directory, separators=(",", ":")).encode()
@@ -474,7 +474,9 @@ class Q4N16K16TranscodeTest(unittest.TestCase):
                 hash_open_fd = transcode_module._hash_open_fd
                 hash_calls = 0
 
-                def hash_with_late_earlier_mutation(descriptor):
+                def hash_with_late_earlier_mutation(
+                    descriptor, *, mutation=mutation, source=source, hash_open_fd=hash_open_fd
+                ):
                     nonlocal hash_calls
                     result = hash_open_fd(descriptor)
                     hash_calls += 1
@@ -482,7 +484,17 @@ class Q4N16K16TranscodeTest(unittest.TestCase):
                         source.write_bytes(b"LEGACY")
                     return result
 
-                def mutate_then_publish(path, payload):
+                def mutate_then_publish(
+                    path,
+                    payload,
+                    *,
+                    mutation=mutation,
+                    source=source,
+                    output=output,
+                    upstream_path=upstream_path,
+                    fake_transcoder=fake_transcoder,
+                    publish=publish,
+                ):
                     if mutation == "source":
                         source.write_bytes(b"LEGACY")
                     elif mutation == "output":

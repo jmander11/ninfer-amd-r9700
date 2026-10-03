@@ -16,7 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.analyze_whole_profile import _duration_ns, _message
+from tools.bench.analyze_whole_profile import (  # noqa: E402  sys.path bootstrap
+    _duration_ns,
+    _message,
+)
 
 MEASURED = "ninfer_bench_measured"
 ORDINARY = "ninfer.decode.decode.ordinary_round payload=8192"
@@ -72,7 +75,7 @@ def _aggregate_timed(
         value["intervals"].append((begin, end))
     result = []
     for key, value in grouped.items():
-        item: dict[str, Any] = dict(zip(key_names, key))
+        item: dict[str, Any] = dict(zip(key_names, key, strict=True))
         item.update(
             {
                 "record_count": value["count"],

@@ -58,14 +58,14 @@ def screen(out):
                     (out / f"{prefix}-{name}_a8-{sample}" / "receipt.json").read_text()
                 )
                 assert receipt["exit_code"] == 0 and candidate["q4_activation_bits"] == 8
-                delta = statistics.mean(c - r for c, r in zip(cv, rv))
+                delta = statistics.mean(c - r for c, r in zip(cv, rv, strict=True))
                 row[schedule][sample] = dict(
                     ppl=candidate["ppl"],
                     reference_ppl=reference["ppl"],
                     ratio=math.exp(delta),
                     mean_nll_delta=delta,
-                    new_severe=sum(c >= 10 and r < 10 for c, r in zip(cv, rv)),
-                    resolved_severe=sum(c < 10 and r >= 10 for c, r in zip(cv, rv)),
+                    new_severe=sum(c >= 10 and r < 10 for c, r in zip(cv, rv, strict=True)),
+                    resolved_severe=sum(c < 10 and r >= 10 for c, r in zip(cv, rv, strict=True)),
                 )
         ratios = [v["ratio"] for samples in row.values() for v in samples.values()]
         row["within_2pct"] = max(ratios) <= 1.02
@@ -112,15 +112,15 @@ def mixed(out, action):
         if schedule == "decode" and not any(p.exists() for p in cells):
             continue
         result[schedule] = {}
-        for sample, cell in zip(common.SAMPLES, cells):
+        for sample, cell in zip(common.SAMPLES, cells, strict=True):
             report, cv = common.nlls(cell, schedule)
             _, rv = common.nlls(out / f"{prefix}-nvfp4-{sample}", schedule)
             assert report["q4_prefill_gate_up_a4"] is True
             assert report["q4_activation_profile"] == "a8-except-n34816-k5120-tgt128-a4"
             result[schedule][sample] = dict(
                 ppl=report["ppl"],
-                ratio=math.exp(statistics.mean(c - r for c, r in zip(cv, rv))),
-                new_severe=sum(c >= 10 and r < 10 for c, r in zip(cv, rv)),
+                ratio=math.exp(statistics.mean(c - r for c, r in zip(cv, rv, strict=True))),
+                new_severe=sum(c >= 10 and r < 10 for c, r in zip(cv, rv, strict=True)),
             )
     ratios = [v["ratio"] for samples in result.values() for v in samples.values()]
     result["within_2pct"] = "decode" in result and max(ratios) <= 1.02

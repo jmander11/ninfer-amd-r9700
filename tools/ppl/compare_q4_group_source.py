@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl.q4_group_source_diagnostic import (
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
     ARTIFACT_TYPE,
     COMPARISON_TYPE,
     MAXIMUM_MEAN_NLL_DELTA,
@@ -24,7 +24,10 @@ from tools.ppl.q4_group_source_diagnostic import (
     _atomic_new,
     sha256_file,
 )
-from tools.ppl.run import exact_argmax_stats, severe_position_stats
+from tools.ppl.run import (  # noqa: E402  after sys.path setup
+    exact_argmax_stats,
+    severe_position_stats,
+)
 
 
 def _exact_int(value, name: str) -> int:

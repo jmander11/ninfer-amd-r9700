@@ -181,12 +181,16 @@ class DeterministicExecutionContractTest(unittest.TestCase):
             self.assertEqual(os.environ["TORCH_BLAS_PREFER_HIPBLASLT"], "1")
 
     def test_forbidden_environment_override_fails_even_when_empty(self) -> None:
-        with mock.patch.dict(os.environ, {"TRITON_OVERRIDE_ARCH": ""}, clear=True):
-            with self.assertRaisesRegex(ValueError, "TRITON_OVERRIDE_ARCH"):
-                protocol.establish_deterministic_environment()
-        with mock.patch.dict(os.environ, {"PYTORCH_ALLOC_CONF": ""}, clear=True):
-            with self.assertRaisesRegex(ValueError, "PYTORCH_ALLOC_CONF"):
-                protocol.establish_deterministic_environment()
+        with (
+            mock.patch.dict(os.environ, {"TRITON_OVERRIDE_ARCH": ""}, clear=True),
+            self.assertRaisesRegex(ValueError, "TRITON_OVERRIDE_ARCH"),
+        ):
+            protocol.establish_deterministic_environment()
+        with (
+            mock.patch.dict(os.environ, {"PYTORCH_ALLOC_CONF": ""}, clear=True),
+            self.assertRaisesRegex(ValueError, "PYTORCH_ALLOC_CONF"),
+        ):
+            protocol.establish_deterministic_environment()
 
     def test_resolved_triton_codegen_requires_exact_gfx1201_defaults(self) -> None:
         class Values:
@@ -327,14 +331,14 @@ class ArgumentContractTest(unittest.TestCase):
 
     def test_product_labels_do_not_enter_formula_signature(self) -> None:
         ordinary = protocol.parse_options(self.base())
-        mtp = protocol.parse_options(self.base() + ["--spec", "mtp", "--draft-tokens", "3"])
-        eager = protocol.parse_options(self.base() + ["--no-device-graph"])
-        decode = protocol.parse_options(self.base() + ["--schedule", "decode"])
+        mtp = protocol.parse_options([*self.base(), "--spec", "mtp", "--draft-tokens", "3"])
+        eager = protocol.parse_options([*self.base(), "--no-device-graph"])
+        decode = protocol.parse_options([*self.base(), "--schedule", "decode"])
         self.assertEqual(protocol.formula_signature(ordinary), protocol.formula_signature(mtp))
         self.assertEqual(protocol.formula_signature(ordinary), protocol.formula_signature(eager))
         self.assertEqual(protocol.formula_signature(ordinary), protocol.formula_signature(decode))
-        prefill_zero = protocol.parse_options(self.base() + ["--skip", "0"])
-        decode_zero = protocol.parse_options(self.base() + ["--skip", "0", "--schedule", "decode"])
+        prefill_zero = protocol.parse_options([*self.base(), "--skip", "0"])
+        decode_zero = protocol.parse_options([*self.base(), "--skip", "0", "--schedule", "decode"])
         self.assertEqual(
             protocol.formula_signature(prefill_zero), protocol.formula_signature(decode_zero)
         )
@@ -343,8 +347,8 @@ class ArgumentContractTest(unittest.TestCase):
 
     def test_cache_profile_is_an_explicit_formula_input(self) -> None:
         baseline = protocol.parse_options(self.base())
-        g16 = protocol.parse_options(self.base() + ["--scheme", protocol.G16_CACHE_SCHEME])
-        g32 = protocol.parse_options(self.base() + ["--scheme", protocol.G32_CACHE_SCHEME])
+        g16 = protocol.parse_options([*self.base(), "--scheme", protocol.G16_CACHE_SCHEME])
+        g32 = protocol.parse_options([*self.base(), "--scheme", protocol.G32_CACHE_SCHEME])
         self.assertIsNone(protocol.cache_value_group(baseline.scheme))
         self.assertEqual(protocol.cache_value_group(g16.scheme), 16)
         self.assertEqual(protocol.cache_value_group(g32.scheme), 32)
@@ -353,21 +357,21 @@ class ArgumentContractTest(unittest.TestCase):
 
     def test_product_flags_are_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires --draft-tokens"):
-            protocol.parse_options(self.base() + ["--spec", "mtp"])
+            protocol.parse_options([*self.base(), "--spec", "mtp"])
         with self.assertRaisesRegex(ValueError, "requires --spec mtp"):
-            protocol.parse_options(self.base() + ["--draft-tokens", "3"])
+            protocol.parse_options([*self.base(), "--draft-tokens", "3"])
         with self.assertRaisesRegex(ValueError, "no Device Graph"):
-            protocol.parse_options(self.base() + ["--device-graph"])
+            protocol.parse_options([*self.base(), "--device-graph"])
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-            protocol.parse_options(self.base() + ["--spec", "dflash"])
+            protocol.parse_options([*self.base(), "--spec", "dflash"])
         with self.assertRaisesRegex(ValueError, "must be bf16-reference"):
-            protocol.parse_options(self.base() + ["--scheme", "r9700-g16"])
+            protocol.parse_options([*self.base(), "--scheme", "r9700-g16"])
 
     def test_trace_cannot_collide_with_result_triplet(self) -> None:
         for trace in ("result.json", "result.nllf32", "result.argmaxi32"):
             with self.subTest(trace=trace), self.assertRaisesRegex(ValueError, "separate"):
                 protocol.parse_options(
-                    self.base() + ["--out-json", "result.json", "--trace-json", trace]
+                    [*self.base(), "--out-json", "result.json", "--trace-json", trace]
                 )
 
     def test_executable_help_needs_no_model_dependencies(self) -> None:

@@ -13,14 +13,17 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl.compare_q4_group_source import (
+from tools.ppl.compare_q4_group_source import (  # noqa: E402  after sys.path setup
     _against,
     _load_bf16,
     _sidecar_values,
     _source_key,
 )
-from tools.ppl.q4_group_source_diagnostic import _atomic_new, sha256_file
-from tools.ppl.selective_q4g128_source_diagnostic import (
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
+    _atomic_new,
+    sha256_file,
+)
+from tools.ppl.selective_q4g128_source_diagnostic import (  # noqa: E402  after sys.path setup
     ARTIFACT_TYPE,
     SCHEMA_VERSION,
     TOKENS,

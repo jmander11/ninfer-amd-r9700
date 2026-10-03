@@ -99,7 +99,7 @@ def measured_q4_calls(kernel_trace: Path, marker_trace: Path) -> list[dict[str, 
 
     calls = []
     for ordinal, ((name, shape), quantize, linear) in enumerate(
-        (item[0], item[1][0], item[1][1]) for item in zip(expected, pairs)
+        (item[0], item[1][0], item[1][1]) for item in zip(expected, pairs, strict=True)
     ):
         if (
             "quantize" not in quantize["Kernel_Name"]

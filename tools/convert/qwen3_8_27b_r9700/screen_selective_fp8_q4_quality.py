@@ -196,14 +196,17 @@ def assemble_report(
             "value": global_abs_worst["max_abs"],
         },
     }
-    compact = lambda item, metric: {
-        "name": item["name"],
-        "role": item["role"],
-        "metric": metric,
-        "e4m3": item["e4m3"][metric],
-        "q4g64": item["q4g64"][metric],
-        "ratio": item["e4m3_over_q4g64"][metric],
-    }
+
+    def compact(item, metric):
+        return {
+            "name": item["name"],
+            "role": item["role"],
+            "metric": metric,
+            "e4m3": item["e4m3"][metric],
+            "q4g64": item["q4g64"][metric],
+            "ratio": item["e4m3_over_q4g64"][metric],
+        }
+
     return {
         "schema": SCHEMA,
         "status": "source_only_diagnostic_no_artifact_or_runtime_change",

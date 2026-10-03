@@ -14,13 +14,13 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from tools.bench.prefill_chunk_authority import (
+from tools.bench.prefill_chunk_authority import (  # noqa: E402  sys.path bootstrap
     durable_create_json,
     validate_prefill_chunk_authority,
 )
-from tools.ppl import run as ppl
-from tools.ppl.fp8_context_recovery import identity
-from tools.ppl.quality_recovery_io import validate_authority_map
+from tools.ppl import run as ppl  # noqa: E402  sys.path bootstrap
+from tools.ppl.fp8_context_recovery import identity  # noqa: E402  sys.path bootstrap
+from tools.ppl.quality_recovery_io import validate_authority_map  # noqa: E402  sys.path bootstrap
 
 SELECTION = REPO / "profiles/bench/prefill-chunk-selection-panel-attention-20260921.json"
 QUALITY = (
@@ -45,7 +45,7 @@ def validate_rows(rows, prompt, group):
     histogram = Counter()
     fractions = []
     sparse_slots = 0
-    for dispatch, (row, context) in enumerate(zip(rows, contexts)):
+    for dispatch, (row, context) in enumerate(zip(rows, contexts, strict=True)):
         expected = dict(
             schema_version=1,
             diagnostic_only=True,
@@ -103,7 +103,7 @@ def cache(path):
 
 
 def preflight():
-    authority, selection = validate_prefill_chunk_authority(SELECTION)
+    authority, _selection = validate_prefill_chunk_authority(SELECTION)
     quality = validate_authority_map(QUALITY)
     if authority["selected_prefill_chunk"] != 2048 or quality[
         "selected_prefill_chunk_authority"
@@ -229,6 +229,7 @@ def run(output):
                 env={**os.environ, "NINFER_XATTENTION_KEEP_TRACE": str(trace)},
                 stdout=stdout,
                 stderr=stderr,
+                check=False,
             )
         durable_create_json(root / "exit.json", {"returncode": result.returncode})
         bench.require_auto_power_profile()

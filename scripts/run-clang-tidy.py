@@ -33,7 +33,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CLANG_TIDY = Path(os.environ.get("NINFER_CLANG_TIDY", "/opt/rocm/lib/llvm/bin/clang-tidy"))
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".hip"}
 HEADER_SUFFIXES = {".h", ".hpp"}
-EXCLUDED_PREFIXES = ("third_party/",)
+# Third-party sources, including the patched copies CMake generates inside build trees.
+EXCLUDED_PREFIXES = ("third_party/", "build/", "build-")
 MAX_JOBS = 8
 DIAGNOSTIC = re.compile(
     r"^(?P<path>[^\s:][^:]*):(?P<line>\d+):\d+: (?:warning|error): .*\[[\w.,-]+\]$"

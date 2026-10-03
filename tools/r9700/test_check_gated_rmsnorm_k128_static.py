@@ -63,9 +63,11 @@ class StaticCheckTest(unittest.TestCase):
             "v_wmma_f32_16x16x16_bf16 v[0:7], v[0:3], v[0:3], v[0:7]\n",
             "global_atomic_add v0, v0, v1\n",
         ):
-            with self.subTest(opcode=opcode):
-                with self.assertRaisesRegex(ValueError, "forbidden"):
-                    self.run_check(fixture(forbidden="  " + opcode))
+            with (
+                self.subTest(opcode=opcode),
+                self.assertRaisesRegex(ValueError, "forbidden"),
+            ):
+                self.run_check(fixture(forbidden="  " + opcode))
 
     def test_rejects_launch_geometry(self):
         with self.assertRaisesRegex(ValueError, "execution geometry"):

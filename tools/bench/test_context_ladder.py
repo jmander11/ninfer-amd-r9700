@@ -225,7 +225,7 @@ class ContextLadderTests(unittest.TestCase):
         raw["artifact"]["path"] = str(weights)
         raw["config"].update(corpus_path=str(ids), corpus_tokens=4)
 
-        def execute(command, **kwargs):
+        def execute(command, **_kwargs):
             ladder.write(Path(command[-1]), raw)
             return argparse.Namespace(returncode=0)
 

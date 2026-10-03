@@ -53,11 +53,14 @@ class PrepareWholeProfileTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        identity = lambda path: {
-            "path": str(path),
-            "file_size_bytes": path.stat().st_size,
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-        }
+
+        def identity(path):
+            return {
+                "path": str(path),
+                "file_size_bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+
         command = [
             str(bench),
             "--weights",
@@ -118,11 +121,14 @@ class PrepareWholeProfileTest(unittest.TestCase):
         bench.write_bytes(b"bench")
         selection.write_text("{}", encoding="utf-8")
         (root / "corpus.ids").write_text("1 2 3\n", encoding="utf-8")
-        identity = lambda path: {
-            "path": str(path),
-            "file_size_bytes": path.stat().st_size,
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-        }
+
+        def identity(path):
+            return {
+                "path": str(path),
+                "file_size_bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+
         report.write_text(
             json.dumps(
                 {
@@ -293,7 +299,9 @@ class PrepareWholeProfileTest(unittest.TestCase):
                 ).replace("/opt/rocm/bin/rocprofv3", "/bin/false"),
                 encoding="utf-8",
             )
-            failed = subprocess.run(["bash", str(script)], capture_output=True, text=True)
+            failed = subprocess.run(
+                ["bash", str(script)], capture_output=True, text=True, check=False
+            )
             self.assertEqual(failed.returncode, 1)
             self.assertEqual((root / "plan" / "power-profile-before.txt").read_text(), "auto\n")
             self.assertEqual((root / "plan" / "power-profile-after.txt").read_text(), "auto\n")

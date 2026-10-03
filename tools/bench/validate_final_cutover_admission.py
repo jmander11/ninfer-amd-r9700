@@ -419,10 +419,8 @@ def assemble(plan_path: Path) -> dict[str, Any]:
     selection_snapshot = snapshot(paths["selection"], "schema-v7 selection")
     selection = selection_snapshot["value"]
     terminal, _ = validate_terminal_production_authority(load_payload(json.dumps(selection)))
-    route, winner_source = selected_route(selection, terminal)
-    converter = validate_converter_preflight(
-        paths["converter_preflight"], paths["selection"], route
-    )
+    route, _winner_source = selected_route(selection, terminal)
+    validate_converter_preflight(paths["converter_preflight"], paths["selection"], route)
     chunk = validate_selection_record(paths["prefill_chunk"])
     if chunk["selected_prefill_chunk"] != route["prefill_chunk"]:
         raise ValueError("prefill-chunk and schema-v7 decisions differ")

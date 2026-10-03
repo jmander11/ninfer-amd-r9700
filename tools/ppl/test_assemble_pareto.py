@@ -706,9 +706,9 @@ class AssembleParetoTest(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as directory,
             patch("tools.ppl.assemble_pareto.build_cases", return_value=[case]),
+            self.assertRaisesRegex(ValueError, "exact pareto matrix point set"),
         ):
-            with self.assertRaisesRegex(ValueError, "exact pareto matrix point set"):
-                _reports(Path(directory), manifest, "pareto", 4096)
+            _reports(Path(directory), manifest, "pareto", 4096)
 
     def test_report_loader_rejects_report_outside_campaign(self) -> None:
         case = BenchCase("suite", "case", ("-p", "128"), 1, 0)
@@ -728,9 +728,11 @@ class AssembleParetoTest(unittest.TestCase):
                     }
                 ],
             }
-            with patch("tools.ppl.assemble_pareto.build_cases", return_value=[case]):
-                with self.assertRaisesRegex(ValueError, "resolves outside"):
-                    _reports(root, manifest, "pareto", 4096)
+            with (
+                patch("tools.ppl.assemble_pareto.build_cases", return_value=[case]),
+                self.assertRaisesRegex(ValueError, "resolves outside"),
+            ):
+                _reports(root, manifest, "pareto", 4096)
 
     def test_assembly_binds_artifact_bench_and_all_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

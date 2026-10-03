@@ -47,7 +47,9 @@ class MemoryPlan:
     streamed_blocks: int
 
     def summary(self) -> str:
-        gib = lambda value: value / GIB
+        def gib(value):
+            return value / GIB
+
         return (
             f"free={gib(self.free_bytes):.2f}GiB "
             f"headroom={gib(self.headroom_bytes):.2f}GiB "

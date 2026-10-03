@@ -14,7 +14,9 @@ class DFlash2Q4InventoryTest(unittest.TestCase):
     def test_selective_protected_has_only_canonical_companion(self) -> None:
         from tools.convert.qwen3_8_27b_r9700 import selective_protected_inventory as base
 
-        for actual, original in zip(inventory.SELECTIVE_OBJECT_SPECS[:1124], base.OBJECT_SPECS):
+        for actual, original in zip(
+            inventory.SELECTIVE_OBJECT_SPECS[:1124], base.OBJECT_SPECS, strict=True
+        ):
             if original.name == "text/output_head":
                 self.assertEqual(
                     (actual.name, actual.shape, actual.format),

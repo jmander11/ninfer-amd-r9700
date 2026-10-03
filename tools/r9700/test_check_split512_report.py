@@ -95,7 +95,10 @@ class Split512ReportTest(unittest.TestCase):
         with (
             patch("pathlib.Path.is_file", return_value=True),
             patch("pathlib.Path.is_dir", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             patch(
                 "tools.r9700.check_split512_report._file_sha256",
                 side_effect=lambda path: digests[str(path)],
@@ -199,7 +202,10 @@ class Split512ReportTest(unittest.TestCase):
         value = report()
         with (
             patch("pathlib.Path.is_file", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             patch("tools.r9700.check_split512_report._file_sha256", return_value="0" * 64),
             self.assertRaisesRegex(ValueError, "executable bytes changed"),
         ):
@@ -211,7 +217,10 @@ class Split512ReportTest(unittest.TestCase):
         value = report()
         with (
             patch("pathlib.Path.is_file", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             self.assertRaisesRegex(ValueError, "path differs"),
         ):
             validate_report(value, Path("/retained/split512"), Path("/repo"), lambda _path: "auto")
@@ -232,7 +241,10 @@ class Split512ReportTest(unittest.TestCase):
         with (
             patch("pathlib.Path.is_file", return_value=True),
             patch("pathlib.Path.is_dir", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             patch(
                 "tools.r9700.check_split512_report._file_sha256",
                 side_effect=lambda path: digests[str(path)],

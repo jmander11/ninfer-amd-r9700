@@ -79,7 +79,7 @@ class PrepareDispatchScheduleTest(unittest.TestCase):
             if not full:
                 rows.append(_row(len(rows), marker, "control_gates_kernel", 48 * 2048, 256))
 
-            def append_pair(spec: tuple[str, int, int]) -> None:
+            def append_pair(spec: tuple[str, int, int], layer=layer, marker=marker) -> None:
                 suffix, r, c = spec
                 tensors[f"text/layers/{layer}/{suffix}"] = ((r, c), "Q4G64_F16S")
                 rows.append(

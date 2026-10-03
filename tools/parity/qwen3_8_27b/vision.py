@@ -19,12 +19,20 @@ from tools.artifact import dequantize_row_split
 from tools.artifact.numeric import QUANT_FORMATS
 from tools.parity.qwen3_8_27b.vision_contract import (
     CRITERIA,
+    EXPECTED_TRACE_NAMES,
     GROUP_ACTIVITY_FLOOR,
     POSITION_WEIGHT_ABSOLUTE_LIMIT,
     PREPROCESSING_ABSOLUTE_LIMIT,
     PREPROCESSING_RELATIVE_RMSE_LIMIT,
     PRODUCTION_COSINE_MINIMUM,
     PRODUCTION_RELATIVE_RMSE_LIMIT,
+    REPORT_FORMAT,
+)
+from tools.parity.qwen3_8_27b.vision_contract import (  # re-exported for the parity metric tests
+    LOCAL_GROUP_COSINE_MINIMUM as LOCAL_GROUP_COSINE_MINIMUM,
+)
+from tools.parity.qwen3_8_27b.vision_contract import (
+    LOCAL_GROUP_SCALED_RMSE_LIMIT as LOCAL_GROUP_SCALED_RMSE_LIMIT,
 )
 from tools.parity.qwen3_8_27b.vision_contract import (
     summarize as _summarize,
@@ -85,9 +93,6 @@ WEIGHT_CRITERIA = {
 }
 
 
-from .vision_contract import EXPECTED_TRACE_NAMES, REPORT_FORMAT
-
-
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -123,7 +128,7 @@ def load_prepared_batch(path: Path) -> tuple[MultimodalBatch, dict[str, object]]
         if set(metadata) != {"contract"}:
             raise ValueError("prepared Vision input lacks its exact contract")
         contract = json.loads(metadata["contract"])
-        tensors = {name: source.get_tensor(name) for name in source.keys()}
+        tensors = {name: source.get_tensor(name) for name in source.keys()}  # noqa: SIM118  safe_open is not iterable
     batch = MultimodalBatch(
         input_ids=tensors["input_ids"],
         mm_token_type_ids=tensors["mm_token_type_ids"],
@@ -973,10 +978,10 @@ def run_campaign(args: argparse.Namespace, trace_root: Path) -> dict[str, object
                     modality = manifest["items"][item]["modality"]
                     artifact_names: list[str] = []
 
-                    def artifact_tap(name: str, value: torch.Tensor, *, item=item) -> None:
-                        _record_ordered_tap(
-                            artifact_names, name, item=item, label="artifact schedule"
-                        )
+                    def artifact_tap(
+                        name: str, value: torch.Tensor, *, item=item, names=artifact_names
+                    ) -> None:
+                        _record_ordered_tap(names, name, item=item, label="artifact schedule")
                         cpp = _read_tensor(trace_root, records[(item, name)])
                         production_comparisons.append(
                             {"item": item, "name": name, **metrics(cpp, value)}
@@ -1013,8 +1018,10 @@ def run_campaign(args: argparse.Namespace, trace_root: Path) -> dict[str, object
                 for item, (pixels, grid) in enumerate(item_inputs):
                     source_names: list[str] = []
 
-                    def source_tap(name: str, value: torch.Tensor, *, item=item) -> None:
-                        _record_ordered_tap(source_names, name, item=item, label="source schedule")
+                    def source_tap(
+                        name: str, value: torch.Tensor, *, item=item, names=source_names
+                    ) -> None:
+                        _record_ordered_tap(names, name, item=item, label="source schedule")
                         artifact = _read_bf16(
                             artifact_root / f"item_{item:02d}" / (name + ".bf16"), value.shape
                         )

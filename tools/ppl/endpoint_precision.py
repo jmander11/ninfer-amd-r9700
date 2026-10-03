@@ -23,9 +23,14 @@ PROFILES = aligned.PROFILES
 FAMILIES = dict(
     a8=0, **{"gate-up": 1, "mlp": 2, "projections": 3, "attn-input": 4, "gate-up-attn-input": 5}
 )
-RECIPES = tuple(
-    f"{base}-{endpoint}" for base in ("cap26", "cap22") for endpoint in ("embed", "head", "both")
-) + ("cap22-base",)
+RECIPES = (
+    *(
+        f"{base}-{endpoint}"
+        for base in ("cap26", "cap22")
+        for endpoint in ("embed", "head", "both")
+    ),
+    "cap22-base",
+)
 CAP22_BASE = (
     common.ROOT / "profiles/ppl/r9700-nv-aligned-precision-20260923/artifacts/no-late-mlp.ninfer"
 )

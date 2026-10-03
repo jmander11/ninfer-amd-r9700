@@ -364,9 +364,11 @@ class ValidateProfilePmcTest(unittest.TestCase):
             self.assertFalse(result["profile_timing_admissible"])
 
     def test_rejects_plan_without_same_capture_marker_trace(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "exact same-capture PMC contract"):
-                self.run_validate(self.fixture(Path(directory), markers=False))
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            self.assertRaisesRegex(ValueError, "exact same-capture PMC contract"),
+        ):
+            self.run_validate(self.fixture(Path(directory), markers=False))
 
     def test_rejects_missing_counter_and_partial_stage_join(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

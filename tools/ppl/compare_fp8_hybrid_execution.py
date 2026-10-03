@@ -13,14 +13,20 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl import run
-from tools.ppl.compare_fp8_hybrid_source import _load_hybrid
-from tools.ppl.compare_q4_group_source import _load_bf16, _source_key
-from tools.ppl.q4_group_source_diagnostic import _atomic_new, sha256_file
-from tools.ppl.validate_fp8_hybrid_greedy import (
+from tools.ppl import run  # noqa: E402  after sys.path setup
+from tools.ppl.compare_fp8_hybrid_source import _load_hybrid  # noqa: E402  after sys.path setup
+from tools.ppl.compare_q4_group_source import (  # noqa: E402  after sys.path setup
+    _load_bf16,
+    _source_key,
+)
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
+    _atomic_new,
+    sha256_file,
+)
+from tools.ppl.validate_fp8_hybrid_greedy import (  # noqa: E402  after sys.path setup
     _candidate_sidecars,
 )
-from tools.ppl.validate_fp8_hybrid_greedy import (
+from tools.ppl.validate_fp8_hybrid_greedy import (  # noqa: E402  after sys.path setup
     validate as validate_product,
 )
 
@@ -61,7 +67,7 @@ def _pair(
     return {
         "reference_mean_nll": sum(reference_nll) / len(reference_nll),
         "candidate_mean_nll": sum(candidate_nll) / len(candidate_nll),
-        "mean_nll_delta": sum(c - r for r, c in zip(reference_nll, candidate_nll))
+        "mean_nll_delta": sum(c - r for r, c in zip(reference_nll, candidate_nll, strict=True))
         / len(reference_nll),
         "paired_delta_se": run.paired_delta_se(candidate_nll, reference_nll),
         **summary,
@@ -81,7 +87,7 @@ def _greedy_attribution(bf16: list[int], source: list[int], product: list[int]) 
         "both_differ_from_bf16_same_prediction": 0,
         "both_differ_from_bf16_different_predictions": 0,
     }
-    for reference, source_token, product_token in zip(bf16, source, product):
+    for reference, source_token, product_token in zip(bf16, source, product, strict=True):
         source_differs = source_token != reference
         product_differs = product_token != reference
         if not source_differs and not product_differs:

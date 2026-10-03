@@ -230,7 +230,9 @@ class ValidateSelectedVisionDiagnosticTest(unittest.TestCase):
         ):
             with self.subTest(section=section):
                 self.check_rejected_report(
-                    lambda raw: raw[section]["comparisons"][15].update(relative_rmse=1.0),
+                    lambda raw, section=section: raw[section]["comparisons"][15].update(
+                        relative_rmse=1.0
+                    ),
                     "failed numerical criteria",
                 )
         self.check_rejected_report(

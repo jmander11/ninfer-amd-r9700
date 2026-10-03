@@ -30,35 +30,39 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.convert.qwen3_8_27b_r9700 import (
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
     fp8_hybrid_decision,
     fp8_hybrid_inventory,
     q4_inventory,
     q4_w8_mse_inventory,
 )
-from tools.ppl.schemes import BASELINE, ORDER, PROFILES
-from tools.reference.qwen3_8_27b_bf16.protocol import (
+from tools.ppl.schemes import (  # noqa: E402  after sys.path setup
+    BASELINE,
+    ORDER,
+    PROFILES,
+)
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
     ATTENTION_PV_EXECUTION as BF16_ATTENTION_PV_EXECUTION,
 )
-from tools.reference.qwen3_8_27b_bf16.protocol import (
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
     DETERMINISTIC_ENVIRONMENT as BF16_DETERMINISTIC_ENVIRONMENT,
 )
-from tools.reference.qwen3_8_27b_bf16.protocol import (
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
     DETERMINISTIC_EXECUTION_PROFILE as BF16_DETERMINISTIC_EXECUTION_PROFILE,
 )
-from tools.reference.qwen3_8_27b_bf16.protocol import (
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
     EXECUTION_ENVIRONMENT_KEYS as BF16_EXECUTION_ENVIRONMENT_KEY_ORDER,
 )
-from tools.reference.qwen3_8_27b_bf16.protocol import (
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
     FORBIDDEN_EXECUTION_ENVIRONMENT as BF16_FORBIDDEN_EXECUTION_ENVIRONMENT,
 )
-from tools.reference.qwen3_8_27b_bf16.protocol import (
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
     GDN_RECURRENCE_EXECUTION as BF16_GDN_RECURRENCE_EXECUTION,
 )
-from tools.reference.qwen3_8_27b_bf16.protocol import (
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
     MATMUL_REDUCTION_EXECUTION as BF16_MATMUL_REDUCTION_EXECUTION,
 )
-from tools.reference.qwen3_8_27b_bf16.protocol import (
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
     TRITON_CODEGEN_EXECUTION as BF16_TRITON_CODEGEN_EXECUTION,
 )
 
@@ -198,8 +202,8 @@ def select_schedules(raw: str | None) -> list[str]:
     if not raw:
         return list(SCHEDULES)
     selected: list[str] = []
-    for name in raw.split(","):
-        name = name.strip()
+    for item in raw.split(","):
+        name = item.strip()
         if name not in SCHEDULES:
             raise SystemExit(f"unknown schedule {name!r}; known: {', '.join(SCHEDULES)}")
         if name not in selected:
@@ -1591,7 +1595,7 @@ def load_reused_bf16_cells(
         if len(arguments) != len(expected_arguments):
             raise SystemExit(f"reused BF16 cell command differs from the exact gate: {cell_path}")
         path_value_indices = {1, 3, len(arguments) - 1}
-        for index, (actual, expected) in enumerate(zip(arguments, expected_arguments)):
+        for index, (actual, expected) in enumerate(zip(arguments, expected_arguments, strict=True)):
             equal = (
                 Path(actual).resolve() == Path(expected).resolve()
                 if index in path_value_indices
@@ -2019,8 +2023,10 @@ def write_markdown(path: Path, payload: dict) -> None:
         "- device graphs: on unless a cell sets device_graph=false",
         f"- terrible token: nll >= {TERRIBLE_NLL}",
         f"- independent baseline: `{payload['baseline']}` per (length, schedule, spec)",
-        f"- decode spec: {payload.get('spec', '-')} (draft {payload.get('draft_tokens', '-')}) "
-        f"unless a cell sets spec=none; prefill lane is spec-free",
+        (
+            f"- decode spec: {payload.get('spec', '-')} (draft {payload.get('draft_tokens', '-')}) "
+            f"unless a cell sets spec=none; prefill lane is spec-free"
+        ),
         "",
         "| length | schedule | scheme | spec | graph | skip | scored | greedy exact (diagnostic) | flips | flip rate | mean_nll | max_nll | severe | severe Δ | new / budget | ppl | Δ mean_nll | Δabs p50 | p95 | p99 | max | Δ 1σ | σ nll | noise | quality gate |",
         "|---:|---|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|",
@@ -2072,16 +2078,20 @@ def write_markdown(path: Path, payload: dict) -> None:
     lines.extend(
         [
             "",
-            "_Greedy exactness and flip rate against BF16 are diagnostics, not quality gates. "
-            "Prefill/decode schedule flips are also diagnostic because the selected attention "
-            "routes may use different qualified private precision; their finite aligned NLL "
-            "sidecars must meet the explicitly supplied bound. Graph/eager, MTP/ordinary, and "
-            "draft-window execution variants remain exact-token comparisons._",
+            (
+                "_Greedy exactness and flip rate against BF16 are diagnostics, not quality gates. "
+                "Prefill/decode schedule flips are also diagnostic because the selected attention "
+                "routes may use different qualified private precision; their finite aligned NLL "
+                "sidecars must meet the explicitly supplied bound. Graph/eager, MTP/ordinary, and "
+                "draft-window execution variants remain exact-token comparisons._"
+            ),
             "",
-            "_Noise columns: `σ nll` is the per-token NLL std for the cell; `Δ 1σ` is the SE of "
-            "the per-token paired Δnll vs the independent BF16 reference (index-aligned tokens, from "
-            "the .nllf32 sidecars). `noise` marks |Δ| ≤ 2·Δ1σ — the delta is not resolved above "
-            "the per-token noise floor._",
+            (
+                "_Noise columns: `σ nll` is the per-token NLL std for the cell; `Δ 1σ` is the SE of "
+                "the per-token paired Δnll vs the independent BF16 reference (index-aligned tokens, from "
+                "the .nllf32 sidecars). `noise` marks |Δ| ≤ 2·Δ1σ — the delta is not resolved above "
+                "the per-token noise floor._"
+            ),
         ]
     )
     lines.append("")
@@ -2381,9 +2391,8 @@ def main() -> int:
 
     reused_bf16: dict[int, tuple[dict, Path]] = {}
     bf16_repeat_comparison = None
-    if args.reuse_candidate_campaign:
-        if schedules != ["prefill"] or spec != "none":
-            raise SystemExit("campaign reuse requires a prefill-only non-speculative campaign")
+    if args.reuse_candidate_campaign and (schedules != ["prefill"] or spec != "none"):
+        raise SystemExit("campaign reuse requires a prefill-only non-speculative campaign")
     if args.reuse_bf16_campaign is not None:
         if spec != "none" or schedules not in (["prefill"], ["decode"]):
             raise SystemExit("BF16 reuse requires one non-speculative schedule")

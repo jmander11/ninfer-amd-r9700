@@ -118,7 +118,7 @@ def _sample_expression(
         rows = []
         for index in indices:
             offset = 0
-            for part, shape in zip(expression.sources, shapes):
+            for part, shape in zip(expression.sources, shapes, strict=True):
                 if index < offset + shape[0]:
                     rows.append(_sample_expression(part, [index - offset], reader, draft_ids))
                     break

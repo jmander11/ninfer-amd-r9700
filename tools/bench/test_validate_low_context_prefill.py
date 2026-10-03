@@ -179,7 +179,7 @@ class LowContextPrefillValidationTest(unittest.TestCase):
         path.write_text(json.dumps(authority), encoding="utf-8")
         return path
 
-    def make_campaign(self, root: Path, p2048_speed: float = 2100.0) -> Path:
+    def make_campaign(self, root: Path) -> Path:
         artifact = {
             "path": str(root / "selected.ninfer"),
             "model_id": "qwen3.8-27b",

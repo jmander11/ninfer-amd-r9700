@@ -21,8 +21,8 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.artifact.layouts import align_up, encoded_size
-from tools.convert.qwen3_8_27b_r9700 import fp8_hybrid_inventory
+from tools.artifact.layouts import align_up, encoded_size  # noqa: E402  sys.path bootstrap
+from tools.convert.qwen3_8_27b_r9700 import fp8_hybrid_inventory  # noqa: E402  sys.path bootstrap
 
 SCHEMA = "ninfer.r9700.fp8-hybrid-current-capacity.v2"
 HEADROOM = 1 << 30
@@ -62,7 +62,10 @@ PLANNER_PROFILE = {
     "device_graph": "1",
 }
 PLANNER_INTEGER_FIELDS = (
-    PLANNER_FIELDS[2:6] + ("draft_tokens", "device_graph") + PLANNER_FIELDS[10:]
+    *PLANNER_FIELDS[2:6],
+    "draft_tokens",
+    "device_graph",
+    *PLANNER_FIELDS[10:],
 )
 
 

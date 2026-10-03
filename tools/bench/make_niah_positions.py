@@ -216,7 +216,7 @@ def _splice(essay: str, frac: float) -> str:
         return NEEDLE + "\n\n" + essay
     if frac >= 1.0:
         return essay.rstrip("\n") + "\n\n" + NEEDLE
-    j = _line_boundary(essay, int(round(len(essay) * frac)))
+    j = _line_boundary(essay, round(len(essay) * frac))
     if j <= 0:
         return NEEDLE + "\n\n" + essay
     return essay[:j] + "\n\n" + NEEDLE + "\n\n" + essay[j + 1 :]
@@ -228,7 +228,7 @@ def _splice_line(essay: str, frac: float, line: str) -> str:
         return line + "\n\n" + essay
     if frac >= 1.0:
         return essay.rstrip("\n") + "\n\n" + line
-    j = _line_boundary(essay, int(round(len(essay) * frac)))
+    j = _line_boundary(essay, round(len(essay) * frac))
     if j <= 0:
         return line + "\n\n" + essay
     return essay[:j] + "\n\n" + line + "\n\n" + essay[j + 1 :]
@@ -270,8 +270,7 @@ def default_path(length_name: str, pos_name: str, multikey: bool = False) -> str
 
 
 def write_fixture(fixture: list[dict], rel_path: str, length_name: str, pos_name: str) -> None:
-    root = _repo_root()
-    out = Path(rel_path) if Path(rel_path).is_absolute() else (Path(_repo_root()) / rel_path)
+    out = Path(rel_path) if Path(rel_path).is_absolute() else (_repo_root() / rel_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(fixture, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"wrote {out}  (length={length_name}, needle {pos_name})")
@@ -290,7 +289,7 @@ def main() -> None:
         default="200k",
         help="target document length preset",
     )
-    ap.add_argument("--position", default="mid", choices=sorted(POS_FRACTION) + ["all"])
+    ap.add_argument("--position", default="mid", choices=[*sorted(POS_FRACTION), "all"])
     ap.add_argument("--out", default="", help="explicit output path (relative to repo root)")
     ap.add_argument(
         "--multikey",

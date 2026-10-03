@@ -114,9 +114,11 @@ class StaticCheckTest(unittest.TestCase):
             "  v_wmma_f32_16x16x16_bf16 v0, v1, v2, v3\n",
             "  global_atomic_add v0, v[1:2], v3, off\n",
         ):
-            with self.subTest(instruction=instruction):
-                with self.assertRaisesRegex(ValueError, "forbidden instructions"):
-                    self.run_check(fixture(barrier_protocol=instruction))
+            with (
+                self.subTest(instruction=instruction),
+                self.assertRaisesRegex(ValueError, "forbidden instructions"),
+            ):
+                self.run_check(fixture(barrier_protocol=instruction))
 
     def test_rejects_occupancy_drift(self):
         with self.assertRaisesRegex(ValueError, "resources fail"):

@@ -381,7 +381,7 @@ class DFlashTraceMarkerTest(unittest.TestCase):
 
     def test_outside_measured_fails(self):
         rows = fixture()
-        begin, end, message = rows[-1]
+        begin, _end, message = rows[-1]
         rows[-1] = (begin, 1_000_001, message)
         with self.assertRaisesRegex(ValueError, "outside measured"):
             _validate_verify_ranges(rows, (0, 1_000_000))

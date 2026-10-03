@@ -220,7 +220,7 @@ def preflight_summary(
         "--device",
         "cuda",
     ]
-    validation_argv = conversion_argv[:-2] + ["--validate-only"]
+    validation_argv = [*conversion_argv[:-2], "--validate-only"]
     return {
         "artifact_type": "ninfer_qwen3_8_27b_r9700_fp8_q4_hybrid_conversion_preflight",
         "schema_version": 1,

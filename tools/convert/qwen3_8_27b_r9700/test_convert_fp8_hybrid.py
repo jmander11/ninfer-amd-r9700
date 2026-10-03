@@ -129,7 +129,7 @@ class Fp8HybridConverterTest(unittest.TestCase):
                 mock.patch.object(
                     convert_fp8_hybrid.source,
                     "materialize_tensor",
-                    side_effect=lambda spec, reader, draft: reader.get(spec.name),
+                    side_effect=lambda spec, reader, _draft: reader.get(spec.name),
                 ),
                 redirect_stdout(io.StringIO()),
             ):

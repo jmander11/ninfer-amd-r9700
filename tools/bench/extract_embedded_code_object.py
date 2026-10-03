@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import itertools
 import os
 import stat
 import struct
@@ -26,14 +28,17 @@ def _snapshot(path: Path, label: str) -> tuple[Path, int, str, int, int, int, in
         digest = hashlib.file_digest(source, "sha256").hexdigest()
         after = os.fstat(source.fileno())
     current = resolved.stat()
-    identity = lambda value: (
-        value.st_dev,
-        value.st_ino,
-        value.st_size,
-        value.st_mode,
-        value.st_mtime_ns,
-        value.st_ctime_ns,
-    )
+
+    def identity(value):
+        return (
+            value.st_dev,
+            value.st_ino,
+            value.st_size,
+            value.st_mode,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+
     if identity(before) != identity(after) or identity(after) != identity(current):
         raise ValueError(f"{label} changed while being snapshotted")
     return (
@@ -67,10 +72,8 @@ def _publish(path: Path, payload: bytes) -> None:
             os.fsync(output.fileno())
         os.link(temporary, path)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
 
 
 def _select_device_code_object(fatbin: bytes, code_symbol: str) -> tuple[bytes, str, int]:
@@ -102,7 +105,7 @@ def _select_device_code_object(fatbin: bytes, code_symbol: str) -> tuple[bytes, 
                     raise ValueError
                 entries.append((identifier, start, end))
             ordered_extents = sorted((start, end) for _, start, end in entries)
-            if any(left[1] > right[0] for left, right in zip(ordered_extents, ordered_extents[1:])):
+            if any(left[1] > right[0] for left, right in itertools.pairwise(ordered_extents)):
                 raise ValueError
         except (UnicodeDecodeError, ValueError, struct.error):
             position += len(OFFLOAD_MAGIC)

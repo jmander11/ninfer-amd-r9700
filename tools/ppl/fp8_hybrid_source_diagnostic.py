@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.convert.qwen3.common.recipe import (
+from tools.convert.qwen3.common.recipe import (  # noqa: E402  after sys.path setup
     Concat,
     Expression,
     Reshape,
@@ -31,13 +31,13 @@ from tools.convert.qwen3.common.recipe import (
     expression_shape,
     expression_sources,
 )
-from tools.convert.qwen3_8_27b_r9700 import (
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
     fp8_hybrid_decision,
     fp8_hybrid_inventory,
     source_inventory,
     source_recipe,
 )
-from tools.ppl.q4_group_source_diagnostic import (
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
     ROW_CHUNK,
     TERRIBLE_NLL,
     _atomic_new,
@@ -47,7 +47,7 @@ from tools.ppl.q4_group_source_diagnostic import (
     sha256_file,
     validate_source_metadata,
 )
-from tools.reference.qwen3_8_27b_bf16 import protocol
+from tools.reference.qwen3_8_27b_bf16 import protocol  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_fp8_q4_hybrid_source_diagnostic"
 COMPARISON_TYPE = "ninfer_qwen3_8_fp8_q4_hybrid_source_comparison"
@@ -253,7 +253,7 @@ def quantize_decode_e4m3(weight, *, row_chunk: int = ROW_CHUNK):
         raise TypeError("E4M3 diagnostic input must be a rank-two BF16 tensor")
     if weight.device.type != "cpu":
         raise ValueError("exact source E4M3 coding requires a CPU BF16 tensor")
-    rows, columns = weight.shape
+    rows, _columns = weight.shape
     result = torch.empty_like(weight)
     for begin in range(0, rows, row_chunk):
         end = min(rows, begin + row_chunk)

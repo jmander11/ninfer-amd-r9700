@@ -140,7 +140,7 @@ def prepare(selection: Path, out: Path) -> dict:
     proofs, embedded = {}, {}
     with tempfile.TemporaryDirectory(prefix="ninfer-selected-static-") as directory:
         for name in names:
-            family, token, opcode = SPECS[name]
+            family, token, _opcode = SPECS[name]
             if name == "xattention_flash_consumer":
                 token = f"xattention_flash_consumer_kernelILj{group}ELb0ELb0EE"
             symbol = unique_symbol(raw, token)

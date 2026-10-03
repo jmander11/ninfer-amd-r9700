@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -18,15 +19,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.r9700 import check_prefill_cta_static as cta_checker_module
-from tools.r9700.check_prefill_cta_static import (
+from tools.r9700 import (  # noqa: E402  sys.path bootstrap
+    check_prefill_cta_static as cta_checker_module,
+)
+from tools.r9700.check_prefill_cta_static import (  # noqa: E402  sys.path bootstrap
     PROFILES as CTA_PROFILES,
 )
-from tools.r9700.check_prefill_cta_static import (
+from tools.r9700.check_prefill_cta_static import (  # noqa: E402  sys.path bootstrap
     _function,
     _one_integer,
 )
-from tools.r9700.check_prefill_cta_static import (
+from tools.r9700.check_prefill_cta_static import (  # noqa: E402  sys.path bootstrap
     check as check_cta,
 )
 
@@ -337,10 +340,8 @@ def _publish(path: Path, value: dict[str, Any]) -> None:
             os.fsync(output.fileno())
         os.link(temporary, path)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

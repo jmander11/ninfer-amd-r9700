@@ -149,7 +149,7 @@ def _make_inputs(torch, source_rows: int):
     return probabilities, values
 
 
-def _accuracy(torch, output, source_rows: int) -> dict:
+def _accuracy(output, source_rows: int) -> dict:
     host = output.detach().cpu()
     records = []
     passed = True
@@ -242,7 +242,7 @@ def run_probe(device_index: int) -> dict:
                     "seconds": time.perf_counter() - started,
                     "sha256": _sha256_bytes(_tensor_bytes(torch, output)),
                     "finite": bool(torch.isfinite(output).all().item()),
-                    "accuracy": _accuracy(torch, output, source_rows),
+                    "accuracy": _accuracy(output, source_rows),
                 }
             difference = retained["fixed-ascending-chunks"] - retained["one-shot-einsum"]
             cases.append(

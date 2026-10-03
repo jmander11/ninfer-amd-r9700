@@ -335,7 +335,9 @@ def run(args):
             write(receipt, command)
             print(f"RUN {args.kind} {args.attention} P{context}", flush=True)
             with report.with_suffix(".log").open("x") as log:
-                process = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+                process = subprocess.run(
+                    command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False
+                )
             power_after = POWER.read_text().strip()
             write(completion, dict(returncode=process.returncode, power_after=power_after))
             require(
@@ -392,7 +394,7 @@ def compare(dense_path, candidate_path):
         "cannot compare incomplete ladders",
     )
     rows = []
-    for left, right in zip(dense["cells"], candidate["cells"]):
+    for left, right in zip(dense["cells"], candidate["cells"], strict=True):
         # Revalidate the retained raw reports and PPL sidecars, not just summaries.
         for cell, ladder in ((left, dense), (right, candidate)):
             path = Path(cell["report"])
@@ -427,9 +429,9 @@ def compare(dense_path, candidate_path):
             row.update(
                 mean_nll_delta=right["mean_nll"] - left["mean_nll"],
                 ppl_change_percent=100 * (right["ppl"] / left["ppl"] - 1),
-                max_abs_nll_delta=max(abs(a - b) for a, b in zip(l_nll, r_nll)),
+                max_abs_nll_delta=max(abs(a - b) for a, b in zip(l_nll, r_nll, strict=True)),
                 new_severe_positions=sum(
-                    a < left["terrible_nll"] <= b for a, b in zip(l_nll, r_nll)
+                    a < left["terrible_nll"] <= b for a, b in zip(l_nll, r_nll, strict=True)
                 ),
             )
         rows.append(row)

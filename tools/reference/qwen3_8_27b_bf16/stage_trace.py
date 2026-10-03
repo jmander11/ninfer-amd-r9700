@@ -137,9 +137,8 @@ class StageTrace:
     def write(self, vectors):
         torch = self.torch
         rows = []
-        for name, begin, end, value in self.items:
-            if isinstance(value, list):
-                value = torch.cat(value, dim=0)
+        for name, begin, end, item in self.items:
+            value = torch.cat(item, dim=0) if isinstance(item, list) else item
             host = value.detach().contiguous().cpu()
             raw = host.view(torch.uint8).numpy().tobytes()
             rows.append(

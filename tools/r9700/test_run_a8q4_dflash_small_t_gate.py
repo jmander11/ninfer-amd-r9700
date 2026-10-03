@@ -24,10 +24,14 @@ def report(candidate: float = 0.8, incumbent: float = 1.0) -> dict:
     incumbent_reverse = [incumbent + 0.002 + index * 0.001 for index in range(7)]
     candidate_forward = [candidate + index * 0.001 for index in range(7)]
     candidate_reverse = [candidate + 0.002 + index * 0.001 for index in range(7)]
-    incumbent_balanced = [(a + b) * 0.5 for a, b in zip(incumbent_forward, incumbent_reverse)]
-    candidate_balanced = [(a + b) * 0.5 for a, b in zip(candidate_forward, candidate_reverse)]
-    forward_ratios = [a / b for a, b in zip(candidate_forward, incumbent_forward)]
-    reverse_ratios = [a / b for a, b in zip(candidate_reverse, incumbent_reverse)]
+    incumbent_balanced = [
+        (a + b) * 0.5 for a, b in zip(incumbent_forward, incumbent_reverse, strict=True)
+    ]
+    candidate_balanced = [
+        (a + b) * 0.5 for a, b in zip(candidate_forward, candidate_reverse, strict=True)
+    ]
+    forward_ratios = [a / b for a, b in zip(candidate_forward, incumbent_forward, strict=True)]
+    reverse_ratios = [a / b for a, b in zip(candidate_reverse, incumbent_reverse, strict=True)]
     ratios = forward_ratios + reverse_ratios
     forward_median = statistics.median(forward_ratios)
     reverse_median = statistics.median(reverse_ratios)

@@ -21,8 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
-from tools.bench.run_ninfer_bench_matrix import (
+from tools.bench.prefill_chunk_authority import (  # noqa: E402  after sys.path setup
+    validate_prefill_chunk_authority,
+)
+from tools.bench.run_ninfer_bench_matrix import (  # noqa: E402  after sys.path setup
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     PRODUCTION_PREFILL_CHUNKS,
@@ -35,16 +37,16 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_automatic_feasibility,
     validate_hybrid_shared_workspace_authority,
 )
-from tools.bench.select_prefill_chunk import (
+from tools.bench.select_prefill_chunk import (  # noqa: E402  after sys.path setup
     ARTIFACT_TYPE as PREFILL_CHUNK_ARTIFACT_TYPE,
 )
-from tools.bench.select_prefill_chunk import (
+from tools.bench.select_prefill_chunk import (  # noqa: E402  after sys.path setup
     RULE as PREFILL_CHUNK_SELECTION_RULE,
 )
-from tools.bench.select_prefill_chunk import (
+from tools.bench.select_prefill_chunk import (  # noqa: E402  after sys.path setup
     SCHEMA_VERSION as PREFILL_CHUNK_SCHEMA_VERSION,
 )
-from tools.ppl import run as ppl_run
+from tools.ppl import run as ppl_run  # noqa: E402  after sys.path setup
 
 HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 TERMINAL_RECIPE_IDS = {

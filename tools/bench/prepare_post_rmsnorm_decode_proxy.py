@@ -245,7 +245,7 @@ def shell(plan_dir: Path) -> str:
         "printf '%s\\n' profile_standard | sudo tee \"$power\" >/dev/null",
         'test "$(cat "$power")" = profile_standard',
     ]
-    for label, counters in PASSES.items():
+    for counters in PASSES.values():
         lines.append(f"{quoted(str(ROCPROF_AVAIL))} --device 0 pmc-check " + " ".join(counters))
     lines += [
         "restore_auto",

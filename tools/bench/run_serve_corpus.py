@@ -1161,7 +1161,7 @@ def markdown_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str
 def mode_display_name(mode_name: str) -> str:
     if mode_name not in SPECULATIVE_MODES:
         raise CampaignError(f"unsupported summary mode: {mode_name}")
-    backend, draft_tokens, verify_width = SPECULATIVE_MODES[mode_name]
+    backend, draft_tokens, _verify_width = SPECULATIVE_MODES[mode_name]
     if backend == "none":
         return "MTP0"
     if backend == "mtp":

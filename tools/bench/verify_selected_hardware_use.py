@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -36,8 +37,7 @@ def _machine_interval(path: Path, symbol: str) -> dict[str, Any]:
     result = subprocess.run(
         [str(LLVM_NM), "-S", "-n", str(path)],
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
     matches = []
@@ -606,7 +606,7 @@ def verify(
         },
         "executed_symbol_count": len(symbols),
         "required_symbol_families": symbol_tokens,
-        "static_proof_names": required + ["ordinary_fp8_qk"],
+        "static_proof_names": [*required, "ordinary_fp8_qk"],
         "selected_embedded_static_proofs": embedded_evidence,
         "static_only_proof_names": ["ordinary_fp8_qk"],
         "loaded_fp8_proofs": fp8,
@@ -665,10 +665,8 @@ def main() -> None:
                 os.close(directory)
             durable = True
         finally:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 os.unlink(temporary)
-            except FileNotFoundError:
-                pass
             if published and not durable and created_inode is not None:
                 try:
                     current = os.stat(output, follow_symlinks=False)

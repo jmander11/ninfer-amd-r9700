@@ -121,7 +121,10 @@ class PrefillCtaReportTest(unittest.TestCase):
         with (
             patch("pathlib.Path.is_file", return_value=True),
             patch("pathlib.Path.is_dir", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             patch(
                 "tools.r9700.check_prefill_cta_report.file_sha256",
                 side_effect=lambda path: digests[str(path)],
@@ -202,7 +205,10 @@ class PrefillCtaReportTest(unittest.TestCase):
         with (
             patch("pathlib.Path.is_file", return_value=True),
             patch("pathlib.Path.is_dir", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             patch(
                 "tools.r9700.check_prefill_cta_report.file_sha256",
                 side_effect=lambda path: digests[str(path)],
@@ -216,7 +222,10 @@ class PrefillCtaReportTest(unittest.TestCase):
         digests = {"/retained/qual": value["executable"]["sha256"]}
         with (
             patch("pathlib.Path.is_file", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             patch(
                 "tools.r9700.check_prefill_cta_report.file_sha256",
                 side_effect=lambda path: digests[str(path)],
@@ -235,7 +244,10 @@ class PrefillCtaReportTest(unittest.TestCase):
         with (
             patch("pathlib.Path.is_file", return_value=True),
             patch("pathlib.Path.is_dir", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             patch(
                 "tools.r9700.check_prefill_cta_report.file_sha256",
                 side_effect=lambda path: digests[str(path)],
@@ -257,7 +269,10 @@ class PrefillCtaReportTest(unittest.TestCase):
         with (
             patch("pathlib.Path.is_file", return_value=True),
             patch("pathlib.Path.is_dir", return_value=True),
-            patch("pathlib.Path.resolve", lambda self, strict=False: self),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
             self.assertRaisesRegex(ValueError, "live power"),
         ):
             validate_report(

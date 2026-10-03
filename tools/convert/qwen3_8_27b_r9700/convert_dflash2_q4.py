@@ -531,33 +531,33 @@ def convert(
     }
     _atomic_json(pending_path, pending)
     source_path = checked.dflash_model / "model.safetensors"
-    with Artifact.open(checked.base_path) as source_artifact:
-        with ShardReader.from_file(source_path) as reader:
-            with ArtifactWriter(output, checked.output_identity, checked.specs) as writer:
-                if writer.objects != checked.objects:
-                    raise RuntimeError("DFlash2 writer plan differs from completed preflight")
-                for obj in source_artifact.objects:
-                    if (
-                        checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
-                        and obj.name == "text/output_head"
-                    ):
-                        writer.write(
-                            obj.name, transcode_w8_n16k16(source_artifact.payload(obj), obj.shape)
-                        )
-                    else:
-                        writer.write(obj.name, _chunks(source_artifact.payload(obj)))
-                for binding in inventory.source_bindings_for_recipe(checked.matrix_recipe):
-                    tensor = _load_source_tensor(binding, reader, torch)
-                    if binding.artifact.format == "BF16":
-                        payload = family_conversion.encode_tensor_payload(
-                            tensor, binding.artifact, resolved_device
-                        )
-                    else:
-                        payload = dflash2_matrix_recipes.encode_matrix_payload(
-                            tensor, binding.artifact, checked.matrix_recipe, resolved_device
-                        )
-                    writer.write(binding.artifact.name, payload)
-                    del payload, tensor
+    with (
+        Artifact.open(checked.base_path) as source_artifact,
+        ShardReader.from_file(source_path) as reader,
+        ArtifactWriter(output, checked.output_identity, checked.specs) as writer,
+    ):
+        if writer.objects != checked.objects:
+            raise RuntimeError("DFlash2 writer plan differs from completed preflight")
+        for obj in source_artifact.objects:
+            if (
+                checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
+                and obj.name == "text/output_head"
+            ):
+                writer.write(obj.name, transcode_w8_n16k16(source_artifact.payload(obj), obj.shape))
+            else:
+                writer.write(obj.name, _chunks(source_artifact.payload(obj)))
+        for binding in inventory.source_bindings_for_recipe(checked.matrix_recipe):
+            tensor = _load_source_tensor(binding, reader, torch)
+            if binding.artifact.format == "BF16":
+                payload = family_conversion.encode_tensor_payload(
+                    tensor, binding.artifact, resolved_device
+                )
+            else:
+                payload = dflash2_matrix_recipes.encode_matrix_payload(
+                    tensor, binding.artifact, checked.matrix_recipe, resolved_device
+                )
+            writer.write(binding.artifact.name, payload)
+            del payload, tensor
 
     output_sha256 = _validate_completed_artifact(
         output, checked.output_identity, checked.objects, checked.projected_file_bytes

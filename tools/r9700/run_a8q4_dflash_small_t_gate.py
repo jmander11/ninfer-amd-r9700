@@ -161,16 +161,20 @@ def validate_cell(
     candidate_reverse = _samples(timing, "candidate_reverse_ms")
     incumbent_reverse = _samples(timing, "incumbent_reverse_ms")
     incumbent_balanced = [
-        (forward + reverse) * 0.5 for forward, reverse in zip(incumbent_forward, incumbent_reverse)
+        (forward + reverse) * 0.5
+        for forward, reverse in zip(incumbent_forward, incumbent_reverse, strict=True)
     ]
     candidate_balanced = [
-        (forward + reverse) * 0.5 for forward, reverse in zip(candidate_forward, candidate_reverse)
+        (forward + reverse) * 0.5
+        for forward, reverse in zip(candidate_forward, candidate_reverse, strict=True)
     ]
     forward_ratios = [
-        candidate / incumbent for candidate, incumbent in zip(candidate_forward, incumbent_forward)
+        candidate / incumbent
+        for candidate, incumbent in zip(candidate_forward, incumbent_forward, strict=True)
     ]
     reverse_ratios = [
-        candidate / incumbent for candidate, incumbent in zip(candidate_reverse, incumbent_reverse)
+        candidate / incumbent
+        for candidate, incumbent in zip(candidate_reverse, incumbent_reverse, strict=True)
     ]
     for name, expected in (
         ("incumbent_balanced_ms", incumbent_balanced),
@@ -179,7 +183,7 @@ def validate_cell(
         ("reverse_candidate_over_incumbent", reverse_ratios),
     ):
         retained = _samples(timing, name)
-        for index, (actual, value) in enumerate(zip(retained, expected)):
+        for index, (actual, value) in enumerate(zip(retained, expected, strict=True)):
             _close(actual, value, f"{name}[{index}]")
 
     incumbent_median = statistics.median(incumbent_balanced)

@@ -74,9 +74,11 @@ amdhsa.kernels:
             self.assertEqual(result["lds_bytes"], PROFILE["lds"])
 
     def test_rejects_wrong_group_symbol(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "G32 specialization"):
-                self.run_check(self.fixture(Path(directory)), value_group=32)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            self.assertRaisesRegex(ValueError, "G32 specialization"),
+        ):
+            self.run_check(self.fixture(Path(directory)), value_group=32)
 
     def test_rejects_resource_and_instruction_regressions(self) -> None:
         cases = (
@@ -95,9 +97,12 @@ amdhsa.kernels:
             (dict(maximum_workgroup=256), "execution mode"),
         )
         for changes, message in cases:
-            with self.subTest(changes=changes), tempfile.TemporaryDirectory() as directory:
-                with self.assertRaisesRegex(ValueError, message):
-                    self.run_check(self.fixture(Path(directory), **changes))
+            with (
+                self.subTest(changes=changes),
+                tempfile.TemporaryDirectory() as directory,
+                self.assertRaisesRegex(ValueError, message),
+            ):
+                self.run_check(self.fixture(Path(directory), **changes))
 
 
 if __name__ == "__main__":

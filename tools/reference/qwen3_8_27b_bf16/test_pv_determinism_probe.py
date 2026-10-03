@@ -46,8 +46,8 @@ class PvDeterminismProbeTest(unittest.TestCase):
         one_shot = probe.one_shot_pv(torch, probabilities, values)
         fixed = probe.fixed_order_pv(torch, probabilities, values, source_chunk=64)
         self.assertEqual(tuple(fixed.shape), (32, 6, 256))
-        self.assertTrue(probe._accuracy(torch, one_shot, 257)["pass"])
-        self.assertTrue(probe._accuracy(torch, fixed, 257)["pass"])
+        self.assertTrue(probe._accuracy(one_shot, 257)["pass"])
+        self.assertTrue(probe._accuracy(fixed, 257)["pass"])
         self.assertLessEqual(float((fixed - one_shot).abs().max().item()), 1.0e-6)
 
     def test_comparison_requires_exact_route_hashes(self) -> None:

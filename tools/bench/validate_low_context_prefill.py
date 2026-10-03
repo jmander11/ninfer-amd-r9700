@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.run_ninfer_bench_matrix import (
+from tools.bench.run_ninfer_bench_matrix import (  # noqa: E402  sys.path bootstrap
     DECODE_ATTENTION_PROFILE,
     LOW_CONTEXT_PREFILL_PROMPTS,
     MATRIX_SCHEMA_VERSION,
@@ -37,7 +37,10 @@ from tools.bench.run_ninfer_bench_matrix import (
     require_fp8_hybrid_artifact,
     validate_hybrid_shared_workspace_authority,
 )
-from tools.ppl.pareto import load_payload, validate_terminal_production_authority
+from tools.ppl.pareto import (  # noqa: E402  sys.path bootstrap
+    load_payload,
+    validate_terminal_production_authority,
+)
 
 
 def _sha256(value: object) -> bool:

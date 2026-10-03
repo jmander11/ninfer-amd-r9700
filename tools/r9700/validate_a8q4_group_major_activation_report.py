@@ -13,7 +13,7 @@ from tools.r9700.run_a8q4_group_major_activation_gate import OUTPUT, validate_re
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    args = parser.parse_args()
+    parser.parse_args()
     path = OUTPUT
     info = os.lstat(path)
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:

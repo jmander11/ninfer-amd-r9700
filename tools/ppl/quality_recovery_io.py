@@ -15,7 +15,9 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
+from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402  after sys.path setup
+    validate_checkpoint_files,
+)
 
 EXPECTED_AUTHORITIES = {
     "ALL_Q4_DENSE_QUALITY": ("r9700-q4g64-n16k16-eval", "dense"),

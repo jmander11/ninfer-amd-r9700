@@ -698,7 +698,7 @@ def run_clients(
                     if ordered_dispatch:
                         with dispatch_condition:
                             dispatch_condition.wait_for(
-                                lambda: failed.is_set() or job.index == next_dispatch_index
+                                lambda job=job: failed.is_set() or job.index == next_dispatch_index  # noqa: B023  re-reads the live shared dispatch counter by design
                             )
                             if failed.is_set():
                                 return

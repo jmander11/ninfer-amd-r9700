@@ -261,9 +261,9 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         with (
             mock.patch.object(sys, "argv", argv),
             mock.patch.object(validator_module, "validate") as validate_call,
+            self.assertRaises(SystemExit),
         ):
-            with self.assertRaises(SystemExit):
-                validator_module.main()
+            validator_module.main()
         validate_call.assert_not_called()
         self.assertTrue(output.is_symlink())
 

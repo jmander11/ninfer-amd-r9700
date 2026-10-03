@@ -133,7 +133,7 @@ class SelectedMtpBulkW8Test(unittest.TestCase):
             plan = preparer.prepare(Path(route["terminal_selection"]["path"]), operator, output)
         return output, plan
 
-    def materialize(self, package: Path, plan: dict, route: dict, samples: int = 64) -> None:
+    def materialize(self, plan: dict, route: dict, samples: int = 64) -> None:
         outputs = plan["outputs"]
         self.raw(Path(outputs["operator"]), samples)
         Path(outputs["benchmark_report"]).write_text(
@@ -239,7 +239,7 @@ class SelectedMtpBulkW8Test(unittest.TestCase):
             root = Path(directory)
             route = self.route(root)
             package, plan = self.prepare_package(root, route)
-            self.materialize(package, plan, route)
+            self.materialize(plan, route)
             out = package / "evidence.json"
             with (
                 patch.object(finalizer, "resolve", return_value=route),
@@ -258,7 +258,7 @@ class SelectedMtpBulkW8Test(unittest.TestCase):
             root = Path(directory)
             route = self.route(root)
             package, plan = self.prepare_package(root, route)
-            self.materialize(package, plan, route, 0)
+            self.materialize(plan, route, 0)
             with (
                 patch.object(finalizer, "resolve", return_value=route),
                 patch.object(
@@ -275,7 +275,7 @@ class SelectedMtpBulkW8Test(unittest.TestCase):
             root = Path(directory)
             route = self.route(root)
             package, plan = self.prepare_package(root, route)
-            self.materialize(package, plan, route)
+            self.materialize(plan, route)
             mutated = json.loads((package / "plan.json").read_text())
             mutated["benchmark_command"][mutated["benchmark_command"].index("--device") + 1] = "1"
             (package / "plan.json").write_text(json.dumps(mutated))
@@ -290,7 +290,7 @@ class SelectedMtpBulkW8Test(unittest.TestCase):
             root = Path(directory)
             route = self.route(root)
             package, plan = self.prepare_package(root, route)
-            self.materialize(package, plan, route)
+            self.materialize(plan, route)
             raw = Path(plan["outputs"]["operator"])
             value = json.loads(raw.read_text())
             value["shapes"].append(dict(value["shapes"][0]))
@@ -306,7 +306,7 @@ class SelectedMtpBulkW8Test(unittest.TestCase):
             root = Path(directory)
             route = self.route(root)
             package, plan = self.prepare_package(root, route)
-            self.materialize(package, plan, route)
+            self.materialize(plan, route)
             rows = self.trace_rows()
             rows[0]["symbol"] = "a8w8g32_linear_wmma32_kernel"
             with (
@@ -323,7 +323,7 @@ class SelectedMtpBulkW8Test(unittest.TestCase):
             root = Path(directory)
             route = self.route(root)
             package, plan = self.prepare_package(root, route)
-            self.materialize(package, plan, route)
+            self.materialize(plan, route)
             out = package / "evidence.json"
 
             def raced_link(_source, destination):

@@ -36,9 +36,9 @@ class AttentionParityStaticTest(unittest.TestCase):
             )
             result = subprocess.run(
                 ["python3", str(CHECK), str(mutated)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
+                check=False,
             )
             self.assertNotEqual(result.returncode, 0)
 

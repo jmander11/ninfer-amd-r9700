@@ -81,23 +81,25 @@ class EvalScopeBackend:
     name = "evalscope"
     _serpapi_lock = threading.Lock()
 
-    _ALLOWED_ARGS = {
-        "subset_list",
-        "dataset_args",
-        "few_shot_num",
-        "shuffle",
-        "judge_strategy",
-        "judge_model_args",
-        "dataset_hub",
-        "dataset_dir",
-        "collect_perf",
-        "ignore_errors",
-        "debug",
-        "is_fc_model",
-        "underscore_to_dot",
-        "serpapi_api_key_env",
-        "allow_network_downloads",
-    }
+    _ALLOWED_ARGS = frozenset(
+        {
+            "subset_list",
+            "dataset_args",
+            "few_shot_num",
+            "shuffle",
+            "judge_strategy",
+            "judge_model_args",
+            "dataset_hub",
+            "dataset_dir",
+            "collect_perf",
+            "ignore_errors",
+            "debug",
+            "is_fc_model",
+            "underscore_to_dot",
+            "serpapi_api_key_env",
+            "allow_network_downloads",
+        }
+    )
 
     def validate(
         self, job: JobConfig, target: ResolvedTarget | None, for_run: bool = False

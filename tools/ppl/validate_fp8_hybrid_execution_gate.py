@@ -21,7 +21,7 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl import run as ppl
+from tools.ppl import run as ppl  # noqa: E402  after sys.path setup
 
 
 def sha256(path: Path) -> str:
@@ -122,8 +122,7 @@ def query_widths(
         ],
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     return parse_width_inventory(process.stdout, (prefill, concurrency, mtp_width, dflash_width))
 

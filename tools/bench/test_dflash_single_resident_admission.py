@@ -125,7 +125,7 @@ class Campaign:
             raise ValueError("mixed recipe/K/W evidence")
         return value
 
-    def capacity(self, route, evidence, k, w, root):
+    def capacity(self, _route, evidence, k, w, root):
         value = self.read_cell(evidence, k, w, root)
         return {
             "matrix": selection._identity(root / "manifest.json"),
@@ -140,7 +140,7 @@ class Campaign:
             },
         }
 
-    def performance(self, route, evidence, k, w, root, concurrency):
+    def performance(self, _route, evidence, k, w, root, concurrency):
         value = self.read_cell(evidence, k, w, root)
         if value["concurrency"] != concurrency:
             raise ValueError("missing declared concurrency")

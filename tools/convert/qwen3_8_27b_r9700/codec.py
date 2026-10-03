@@ -49,7 +49,7 @@ def _round_even(value: float) -> int:
     # keeps bad source state from becoming a platform-dependent integer cast.
     if not math.isfinite(value):
         raise ValueError("W8G32 code input is non-finite")
-    return int(round(value))
+    return round(value)
 
 
 def _validate_shape(rows: int, columns: int, values: Sequence[float]) -> None:

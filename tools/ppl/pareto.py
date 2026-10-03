@@ -20,8 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.run_ninfer_bench_matrix import PRODUCTION_PREFILL_CHUNKS
-from tools.ppl.run import QUALITY_TIERS
+from tools.bench.run_ninfer_bench_matrix import (  # noqa: E402  after sys.path setup
+    PRODUCTION_PREFILL_CHUNKS,
+)
+from tools.ppl.run import QUALITY_TIERS  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_r9700_pareto_comparison"
 SCHEMA_VERSION = 7

@@ -87,8 +87,10 @@ def _expected_checkpoints(prompt_tokens: int, skip_tokens: int) -> list[tuple]:
                             )
                             result.append(
                                 (
-                                    f"layer-{layer:02d}.attention-detail.kv-{kv_head:02d}."
-                                    f"{kernel_stage}.last",
+                                    (
+                                        f"layer-{layer:02d}.attention-detail.kv-{kv_head:02d}."
+                                        f"{kernel_stage}.last"
+                                    ),
                                     hidden_rows - width,
                                     hidden_rows,
                                     [width, *tail],

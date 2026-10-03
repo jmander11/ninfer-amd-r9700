@@ -23,21 +23,28 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.convert.qwen3_8_27b_r9700 import mse_quantize, source_inventory
-from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
+    mse_quantize,
+    source_inventory,
+)
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (  # noqa: E402  after sys.path setup
     MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2,
     _mse_q4g128_decode,
     selective_specs,
 )
-from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (  # noqa: E402  after sys.path setup
     _validate_provenance as validate_screen_provenance,
 )
-from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (  # noqa: E402  after sys.path setup
     validate_report as validate_screen_report,
 )
-from tools.ppl.compare_q4_group_source import _against, _load_bf16, _source_key
-from tools.ppl.fp8_hybrid_source_diagnostic import _source_rows
-from tools.ppl.q4_group_source_diagnostic import (
+from tools.ppl.compare_q4_group_source import (  # noqa: E402  after sys.path setup
+    _against,
+    _load_bf16,
+    _source_key,
+)
+from tools.ppl.fp8_hybrid_source_diagnostic import _source_rows  # noqa: E402  after sys.path setup
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
     MAXIMUM_MEAN_NLL_DELTA,
     MAXIMUM_NEW_SEVERE_RATE,
     ROW_CHUNK,
@@ -48,7 +55,7 @@ from tools.ppl.q4_group_source_diagnostic import (
     sha256_file,
     validate_source_metadata,
 )
-from tools.reference.qwen3_8_27b_bf16 import protocol
+from tools.reference.qwen3_8_27b_bf16 import protocol  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_selective_q4g128_source_diagnostic"
 SCHEMA_VERSION = 1
@@ -327,7 +334,7 @@ def run(args: argparse.Namespace) -> int:
     weight_map = protocol.validate_checkpoint_files(args.weights)
     source = _source_identity(args.weights, weight_map, ids)
     _load_screen(args.source_screen, args.weights)
-    bf16, bf16_nll, bf16_argmax = _load_bf16_authority(args, source)
+    _bf16, bf16_nll, bf16_argmax = _load_bf16_authority(args, source)
     if args.preflight_only:
         from tools.ppl.q4_group_source_diagnostic import _atomic_new
 

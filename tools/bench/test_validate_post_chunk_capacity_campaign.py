@@ -120,13 +120,13 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
                 "tools.bench.validate_post_chunk_capacity_campaign.validate_matrix",
                 return_value=(duplicate, 0),
             ),
+            self.assertRaisesRegex(ValueError, "exact Cartesian"),
         ):
-            with self.assertRaisesRegex(ValueError, "exact Cartesian"):
-                validate_campaign(
-                    Path("/prefill-chunk-selection-receipt-bound-n16k16-20260905.json"),
-                    roots,
-                    executed=False,
-                )
+            validate_campaign(
+                Path("/prefill-chunk-selection-receipt-bound-n16k16-20260905.json"),
+                roots,
+                executed=False,
+            )
 
     def test_asymmetric_attention_capacity_eligibility_fails_closed(self) -> None:
         roots = [Path(f"/matrix-{index}") for index in range(12)]
@@ -151,9 +151,9 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
                 "tools.bench.validate_post_chunk_capacity_campaign.validate_matrix",
                 side_effect=outcomes,
             ),
+            self.assertRaisesRegex(ValueError, "differs across matched"),
         ):
-            with self.assertRaisesRegex(ValueError, "differs across matched"):
-                validate_campaign(authority, roots, executed=True)
+            validate_campaign(authority, roots, executed=True)
 
         outcomes = [
             (identity, 1 if identity in (failed_identity, paired_identity) else 0)

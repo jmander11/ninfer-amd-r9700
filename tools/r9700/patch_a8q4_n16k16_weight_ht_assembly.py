@@ -59,7 +59,7 @@ def patch(fatbin: bytes, disasm: str) -> tuple[bytes, bytes, list[int]]:
             raise RuntimeError("disassembly/ELF encoding mismatch")
         struct.pack_into("<I", out, off + 4, w1 | POLICY)
         offsets.append(off + 4)
-    changed = [i for i, (a, b) in enumerate(zip(base, out)) if a != b]
+    changed = [i for i, (a, b) in enumerate(zip(base, out, strict=True)) if a != b]
     expected_changed = sorted(i for o in offsets for i in range(o, o + 4) if base[i] != out[i])
     if changed != expected_changed:
         raise RuntimeError("unexpected byte delta")

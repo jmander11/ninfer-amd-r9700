@@ -390,7 +390,6 @@ def _summarize(
     pass_b_ids: list[int],
     pass_b_values: dict[tuple[int, str], list[Decimal]],
     cu_count: int,
-    simd_count: int,
 ) -> dict[str, Any]:
     a_sum, a_max = _reduce(
         pass_a_ids, pass_a_values, PASS_A_SUM_COUNTERS, PASS_A_INSTANCE_SUM_COUNTERS
@@ -572,12 +571,10 @@ def analyze(
     for label, classified in (("cache_wait", classified_a), ("issue_lds", classified_b)):
         if Counter({name: len(ids) for name, ids in classified.items()}) != Counter(expected):
             raise ValueError(
-                f"{label} selected shape inventory differs: {dict((k, len(v)) for k, v in classified.items())}"
+                f"{label} selected shape inventory differs: { {k: len(v) for k, v in classified.items()} }"
             )
     summaries = {
-        name: _summarize(
-            classified_a[name], values_a, classified_b[name], values_b, cu_count, simd_count
-        )
+        name: _summarize(classified_a[name], values_a, classified_b[name], values_b, cu_count)
         for name in sorted(classified_a)
     }
     for name in classified_a:

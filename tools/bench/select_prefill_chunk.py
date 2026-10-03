@@ -16,12 +16,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.matrix_contract import (
+from tools.bench.matrix_contract import (  # noqa: E402  sys.path bootstrap
     MATRIX_SCHEMA_VERSION,
     PRODUCTION_PREFILL_CHUNKS,
     R9700_KV_PLANE_LAYOUTS,
 )
-from tools.ppl.run import validate_n16_receipt_summary
+from tools.ppl.run import validate_n16_receipt_summary  # noqa: E402  sys.path bootstrap
 
 
 def _runner():
@@ -309,12 +309,11 @@ def _same_candidate(screen: dict[str, Any], final: dict[str, Any]) -> None:
     )
     if any(screen.get(field) != final.get(field) for field in fields):
         raise ValueError("8K and 32K chunk matrices do not bind one candidate identity")
-    if screen["artifact"]["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-        if (
-            screen["hybrid_shared_workspace_authority"]["tool"]
-            != final["hybrid_shared_workspace_authority"]["tool"]
-        ):
-            raise ValueError("8K and 32K hybrid matrices bind different planner bytes")
+    if screen["artifact"]["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval" and (
+        screen["hybrid_shared_workspace_authority"]["tool"]
+        != final["hybrid_shared_workspace_authority"]["tool"]
+    ):
+        raise ValueError("8K and 32K hybrid matrices bind different planner bytes")
 
 
 def _rank(
@@ -364,7 +363,7 @@ def build_selection(candidate_roots: Sequence[tuple[Path, Path]]) -> dict[str, A
     sources = []
     sources_by_identity: dict[tuple[str, int, str], dict[str, Any]] = {}
     screen_manifests: dict[tuple[str, int, str], dict[str, Any]] = {}
-    for screen_root, final_root in candidate_roots:
+    for screen_root, _final_root in candidate_roots:
         screen, screen_rows, screen_manifest = _stable_manifest(
             screen_root, 8192, PRODUCTION_PREFILL_CHUNKS
         )

@@ -100,7 +100,7 @@ def main():
         if args.only and args.only != name:
             continue
         recipe = f"r9700-q4-fp8-{name}-n16k16-eval"
-        selected = sorted(conversion.recipes()[recipe])[0]
+        selected = min(conversion.recipes()[recipe])
         bad_selected = fixtures / f"{name}-selected.ninfer"
         bad_unlisted = fixtures / f"{name}-unlisted.ninfer"
         invalid_fixture(bad_selected, recipe, selected, conversion.q4_inventory.Q4)
