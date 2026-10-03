@@ -185,6 +185,119 @@ __device__ inline float sampling_block_sum_fast(float value, float* warp_sums) {
     return value;
 }
 
+// Inverse-CDF tile choice over per-tile masses, shared by the whole block. Each thread owns a
+// contiguous chunk of tiles; chunk sums are scanned in tile order, and the first thread with mass
+// whose scanned upper bound exceeds goal = u * total walks its chunk. The rule matches a serial
+// walk (first tile whose running prefix exceeds the goal, else the last tile with mass) up to the
+// FP32 association of the prefix sums. Requires whole wave32 waves and at most kSamplerBlock
+// threads.
+struct SamplingTileChoiceShared {
+    float upper[kSamplerBlock];
+    float wave_totals[kSamplerBlock / 32];
+    int claim;
+    int last_tile;
+};
+
+// Every thread calls this with the same arguments; mass(p) must be deterministic because the
+// owning thread evaluates it again during its walk. Returns the total mass to every thread. Exactly
+// one thread writes *selected_tile/*selected_goal (-1/0 when the total is not positive); callers
+// synchronize before reading them or calling again with the same shared state.
+template <class Mass>
+__device__ inline float sampling_block_choose_tile(int tiles, const Mass& mass, float u,
+                                                   SamplingTileChoiceShared& shared,
+                                                   int* selected_tile, float* selected_goal) {
+    const int tid     = static_cast<int>(threadIdx.x);
+    const int threads = static_cast<int>(blockDim.x);
+    const int lane    = tid & 31;
+    const int wave    = tid >> 5;
+    const int chunk   = (tiles + threads - 1) / threads;
+    const int begin   = min(tiles, tid * chunk);
+    const int end     = min(tiles, begin + chunk);
+
+    float local = 0.0f;
+    int last    = -1;
+    for (int p = begin; p < end; ++p) {
+        const float m = mass(p);
+        if (m > 0.0f) { last = p; }
+        local += m;
+    }
+    float inclusive = local;
+    for (int offset = 1; offset < 32; offset <<= 1) {
+        const float other = __shfl_up(inclusive, offset);
+        if (lane >= offset) { inclusive += other; }
+    }
+    if (lane == 31) { shared.wave_totals[wave] = inclusive; }
+    if (tid == 0) {
+        shared.claim     = INT_MAX;
+        shared.last_tile = -1;
+    }
+    __syncthreads();
+    float wave_base = 0.0f;
+    for (int w = 0; w < wave; ++w) { wave_base += shared.wave_totals[w]; }
+    const float upper = wave_base + inclusive;
+    shared.upper[tid] = upper;
+    if (last >= 0) { atomicMax(&shared.last_tile, last); }
+    __syncthreads();
+
+    const float total = shared.upper[threads - 1];
+    if (!(total > 0.0f)) {
+        if (tid == 0) {
+            *selected_tile = -1;
+            *selected_goal = 0.0f;
+        }
+        return total;
+    }
+    const float goal  = u * total;
+    const float lower = tid > 0 ? shared.upper[tid - 1] : 0.0f;
+    // The first chunk with mass whose upper bound passes the goal. Per-lane scans associate
+    // differently, so an empty chunk's interval can absorb a goal by a few ulp; it never claims.
+    if (local > 0.0f && goal < upper) { atomicMin(&shared.claim, tid); }
+    __syncthreads();
+
+    const int claim = shared.claim;
+    // A goal past every interval (rounding at u near 1) takes the last tile with mass.
+    const int owner = claim != INT_MAX ? claim : shared.last_tile / chunk;
+    if (tid == owner) {
+        float prefix         = lower;
+        int tile             = -1;
+        float tile_goal      = 0.0f;
+        int nonempty         = -1;
+        float nonempty_begin = 0.0f;
+        for (int p = begin; p < end; ++p) {
+            const float m = mass(p);
+            if (m > 0.0f) {
+                nonempty       = p;
+                nonempty_begin = prefix;
+            }
+            if (claim != INT_MAX && m > 0.0f && goal < prefix + m) {
+                tile      = p;
+                tile_goal = fmaxf(0.0f, goal - prefix);
+                break;
+            }
+            prefix += m;
+        }
+        if (tile < 0) {
+            tile      = nonempty;
+            tile_goal = fmaxf(0.0f, goal - nonempty_begin);
+        }
+        *selected_tile = tile;
+        *selected_goal = tile_goal;
+    }
+    return total;
+}
+
+// Block sum of per-tile masses in contiguous per-thread chunks; every thread gets the total.
+template <class Mass>
+__device__ inline float sampling_block_tile_sum(int tiles, const Mass& mass, float* warp_sums) {
+    const int threads = static_cast<int>(blockDim.x);
+    const int chunk   = (tiles + threads - 1) / threads;
+    const int begin   = min(tiles, static_cast<int>(threadIdx.x) * chunk);
+    const int end     = min(tiles, begin + chunk);
+    float local       = 0.0f;
+    for (int p = begin; p < end; ++p) { local += mass(p); }
+    return sampling_block_sum_fast(local, warp_sums);
+}
+
 struct SamplingFloatPair {
     float first  = 0.0f;
     float second = 0.0f;
