@@ -189,8 +189,24 @@ budget), where the 32-column GDN front (1.8x), convolution record (1.6x) and two
 lose occupancy against their own launches, while a barrier saves only ~0.6 us of the ~1.6 us
 launch gap and every further persistent kernel starts ~8 us slower than a steady phase.
 
+Removing latency phases, not adopted (C1 DFlash K7, interleaved with HEAD, same accepted tokens).
+Running a phase twice bounded what removing one could save: about 10 us per extra gated-RMSNorm
+or activation quantization phase and 15 us per extra GDN record phase. Each was then tried, all
+bitwise against the captured launches (`persistent_decode_qual`):
+- GDN record merged with its gated RMSNorm quantization (each head CTA normalizes its own
+  vectors; the row maximum and nonfinite flag merge over the 48 head CTAs by atomics and an
+  in-phase arrival count; 47 merged phases per round): -0.01 to -0.07 ms/round over six pass
+  pairs, ~0.1%, not worth its merge protocol.
+- The MLP activation quantization over all 64 blocks (one register-held vector per thread, the
+  same merge): +0.12 to +0.22 ms/round. The row CTAs used 8 blocks; the other 56 spent the phase
+  streaming the down projection at the barrier.
+- Prefetching the record's initial-slot recurrent state (64 KiB per head) at the barrier before
+  it, instead of the output projection's lines: +0.03 to +0.04 ms/round.
+
+So the barrier-time stream already absorbs most of a short phase's cost.
+
 Evidence: `profiles/bench/r9700-megakernel-20261002/` (`ab*`, `trace*`, `tokens/`, `corpus/`,
-`abB`/`abX`/`abY`/`abZ`, `b4trace/`).
+`abB`/`abX`/`abY`/`abZ`, `b4trace/`, `abdup/`, `m1-*`..`m4-*`).
 
 The 2026-10-01 feasibility bound (96 phases, empty phase 0.95-1.0 us against 3.3 us per graph
 kernel; ~1.3 ms per round before costs;
