@@ -761,12 +761,19 @@ __device__ __forceinline__ void dense_store_key(std::uint16_t* keys, std::uint32
     }
 }
 
+// Slots of the block at or past the tile's largest causal context (`written` keys of the block
+// precede it) may be unwritten (the visible frontier can run past the appended keys): their
+// scales are taken as zero, so a masked key's zero probability meets a zero value instead of
+// whatever the unwritten codes and scale hold (an FP16 NaN scale poisons the row through 0 * NaN).
 template <std::uint32_t Group, std::uint32_t Keys>
 __device__ __forceinline__ DenseValueItem dense_load_value(const Fp8Int4KvAttentionArgs& a,
                                                           std::uint32_t item_index,
                                                           std::size_t page, std::size_t in_page,
-                                                          std::uint32_t kv_head) {
+                                                          std::uint32_t kv_head,
+                                                          std::uint32_t written) {
     const std::uint32_t token_pair = item_index % (Keys / 2U), chunk = item_index / (Keys / 2U);
+    const std::uint32_t even_mask = 2U * token_pair < written ? 0xFFFFU : 0U;
+    const std::uint32_t odd_mask = 2U * token_pair + 1U < written ? 0xFFFF0000U : 0U;
     const std::size_t row = in_page + 2U * token_pair + kPageSize * (kv_head + 4U * page);
     DenseValueItem item;
 #pragma unroll
@@ -780,6 +787,7 @@ __device__ __forceinline__ DenseValueItem dense_load_value(const Fp8Int4KvAttent
             static_cast<std::uint32_t>(a.value_scale_bits[group + (kHeadDim / Group) * row]) |
             (static_cast<std::uint32_t>(
                  a.value_scale_bits[group + (kHeadDim / Group) * (row + 1U)]) << 16U);
+        item.scales[word] &= even_mask | odd_mask;
     }
     return item;
 }
@@ -1043,8 +1051,9 @@ __device__ __forceinline__ void dense_prefill_body(const Fp8Int4KvAttentionArgs&
             else
                 dense_store_value<kDensePrefillKeys>(
                     shared.values, loader - 256U,
-                    dense_load_value<Group, kDensePrefillKeys>(a, loader - 256U, page, in_page,
-                                                               kv_head));
+                    dense_load_value<Group, kDensePrefillKeys>(
+                        a, loader - 256U, page, in_page, kv_head,
+                        maximum_context - key_base));
         }
         dense_prefill_barrier();
         // Phase boundaries bound register live ranges at the 240-VGPR budget.
@@ -1203,7 +1212,7 @@ void dense_verify_kernel(DenseVerifySequences sequences) {
                 else
                     value = dense_load_value<Group, kDenseVerifyKeys>(
                         a, loader + kDenseVerifyLoaders - kDenseVerifyKeyItems, page, in_page,
-                        kv_head);
+                        kv_head, maximum_context - key_base);
                 dense_store_key(shared.keys[buffer], loader, keys[0]);
                 if (second_is_key)
                     dense_store_key(shared.keys[buffer], loader + kDenseVerifyLoaders, keys[1]);

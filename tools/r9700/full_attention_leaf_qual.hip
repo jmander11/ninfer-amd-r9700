@@ -150,12 +150,14 @@ EncodedCache encode_cache(const std::vector<float>& keys,
         values.size() != keys.size()) {
         fail("encoded cache source geometry is invalid");
     }
+    // Slots holding no represented token keep NaN keys and scales (as stale device memory may):
+    // a route must not read them into a result.
     EncodedCache cache{
         oracle::encode_keys(keys, tokens * kKvHeads, kHeadDim),
         oracle::encode_values(values, tokens * kKvHeads, kHeadDim, kValueGroup),
-        std::vector<std::uint8_t>(physical_pages * kPageSize * kKvHeads * kHeadDim, 0U),
+        std::vector<std::uint8_t>(physical_pages * kPageSize * kKvHeads * kHeadDim, 0xFFU),
         std::vector<std::uint8_t>(physical_pages * kPageSize * kKvHeads * kHeadDim / 2U, 0U),
-        std::vector<std::uint16_t>(physical_pages * kPageSize * kKvHeads * kGroups, 0U)};
+        std::vector<std::uint16_t>(physical_pages * kPageSize * kKvHeads * kGroups, 0xFFFFU)};
     for (std::size_t logical = 0; logical < tokens; ++logical) {
         const std::size_t physical = physical_token(logical, page_table);
         for (std::size_t head = 0; head < kKvHeads; ++head) {
