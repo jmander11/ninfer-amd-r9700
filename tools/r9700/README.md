@@ -1796,3 +1796,10 @@ selected finite schedule measured 0.173 ms at W4096 T3/B2, 0.063 ms at the real 
 measured 2.11/1.17 ms at the first two points. Maximum absolute oracle error was 1.25e-3. Build and
 run the `ninfer_r9700_swa_qual` target in the R9700 CMake tree. Direct/partial/reduce use 32/32/8
 VGPR respectively, with no LDS or private scratch.
+
+## Device checks
+
+`gpu_check/` holds the gfx1201 counterparts of compute-sanitizer memcheck, initcheck, and racecheck
+(guard-page allocations, poisoned allocations, and LDS race instrumentation of the device bitcode).
+`scripts/gpu-check.sh memcheck|initcheck|racecheck` runs them over the `gpucheck` qualifier set;
+semantics and limits are in [`docs/maintainer/code-quality.md`](../../docs/maintainer/code-quality.md#device-checks).

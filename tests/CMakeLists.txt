@@ -359,13 +359,17 @@ set(ninfer_r9700_qualifiers
   ninfer_r9700_scalar_schedule_qual
   ninfer_r9700_runtime_planner_qual
   ninfer_r9700_engine_boundary_qual)
+# Every qualifier is also in the device-check set (`gpucheck`, scripts/gpu-check.sh,
+# docs/maintainer/code-quality.md). The race-check tree raises the timeout: instrumented LDS
+# accesses make the speculative-round qualifier about 2.5 times slower.
+set(NINFER_R9700_QUALIFIER_TIMEOUT 300 CACHE STRING "CTest timeout of each R9700 qualifier, seconds")
 foreach(qualifier IN LISTS ninfer_r9700_qualifiers)
   if(TARGET ${qualifier})
     add_test(NAME ${qualifier} COMMAND ${qualifier})
     set_tests_properties(${qualifier} PROPERTIES
-      LABELS "r9700"
+      LABELS "r9700;gpucheck"
       RESOURCE_LOCK r9700_device
-      TIMEOUT 300)
+      TIMEOUT ${NINFER_R9700_QUALIFIER_TIMEOUT})
   endif()
 endforeach()
 
