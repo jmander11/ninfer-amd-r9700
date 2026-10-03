@@ -86,7 +86,7 @@ __launch_bounds__(kArgmaxBlock) __global__
     __syncthreads();
 
     for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.x < stride) {
+        if (static_cast<int>(threadIdx.x) < stride) {
             const float other_value        = values[threadIdx.x + stride];
             const std::int32_t other_index = indices[threadIdx.x + stride];
             if (argmax_better(other_value, other_index, values[threadIdx.x],

@@ -89,6 +89,8 @@ __launch_bounds__(kBlock) __global__ void nll_from_logits_kernel(
     if (threadIdx.x == 0) { partial[0] = maximum; }
     __syncthreads();
     maximum = partial[0];
+    // The sum reduction below rewrites partial[0]; every wave must have read the maximum first.
+    __syncthreads();
 
     float sum = 0.0F;
     for (std::uint32_t row = threadIdx.x; row < valid_rows; row += blockDim.x) {
