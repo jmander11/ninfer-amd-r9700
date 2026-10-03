@@ -1345,9 +1345,9 @@ gate/up 4059 -> 3441 us, down 5120x17408 3063 -> 1717 us, attention input 7168x5
 output 5120x6144 764 -> 600 us. The kernel sits at the same ~212-217 TFLOP/s as FP8LUT4, which
 matches the recorded power bound at 300 W rather than a decode cost.
 
-Qualification: `ninfer_r9700_fp8_gate_up_qual --selective-protected` and `--shared-context`
-pass with zero BF16-step error against their FP64 oracles at T2047/T2048 (the default mode's A8Q4
-probe fails identically on the previous commit). Against the BF16 reference at 8K
+Qualification: the hipBLASLt-era FP8 gate/up qualifier's selective-protected and shared-context
+modes passed with zero BF16-step error against their FP64 oracles at T2047/T2048 (its default
+mode's A8Q4 probe failed identically on the previous commit). Against the BF16 reference at 8K
 (`tools/ppl/corpus.ids`, chunk 2048) dNLL is +0.02175 vs +0.02206 for hipBLASLt (paired
 -0.0003 +/- 0.0034), flips 380 vs 382; 4K code/wiki/technical PPL moves +0.33/+0.09/+0.08%
 (accumulation-order perturbation). Interleaved whole-prefill A/B (two pairs each): 32K +1.0% and

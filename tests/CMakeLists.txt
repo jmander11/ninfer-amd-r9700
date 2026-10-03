@@ -61,21 +61,6 @@ target_compile_options(ninfer_xattention_oracle_test PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
 add_test(NAME ninfer_xattention_oracle_test COMMAND ninfer_xattention_oracle_test)
 
-add_test(NAME ninfer_fp8_gate_up_comparison_report_test
-  COMMAND ${Python3_EXECUTABLE} -m unittest -q
-    tools.bench.test_validate_fp8_gate_up_comparison)
-set_tests_properties(ninfer_fp8_gate_up_comparison_report_test PROPERTIES
-  LABELS "host"
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-
-add_test(NAME ninfer_fp8_gate_up_hardware_proof_host_test
-  COMMAND ${Python3_EXECUTABLE} -m unittest -q
-    tools.bench.test_prepare_fp8_gate_up_hardware_proof
-    tools.bench.test_validate_fp8_gate_up_hardware_proof)
-set_tests_properties(ninfer_fp8_gate_up_hardware_proof_host_test PROPERTIES
-  LABELS "host"
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-
 # Model-independent framing and supported host/runtime policies.
 ninfer_add_r9700_test(ninfer_speculative_stats_test
   SOURCES test_speculative_stats.cpp)

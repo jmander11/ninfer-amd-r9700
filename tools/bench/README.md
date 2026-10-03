@@ -926,84 +926,21 @@ reconciler, artifact directory reader/layout registry, ROCTX/topology/configurat
 Program/variant/binder, and selected Q4/W8/dense dispatch predicates and kernels. Reconciliation
 rehashes every member before accepting the schedule.
 
-### FP8 gate/up post-measurement decision
+### FP8 gate/up and post-gate/up role decisions (retired)
 
-`decide_fp8_gate_up.py` owns only the all-64-layer `text.mlp.gate_up` decision after the fixed
-P2048 FP8/Q4 qualifier schema v2 exists. It requires explicit SHA-256 values for the qualifier, hybrid and
-capacity analyses, benchmark, kernel trace, and marker trace. Unknown schemas, the wrong
-`[2048,34816,5120]` shape, a non-R9700 profile, incomplete axis-sensitive represented-format
-oracle/status/no-clobber flags, a non-7-pair raw timing set, inconsistent even-sample medians, a
-changed trace/capacity/source/executable hash, or a changed 64-object inventory fails before
-output. It does not accept a theoretical FP8 timing estimate. Capacity budgets are recomputed from
-the capacity authority and gate/up Q4 service is reconstructed again from the bound raw trace;
-copied hybrid summary values are cross-checks, not independent authorities.
+The hipBLASLt-era FP8 role decisions are retained only as historical evidence. Their decision,
+comparison-report, hardware-proof, and PMC tools consumed the hipBLASLt FP8 gate/up qualifier and
+were retired with it when hipBLASLt was removed in 438f6a89; `verify_selected_hardware_use` still
+reopens the retained executed-path proofs. FP8 Linear qualification is now
+`ninfer_r9700_fp8_row_scaled_linear_qual`.
 
-The retained physical input passed this contract at 4.129716 ms FP8 versus 6.868267 ms Q4
-(1.663133x faster). Reproduce the retained decision with:
-
-```bash
-python3 -m tools.bench.decide_fp8_gate_up \
-  --qualifier profiles/bench/r9700-fp8-vs-a8q4-gate-up-20260904.json \
-  --qualifier-sha256 ba1434a773df7d7cf51ec41158ba7d1a2753f2ee589a945e150f4c606f3470ff \
-  --hybrid profiles/bench/r9700-e4m3-q4-hybrid-selection-20260904.json \
-  --hybrid-sha256 eae6e53c0dc9a7d9d38f92072124e0af70610d57b3d1f6c7ae526b6b1de6e04a \
-  --capacity profiles/bench/r9700-e4m3-capacity-analysis-20260904.json \
-  --capacity-sha256 18652c9355fa6e4b8321d7784214a5a349a7e2539dd0879be3337dc803b0b8b1 \
-  --benchmark profiles/rocprof/diagnostic-p2048-production-pingpong-20260904/report.json \
-  --benchmark-sha256 22589e68ed2926ae44b5a0e78f5a654164a61d3488b7b2e0047b2a7324b836f8 \
-  --kernel-trace profiles/rocprof/diagnostic-p2048-production-pingpong-20260904/trace_kernel_trace.csv \
-  --kernel-trace-sha256 29ba3816ba225053167a36bfd7e44903711c9d7cdb0768ba524ab7129e51ec82 \
-  --marker-trace profiles/rocprof/diagnostic-p2048-production-pingpong-20260904/trace_marker_api_trace.csv \
-  --marker-trace-sha256 089af1710a7baf5d8dfb29fc7a1d821db1b06ba719c470f7502bae6c3f4dbdb9 \
-  --output profiles/bench/r9700-fp8-gate-up-decision-20260904.json
-```
-
-The decision replaces the fresh trace's measured Q4 gate/up service with the qualifier's measured
-complete-path FP8/Q4 time ratio. It reports the exact 64-object resident-byte delta, the historical
-P2048/P8192 capacity calculation for every G16/G32 C1..4 cell, and projected whole-P2048 time and
-throughput. Its `proceed` verdict required a faster complete FP8 median, nonnegative historical
-slack in all 16 cells, and an improving whole projection. That historical capacity calculation
-predates the current N16 artifact, selected chunk, and exact ordinary physical-capacity contract;
-only fresh selected-chunk physical capacity can admit the route.
-
-### FP8 post-gate/up fixed-role decision
-
-`decide_fp8_post_gate_up.py` owns the retained role-selection step after the gate/up decision. It
-recomputed converter inventories and the then-used 16 planner capacity cells, then maximized
-measured Q4 service under that envelope. The fixed role result is
-`text.attention.query_key`, `text.attention.gate_value`, and `text.gdn.query_key`:
-1,024,065,536 additional bytes and 87,724,946 ns of measured P2048 Q4 service. The two attention
-roles share `[2048,7168,5120]`, so the set requires only that matched complete-path qualifier and
-the `[2048,4096,5120]` GDN query/key qualifier. Its reported 2,004,481-byte tight-cell remainder is
-invalid because its capacity input predates the current N16 artifact, selected chunk, and exact
-ordinary physical-capacity contract; it is not current capacity evidence and admits no additional
-role. Fresh selected-chunk physical capacity owns admission.
-
-Each pending input uses schema `ninfer.r9700.fp8_projection_qualification.v1`, version 1, with its
-fixed qualification ID, shape, live source/executable hashes, R9700/gfx1201/auto identity, the
-nine-point axis oracle, seven balanced timing pairs, raw 14-sample lists, algorithm/workspace
-identity, correctness/status gates, and no-clobber proof. Once both physical reports exist, run:
-
-```bash
-python3 -m tools.bench.decide_fp8_post_gate_up \
-  --gate-decision profiles/bench/r9700-fp8-gate-up-decision-20260904.json \
-  --gate-decision-sha256 b6826119284e18966390ebc3a78423f218ef74b39ac1fdb6f163b65d7f08ae1f \
-  --hybrid profiles/bench/r9700-e4m3-q4-hybrid-selection-20260904.json \
-  --hybrid-sha256 eae6e53c0dc9a7d9d38f92072124e0af70610d57b3d1f6c7ae526b6b1de6e04a \
-  --capacity profiles/bench/r9700-e4m3-capacity-analysis-20260904.json \
-  --capacity-sha256 18652c9355fa6e4b8321d7784214a5a349a7e2539dd0879be3337dc803b0b8b1 \
-  --attention-qk-gate-value profiles/bench/EXACT-FP8-ATTENTION-QK-GATE-VALUE.json \
-  --attention-qk-gate-value-sha256 EXACT_SHA256 \
-  --gdn-query-key profiles/bench/EXACT-FP8-GDN-QUERY-KEY.json \
-  --gdn-query-key-sha256 EXACT_SHA256 \
-  --output profiles/bench/r9700-fp8-post-gate-up-decision-20260904.json
-```
-
-The tool emits nothing until both hash-bound physical inputs validate. A `proceed` verdict requires
-both complete FP8 paths to beat Q4, its historical capacity calculation to remain nonnegative, and
-the projection to improve on the gate/up projection. The capacity clause is now superseded by the
-exact feature-materialization correction. The result remains speed/design evidence until a selected
-hybrid artifact is converted and measured at whole-inference scope.
+The gate/up decision (`profiles/bench/r9700-fp8-gate-up-decision-20260904.json`) measured
+4.129716 ms FP8 versus 6.868267 ms Q4 at `[2048,34816,5120]` (1.663133x faster) and returned
+`proceed`. The post-gate/up step selected `text.attention.query_key`,
+`text.attention.gate_value`, and `text.gdn.query_key`: 1,024,065,536 additional bytes and
+87,724,946 ns of measured P2048 Q4 service. Both capacity calculations predate the current N16
+artifact, selected chunk, and exact ordinary physical-capacity contract and are not current
+capacity evidence.
 
 The roofline tool does not infer a model role, shape, weight format, or inner dimension from a
 kernel symbol or launch grid:

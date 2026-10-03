@@ -716,8 +716,8 @@ Replace functional routes with measured gfx1201 families:
   `[2048,34816,5120]` qualifier report exists. Qualifier SHA-256
   `8f14df460c0b413cea99309a289c41cde2b71f32431450e76a9d4527d4af6306` for
   `profiles/bench/r9700-fp8-vs-a8q4-gate-up-shared-source-20260904.json` measured
-  4.083197 ms FP8 versus 6.826113 ms Q4 (1.671757x faster). The owner is
-  `tools/bench/decide_fp8_gate_up.py`; it admits only schema v2 with live harness-source and
+  4.083197 ms FP8 versus 6.826113 ms Q4 (1.671757x faster). The decision tool (retired with the
+  hipBLASLt FP8 gate/up qualifier in 438f6a89) admitted only schema v2 with live harness-source and
   executable hashes,
   the exact nine-point axis-sensitive FP64 represented-format oracle, seven balanced timing pairs,
   the R9700/auto-power complete-path identity, and retained P2048 trace/capacity hashes. It replaces the
@@ -742,7 +742,8 @@ Replace functional routes with measured gfx1201 families:
   refreshed executed-path proof for the shared-source gate and the distinct post-gate attention
   algorithm remains required before production promotion.
 - [x] Run the two fixed-shape physical inputs for the capacity-optimal post-gate/up FP8 role
-  decision, then execute `tools/bench/decide_fp8_post_gate_up.py`. The exact selected addition is
+  decision, then execute the post-gate/up decision tool (retired with the hipBLASLt FP8 gate/up
+  qualifier in 438f6a89). The exact selected addition is
   `text.attention.query_key` plus `text.attention.gate_value` at `[2048,7168,5120]` and
   `text.gdn.query_key` at `[2048,4096,5120]`: three role-consistent families, 80 objects,
   1,024,065,536 added bytes, and 87,724,946 ns of measured Q4 service. The attention roles share

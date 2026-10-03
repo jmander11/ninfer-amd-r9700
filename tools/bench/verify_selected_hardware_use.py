@@ -22,8 +22,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     bind_n16_migration_receipt,
     inspect_artifact,
 )
-from tools.bench.selected_loaded_code_objects import selected_loaded_fp8
-from tools.bench.validate_fp8_gate_up_hardware_proof import revalidate_fp8_resources
+from tools.bench.selected_loaded_code_objects import revalidate_fp8_resources, selected_loaded_fp8
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
 
 AUDIT_SCHEMA = "ninfer.r9700.selected_hardware_path_static_audit.v1"
