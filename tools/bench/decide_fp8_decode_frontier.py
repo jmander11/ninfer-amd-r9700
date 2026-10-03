@@ -8,9 +8,8 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping, Sequence
-
 
 SCHEMA = "ninfer.r9700.fp8-selective-decode-decision.v1"
 ATTRIBUTION_SCHEMA = "ninfer.r9700.fp8-selective-q4-decode-attribution.v1"

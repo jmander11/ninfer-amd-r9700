@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 
@@ -45,7 +46,7 @@ class RequestConfig:
     headers: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, raw: Any, where: str) -> "RequestConfig":
+    def from_dict(cls, raw: Any, where: str) -> RequestConfig:
         data = _mapping(raw or {}, where)
         _reject_unknown(
             data,
@@ -84,7 +85,7 @@ class TargetConfig:
     provenance: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, name: str, raw: Any) -> "TargetConfig":
+    def from_dict(cls, name: str, raw: Any) -> TargetConfig:
         where = f"targets.{name}"
         data = _mapping(raw, where)
         _reject_unknown(
@@ -135,7 +136,7 @@ class JobConfig:
     backend_args: dict[str, Any]
 
     @classmethod
-    def from_dict(cls, raw: Any, where: str) -> "JobConfig":
+    def from_dict(cls, raw: Any, where: str) -> JobConfig:
         data = _mapping(raw, where)
         _reject_unknown(
             data,
@@ -201,7 +202,7 @@ class SuiteConfig:
     jobs: tuple[JobConfig, ...]
 
     @classmethod
-    def from_dict(cls, name: str, raw: Any) -> "SuiteConfig":
+    def from_dict(cls, name: str, raw: Any) -> SuiteConfig:
         where = f"suites.{name}"
         data = _mapping(raw, where)
         _reject_unknown(data, {"jobs"}, where)
@@ -224,7 +225,7 @@ class ProgressConfig:
     heartbeat_seconds: float = 30.0
 
     @classmethod
-    def from_dict(cls, raw: Any, where: str) -> "ProgressConfig":
+    def from_dict(cls, raw: Any, where: str) -> ProgressConfig:
         data = _mapping(raw or {}, where)
         _reject_unknown(data, {"enabled", "refresh_seconds", "heartbeat_seconds"}, where)
         enabled = data.get("enabled", True)
@@ -253,7 +254,7 @@ class RuntimeConfig:
     sample_retention: str = "all"
 
     @classmethod
-    def from_dict(cls, raw: Any) -> "RuntimeConfig":
+    def from_dict(cls, raw: Any) -> RuntimeConfig:
         where = "runtime"
         data = _mapping(raw or {}, where)
         _reject_unknown(data, {"max_parallel_jobs", "runs_dir", "progress", "samples"}, where)

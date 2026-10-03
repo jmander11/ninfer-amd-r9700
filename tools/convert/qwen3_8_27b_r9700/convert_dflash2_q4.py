@@ -10,15 +10,15 @@ whose W8 codes/scales are losslessly tiled. The 66 DFlash2 objects are appended.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
 import time
-from typing import Iterator, Sequence
+from collections import Counter
+from collections.abc import Iterator, Sequence
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 
 from tools.artifact.container import (
     Artifact,
@@ -26,18 +26,27 @@ from tools.artifact.container import (
     ArtifactObject,
     ArtifactWriter,
     ResourceObject,
-    ResourceSpec as ArtifactResourceSpec,
     TensorObject,
-    TensorSpec as ArtifactTensorSpec,
     encode_directory,
     plan_objects,
+)
+from tools.artifact.container import (
+    ResourceSpec as ArtifactResourceSpec,
+)
+from tools.artifact.container import (
+    TensorSpec as ArtifactTensorSpec,
 )
 from tools.artifact.layouts import align_up, transcode_w8_n16k16
 from tools.convert.qwen3.common.inventory import ResourceSpec, TensorSpec
 
-from . import dflash2_matrix_recipes, dflash2_q4_inventory as inventory
-from . import fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory, selective_protected_inventory
-
+from . import (
+    dflash2_matrix_recipes,
+    fp8_hybrid_inventory,
+    q4_inventory,
+    q4_w8_mse_inventory,
+    selective_protected_inventory,
+)
+from . import dflash2_q4_inventory as inventory
 
 _COPY_CHUNK = 64 * 1024 * 1024
 _CANONICAL_RECIPE = dflash2_matrix_recipes.CANONICAL_Q4G64

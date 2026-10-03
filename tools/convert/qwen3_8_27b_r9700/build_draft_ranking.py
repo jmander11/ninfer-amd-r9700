@@ -4,16 +4,15 @@
 from __future__ import annotations
 
 import argparse
-from array import array
-from dataclasses import dataclass
 import hashlib
 import json
-from pathlib import Path
 import re
 import sys
 import tempfile
-from typing import Sequence
-
+from array import array
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 MODEL_ID = "qwen3.8-27b"
 TOKENIZER_MODEL_ID = "Qwen/Qwen3.8-27B"

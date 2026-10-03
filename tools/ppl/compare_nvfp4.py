@@ -11,12 +11,12 @@ import argparse
 import hashlib
 import json
 import math
-from pathlib import Path
 import shutil
 import statistics
 import struct
 import subprocess
 import time
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT.parent

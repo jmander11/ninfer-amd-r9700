@@ -204,7 +204,7 @@ def _line_boundary(text: str, pos: int) -> int:
     """The newline index at or before `pos` (the line boundary just before it),
     or 0 if there is none. Used to splice the needle at a clean line boundary."""
     j = text.rfind("\n", 0, max(1, pos))
-    return j if j > 0 else 0
+    return max(0, j)
 
 
 def _splice(essay: str, frac: float) -> str:

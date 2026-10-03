@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 RESOLVER = (
     Path(__file__).resolve().parents[2]
     / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"

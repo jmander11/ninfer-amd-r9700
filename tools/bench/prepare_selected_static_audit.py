@@ -6,10 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import tempfile
+from pathlib import Path
 
 from tools.bench.extract_embedded_code_object import extract
 from tools.bench.verify_selected_hardware_use import (

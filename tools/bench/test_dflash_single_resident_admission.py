@@ -1,11 +1,11 @@
 """Fixed-resident admission over recomputed evaluation, never per-C recipe mixing."""
 
-from contextlib import ExitStack
 import copy
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
 
 from tools.bench import assemble_dflash_selection as selection

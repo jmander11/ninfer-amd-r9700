@@ -3,7 +3,13 @@
 
 from __future__ import annotations
 
-import argparse, csv, hashlib, json, math, os, tempfile
+import argparse
+import csv
+import hashlib
+import json
+import math
+import os
+import tempfile
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 

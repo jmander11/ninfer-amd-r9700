@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import struct
 import random
+import struct
 import unittest
 
-from tools.convert.qwen3_8_27b_r9700 import codec
-from tools.convert.qwen3_8_27b_r9700 import inventory
+from tools.convert.qwen3_8_27b_r9700 import codec, inventory
 
 
 class W8G32ReferenceCodecTest(unittest.TestCase):

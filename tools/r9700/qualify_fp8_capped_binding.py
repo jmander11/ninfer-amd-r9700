@@ -2,20 +2,20 @@
 
 import argparse
 import json
-from pathlib import Path
 import struct
+from pathlib import Path
 
 from tools.convert.qwen3.common.inventory import TensorSpec, tensor_spec
-from tools.convert.qwen3_8_27b_r9700 import convert_fp8_capped as conversion
 from tools.convert.qwen3_8_27b_r9700 import compose_fp8_capped_dflash as companion
+from tools.convert.qwen3_8_27b_r9700 import convert_fp8_capped as conversion
+from tools.ppl.compare_nvfp4 import run
 from tools.r9700.make_sparse_r9700_candidate import (
-    build_objects,
-    align_up,
-    PREFIX,
     MAGIC,
     PAYLOAD_ALIGNMENT,
+    PREFIX,
+    align_up,
+    build_objects,
 )
-from tools.ppl.compare_nvfp4 import run
 
 
 def invalid_fixture(path, recipe, changed, fmt):

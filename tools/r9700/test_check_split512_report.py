@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.r9700.check_split512_report import (
-    SOURCE_PATHS,
     SHAPES,
+    SOURCE_PATHS,
     split_workspace_bytes,
     validate_report,
 )

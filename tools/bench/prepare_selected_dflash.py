@@ -7,20 +7,20 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import shlex
 import subprocess
 import tempfile
+from pathlib import Path
 
 from tools.bench.assemble_dflash_selection import (
-    RECIPES,
     DFLASH_PRODUCTION_PROFILES,
-    selected_base_route,
+    RECIPES,
     benchmark_profile,
-    recipe_evidence,
+    candidate_key,
     capacity_cells,
     performance_cells,
-    candidate_key,
+    recipe_evidence,
+    selected_base_route,
 )
 from tools.bench.run_ninfer_bench_matrix import build_hybrid_shared_workspace_authority
 from tools.convert.qwen3_8_27b_r9700.dflash2_q4_inventory import companion_weights_id

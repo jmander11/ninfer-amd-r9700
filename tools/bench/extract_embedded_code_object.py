@@ -10,9 +10,8 @@ import stat
 import struct
 import subprocess
 import tempfile
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Callable, Sequence
-
 
 DEFAULT_OBJCOPY = Path("/opt/rocm/llvm/bin/llvm-objcopy")
 OFFLOAD_MAGIC = b"__CLANG_OFFLOAD_BUNDLE__"

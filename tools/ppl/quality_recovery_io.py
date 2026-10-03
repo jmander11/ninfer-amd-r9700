@@ -17,7 +17,6 @@ if str(REPO) not in sys.path:
 
 from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
 
-
 EXPECTED_AUTHORITIES = {
     "ALL_Q4_DENSE_QUALITY": ("r9700-q4g64-n16k16-eval", "dense"),
     "ALL_Q4_XATTENTION_QUALITY": ("r9700-q4g64-n16k16-eval", "b128-s16-tau900"),

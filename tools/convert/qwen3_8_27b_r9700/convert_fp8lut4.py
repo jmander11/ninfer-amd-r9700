@@ -29,10 +29,15 @@ from tools.artifact.container import (
     ArtifactIdentity,
     ArtifactWriter,
     TensorObject,
-    TensorSpec as StoredTensor,
+)
+from tools.artifact.container import (
     ResourceSpec as StoredResource,
 )
+from tools.artifact.container import (
+    TensorSpec as StoredTensor,
+)
 from tools.artifact.layouts import transcode_q4_n16k16
+
 from .convert_fp8_capped import selections
 from .e4m3_inventory import F8E4M3_ROW_F32S
 
@@ -91,9 +96,11 @@ def row_split(artifact, obj):
 
 def convert(args) -> None:
     import torch
+
     from tools.convert.common.safetensors import ShardReader
-    from . import fp8lut4_codec, source, source_recipe
     from tools.reference.qwen3_8_27b_bf16.protocol import LAYERS
+
+    from . import fp8lut4_codec, source, source_recipe
     from .calibration import InputMoments
 
     receipt = Path(str(args.out) + ".conversion.json")

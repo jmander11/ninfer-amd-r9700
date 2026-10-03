@@ -7,10 +7,10 @@ import unittest
 import torch
 
 from tools.artifact.layouts import (
-    fp8lut4_geometry,
-    fp8lut4_magnitude_table,
     decode_fp8lut4,
     encode_fp8lut4_planes,
+    fp8lut4_geometry,
+    fp8lut4_magnitude_table,
 )
 from tools.artifact.numeric import round_e4m3fn_magnitude
 
@@ -19,7 +19,7 @@ from .fp8lut4_codec import Calibration, encode_chunks, interleave_gate_up, quant
 
 class Fp8Lut4CodecTest(unittest.TestCase):
     def test_e4m3_rounding_matches_torch_ties_to_even_with_saturation(self) -> None:
-        for numerator in range(0, 520):
+        for numerator in range(520):
             for exponent in range(-30, 10):
                 value = min(numerator * 2.0**exponent, 448.0)
                 expected = torch.tensor(value).to(torch.float8_e4m3fn).view(torch.uint8).item()

@@ -8,12 +8,11 @@ geometry.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from .conversion import ResourcePayload, load_resources
 from .inventory import ResourceSpec
-
 
 OFFICIAL_RESOURCE_SHA256 = {
     "frontend/tokenizer.json": ("5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"),

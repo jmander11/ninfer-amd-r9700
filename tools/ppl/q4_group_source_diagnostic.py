@@ -11,22 +11,21 @@ not evidence for the product A8Q4 execution profile.
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import struct
 import sys
-from typing import Iterable
+from collections import defaultdict
+from collections.abc import Iterable
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from tools.reference.qwen3_8_27b_bf16 import protocol
-
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_q4_group_source_diagnostic"
 COMPARISON_TYPE = "ninfer_qwen3_8_q4_group_source_comparison"

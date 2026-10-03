@@ -10,7 +10,6 @@ import pytest
 from tools.bench import prepare_selected_niah as preparer
 from tools.bench.prepare_selected_niah import prepare, rename_noreplace
 
-
 REPO = Path(__file__).resolve().parents[2]
 
 

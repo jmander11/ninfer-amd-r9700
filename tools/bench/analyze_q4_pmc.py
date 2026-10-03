@@ -10,10 +10,10 @@ import json
 import math
 import sqlite3
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Sequence
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Iterable, Sequence
-
+from typing import Any
 
 PLAN_SCHEMA = "ninfer.r9700.production_q4_p2048_pmc_two_pass_plan.v1"
 REPORT_SCHEMA = "ninfer.r9700.production_q4_p2048_pmc_attribution.v2"

@@ -8,7 +8,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 BEGIN = re.compile(r"-- Begin function\s+(\S+)")
 INTEGER_FIELDS = {
     "lds": re.compile(r"\.amdhsa_group_segment_fixed_size\s+(\d+)"),
@@ -84,7 +83,7 @@ def check_resources(selected: list[Kernel]) -> None:
         "partial": {"lds": 6224, "vgpr": 26},
         "merge": {"lds": 2124, "vgpr": 25},
     }
-    counts = {kind: 0 for kind in limits}
+    counts = dict.fromkeys(limits, 0)
     for kernel in selected:
         kind = kernel.kind
         if kind is None:

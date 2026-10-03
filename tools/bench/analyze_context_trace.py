@@ -10,8 +10,8 @@ multiple measured requests/repetitions, eager decode, or overlapping streams.
 import argparse
 import csv
 import json
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 
 
 def families(rows):

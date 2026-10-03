@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, json, os, stat
+
+import argparse
+import json
+import os
+import stat
 from pathlib import Path
+
 from tools.r9700.run_a8g128_q4g128_n16k16_gate import validate_report_payload
 
 

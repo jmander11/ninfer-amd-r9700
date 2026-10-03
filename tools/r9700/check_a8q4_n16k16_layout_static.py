@@ -7,7 +7,6 @@ import argparse
 import re
 from pathlib import Path
 
-
 PREFILL = "a8q4_n16k16_prefill_p2048_m64n128"
 DECODE = "a8q4_n16k16_decode_t1_wmma32"
 

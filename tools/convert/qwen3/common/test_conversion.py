@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
-from types import SimpleNamespace
-from tempfile import TemporaryDirectory
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 import torch
 

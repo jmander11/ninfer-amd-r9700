@@ -20,7 +20,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "ninfer.r9700.rocm-tool-capability-audit.v1"
 ROCM_ROOT = Path("/opt/rocm")
 

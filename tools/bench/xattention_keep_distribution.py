@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
+from collections import Counter
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
@@ -18,9 +18,9 @@ from tools.bench.prefill_chunk_authority import (
     durable_create_json,
     validate_prefill_chunk_authority,
 )
-from tools.ppl.quality_recovery_io import validate_authority_map
 from tools.ppl import run as ppl
 from tools.ppl.fp8_context_recovery import identity
+from tools.ppl.quality_recovery_io import validate_authority_map
 
 SELECTION = REPO / "profiles/bench/prefill-chunk-selection-panel-attention-20260921.json"
 QUALITY = (

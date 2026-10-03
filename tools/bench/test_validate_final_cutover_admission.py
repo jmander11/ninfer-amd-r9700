@@ -115,9 +115,8 @@ def test_joined_gate_requires_selected_vision_completion_inputs() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         plan = root / "plan.json"
-        inputs = {
-            name: "missing"
-            for name in (
+        inputs = dict.fromkeys(
+            (
                 "selection",
                 "prefill_chunk",
                 "quality_map",
@@ -134,8 +133,9 @@ def test_joined_gate_requires_selected_vision_completion_inputs() -> None:
                 "hardware",
                 "dflash",
                 "converter_preflight",
-            )
-        }
+            ),
+            "missing",
+        )
         plan.write_text(json.dumps({"inputs": inputs}), encoding="utf-8")
         with (
             patch.object(gate, "validate_prepared_closure", return_value={}),

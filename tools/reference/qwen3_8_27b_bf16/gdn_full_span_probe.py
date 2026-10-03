@@ -8,18 +8,17 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import struct
 import sys
 import time
-from typing import Sequence
 import uuid
-
+from collections.abc import Sequence
+from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from tools.reference.qwen3_8_27b_bf16.gdn_determinism_probe import (  # noqa: E402
+from tools.reference.qwen3_8_27b_bf16.gdn_determinism_probe import (
     GENERATOR,
     _input_sha256,
     _make_inputs,
@@ -27,13 +26,12 @@ from tools.reference.qwen3_8_27b_bf16.gdn_determinism_probe import (  # noqa: E4
     _tensor_sha256,
     file_sha256,
 )
-from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     GDN_RECURRENCE_EXECUTION,
     enable_strict_torch_determinism,
     establish_deterministic_environment,
     execution_provenance,
 )
-
 
 SCHEMA = "ninfer_qwen3_8_27b_bf16_gdn_full_span_probe"
 SCHEMA_VERSION = 1
@@ -194,6 +192,7 @@ def run_probe(device_index: int) -> dict:
     establish_deterministic_environment()
     try:
         import torch
+
         from tools.reference.qwen3_8_27b_bf16 import backend
     except (ImportError, OSError, RuntimeError) as error:
         raise RuntimeError("full-span GDN probe requires the scorer's ROCm environment") from error

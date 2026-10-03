@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 HYBRID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
@@ -48,8 +48,7 @@ def checked_file(record: dict) -> Path:
     if (
         not path.is_file()
         or identity(path) != {key: record[key] for key in ("path", "sha256")}
-        or "file_size_bytes" in record
-        and record["file_size_bytes"] != path.stat().st_size
+        or ("file_size_bytes" in record and record["file_size_bytes"] != path.stat().st_size)
     ):
         raise ValueError(f"FP8 recovery bound file changed: {path}")
     return path

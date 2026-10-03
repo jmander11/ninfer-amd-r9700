@@ -13,16 +13,15 @@ import hashlib
 import json
 import math
 import re
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.ppl.run import QUALITY_TIERS
 from tools.bench.run_ninfer_bench_matrix import PRODUCTION_PREFILL_CHUNKS
-
+from tools.ppl.run import QUALITY_TIERS
 
 ARTIFACT_TYPE = "ninfer_r9700_pareto_comparison"
 SCHEMA_VERSION = 7
@@ -1011,8 +1010,8 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
 
     reporting_recovery = bound_bridge(source_provenance)
     if any(binding is not None for binding in recovery_bindings):
-        from tools.ppl.fp8_context_recovery import checked_file, validate_bridge
         from tools.ppl.assemble_pareto import validate_chunk_candidate_bindings
+        from tools.ppl.fp8_context_recovery import checked_file, validate_bridge
 
         if any(binding != recovery_bindings[0] for binding in recovery_bindings):
             raise ValueError("schema-v7 resource recovery binding differs across candidates")

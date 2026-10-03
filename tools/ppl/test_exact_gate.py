@@ -60,7 +60,7 @@ def bf16_execution_provenance() -> dict:
             "allow_fp16_accumulation": False,
         },
         "environment": {
-            **{key: None for key in run.BF16_EXECUTION_ENVIRONMENT_KEYS},
+            **dict.fromkeys(run.BF16_EXECUTION_ENVIRONMENT_KEYS),
             **run.BF16_DETERMINISTIC_ENVIRONMENT,
         },
         "scorer_python_tree_sha256": "2" * 64,
@@ -1521,7 +1521,7 @@ class CampaignOrchestrationTest(unittest.TestCase):
             scorer.write_text("scorer", encoding="utf-8")
             cell_path = root / "old" / "4.prefill.r9700-g16.json"
             cell_path.parent.mkdir()
-            raw = {field: 0 for field in run.CANDIDATE_SCORER_REPORT_FIELDS}
+            raw = dict.fromkeys(run.CANDIDATE_SCORER_REPORT_FIELDS, 0)
             raw.update(
                 {
                     "scheme": "r9700-g16",

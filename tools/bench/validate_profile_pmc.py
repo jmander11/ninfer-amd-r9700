@@ -11,13 +11,13 @@ import math
 import os
 import sqlite3
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from tools.bench.prepare_whole_profile import DISPATCH_COUNTERS, ROCPROFV3
 from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
-
 
 ARTIFACT_TYPE = "ninfer_r9700_selected_profile_pmc"
 SCHEMA_VERSION = 1

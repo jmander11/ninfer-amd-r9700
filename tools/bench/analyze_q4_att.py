@@ -7,13 +7,11 @@ import argparse
 import csv
 import hashlib
 import json
-import math
 import re
 import sqlite3
-from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 PLAN_SCHEMA = "ninfer.r9700.production_q4_p2048_att_plan.v2"
 REPORT_SCHEMA = "ninfer.r9700.production_q4_p2048_att_attribution.v1"

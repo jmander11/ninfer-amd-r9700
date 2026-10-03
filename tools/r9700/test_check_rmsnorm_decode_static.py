@@ -1,9 +1,8 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from tools.r9700.check_rmsnorm_decode_static import check
-
 
 SYMBOL = "_ZN6ninfer3ops5r97005eager12_GLOBAL__N_137rmsnorm_k5120_rows4_cta_kernelEv"
 

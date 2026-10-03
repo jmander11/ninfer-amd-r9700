@@ -6,11 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import struct
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from tools.ppl.run import inspect_candidate_artifact
-
 
 MAGIC = b"NINFER\x00\x02"
 PREFIX = struct.Struct("<8sQ")

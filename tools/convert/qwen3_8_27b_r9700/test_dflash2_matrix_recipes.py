@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import sys
-from types import ModuleType
 import unittest
+from types import ModuleType
 from unittest.mock import Mock, patch
 
 from tools.convert.qwen3.common.inventory import BF16, Q4, W8, tensor_spec

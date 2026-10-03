@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-import struct
 import hashlib
-from tempfile import TemporaryDirectory
+import json
+import struct
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from tools.artifact.container import Artifact, MAGIC, PAYLOAD_ALIGNMENT, PREFIX
+from tools.artifact.container import MAGIC, PAYLOAD_ALIGNMENT, PREFIX, Artifact
 from tools.artifact.layouts import align_up
 from tools.convert.qwen3.common.inventory import ResourceSpec, TensorSpec
 from tools.ppl.run import _validate_hybrid_migration_ancestry
@@ -17,11 +17,13 @@ from . import (
     fp8_hybrid_inventory,
     q4_inventory,
     q4_w8_mse_inventory,
+)
+from . import (
     transcode_q4_n16k16 as transcode_module,
 )
 from .transcode_q4_n16k16 import (
-    MigrationProfile,
     PROFILES_BY_SOURCE,
+    MigrationProfile,
     _validate_migration_pair,
     preflight,
     publish_hybrid_migration_receipt,
@@ -156,13 +158,15 @@ class Q4N16K16TranscodeTest(unittest.TestCase):
                 preflight(source)
             source = root / "trailing.ninfer"
             inventory, _, _ = self.write_source(source, "r9700-q4g64-eval", extra_payload=b"x")
-            with patch.dict(
-                PROFILES_BY_SOURCE,
-                {"r9700-q4g64-eval": MigrationProfile("r9700-q4g64-n16k16-eval", inventory)},
-                clear=True,
+            with (
+                patch.dict(
+                    PROFILES_BY_SOURCE,
+                    {"r9700-q4g64-eval": MigrationProfile("r9700-q4g64-n16k16-eval", inventory)},
+                    clear=True,
+                ),
+                self.assertRaisesRegex(ValueError, "payload extent"),
             ):
-                with self.assertRaisesRegex(ValueError, "payload extent"):
-                    preflight(source)
+                preflight(source)
 
     def test_shifted_or_extended_descriptor_never_publishes_output(self) -> None:
         with TemporaryDirectory() as temporary:

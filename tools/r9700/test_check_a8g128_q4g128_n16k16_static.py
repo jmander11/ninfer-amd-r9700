@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+
 from tools.r9700.check_a8g128_q4g128_n16k16_static import source_gate
 
 SRC = Path(__file__).with_name("a8g128_q4g128_n16k16_qual.hip").read_text()

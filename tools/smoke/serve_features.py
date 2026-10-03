@@ -9,13 +9,13 @@ alongside its output. Restart-persistence uses --save-response and --restore-res
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .serve_contract import (

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import unittest
+from collections import Counter
 
 from . import fp8_hybrid_decision, fp8_hybrid_inventory, q4_inventory
 

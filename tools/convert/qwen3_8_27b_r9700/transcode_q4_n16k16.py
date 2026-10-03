@@ -7,12 +7,11 @@ import hashlib
 import json
 import mmap
 import os
-from pathlib import Path
 import secrets
 import stat
-import struct
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Iterator, Sequence
+from pathlib import Path
 
 from tools.artifact.container import (
     MAGIC,
@@ -28,7 +27,6 @@ from tools.artifact.container import (
 from tools.artifact.layouts import align_up, encoded_size, get_layout, q4_n16k16_geometry
 
 from . import fp8_hybrid_decision, fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory
-
 
 OLD_Q4_LAYOUT = "row-split-k128-v1"
 NEW_Q4_LAYOUT = "r9700-q4g64-n16-k16-v1"

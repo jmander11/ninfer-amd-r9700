@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TypeAlias
 
@@ -146,27 +146,27 @@ def get_format(name: str) -> NumericFormat:
 
 __all__ = [
     "BF16",
+    "CODEBOOK_FORMATS",
+    "DIRECT_FORMATS",
+    "F8E4M3_ROW_F32S",
     "FP8LUT4",
     "FP8LUT4_BASE_SIXTEENTHS",
-    "CODEBOOK_FORMATS",
-    "CodebookFormat",
-    "fp8lut4_group_magnitudes",
-    "round_e4m3fn_magnitude",
-    "DIRECT_FORMATS",
-    "DirectFormat",
     "FP32",
-    "F8E4M3_ROW_F32S",
     "I32",
     "NUMERIC_FORMATS",
-    "NumericFormat",
     "Q4G64_F16S",
     "Q5G64_F16S",
     "Q6G64_F16S",
     "QUANT_FORMATS",
-    "QuantFormat",
     "ROW_SCALED_FORMATS",
-    "RowScaledFormat",
     "W8G32_F16S",
+    "CodebookFormat",
+    "DirectFormat",
+    "NumericFormat",
+    "QuantFormat",
+    "RowScaledFormat",
     "decode_e4m3fn_word",
+    "fp8lut4_group_magnitudes",
     "get_format",
+    "round_e4m3fn_magnitude",
 ]

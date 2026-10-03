@@ -15,6 +15,8 @@ from tools.artifact.container import (
     ArtifactIdentity,
     ArtifactWriter,
     ResourceSpec,
+)
+from tools.artifact.container import (
     TensorSpec as StoredTensor,
 )
 from tools.convert.qwen3.common.inventory import (
@@ -22,10 +24,14 @@ from tools.convert.qwen3.common.inventory import (
     W8,
     TensorSpec,
     tensor_spec,
+)
+from tools.convert.qwen3.common.inventory import (
     ResourceSpec as InventoryResource,
 )
-from . import codec, q4_inventory, selective_protected_inventory as inventory
+
+from . import codec, q4_inventory
 from . import convert_selective_protected as conversion
+from . import selective_protected_inventory as inventory
 
 
 class SelectiveProtectedTest(unittest.TestCase):
@@ -131,16 +137,14 @@ class SelectiveProtectedTest(unittest.TestCase):
                 patch.object(
                     conversion.source_recipe, "materialize_recipe", return_value=tensor
                 ) as materialize,
+                Artifact(base) as artifact,
+                ArtifactWriter(
+                    output,
+                    ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),
+                    output_specs,
+                ) as writer,
             ):
-                with (
-                    Artifact(base) as artifact,
-                    ArtifactWriter(
-                        output,
-                        ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),
-                        output_specs,
-                    ) as writer,
-                ):
-                    records = conversion.write_payloads(artifact, writer, None)
+                records = conversion.write_payloads(artifact, writer, None)
             self.assertEqual(materialize.call_count, 1)
             with Artifact(output) as artifact:
                 for obj, payload, record in zip(artifact.objects[:-1], payloads[:-1], records[:-1]):

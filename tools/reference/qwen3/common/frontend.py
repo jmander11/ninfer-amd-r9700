@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from types import MethodType
-from typing import Any, Iterable
+from typing import Any
 
 from .multimodal import MultimodalBatch, batch_from_processor_output
-
 
 _SPECIAL_TOKEN_IDS = {
     "<|vision_start|>": 248053,

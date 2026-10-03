@@ -1,18 +1,21 @@
 """Endpoint recipe formats and exact real-container payload composition."""
 
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from tools.artifact.container import (
     Artifact,
     ArtifactIdentity,
     ArtifactWriter,
+)
+from tools.artifact.container import (
     TensorSpec as StoredTensor,
 )
 from tools.artifact.layouts import encoded_size
-from tools.convert.qwen3.common.inventory import tensor_spec, TensorSpec, Q4
+from tools.convert.qwen3.common.inventory import Q4, TensorSpec, tensor_spec
+
 from . import compose_fp8_endpoints as compose
 
 

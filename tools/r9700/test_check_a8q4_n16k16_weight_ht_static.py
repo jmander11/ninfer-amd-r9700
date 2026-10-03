@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
+
 from tools.r9700.check_a8q4_n16k16_weight_ht_static import check
 from tools.r9700.patch_a8q4_n16k16_weight_ht_assembly import patch
 

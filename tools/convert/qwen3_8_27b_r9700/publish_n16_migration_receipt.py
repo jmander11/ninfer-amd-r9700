@@ -6,13 +6,13 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import stat
-from typing import Any, Sequence
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 from . import q4_inventory, q4_w8_mse_inventory
 from . import transcode_q4_n16k16 as migration
-
 
 MODEL_ID = "qwen3.8-27b"
 ARTIFACT_TYPE = "ninfer_qwen3_8_27b_r9700_q4_n16k16_migration_receipt"

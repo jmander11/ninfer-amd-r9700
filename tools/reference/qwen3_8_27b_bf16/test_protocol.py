@@ -6,16 +6,15 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
-from . import protocol
-from . import scorer
+from . import protocol, scorer
 
 
 def options(
@@ -359,9 +358,8 @@ class ArgumentContractTest(unittest.TestCase):
             protocol.parse_options(self.base() + ["--draft-tokens", "3"])
         with self.assertRaisesRegex(ValueError, "no Device Graph"):
             protocol.parse_options(self.base() + ["--device-graph"])
-        with self.assertRaises(SystemExit):
-            with contextlib.redirect_stderr(io.StringIO()):
-                protocol.parse_options(self.base() + ["--spec", "dflash"])
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            protocol.parse_options(self.base() + ["--spec", "dflash"])
         with self.assertRaisesRegex(ValueError, "must be bf16-reference"):
             protocol.parse_options(self.base() + ["--scheme", "r9700-g16"])
 

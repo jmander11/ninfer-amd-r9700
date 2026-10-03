@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import unittest
 
-
 try:
-    import torch
     import fla  # noqa: F401
+    import torch
 
     _DEPENDENCIES = torch.cuda.is_available()
 except (ImportError, OSError):

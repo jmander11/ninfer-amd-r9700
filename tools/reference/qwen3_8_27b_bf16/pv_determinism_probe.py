@@ -9,14 +9,13 @@ import importlib.metadata
 import json
 import math
 import os
-from pathlib import Path
 import platform
 import struct
 import sys
 import time
-from typing import Sequence
 import uuid
-
+from collections.abc import Sequence
+from pathlib import Path
 
 SCHEMA = "ninfer_qwen3_8_27b_bf16_pv_determinism_probe"
 COMPARISON_SCHEMA = "ninfer_qwen3_8_27b_bf16_pv_determinism_comparison"

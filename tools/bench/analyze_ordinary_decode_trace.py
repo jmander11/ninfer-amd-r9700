@@ -8,15 +8,15 @@ import json
 import sqlite3
 import sys
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.bench.analyze_whole_profile import _duration_ns, _message
-
 
 MEASURED = "ninfer_bench_measured"
 ORDINARY = "ninfer.decode.decode.ordinary_round payload=8192"

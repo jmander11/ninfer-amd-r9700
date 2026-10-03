@@ -23,7 +23,6 @@ if str(SCRIPT_REPO) not in sys.path:
 
 from tools.bench.prepare_post_rmsnorm_decode_proxy import PASSES, REPO, identity, sha
 
-
 ROUNDS = 256
 ONE_ROUND_DISPATCHES = 1806
 QK_GRID_CONTRACT = {

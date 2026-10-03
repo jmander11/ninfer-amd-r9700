@@ -2,8 +2,11 @@
 """Revalidate an immutable W-only DEVICE_HT qualification report."""
 
 from __future__ import annotations
-import argparse, json
+
+import argparse
+import json
 from pathlib import Path
+
 from tools.r9700.run_a8q4_n16k16_weight_ht_gate import validate_report_payload
 
 

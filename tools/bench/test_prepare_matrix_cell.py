@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from tools.bench.prepare_matrix_cell import prepare_or_validate
-
 
 PRODUCER = r"""from pathlib import Path
 import json, sys

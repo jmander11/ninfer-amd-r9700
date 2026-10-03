@@ -148,14 +148,14 @@ class SelectedP2048EvidenceTest(unittest.TestCase):
                             {
                                 "stage": "prefill/text/linear",
                                 "dispatch_count": 1,
-                                "counter_sums": {name: "20" for name in DISPATCH_COUNTERS},
+                                "counter_sums": dict.fromkeys(DISPATCH_COUNTERS, "20"),
                                 "gl2_hit_ratio": {"state": "measured", "value": 0.8},
                                 "tcp_hit_ratio": {"state": "measured", "value": 0.7},
                             },
                             {
                                 "stage": "prefill/orchestration",
                                 "dispatch_count": 1,
-                                "counter_sums": {name: "4" for name in DISPATCH_COUNTERS},
+                                "counter_sums": dict.fromkeys(DISPATCH_COUNTERS, "4"),
                                 "gl2_hit_ratio": {"state": "measured", "value": 0.5},
                                 "tcp_hit_ratio": {"state": "measured", "value": 0.4},
                             },

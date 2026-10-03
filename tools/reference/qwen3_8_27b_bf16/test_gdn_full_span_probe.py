@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import math
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from . import gdn_full_span_probe as probe
 

@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from project_post_hybrid_prefill import project
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 

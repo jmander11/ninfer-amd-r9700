@@ -8,15 +8,15 @@ from pathlib import Path
 from tools.bench.run_ninfer_bench_matrix import (
     DECODE_ATTENTION_PROFILE,
     PACKED_DECODE_MIN_CONTEXT,
-    REPORT_SCHEMA_VERSION,
-    SPLIT512_MIN_CONTEXT,
     PHASE_TIMING_SEMANTICS,
     R9700_KV_PLANE_LAYOUTS,
+    REPORT_SCHEMA_VERSION,
+    SPLIT512_MIN_CONTEXT,
     BenchCase,
-    report_rows,
     prefill_timing_eligible,
-    resolved_dflash_verify_width,
+    report_rows,
     resolved_dflash_topology,
+    resolved_dflash_verify_width,
 )
 
 

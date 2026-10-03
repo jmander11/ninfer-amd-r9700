@@ -40,8 +40,8 @@ __all__ = [
     "LogicalRowView",
     "MemoryPlan",
     "PhysicalBlock",
-    "VisionArtifactBinding",
     "RefModel",
+    "VisionArtifactBinding",
     "WeightObject",
     "WeightStore",
 ]

@@ -8,8 +8,9 @@ import hashlib
 import json
 import math
 import statistics
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POWER_PATH = "/sys/class/drm/card2/device/power_dpm_force_performance_level"

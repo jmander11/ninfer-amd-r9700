@@ -4,6 +4,7 @@ from collections import Counter
 
 from tools.artifact.layouts import align_up, encoded_size
 from tools.convert.qwen3.common.inventory import BF16, W8, TensorSpec, tensor_spec
+
 from . import q4_inventory
 from .e4m3_inventory import F8E4M3_ROW_F32S, ROW_SCALED_LAYOUT
 

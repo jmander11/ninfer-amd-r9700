@@ -6,28 +6,34 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import torch
 
 from tools.artifact.container import (
+    PAYLOAD_ALIGNMENT,
+    PREFIX_BYTES,
     Artifact,
     ArtifactIdentity,
     ArtifactWriter,
     TensorObject,
-    TensorSpec as ArtifactTensorSpec,
-    ResourceSpec as ArtifactResourceSpec,
     encode_directory,
     plan_objects,
-    PREFIX_BYTES,
-    PAYLOAD_ALIGNMENT,
+)
+from tools.artifact.container import (
+    ResourceSpec as ArtifactResourceSpec,
+)
+from tools.artifact.container import (
+    TensorSpec as ArtifactTensorSpec,
 )
 from tools.artifact.layouts import align_up, encode_direct
 from tools.convert.common.quantize import quantize_and_encode
 from tools.convert.common.safetensors import ShardReader
 from tools.convert.qwen3.common.inventory import BF16, W8, TensorSpec
-from . import q4_inventory, source, source_recipe, selective_protected_inventory as inventory
+
+from . import q4_inventory, source, source_recipe
+from . import selective_protected_inventory as inventory
 from .convert_q4_w8_mse import _checkpoint_receipt
 from .e4m3_rowwise import encode_e4m3_rowwise_chunks
 
@@ -199,13 +205,16 @@ def convert(base: Path, model: Path, output: Path) -> Path:
     report = preflight(base, model, output)
     output.parent.mkdir(parents=True, exist_ok=True)
     report["base"]["sha256"] = sha(base)
-    with Artifact(base) as artifact, ShardReader(model) as reader:
-        with ArtifactWriter(
+    with (
+        Artifact(base) as artifact,
+        ShardReader(model) as reader,
+        ArtifactWriter(
             output,
             ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),
             _output_specs(artifact),
-        ) as writer:
-            report["objects"] = write_payloads(artifact, writer, reader)
+        ) as writer,
+    ):
+        report["objects"] = write_payloads(artifact, writer, reader)
     report["artifact"] = {
         "path": str(output.resolve()),
         "bytes": output.stat().st_size,

@@ -5,17 +5,17 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tools.bench.analyze_whole_profile import analyze
 from tools.bench.prepare_whole_profile import ROCPROFV3
 from tools.bench.reconcile_qwen3_8_27b_dispatches import _publish, _snapshot
 from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
+from tools.bench.selected_loaded_code_objects import selected_loaded_fp8
 from tools.bench.validate_profile_trace import _parse_database
 from tools.bench.verify_selected_hardware_use import selected_route
-from tools.bench.selected_loaded_code_objects import selected_loaded_fp8
-
 
 HYBRID_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 

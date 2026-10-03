@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.bench.check_q4_att_parser import validate_parser
 from tools.bench.analyze_q4_att import (
     EXPECTED_GRID,
     EXPECTED_Q4_DISPATCHES,
@@ -21,6 +20,7 @@ from tools.bench.analyze_q4_att import (
     _validate_capture_log,
     _validate_closure,
 )
+from tools.bench.check_q4_att_parser import validate_parser
 
 
 def dispatch(index: int) -> dict:
@@ -169,11 +169,11 @@ class SelectionTest(unittest.TestCase):
                 "gpu_index": 0,
                 "agent_handle": 7432,
             }
-            with mock.patch(
-                "tools.bench.analyze_q4_att._q4_dispatches", return_value=(rows, r9700)
+            with (
+                mock.patch("tools.bench.analyze_q4_att._q4_dispatches", return_value=(rows, r9700)),
+                self.assertRaisesRegex(ValueError, "not the R9700"),
             ):
-                with self.assertRaisesRegex(ValueError, "not the R9700"):
-                    _resolve_att_outputs(raw, raw / "results.db")
+                _resolve_att_outputs(raw, raw / "results.db")
 
 
 class StatsTest(unittest.TestCase):

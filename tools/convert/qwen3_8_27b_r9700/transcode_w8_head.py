@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from tools.artifact.container import Artifact, ArtifactIdentity, ArtifactWriter, plan_objects
 from tools.artifact.layouts import transcode_w8_n16k16
-from . import dflash2_q4_inventory as inventory, selective_protected_inventory
+
+from . import dflash2_q4_inventory as inventory
+from . import selective_protected_inventory
 from .convert_dflash2_q4 import _artifact_spec, _chunks, _validate_base_objects
 
 HEAD = "text/output_head"

@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 import torch
 
@@ -20,7 +20,6 @@ from .screen_q4_row_scaled_quality import (
     sha256_file,
     write_no_clobber,
 )
-
 
 SCHEMA = "ninfer.qwen3_8_27b.q4-group-size-sampled-quality.v1"
 GROUPS = (64, 128, 256, 512)

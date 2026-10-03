@@ -8,9 +8,9 @@ import json
 import re
 import sqlite3
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Sequence
-
+from typing import Any
 
 MEASURED = "ninfer_bench_measured"
 TEXT_CHUNK = "ninfer.prefill.prefill.chunk"

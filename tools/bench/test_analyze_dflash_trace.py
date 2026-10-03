@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import sqlite3
-from tempfile import TemporaryDirectory
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from tools.bench.analyze_dflash_trace import (
     EXPECTED_CLAIMS,
@@ -14,12 +14,11 @@ from tools.bench.analyze_dflash_trace import (
     EXPECTED_POWER_PROFILE,
     EXPECTED_STATUS,
     FULL_LAYERS,
-    GDN_LAYERS,
     MEASURED,
-    analyze,
     _validate_kernel_intervals,
     _validate_report,
     _validate_verify_ranges,
+    analyze,
 )
 
 

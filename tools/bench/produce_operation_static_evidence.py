@@ -10,8 +10,9 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -20,11 +21,14 @@ if str(REPO_ROOT) not in sys.path:
 from tools.r9700 import check_prefill_cta_static as cta_checker_module
 from tools.r9700.check_prefill_cta_static import (
     PROFILES as CTA_PROFILES,
+)
+from tools.r9700.check_prefill_cta_static import (
     _function,
     _one_integer,
+)
+from tools.r9700.check_prefill_cta_static import (
     check as check_cta,
 )
-
 
 ARTIFACT_TYPE = "ninfer_r9700_operation_static_evidence"
 SCHEMA_VERSION = 1

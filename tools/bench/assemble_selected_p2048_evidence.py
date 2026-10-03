@@ -9,12 +9,12 @@ import json
 import math
 import os
 import tempfile
-from collections import Counter, defaultdict
+from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tools.bench.prepare_whole_profile import DISPATCH_COUNTERS
-
 
 RECONCILIATION_TYPE = "ninfer_qwen3_8_27b_dispatch_reconciliation"
 ROOFLINE_TYPE = "ninfer_qwen3_8_27b_roofline"

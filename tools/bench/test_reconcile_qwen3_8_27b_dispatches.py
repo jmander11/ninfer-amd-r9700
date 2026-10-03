@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.bench.reconcile_qwen3_8_27b_dispatches import _publish, _snapshot, reconcile
 from tools.bench.model_qwen3_8_27b_roofline import model
+from tools.bench.reconcile_qwen3_8_27b_dispatches import _publish, _snapshot, reconcile
 
 
 class DispatchReconciliationTest(unittest.TestCase):

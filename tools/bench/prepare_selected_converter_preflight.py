@@ -17,10 +17,12 @@ from tools.convert.qwen3_8_27b_r9700 import (
     convert_fp8_hybrid,
     convert_q4,
     convert_q4_w8_mse,
-    preflight_identity,
     fp8_hybrid_inventory,
+    preflight_identity,
     q4_inventory,
     q4_w8_mse_inventory,
+)
+from tools.convert.qwen3_8_27b_r9700 import (
     resources as target_resources,
 )
 

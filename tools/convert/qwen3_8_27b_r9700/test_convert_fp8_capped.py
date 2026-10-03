@@ -1,14 +1,15 @@
 """Fixed protection inventory and real-container copy-only composition checks."""
 
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest.mock import patch
 
 from tools.artifact.container import Artifact, ArtifactIdentity, ArtifactWriter, TensorSpec
 from tools.artifact.layouts import encoded_size
-from tools.convert.qwen3.common.inventory import tensor_spec, Q4
+from tools.convert.qwen3.common.inventory import Q4, tensor_spec
+
 from . import convert_fp8_capped as convert
 
 

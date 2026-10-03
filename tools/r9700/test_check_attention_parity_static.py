@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent
 CHECK = ROOT / "check_attention_parity_static.py"
 

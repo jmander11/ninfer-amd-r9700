@@ -8,11 +8,11 @@ score starts; product candidates, not this mathematical oracle, exercise T=1.
 
 from __future__ import annotations
 
-from collections import defaultdict
 import gc
-from pathlib import Path
 import time
-from typing import Iterable
+from collections import defaultdict
+from collections.abc import Iterable
+from pathlib import Path
 
 try:
     import torch
@@ -26,20 +26,18 @@ except (ImportError, OSError) as exc:  # pragma: no cover - exercised only with 
         "install the package requirements explicitly"
     ) from exc
 
+from .kv_tensor_codec import QuantizedFullAttentionCache, validate_codec_device
 from .protocol import (
     ATTENTION_PV_SOURCE_ROW_CHUNK,
     FULL_ATTENTION_LAYERS,
     GDN_QKV_RANGES,
-    HIDDEN_SIZE,
-    ScoreVectors,
     TOKEN_DOMAIN,
+    ScoreVectors,
     expected_text_tensors,
     layer_spans,
     resolve_score_begin,
     validate_scored_targets,
 )
-from .kv_tensor_codec import QuantizedFullAttentionCache, validate_codec_device
-
 
 HEAD_DIM = 256
 Q_HEADS = 24

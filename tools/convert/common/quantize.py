@@ -16,10 +16,8 @@ from tools.artifact.layouts import (
     encode_q4_n16k16,
     encode_row_split,
     row_split_geometry,
-    q4_n16k16_geometry,
 )
 from tools.artifact.numeric import QuantFormat, get_format
-
 
 _FP16_MIN_SUBNORMAL = 2.0**-24
 

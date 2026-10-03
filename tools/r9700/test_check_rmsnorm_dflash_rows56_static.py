@@ -1,5 +1,5 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from tools.r9700.check_rmsnorm_dflash_rows56_static import EXPECTED, exact
@@ -18,12 +18,14 @@ class ExactStaticTest(unittest.TestCase):
             with self.subTest(key=key):
                 changed = dict(EXPECTED)
                 changed[key] += 1
-                with patch(
-                    "tools.r9700.check_rmsnorm_dflash_rows56_static.check",
-                    return_value={"symbol": "kernel", **changed},
+                with (
+                    patch(
+                        "tools.r9700.check_rmsnorm_dflash_rows56_static.check",
+                        return_value={"symbol": "kernel", **changed},
+                    ),
+                    self.assertRaisesRegex(ValueError, key),
                 ):
-                    with self.assertRaisesRegex(ValueError, key):
-                        exact(Path("unused"))
+                    exact(Path("unused"))
 
 
 if __name__ == "__main__":

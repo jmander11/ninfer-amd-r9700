@@ -8,13 +8,12 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from tools.artifact.layouts import encoded_size
 from tools.bench.analyze_e4m3_hybrid import enrich_calls, measured_q4_calls, role_candidates
 from tools.convert.qwen3_8_27b_r9700 import e4m3_inventory, q4_inventory
-
 
 SCHEMA = "ninfer.r9700.fp8-gate-up-decision.v1"
 QUALIFIER_SCHEMA = "ninfer.r9700.fp8_gate_up_qualification.v1"

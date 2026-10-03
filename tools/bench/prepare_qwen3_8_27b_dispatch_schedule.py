@@ -8,8 +8,9 @@ import json
 import math
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tools.artifact.container import Artifact, TensorObject
 from tools.bench.reconcile_qwen3_8_27b_dispatches import (
@@ -18,7 +19,6 @@ from tools.bench.reconcile_qwen3_8_27b_dispatches import (
     _snapshot,
     _validate_trace,
 )
-
 
 ROOT = Path(__file__).resolve().parents[2]
 _PYTHON_AUTHORITIES = (

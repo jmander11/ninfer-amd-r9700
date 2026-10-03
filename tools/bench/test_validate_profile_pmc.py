@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from tools.bench.prepare_whole_profile import DISPATCH_COUNTERS
-from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION, PHASE_TIMING_SEMANTICS
+from tools.bench.run_ninfer_bench_matrix import PHASE_TIMING_SEMANTICS, REPORT_SCHEMA_VERSION
 from tools.bench.validate_profile_pmc import main, validate
 
 

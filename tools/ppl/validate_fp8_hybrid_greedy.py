@@ -7,9 +7,9 @@ import argparse
 import json
 import math
 import os
-import tempfile
 import sys
-from datetime import datetime, timezone
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -240,7 +240,7 @@ def validate(
     return {
         "artifact_type": OUTPUT_TYPE,
         "schema_version": OUTPUT_SCHEMA,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "model_id": run.MODEL_ID,
         "workload": {
             "prompt_tokens": tokens,

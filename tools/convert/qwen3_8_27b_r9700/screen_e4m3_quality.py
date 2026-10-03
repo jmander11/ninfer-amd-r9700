@@ -7,8 +7,8 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 import torch
 from safetensors import safe_open
@@ -25,7 +25,6 @@ from tools.convert.qwen3.common.recipe import (
 
 from . import draft_head, e4m3_inventory, source_recipe
 from .e4m3_rowwise import decode_e4m3_rowwise, encode_e4m3_rowwise
-
 
 SCHEMA = "ninfer.qwen3_8_27b.e4m3-rowwise-sampled-quality.v1"
 SELECTION_ALGORITHM = "endpoints-plus-sha256-counter-v1"
@@ -47,7 +46,7 @@ def select_row_indices(name: str, rows: int, count: int) -> tuple[int, ...]:
     selected: set[int] = {0}
     if wanted > 1:
         selected.add(rows - 1)
-    seed = hashlib.sha256(f"{SELECTION_ALGORITHM}\0{name}\0{rows}".encode("utf-8")).digest()
+    seed = hashlib.sha256(f"{SELECTION_ALGORITHM}\0{name}\0{rows}".encode()).digest()
     counter = 0
     while len(selected) < wanted:
         digest = hashlib.sha256(seed + counter.to_bytes(8, "little")).digest()
@@ -93,7 +92,7 @@ class SampledShardReader:
         self._context = None
         self._handle = None
 
-    def __enter__(self) -> "SampledShardReader":
+    def __enter__(self) -> SampledShardReader:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:

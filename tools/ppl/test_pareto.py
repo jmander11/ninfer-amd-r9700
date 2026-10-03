@@ -16,7 +16,6 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pareto
 
-
 WORKLOADS = ["prefill_8k_c1", "decode_8k_c1", "decode_8k_c4"]
 CHUNK_SELECTION = {
     "path": "/chunk-selection.json",

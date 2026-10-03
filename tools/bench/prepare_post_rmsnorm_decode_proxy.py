@@ -14,7 +14,6 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-
 REPO = Path(__file__).resolve().parents[2]
 BENCH = REPO / "build-r9700-rmsnorm-production-final-20260906/bench/ninfer_bench"
 BENCH_SHA256 = "a7c9303bd213fa3dbdb29ca0cee73addef1de8ab6a6e6b231509e25239776425"

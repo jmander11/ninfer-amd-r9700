@@ -11,12 +11,12 @@ from unittest.mock import patch
 
 from tools.bench.run_ninfer_bench_matrix import (
     DECODE_ATTENTION_PROFILE,
-    PACKED_DECODE_MIN_CONTEXT,
-    SPLIT512_MIN_CONTEXT,
     LOW_CONTEXT_PREFILL_PROMPTS,
     MATRIX_SCHEMA_VERSION,
+    PACKED_DECODE_MIN_CONTEXT,
     R9700_KV_PLANE_LAYOUTS,
     R9700_POWER_PROFILE,
+    SPLIT512_MIN_CONTEXT,
     add_repetition_args,
     build_cases,
 )
@@ -598,16 +598,16 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                     "tools.bench.validate_low_context_prefill.load_bench_report",
                     return_value=forged,
                 ),
+                self.assertRaisesRegex(ValueError, "aggregate differs"),
             ):
-                with self.assertRaisesRegex(ValueError, "aggregate differs"):
-                    validate_ladder(
-                        manifest_path,
-                        2000.0,
-                        root / "bench",
-                        root / "selected.ninfer",
-                        root / "selection.json",
-                        power_reader=lambda _path: "auto",
-                    )
+                validate_ladder(
+                    manifest_path,
+                    2000.0,
+                    root / "bench",
+                    root / "selected.ninfer",
+                    root / "selection.json",
+                    power_reader=lambda _path: "auto",
+                )
 
     def test_rejects_terminal_selection_tuple_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

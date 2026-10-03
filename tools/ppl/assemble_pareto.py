@@ -21,12 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.bench.run_ninfer_bench_matrix import (
     MATRIX_SCHEMA_VERSION,
-    PRODUCTION_PREFILL_CHUNKS,
     PRODUCT_CONCURRENCIES,
-    R9700_POWER_PROFILE,
+    PRODUCTION_PREFILL_CHUNKS,
     R9700_KV_PLANE_LAYOUTS,
+    R9700_POWER_PROFILE,
     build_cases,
     file_sha256,
     load_bench_report,
@@ -36,12 +37,14 @@ from tools.bench.run_ninfer_bench_matrix import (
 )
 from tools.bench.select_prefill_chunk import (
     ARTIFACT_TYPE as PREFILL_CHUNK_ARTIFACT_TYPE,
+)
+from tools.bench.select_prefill_chunk import (
     RULE as PREFILL_CHUNK_SELECTION_RULE,
+)
+from tools.bench.select_prefill_chunk import (
     SCHEMA_VERSION as PREFILL_CHUNK_SCHEMA_VERSION,
 )
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.ppl import run as ppl_run
-
 
 HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 TERMINAL_RECIPE_IDS = {
@@ -1022,7 +1025,7 @@ def assemble_candidate(
             raise ValueError(f"{preset} non-hybrid candidate carries hybrid workspace authority")
     benches = {json.dumps(manifest["bench"], sort_keys=True) for manifest in manifests.values()}
     if reporting_recovery is not None:
-        from tools.ppl.benchmark_reporting_recovery import mapping, expected_benchmark
+        from tools.ppl.benchmark_reporting_recovery import expected_benchmark, mapping
 
         reporting_source = {
             "artifact": identity,

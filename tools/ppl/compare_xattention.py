@@ -25,7 +25,7 @@ EXPECTED_LENGTHS = (8192, 32768)
 TOKEN_DOMAIN = 248077
 QUALITY_TIER = "capacity-speed"
 QUALITY_GATE = math.log(1.05)
-EXPECTED_GATES = {candidate: QUALITY_GATE for candidate in CANDIDATES}
+EXPECTED_GATES = dict.fromkeys(CANDIDATES, QUALITY_GATE)
 
 SHARED_FIELDS = (
     "model_id",

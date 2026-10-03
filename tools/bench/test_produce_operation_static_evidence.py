@@ -7,8 +7,7 @@ import unittest
 from pathlib import Path
 
 from tools.bench.assemble_selected_p2048_evidence import _static_report
-from tools.bench.produce_operation_static_evidence import _publish, produce
-from tools.bench.produce_operation_static_evidence import CTA_RECIPES
+from tools.bench.produce_operation_static_evidence import CTA_RECIPES, _publish, produce
 from tools.r9700.check_prefill_cta_static import PROFILES
 
 

@@ -1,20 +1,20 @@
-import json
 import hashlib
-from pathlib import Path
+import json
 import struct
 import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 
+from tools.convert.qwen3_8_27b_r9700.q4_row_scaled import quantize_dequantize
+from tools.ppl.compare_q4_group_source import _against, _load_bf16, _source_key
 from tools.ppl.q4_group_source_diagnostic import (
     GROUPS,
     _atomic_new,
     preflight_payload,
     quantize_decode_q4,
 )
-from tools.ppl.compare_q4_group_source import _against, _load_bf16, _source_key
-from tools.convert.qwen3_8_27b_r9700.q4_row_scaled import quantize_dequantize
 
 
 class Q4GroupSourceDiagnosticTest(unittest.TestCase):

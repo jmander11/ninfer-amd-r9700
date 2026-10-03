@@ -7,17 +7,16 @@ geometry; only checkpoint-invariant Vision recipes are built here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import prod
 from pathlib import Path
-from typing import Mapping, Sequence
 
 import torch
 
 from tools.convert.common.safetensors import ShardReader
 
-from .inventory import FP32, TensorSpec, VISION_LAYERS
-
+from .inventory import FP32, VISION_LAYERS, TensorSpec
 
 SOURCE_DTYPE = "BF16"
 
@@ -384,13 +383,13 @@ def materialize_recipe(
 
 
 __all__ = [
+    "SOURCE_DTYPE",
     "Cast",
     "Concat",
     "DraftHeadTokenIds",
     "Expression",
     "GatherRows",
     "Reshape",
-    "SOURCE_DTYPE",
     "ShardReader",
     "Slice",
     "SourcePreflight",

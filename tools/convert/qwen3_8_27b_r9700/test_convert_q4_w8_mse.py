@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
-from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from tools.convert.qwen3.common.inventory import Q4, Q5, W8, tensor_spec

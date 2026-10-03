@@ -23,28 +23,42 @@ import stat
 import struct
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl.schemes import BASELINE, ORDER, PROFILES
 from tools.convert.qwen3_8_27b_r9700 import (
     fp8_hybrid_decision,
     fp8_hybrid_inventory,
     q4_inventory,
     q4_w8_mse_inventory,
 )
+from tools.ppl.schemes import BASELINE, ORDER, PROFILES
 from tools.reference.qwen3_8_27b_bf16.protocol import (
     ATTENTION_PV_EXECUTION as BF16_ATTENTION_PV_EXECUTION,
+)
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     DETERMINISTIC_ENVIRONMENT as BF16_DETERMINISTIC_ENVIRONMENT,
+)
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     DETERMINISTIC_EXECUTION_PROFILE as BF16_DETERMINISTIC_EXECUTION_PROFILE,
+)
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     EXECUTION_ENVIRONMENT_KEYS as BF16_EXECUTION_ENVIRONMENT_KEY_ORDER,
+)
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     FORBIDDEN_EXECUTION_ENVIRONMENT as BF16_FORBIDDEN_EXECUTION_ENVIRONMENT,
+)
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     GDN_RECURRENCE_EXECUTION as BF16_GDN_RECURRENCE_EXECUTION,
+)
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     MATMUL_REDUCTION_EXECUTION as BF16_MATMUL_REDUCTION_EXECUTION,
+)
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     TRITON_CODEGEN_EXECUTION as BF16_TRITON_CODEGEN_EXECUTION,
 )
 
@@ -2002,7 +2016,7 @@ def write_markdown(path: Path, payload: dict) -> None:
         f"- candidate artifact: {payload.get('candidate_artifact')}",
         f"- lengths: {payload['lengths']}",
         f"- skip default: {payload['skip']}",
-        f"- device graphs: on unless a cell sets device_graph=false",
+        "- device graphs: on unless a cell sets device_graph=false",
         f"- terrible token: nll >= {TERRIBLE_NLL}",
         f"- independent baseline: `{payload['baseline']}` per (length, schedule, spec)",
         f"- decode spec: {payload.get('spec', '-')} (draft {payload.get('draft_tokens', '-')}) "
@@ -2281,7 +2295,7 @@ def main() -> int:
             f"--gate must equal the {args.quality_tier} tier mean-NLL limit "
             f"{tier_mean_limit}: {', '.join(mismatched_gates)}"
         )
-    gates = {name: tier_mean_limit for name in gates}
+    gates = dict.fromkeys(gates, tier_mean_limit)
     spec = args.spec
     if spec == "mtp" and not 1 <= args.draft_tokens <= 5:
         raise SystemExit("MTP --draft-tokens must be in 1..5")
@@ -2351,7 +2365,7 @@ def main() -> int:
     expected_weights_ids = {
         BASELINE: BF16_WEIGHTS_ID,
         **(
-            {name: candidate_artifact["weights_id"] for name in selected_candidates}
+            dict.fromkeys(selected_candidates, candidate_artifact["weights_id"])
             if candidate_artifact is not None
             else {}
         ),
@@ -2362,7 +2376,7 @@ def main() -> int:
         args.ids, max(lengths), profile_weights[corpus_profile], profile_bins[corpus_profile]
     )
     corpus_provenance = validate_corpus(args.ids, max(lengths))
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%SZ")
     out_dir = args.out or (REPO / "profiles" / "ppl" / stamp)
 
     reused_bf16: dict[int, tuple[dict, Path]] = {}
@@ -2699,7 +2713,7 @@ def main() -> int:
     payload = {
         "artifact_type": CAMPAIGN_ARTIFACT_TYPE,
         "schema_version": CAMPAIGN_SCHEMA_VERSION,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "weights_inputs": {name: str(profile_weights[name]) for name in profiles},
         "scorers": scorer_provenance,
         "model_id": MODEL_ID,

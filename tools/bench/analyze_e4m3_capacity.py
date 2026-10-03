@@ -11,11 +11,10 @@ import argparse
 import hashlib
 import json
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from tools.convert.qwen3_8_27b_r9700 import e4m3_inventory
-
 
 SCHEMA = "ninfer.r9700.e4m3-capacity-analysis.v1"
 PAGE_TOKENS = 64

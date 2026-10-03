@@ -752,7 +752,7 @@ def main() -> int:
             t0 = time.perf_counter()
             try:
                 data = post(args.base, key, body, args.timeout)
-            except Exception as exc:  # noqa: BLE001 - report and continue
+            except Exception as exc:
                 total += 1
                 all_pass = False
                 snippets.append(f"RUN ERROR: {exc}")

@@ -21,11 +21,12 @@ from tools.artifact import (
 )
 from tools.convert.qwen3_8_27b_r9700 import (
     fp8_hybrid_inventory,
-    inventory as candidate_inventory,
     q4_inventory,
     q4_w8_mse_inventory,
 )
-
+from tools.convert.qwen3_8_27b_r9700 import (
+    inventory as candidate_inventory,
+)
 
 MODEL_ID = candidate_inventory.MODEL_ID
 WEIGHTS_ID = candidate_inventory.WEIGHTS_ID
@@ -699,7 +700,7 @@ class ArtifactBinding:
         self._validate_draft_ids()
 
     @classmethod
-    def open(cls, path: str | Path) -> "ArtifactBinding":
+    def open(cls, path: str | Path) -> ArtifactBinding:
         artifact = Artifact.open(path)
         try:
             return cls(artifact, owns_artifact=True)
@@ -708,7 +709,7 @@ class ArtifactBinding:
             raise
 
     @classmethod
-    def bind(cls, artifact: Artifact) -> "ArtifactBinding":
+    def bind(cls, artifact: Artifact) -> ArtifactBinding:
         return cls(artifact, owns_artifact=False)
 
     @property
@@ -761,7 +762,7 @@ class ArtifactBinding:
         if self._owns_artifact:
             self._artifact.close()
 
-    def __enter__(self) -> "ArtifactBinding":
+    def __enter__(self) -> ArtifactBinding:
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
@@ -830,7 +831,7 @@ class VisionArtifactBinding:
         )
 
     @classmethod
-    def open(cls, path: str | Path) -> "VisionArtifactBinding":
+    def open(cls, path: str | Path) -> VisionArtifactBinding:
         artifact = Artifact.open(path)
         try:
             return cls(artifact, owns_artifact=True)
@@ -857,7 +858,7 @@ class VisionArtifactBinding:
             self._artifact.close()
             self._owns_artifact = False
 
-    def __enter__(self) -> "VisionArtifactBinding":
+    def __enter__(self) -> VisionArtifactBinding:
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
@@ -882,8 +883,8 @@ __all__ = [
     "RowAddressable",
     "TextBinding",
     "TextLayerBinding",
-    "VisionBinding",
     "VisionArtifactBinding",
+    "VisionBinding",
     "VisionLayerBinding",
     "VisionMergerBinding",
     "WeightObject",

@@ -3,34 +3,32 @@
 
 from __future__ import annotations
 
-import json
 import io
+import json
 import os
 import tempfile
 import unittest
-from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from tools.bench.run_ninfer_bench_matrix import (
-    _validate_speculative,
-    NINFER_PREFIX,
-    MATRIX_SCHEMA_VERSION,
-    REPORT_SCHEMA_VERSION,
-    PHASE_TIMING_SEMANTICS,
     LEGACY_PHASE_TIMING_SEMANTICS,
-    validate_report_phase_timing,
-    prefill_timing_eligible,
+    MATRIX_SCHEMA_VERSION,
+    NINFER_PREFIX,
+    PHASE_TIMING_SEMANTICS,
     POWER_BOUND_PRESETS,
     POWER_RECHECK_PRESETS,
     R9700_KV_PLANE_LAYOUTS,
+    REPORT_SCHEMA_VERSION,
     BenchCase,
+    _validate_speculative,
     add_repetition_args,
     bind_dflash_diagnostic,
     bind_n16_migration_receipt,
-    build_hybrid_shared_workspace_authority,
     build_cases,
+    build_hybrid_shared_workspace_authority,
     dflash_shortlist_frontier,
     dflash_shortlist_profiles,
     durable_replace_text,
@@ -38,22 +36,24 @@ from tools.bench.run_ninfer_bench_matrix import (
     inspect_artifact,
     inspect_prefill_chunk_authority,
     load_bench_report,
-    report_rows,
     main,
     manifest_owned_path,
+    prefill_timing_eligible,
+    report_rows,
     require_auto_power_profile,
-    require_r9700_pci_identity,
-    require_hip_pci_device,
     require_fp8_hybrid_artifact,
-    validate_fp8_hybrid_performance_contract,
-    validate_post_chunk_capacity_contract,
-    validate_hybrid_shared_workspace_authority,
+    require_hip_pci_device,
+    require_r9700_pci_identity,
     validate_automatic_feasibility,
-    validate_dflash_campaign_artifact,
-    validate_dflash_ordinary_command,
-    validate_dflash_diagnostic_raw,
     validate_bound_diagnostic,
     validate_case_profile,
+    validate_dflash_campaign_artifact,
+    validate_dflash_diagnostic_raw,
+    validate_dflash_ordinary_command,
+    validate_fp8_hybrid_performance_contract,
+    validate_hybrid_shared_workspace_authority,
+    validate_post_chunk_capacity_contract,
+    validate_report_phase_timing,
     validate_report_tests,
     validate_whole_ordinary_command,
     write_dflash_determinism,

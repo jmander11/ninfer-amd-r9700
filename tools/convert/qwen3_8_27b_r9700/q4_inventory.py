@@ -23,7 +23,6 @@ from tools.convert.qwen3.common.inventory import (
 
 from . import source_inventory
 
-
 MODEL_ID = "qwen3.8-27b"
 WEIGHTS_ID = "r9700-q4g64-n16k16-eval"
 TARGET_KEY = "qwen3_8_27b_r9700"
@@ -77,7 +76,7 @@ def validate_inventory() -> None:
     ):
         raise ValueError("all-Q4 evaluation inventory differs from the source plan")
     expected_counts = {BF16: 582, FP32: 96, I32: 1, Q4: 439}
-    if FORMAT_COUNTS != expected_counts:
+    if expected_counts != FORMAT_COUNTS:
         raise ValueError(
             f"all-Q4 format counts differ: expected {expected_counts}, got {FORMAT_COUNTS}"
         )
@@ -87,7 +86,7 @@ def validate_inventory() -> None:
         I32: 524_288,
         Q4: 15_100_612_032,
     }
-    if FORMAT_ENCODED_BYTES != dict(sorted(expected_bytes.items())):
+    if dict(sorted(expected_bytes.items())) != FORMAT_ENCODED_BYTES:
         raise ValueError("all-Q4 encoded byte totals differ from the fixed tensor plan")
     if TENSOR_ENCODED_BYTES != 15_159_801_760:
         raise ValueError("all-Q4 tensor payload byte total differs")
@@ -107,11 +106,11 @@ __all__ = [
     "OBJECT_SPECS",
     "RECIPE_ID",
     "RESOURCE_SPECS",
-    "ResourceSpec",
     "TARGET_KEY",
     "TENSOR_ENCODED_BYTES",
     "TENSOR_SPECS",
-    "TensorSpec",
     "WEIGHTS_ID",
+    "ResourceSpec",
+    "TensorSpec",
     "validate_inventory",
 ]

@@ -5,15 +5,15 @@ from __future__ import annotations
 import copy
 import json
 import math
-from pathlib import Path
 import struct
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from tools.ppl import assemble_pareto as assembly, pareto, run
+from tools.ppl import assemble_pareto as assembly
+from tools.ppl import pareto, run
 from tools.ppl.test_pareto import migration_receipt
-
 
 WEIGHTS = "r9700-q4-w8-mse-n16k16-eval"
 
@@ -80,7 +80,7 @@ def campaign_fixture(root: Path, weights=WEIGHTS, mean_gate=None):
     refs = {}
     for tokens in (8192, 32768):
         n = tokens // 2 - 1
-        base = {key: None for key in run.BF16_SCORER_REPORT_FIELDS}
+        base = dict.fromkeys(run.BF16_SCORER_REPORT_FIELDS)
         base.update(
             {
                 "scheme": run.BASELINE,

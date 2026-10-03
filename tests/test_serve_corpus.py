@@ -1,34 +1,38 @@
 from __future__ import annotations
 
-import json
 import hashlib
 import io
+import json
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from tools.bench.run_serve_concurrency import (
+    Job,
+    receive_stream,
+)
+from tools.bench.run_serve_concurrency import (
+    parse_args as parse_concurrency_args,
+)
 from tools.bench.run_serve_corpus import (
-    CampaignError,
-    Fixture,
     RUN_ARTIFACT_TYPE,
     RUN_SCHEMA_VERSION,
+    CampaignError,
+    Fixture,
     RunSpec,
     load_existing_records,
-    parse_args as parse_corpus_args,
     require_compiled_profile,
     require_server_log_identity,
     server_command,
     summary_row,
     validate_server_start,
 )
-from tools.bench.run_serve_concurrency import (
-    Job,
-    receive_stream,
-    parse_args as parse_concurrency_args,
+from tools.bench.run_serve_corpus import (
+    parse_args as parse_corpus_args,
 )
 
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import struct
 import tempfile
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from tools.artifact.container import Artifact, TensorObject
 from tools.artifact.layouts import encoded_size

@@ -41,15 +41,17 @@ class TerminalSelectionIoTest(unittest.TestCase):
             published_result = root / "result.json"
             pending_input.write_text("{}\n", encoding="utf-8")
             pending_result.write_text("{}\n", encoding="utf-8")
-            with mock.patch.object(
-                publication,
-                "validate_terminal_production_authority",
-                side_effect=ValueError("invalid authority"),
+            with (
+                mock.patch.object(
+                    publication,
+                    "validate_terminal_production_authority",
+                    side_effect=ValueError("invalid authority"),
+                ),
+                self.assertRaisesRegex(ValueError, "invalid authority"),
             ):
-                with self.assertRaisesRegex(ValueError, "invalid authority"):
-                    publication.publish(
-                        pending_input, published_input, pending_result, published_result
-                    )
+                publication.publish(
+                    pending_input, published_input, pending_result, published_result
+                )
             self.assertFalse(published_input.exists())
             self.assertFalse(published_result.exists())
             self.assertTrue(pending_input.exists())

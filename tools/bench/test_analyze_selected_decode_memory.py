@@ -27,8 +27,11 @@ from tools.bench.prepare_selected_decode_memory_profile import (
     sha,
     validate_profile_build_receipt,
 )
-from tools.bench.run_ninfer_bench_matrix import inspect_executable
-from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION, PHASE_TIMING_SEMANTICS
+from tools.bench.run_ninfer_bench_matrix import (
+    PHASE_TIMING_SEMANTICS,
+    REPORT_SCHEMA_VERSION,
+    inspect_executable,
+)
 
 
 class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):

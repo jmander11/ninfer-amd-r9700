@@ -7,7 +7,6 @@ import argparse
 import json
 import os
 import stat
-from pathlib import Path
 
 from tools.r9700.run_a8q4_group_major_activation_gate import OUTPUT, validate_report
 

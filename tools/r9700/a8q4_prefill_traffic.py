@@ -8,7 +8,6 @@ import json
 import math
 from dataclasses import asdict, dataclass
 
-
 GROUP = 64
 OUTPUT_BYTES = 2
 W8_GROUP = 32

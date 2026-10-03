@@ -8,23 +8,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tools.bench import assemble_dflash_selection as selection
 from tools.bench.assemble_dflash_selection import (
     _auxiliary,
     _matched_ordinary_speed_gate,
-    _matrix,
     _records,
     _same_campaign,
-    _selected_base,
     assemble,
     main,
 )
 from tools.bench.run_ninfer_bench_matrix import (
-    BenchCase,
     MATRIX_SCHEMA_VERSION,
     R9700_POWER_PROFILE,
+    BenchCase,
 )
-from tools.ppl.pareto import _file_sha256, classify
-from tools.bench import assemble_dflash_selection as selection
 
 
 class DFlashSelectionTest(unittest.TestCase):
@@ -289,11 +286,11 @@ class DFlashSelectionTest(unittest.TestCase):
                 "--out",
                 str(output),
             ]
-            with patch.object(
-                selection, "assemble", side_effect=[{"winner": "a"}, {"winner": "b"}]
+            with (
+                patch.object(selection, "assemble", side_effect=[{"winner": "a"}, {"winner": "b"}]),
+                self.assertRaisesRegex(ValueError, "changed"),
             ):
-                with self.assertRaisesRegex(ValueError, "changed"):
-                    main(argv)
+                main(argv)
             self.assertFalse(output.exists())
             with patch.object(selection, "assemble", return_value={"winner": "a"}):
                 main(argv)

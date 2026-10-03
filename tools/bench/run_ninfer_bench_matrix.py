@@ -28,8 +28,8 @@ summary CSV/JSON that is easy to compare across runs.
 from __future__ import annotations
 
 import argparse
-import ctypes
 import csv
+import ctypes
 import dataclasses
 import datetime as dt
 import hashlib
@@ -43,8 +43,9 @@ import struct
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -57,9 +58,9 @@ from tools.bench.matrix_contract import (
     R9700_KV_PLANE_LAYOUTS,
 )
 from tools.bench.prefill_chunk_authority import inspect_prefill_chunk_authority
+from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes, dflash2_q4_inventory
 from tools.ppl import run as ppl_run
 from tools.ppl.validate_fp8_hybrid_execution_gate import query_widths
-from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes, dflash2_q4_inventory
 
 DEFAULT_BENCH = REPO_ROOT / "build-r9700/bench/ninfer_bench"
 DEFAULT_CORPUS = REPO_ROOT / "bench/fixtures/bench_corpus.ids"

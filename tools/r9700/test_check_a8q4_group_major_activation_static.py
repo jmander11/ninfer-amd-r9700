@@ -1,9 +1,7 @@
-import tempfile
 import unittest
 from pathlib import Path
 
 from tools.r9700.check_a8q4_group_major_activation_static import check, source_gate
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "tools/r9700/a8q4_group_major_activation_qual.hip"

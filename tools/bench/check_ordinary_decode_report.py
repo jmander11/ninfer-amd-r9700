@@ -7,8 +7,8 @@ import argparse
 import json
 import math
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -16,11 +16,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from tools.bench.run_ninfer_bench_matrix import (
     DECODE_ATTENTION_PROFILE,
-    PACKED_DECODE_MIN_CONTEXT,
-    SPLIT512_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
+    PACKED_DECODE_MIN_CONTEXT,
     R9700_KV_PLANE_LAYOUTS,
     R9700_POWER_PROFILE,
+    SPLIT512_MIN_CONTEXT,
     add_repetition_args,
     build_cases,
     file_sha256,

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import tempfile
-import unittest
 import json
 import statistics
+import tempfile
+import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -21,8 +21,8 @@ from tools.bench.select_prefill_chunk import (
     _owned_path,
     _rank,
     _stable_manifest,
-    build_cases,
     _validated_prefill_measurement,
+    build_cases,
     build_screening,
     build_selection,
     main,

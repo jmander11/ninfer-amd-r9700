@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from pathlib import Path
 import shutil
 import statistics
+from pathlib import Path
 
 from tools.ppl import compare_nvfp4 as common
 

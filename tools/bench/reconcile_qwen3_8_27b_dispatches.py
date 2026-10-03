@@ -11,8 +11,9 @@ import os
 import stat
 import tempfile
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 TRACE_TYPE = "ninfer_r9700_selected_profile_trace"
 SCHEDULE_TYPE = "ninfer_qwen3_8_27b_static_dispatch_schedule"

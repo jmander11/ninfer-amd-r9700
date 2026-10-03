@@ -19,10 +19,9 @@ from tools.bench.validate_low_context_prefill import validate_ladder
 from tools.bench.validate_selected_niah import validate as validate_niah
 from tools.bench.validate_selected_vision_diagnostic import validate as validate_vision
 from tools.bench.verify_selected_hardware_use import verify as verify_hardware
-from tools.ppl.quality_recovery_io import EXPECTED_AUTHORITIES, validate_authority_map
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
+from tools.ppl.quality_recovery_io import EXPECTED_AUTHORITIES, validate_authority_map
 from tools.ppl.validate_selected_exact_token import validate as validate_exact_token
-
 
 REPO = Path(__file__).resolve().parents[2]
 PRODUCT_CONCURRENCIES = [1, 2, 3, 4]

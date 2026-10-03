@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 
 def one(body: str, pattern: str, label: str) -> int:

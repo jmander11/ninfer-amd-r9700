@@ -14,7 +14,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 ROLE_SPECS = (
     ("mlp_gate_up", 64, "post_mixer"),
     ("attention_query_key_and_gate_value", 32, "attention"),

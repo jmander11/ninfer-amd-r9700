@@ -8,9 +8,9 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
-
+from typing import Any
 
 SCHEMA = "ninfer.r9700.fp8_gate_up_qualification.v1"
 SHAPE = {"tokens": 2048, "rows": 34816, "columns": 5120}

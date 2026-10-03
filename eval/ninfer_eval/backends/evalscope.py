@@ -169,7 +169,7 @@ class EvalScopeBackend:
             per_subset = int(params.get("context_lengths_num_intervals", 10)) * int(
                 params.get("document_depth_percent_intervals", 10)
             )
-            counts = {subset: per_subset for subset in ("english", "chinese")}
+            counts = dict.fromkeys(("english", "chinese"), per_subset)
         subsets = tuple(job.backend_args.get("subset_list") or (counts.keys() if counts else ()))
         total = None
         if counts:

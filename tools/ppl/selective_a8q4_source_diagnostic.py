@@ -12,13 +12,13 @@ on the unchanged BF16 source scorer.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
 import math
-from pathlib import Path
 import struct
 import sys
-from typing import Iterable, Mapping
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -49,7 +49,6 @@ from tools.ppl.selective_q4g128_source_diagnostic import (
     _scope,
 )
 from tools.reference.qwen3_8_27b_bf16 import protocol
-
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_selective_a8q4_source_diagnostic"
 SCHEMA_VERSION = 1

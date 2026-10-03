@@ -5,8 +5,8 @@ import unittest
 import torch
 
 from .q4_row_scaled import compare_sample, quantize_dequantize
-from .screen_q4_row_scaled_quality import assemble_report, select_row_indices
 from .screen_q4_group_sizes_quality import _production_model, measure
+from .screen_q4_row_scaled_quality import assemble_report, select_row_indices
 
 
 class Q4RowScaledTest(unittest.TestCase):

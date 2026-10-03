@@ -10,21 +10,25 @@ Q4G128 representations.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-import hashlib
 import json
 import math
-from pathlib import Path
 import sys
-from typing import Mapping, Sequence
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import numpy as np
 import torch
 
 from tools.artifact.numeric import QuantFormat
 
-from . import fp8_hybrid_inventory, mse_quantize, preflight_identity, source_inventory
-from . import source_recipe
+from . import (
+    fp8_hybrid_inventory,
+    mse_quantize,
+    preflight_identity,
+    source_inventory,
+    source_recipe,
+)
 from .q4_row_scaled import quantize_dequantize
 from .screen_q4_row_scaled_quality import (
     SampledShardReader,
@@ -34,7 +38,6 @@ from .screen_q4_row_scaled_quality import (
     sha256_file,
     write_no_clobber,
 )
-
 
 SCHEMA = "ninfer.qwen3_8_27b.selective-q4g128-mse-source-screen.v1"
 STATUS = "qualification_only_no_artifact_or_runtime_format"

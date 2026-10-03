@@ -1,9 +1,8 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from tools.r9700.check_gated_rmsnorm_prefill_static import check
-
 
 SYMBOL = "_ZN6ninfer3ops5r97005eager12_GLOBAL__N_142gated_rmsnorm_k6144_token8_kernelEv"
 

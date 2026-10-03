@@ -10,23 +10,24 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
+from tools.bench.run_ninfer_bench_matrix import (
+    MATRIX_SCHEMA_VERSION,
+    R9700_KV_PLANE_LAYOUTS,
+    R9700_POWER_PROFILE,
+    BenchCase,
+    file_sha256,
+)
 from tools.ppl.assemble_pareto import (
+    _bind_prefill_chunk_authority,
+    _manifest_prefill_chunk,
     _quality_candidate,
     _reports,
-    _manifest_prefill_chunk,
-    _bind_prefill_chunk_authority,
     _validate_ordinary_whole_report,
     assemble_candidate,
     validate_chunk_candidate_bindings,
     validate_xattention_dense_controls,
 )
-from tools.bench.run_ninfer_bench_matrix import BenchCase, file_sha256
-from tools.bench.run_ninfer_bench_matrix import (
-    MATRIX_SCHEMA_VERSION,
-    R9700_KV_PLANE_LAYOUTS,
-    R9700_POWER_PROFILE,
-)
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pareto import _valid_capacity_failure, classify

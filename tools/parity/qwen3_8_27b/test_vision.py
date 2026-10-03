@@ -2,15 +2,14 @@ import json
 import os
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 import torch
 
 from tools.parity.qwen3_8_27b.vision import (
     metrics,
     publish_json_create_only,
-    sha256_file,
     source_provenance,
 )
 

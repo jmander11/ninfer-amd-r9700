@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 import torch
 
@@ -10,7 +10,6 @@ from tools.convert.common.safetensors import ShardReader
 from tools.convert.qwen3.common import conversion
 
 from . import draft_head, inventory, source_inventory, source_recipe
-
 
 _ROOT_CONFIG = {
     "architectures": ["Qwen3_5ForConditionalGeneration"],

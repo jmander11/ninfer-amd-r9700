@@ -8,22 +8,27 @@ The target's fixed selection record owns the exact per-recipe matrix inventory.
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack
 import hashlib
 import json
-from pathlib import Path
 import re
+from contextlib import ExitStack
+from pathlib import Path
 
 from tools.artifact.container import (
     Artifact,
     ArtifactIdentity,
     ArtifactWriter,
     TensorObject,
-    TensorSpec as StoredTensor,
+)
+from tools.artifact.container import (
     ResourceSpec as StoredResource,
 )
+from tools.artifact.container import (
+    TensorSpec as StoredTensor,
+)
 from tools.convert.qwen3.common.inventory import TensorSpec
-from . import q4_inventory, fp8_hybrid_inventory, selective_protected_inventory
+
+from . import fp8_hybrid_inventory, q4_inventory, selective_protected_inventory
 from .e4m3_inventory import F8E4M3_ROW_F32S, ROW_SCALED_LAYOUT
 
 AUTHORITY = (
@@ -148,8 +153,10 @@ def convert(args):
         reader = None
         if source_names:
             import torch
+
             from tools.convert.common.safetensors import ShardReader
-            from . import source_recipe, source
+
+            from . import source, source_recipe
             from .e4m3_rowwise import encode_e4m3_rowwise_chunks
 
             torch.set_num_threads(4)

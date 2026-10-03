@@ -7,16 +7,18 @@ import argparse
 import json
 import os
 import stat
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.bench.run_ninfer_bench_matrix import (
     DECODE_ATTENTION_PROFILE,
-    PACKED_DECODE_MIN_CONTEXT,
-    SPLIT512_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
+    PACKED_DECODE_MIN_CONTEXT,
     PRODUCT_CONCURRENCIES,
     R9700_KV_PLANE_LAYOUTS,
+    SPLIT512_MIN_CONTEXT,
     build_cases,
     file_sha256,
     load_bench_report,
@@ -24,11 +26,9 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_automatic_feasibility,
     validate_manifest_output_ownership,
 )
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.bench.select_prefill_chunk import REQUIRED_GROUPS, REQUIRED_PROFILES, REQUIRED_RECIPES
 from tools.ppl.assemble_pareto import _missing_capacity_provenance
 from tools.ppl.run import validate_n16_receipt_summary
-
 
 EXPECTED_IDENTITIES = {
     (recipe, group, profile)
@@ -113,10 +113,8 @@ def _validate_capacity_outcomes(
             and failure.get("stderr") == str(stderr)
             and failure.get("stdout") == str(stdout)
             and (
-                type(failure.get("returncode")) is int
-                and failure["returncode"] != 0
-                or isinstance(failure.get("error"), str)
-                and bool(failure["error"])
+                (type(failure.get("returncode")) is int and failure["returncode"] != 0)
+                or (isinstance(failure.get("error"), str) and bool(failure["error"]))
             )
         ]
         if len(matches) != 1:

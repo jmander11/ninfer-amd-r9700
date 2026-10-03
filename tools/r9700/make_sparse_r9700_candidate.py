@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from math import prod
-from pathlib import Path
 import struct
 import sys
-
+from math import prod
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -33,7 +32,6 @@ from tools.convert.qwen3_8_27b_r9700 import (
     w8_bf16_gdn_qk_inventory,
     w8_mse_inventory,
 )
-
 
 MAGIC = b"NINFER\x00\x02"
 PREFIX = struct.Struct("<8sQ")

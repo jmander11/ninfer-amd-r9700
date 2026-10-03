@@ -7,10 +7,10 @@ from unittest import mock
 from tools.bench.prepare_selected_vision_diagnostic import REPO, file_identity
 from tools.bench.validate_selected_vision_diagnostic import validate
 from tools.parity.qwen3_8_27b.vision_contract import (
+    CRITERIA,
     EXPECTED_TRACE_NAMES,
     GATE,
     REPORT_FORMAT,
-    CRITERIA,
     trace_shapes,
 )
 

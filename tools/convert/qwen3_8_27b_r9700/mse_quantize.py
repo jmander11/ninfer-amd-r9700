@@ -18,12 +18,10 @@ import torch
 from tools.artifact.layouts import (
     encode_q4_n16k16,
     encode_row_split,
-    q4_n16k16_geometry,
     row_split_geometry,
 )
 from tools.artifact.numeric import QuantFormat, get_format
 from tools.convert.common.quantize import QuantizedMatrix, pick_device
-
 
 REFINEMENT_STEPS = 8
 ROW_CHUNK = 128
@@ -261,6 +259,6 @@ __all__ = [
     "optimize_w8g32_scales",
     "quantize_and_encode_mse",
     "quantize_and_encode_q4g64_mse",
-    "quantize_q4g64_matrix_mse",
     "quantize_matrix_mse",
+    "quantize_q4g64_matrix_mse",
 ]

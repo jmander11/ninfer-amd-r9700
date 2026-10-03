@@ -5,11 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from tools.reference.qwen3_8_27b_bf16 import protocol as bf16_protocol
-
 
 SOURCE_SHARDS = tuple(f"model-{index:05d}-of-00018.safetensors" for index in range(1, 19))
 SOURCE_TENSORS = 1199

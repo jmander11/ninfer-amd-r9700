@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
 import importlib
 import json
 import math
 import os
-from pathlib import Path
 import platform
 import struct
 import sys
-from typing import Iterable, Sequence
-
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 MODEL_ID = "qwen3.8-27b"
 WEIGHTS_ID = "bf16-source"
@@ -825,19 +824,19 @@ __all__ = [
     "EXECUTION_ENVIRONMENT_KEYS",
     "FORBIDDEN_EXECUTION_ENVIRONMENT",
     "FULL_ATTENTION_LAYERS",
-    "GDN_QKV_RANGES",
-    "GDN_RECURRENCE_EXECUTION",
     "G16_CACHE_SCHEME",
     "G32_CACHE_SCHEME",
+    "GDN_QKV_RANGES",
+    "GDN_RECURRENCE_EXECUTION",
     "MATMUL_REDUCTION_EXECUTION",
     "MODEL_ID",
+    "TOKEN_DOMAIN",
+    "TRITON_CODEGEN_EXECUTION",
+    "WEIGHTS_ID",
     "ScoreProvenance",
     "ScoreVectors",
     "ScorerOptions",
-    "TOKEN_DOMAIN",
-    "TRITON_CODEGEN_EXECUTION",
     "TensorRequirement",
-    "WEIGHTS_ID",
     "build_parser",
     "cache_value_group",
     "clear_result",
@@ -855,8 +854,8 @@ __all__ = [
     "resolve_decode_prefix",
     "resolve_score_begin",
     "resolve_skip",
-    "resolved_preferred_blas_library",
     "resolved_matmul_reduction",
+    "resolved_preferred_blas_library",
     "resolved_triton_codegen",
     "result_payload",
     "source_shard_sha256",

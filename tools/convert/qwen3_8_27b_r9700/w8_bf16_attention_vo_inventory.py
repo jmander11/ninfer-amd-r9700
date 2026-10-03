@@ -16,15 +16,14 @@ from tools.convert.qwen3.common.inventory import (
     DIRECT_FORMATS,
     FP32,
     I32,
+    W8,
     ResourceSpec,
     StoredObjectSpec,
     TensorSpec,
-    W8,
     tensor_spec,
 )
 
 from . import source_inventory
-
 
 MODEL_ID = "qwen3.8-27b"
 WEIGHTS_ID = "r9700-w8-bf16-attn-vo-eval"
@@ -90,7 +89,7 @@ def validate_inventory() -> None:
     ):
         raise ValueError("W8/BF16-attention inventory differs from the source plan")
     expected_counts = {BF16: 614, FP32: 96, I32: 1, W8: 407}
-    if FORMAT_COUNTS != expected_counts:
+    if expected_counts != FORMAT_COUNTS:
         raise ValueError(
             "W8/BF16-attention format counts differ: "
             f"expected {expected_counts}, got {FORMAT_COUNTS}"
@@ -101,7 +100,7 @@ def validate_inventory() -> None:
         I32: 524_288,
         W8: 29_042_547_584,
     }
-    if FORMAT_ENCODED_BYTES != dict(sorted(expected_bytes.items())):
+    if dict(sorted(expected_bytes.items())) != FORMAT_ENCODED_BYTES:
         raise ValueError("W8/BF16-attention encoded byte totals differ from the fixed plan")
     if TENSOR_ENCODED_BYTES != 31_282_775_392:
         raise ValueError("W8/BF16-attention tensor payload byte total differs")
@@ -132,11 +131,11 @@ __all__ = [
     "OBJECT_SPECS",
     "RECIPE_ID",
     "RESOURCE_SPECS",
-    "ResourceSpec",
     "TARGET_KEY",
     "TENSOR_ENCODED_BYTES",
     "TENSOR_SPECS",
-    "TensorSpec",
     "WEIGHTS_ID",
+    "ResourceSpec",
+    "TensorSpec",
     "validate_inventory",
 ]

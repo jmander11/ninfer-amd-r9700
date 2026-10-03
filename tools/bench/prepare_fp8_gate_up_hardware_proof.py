@@ -8,9 +8,8 @@ import hashlib
 import json
 import os
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
-
 
 QUALIFICATIONS = {
     "gate_up": {

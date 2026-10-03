@@ -14,23 +14,25 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from pathlib import Path
 import struct
 import sys
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.convert.qwen3_8_27b_r9700 import mse_quantize
-from tools.convert.qwen3_8_27b_r9700 import source_inventory
+from tools.convert.qwen3_8_27b_r9700 import mse_quantize, source_inventory
 from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (
     MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2,
-    Q4G128_DIAGNOSTIC,
     _mse_q4g128_decode,
-    _validate_provenance as validate_screen_provenance,
     selective_specs,
+)
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (
+    _validate_provenance as validate_screen_provenance,
+)
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (
     validate_report as validate_screen_report,
 )
 from tools.ppl.compare_q4_group_source import _against, _load_bf16, _source_key
@@ -47,7 +49,6 @@ from tools.ppl.q4_group_source_diagnostic import (
     validate_source_metadata,
 )
 from tools.reference.qwen3_8_27b_bf16 import protocol
-
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_selective_q4g128_source_diagnostic"
 SCHEMA_VERSION = 1
@@ -75,7 +76,7 @@ if (
     len(SELECTED_SOURCE_ROWS) != SELECTED_RAW_SOURCE_TENSORS
     or sum(end - begin for spans in SELECTED_SOURCE_ROWS.values() for begin, end in spans)
     != SELECTED_RAW_SOURCE_ROWS
-    or SELECTED_SOURCE_ROWS != _expected_source_rows()
+    or _expected_source_rows() != SELECTED_SOURCE_ROWS
 ):
     raise ValueError("selective Q4G128 raw-source row inventory differs")
 

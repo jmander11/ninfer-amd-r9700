@@ -1,7 +1,12 @@
 from __future__ import annotations
-import json, os, tempfile, unittest
+
+import json
+import os
+import tempfile
+import unittest
 from pathlib import Path
 from unittest import mock
+
 from tools.r9700 import run_a8q4_n16k16_weight_ht_gate as gate
 
 
@@ -154,11 +159,13 @@ class TestGate(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 gate.publish(p, payload)
             q = Path(td) / "late.json"
-            with mock.patch.object(
-                gate, "validate_report_payload", side_effect=RuntimeError("late")
+            with (
+                mock.patch.object(
+                    gate, "validate_report_payload", side_effect=RuntimeError("late")
+                ),
+                self.assertRaisesRegex(RuntimeError, "late"),
             ):
-                with self.assertRaisesRegex(RuntimeError, "late"):
-                    gate.publish(q, payload)
+                gate.publish(q, payload)
             self.assertFalse(os.path.lexists(q))
             self.assertFalse(any(Path(td).glob(".*.pending")))
 

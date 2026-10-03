@@ -23,7 +23,7 @@ SPAN = 32
 
 
 def _spans(ids: list[int]) -> set[int]:
-    return {hash(tuple(ids[i : i + SPAN])) for i in range(0, max(0, len(ids) - SPAN + 1))}
+    return {hash(tuple(ids[i : i + SPAN])) for i in range(max(0, len(ids) - SPAN + 1))}
 
 
 def _chat_request(path: Path) -> dict:

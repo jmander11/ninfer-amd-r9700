@@ -2,8 +2,12 @@
 """Prove production HSACO changes only at two W-load policy fields."""
 
 from __future__ import annotations
-import argparse, re, struct
+
+import argparse
+import re
+import struct
 from pathlib import Path
+
 from tools.r9700.patch_a8q4_n16k16_weight_ht_assembly import POLICY, SYMBOL, executable_offset
 
 

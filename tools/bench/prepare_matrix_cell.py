@@ -14,12 +14,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import shutil
 import stat
 import subprocess
 import tempfile
-from typing import Sequence
+from collections.abc import Sequence
+from pathlib import Path
 
 
 def _lexical_absolute(path: Path) -> Path:

@@ -11,9 +11,9 @@ from a8q4_prefill_traffic import (
     W8_M64_N64,
     W8_OLD_WAVE16,
     Shape,
+    parse_w8_shape,
     requested_traffic,
     requested_w8_traffic,
-    parse_w8_shape,
     with_roofline,
     with_w8_roofline,
 )

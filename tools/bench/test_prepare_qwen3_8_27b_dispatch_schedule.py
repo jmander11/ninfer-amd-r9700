@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import unittest
 
+from tools.bench.model_qwen3_8_27b_roofline import FORMATS, _counts
 from tools.bench.prepare_qwen3_8_27b_dispatch_schedule import (
     SOURCE_AUTHORITIES,
     _post_marker,
     _source_marker,
     build_schedule,
 )
-from tools.bench.model_qwen3_8_27b_roofline import FORMATS, _counts
 
 
 def _row(

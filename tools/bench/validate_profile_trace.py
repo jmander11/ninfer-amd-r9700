@@ -9,13 +9,13 @@ import json
 import math
 import os
 import sqlite3
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from tools.bench.analyze_whole_profile import analyze
 from tools.bench.prepare_whole_profile import ROCPROFV3
 from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
-
 
 ARTIFACT_TYPE = "ninfer_r9700_selected_profile_trace"
 SCHEMA_VERSION = 1
@@ -175,7 +175,7 @@ def _parse_database(
             "static_lds_size",
             "static_scratch_size",
         )
-        selection = list(sorted(required)) + [name for name in optional if name in columns]
+        selection = sorted(required) + [name for name in optional if name in columns]
         query = ", ".join(f'"{name}"' for name in selection)
         raw_rows = list(
             connection.execute(f"select {query} from kernels order by start, dispatch_id")

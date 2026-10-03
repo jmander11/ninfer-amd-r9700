@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
-import json
 from pathlib import Path
 from unittest import mock
 
-from tools.bench.select_prefill_chunk import REQUIRED_GROUPS, REQUIRED_PROFILES, REQUIRED_RECIPES
 from tools.bench.matrix_contract import R9700_KV_PLANE_LAYOUTS
 from tools.bench.run_ninfer_bench_matrix import (
     DECODE_ATTENTION_PROFILE,
     PACKED_DECODE_MIN_CONTEXT,
     SPLIT512_MIN_CONTEXT,
 )
+from tools.bench.select_prefill_chunk import REQUIRED_GROUPS, REQUIRED_PROFILES, REQUIRED_RECIPES
 from tools.bench.validate_post_chunk_capacity_campaign import (
     EXPECTED_IDENTITIES,
     validate_campaign,

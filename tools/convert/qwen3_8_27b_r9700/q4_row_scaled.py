@@ -6,7 +6,6 @@ import math
 
 import torch
 
-
 QMIN = -8
 QMAX = 7
 GROUP_SIZE = 64

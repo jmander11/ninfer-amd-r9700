@@ -4,14 +4,14 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter, defaultdict
 import hashlib
 import json
 import math
-from pathlib import Path
 import sqlite3
-from typing import Any, Sequence
-
+from collections import defaultdict
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 MEASURED = "ninfer_bench_measured"
 FULL_LAYERS = frozenset(range(3, 64, 4))
@@ -653,9 +653,9 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
                 raise ValueError("kernel is associated with a future marker occurrence")
             if region.startswith(tuple(TARGET_FAMILIES)):
                 stage = "target_64_layer_verification"
-            elif region.startswith(PREFILL_PREFIXES):
-                stage = "prompt_prefill"
-            elif not region and prefill[0][0] <= begin and end <= prefill[0][1]:
+            elif region.startswith(PREFILL_PREFIXES) or (
+                not region and prefill[0][0] <= begin and end <= prefill[0][1]
+            ):
                 stage = "prompt_prefill"
             elif region in ("", MEASURED) or any(
                 region.startswith(family + " payload=") for family in DFLASH_SERVICE_FAMILIES

@@ -4,18 +4,17 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
 import importlib
 import importlib.metadata
 import json
 import os
-from pathlib import Path
 import platform
 import sys
 import time
-from typing import Sequence
-
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -284,6 +283,7 @@ def run_probe(options: Options) -> dict:
             chunk_gated_delta_rule,
             fused_recurrent_gated_delta_rule,
         )
+
         from tools.reference.qwen3_8_27b_bf16 import backend
     except (ImportError, OSError, RuntimeError) as error:
         raise RuntimeError(

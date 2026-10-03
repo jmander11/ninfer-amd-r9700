@@ -11,11 +11,11 @@ from unittest.mock import patch
 from tools.bench.check_ordinary_decode_report import validate_matrix
 from tools.bench.run_ninfer_bench_matrix import (
     DECODE_ATTENTION_PROFILE,
-    PACKED_DECODE_MIN_CONTEXT,
-    SPLIT512_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
+    PACKED_DECODE_MIN_CONTEXT,
     R9700_KV_PLANE_LAYOUTS,
     R9700_POWER_PROFILE,
+    SPLIT512_MIN_CONTEXT,
     add_repetition_args,
     build_cases,
 )

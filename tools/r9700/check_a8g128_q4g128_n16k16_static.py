@@ -2,6 +2,7 @@
 """Fail-closed static gate for the disconnected exact-G128 qualifier."""
 
 from __future__ import annotations
+
 import argparse
 import re
 from pathlib import Path

@@ -2,7 +2,10 @@
 """Extract exact production HSACO and patch only two W-load policy fields."""
 
 from __future__ import annotations
-import argparse, re, struct
+
+import argparse
+import re
+import struct
 from pathlib import Path
 
 SYMBOL = "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_133a8q4g64_linear_prefill_cta_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjjj"

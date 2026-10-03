@@ -4,14 +4,6 @@ import copy
 import unittest
 
 from .compare_stage_traces import _expected_checkpoints, compare, validate_trace
-from .stage_trace import (
-    LOGIT_ROWS,
-    TRACE_ENVIRONMENT_KEYS,
-    TRACE_ROWS,
-    TYPE,
-    VERSION,
-    resolved_preferred_blas_library,
-)
 from .protocol import (
     ATTENTION_PV_EXECUTION,
     DETERMINISTIC_ENVIRONMENT,
@@ -20,7 +12,14 @@ from .protocol import (
     MATMUL_REDUCTION_EXECUTION,
     TRITON_CODEGEN_EXECUTION,
 )
-
+from .stage_trace import (
+    LOGIT_ROWS,
+    TRACE_ENVIRONMENT_KEYS,
+    TRACE_ROWS,
+    TYPE,
+    VERSION,
+    resolved_preferred_blas_library,
+)
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64

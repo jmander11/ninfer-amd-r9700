@@ -11,7 +11,6 @@ from tools.bench.post_hybrid_profile import (
     bucket,
 )
 
-
 REGIONS = {
     "post_mixer": "ninfer.post-mixer.prefill.layer payload=0",
     "attention": "ninfer.attention.prefill.layer payload=0",

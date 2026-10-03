@@ -2,25 +2,29 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import unittest
+from collections import Counter
 
 from tools.artifact.container import (
     ResourceSpec as ArtifactResourceSpec,
+)
+from tools.artifact.container import (
     TensorObject,
-    TensorSpec as ArtifactTensorSpec,
     plan_objects,
+)
+from tools.artifact.container import (
+    TensorSpec as ArtifactTensorSpec,
 )
 from tools.convert.qwen3_8_27b_r9700 import (
     q4_inventory,
     q4_w8_inventory,
     q4_w8_mse_inventory,
     source_inventory,
-    w8_mse_inventory,
     w8_bf16_attention_qk_inventory,
     w8_bf16_attention_vo_inventory,
     w8_bf16_embedding_inventory,
     w8_bf16_gdn_qk_inventory,
+    w8_mse_inventory,
 )
 
 

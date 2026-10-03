@@ -1,9 +1,8 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from tools.r9700.check_gated_rmsnorm_k128_static import check
-
 
 SYMBOL = "_ZN6ninfer3ops5r97005eager12_GLOBAL__N_131gated_rmsnorm_k128_rows8_kernelEv"
 
@@ -50,15 +49,13 @@ class StaticCheckTest(unittest.TestCase):
 
     def test_rejects_missing_required_instructions(self):
         for text in (fixture(vector_load=False), fixture(exponential=False)):
-            with self.subTest(text=text):
-                with self.assertRaisesRegex(ValueError, "lacks"):
-                    self.run_check(text)
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "lacks"):
+                self.run_check(text)
 
     def test_rejects_resources(self):
         for text in (fixture(vgprs=25), fixture(occupancy=15), fixture(lds=4), fixture(scratch=4)):
-            with self.subTest(text=text):
-                with self.assertRaises(ValueError):
-                    self.run_check(text)
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                self.run_check(text)
 
     def test_rejects_forbidden_instructions(self):
         for opcode in (

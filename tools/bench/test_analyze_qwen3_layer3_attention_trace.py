@@ -6,8 +6,8 @@ from pathlib import Path
 
 from analyze_qwen3_layer3_attention_trace import (
     CACHE_BYTES,
-    FIELDS,
     FIELD_BY_NAME,
+    FIELDS,
     ROLES,
     SIDECAR_BYTES,
     STAGE_BYTES,

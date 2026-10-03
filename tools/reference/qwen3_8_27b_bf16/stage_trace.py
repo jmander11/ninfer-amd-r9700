@@ -23,7 +23,6 @@ from .protocol import (
     resolved_triton_codegen,
 )
 
-
 TYPE = "ninfer_qwen3_8_bf16_stage_trace"
 VERSION = 8
 TRACE_ROWS = 64

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+from tools.bench import assemble_dflash_selection as selection
 from tools.bench import prepare_selected_dflash as prep
 from tools.bench import run_ninfer_bench_matrix as matrix
-from tools.bench import assemble_dflash_selection as selection
 
 
 class PreparationTest(unittest.TestCase):
@@ -94,11 +94,13 @@ class PreparationTest(unittest.TestCase):
                 self.assertEqual(json.loads((root / "plan.json").read_text()), plan)
                 self.assertEqual(len(list(root.glob("*/companion.ninfer"))), 0)
                 self.assertEqual((root / "commands.sh").read_text().count("--device cpu"), 3)
-                with patch.object(
-                    prep, "benchmark_profile", return_value={"benchmark": {"sha256": "changed"}}
+                with (
+                    patch.object(
+                        prep, "benchmark_profile", return_value={"benchmark": {"sha256": "changed"}}
+                    ),
+                    self.assertRaises((ValueError, KeyError)),
                 ):
-                    with self.assertRaises((ValueError, KeyError)):
-                        prep._load_plan(root / "plan.json")
+                    prep._load_plan(root / "plan.json")
 
     def test_script_publication_never_overwrites_changed_plan(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -7,12 +7,12 @@ predecessor/successor codebooks and every non-matrix value remain source BF16.
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass, replace
 import hashlib
 import json
-from pathlib import Path
 import struct
+from collections import Counter
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 from tools.artifact.layouts import encoded_size
 from tools.convert.qwen3.common.inventory import BF16, Q4, TensorSpec, tensor_spec
@@ -24,7 +24,6 @@ from . import (
     q4_w8_mse_inventory,
     selective_protected_inventory,
 )
-
 
 MODEL_ID = "qwen3.8-27b"
 ALL_Q4_BASE_WEIGHTS_ID = q4_inventory.WEIGHTS_ID
@@ -333,8 +332,8 @@ def validate_inventory() -> None:
     if TENSOR_ENCODED_BYTES != 1_209_469_440:
         raise ValueError("DFlash2 tensor byte total differs")
     if (
-        RECIPE_ID
-        != dflash2_matrix_recipes.get_recipe(dflash2_matrix_recipes.CANONICAL_Q4G64).recipe_id
+        dflash2_matrix_recipes.get_recipe(dflash2_matrix_recipes.CANONICAL_Q4G64).recipe_id
+        != RECIPE_ID
     ):
         raise ValueError("canonical DFlash2 recipe identity differs")
     for recipe in dflash2_matrix_recipes.RECIPES:
@@ -365,10 +364,6 @@ validate_inventory()
 
 
 __all__ = [
-    "SELECTIVE_BASE_WEIGHTS_ID",
-    "SELECTIVE_WEIGHTS_ID",
-    "SELECTIVE_OBJECT_SPECS",
-    "SELECTIVE_DEVICE_ARENA_BYTES",
     "ALL_Q4_BASE_WEIGHTS_ID",
     "ALL_Q4_DEVICE_ARENA_BYTES",
     "ALL_Q4_OBJECT_SPECS",
@@ -381,14 +376,18 @@ __all__ = [
     "HYBRID_OBJECT_SPECS",
     "HYBRID_TENSOR_BYTES",
     "HYBRID_WEIGHTS_ID",
+    "MATRIX_RECIPE_SUMMARIES",
     "MIXED_BASE_WEIGHTS_ID",
     "MIXED_DEVICE_ARENA_BYTES",
     "MIXED_OBJECT_SPECS",
     "MIXED_TENSOR_BYTES",
     "MIXED_WEIGHTS_ID",
-    "MATRIX_RECIPE_SUMMARIES",
     "MODEL_ID",
     "RECIPE_ID",
+    "SELECTIVE_BASE_WEIGHTS_ID",
+    "SELECTIVE_DEVICE_ARENA_BYTES",
+    "SELECTIVE_OBJECT_SPECS",
+    "SELECTIVE_WEIGHTS_ID",
     "SOURCE_BINDINGS",
     "SOURCE_NAMES",
     "TARGET_KEY",

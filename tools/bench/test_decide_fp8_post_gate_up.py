@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from tools.bench.decide_fp8_post_gate_up import (
     QUALIFICATIONS,
@@ -12,7 +12,6 @@ from tools.bench.decide_fp8_post_gate_up import (
     sha256_file,
     validate_qualifier,
 )
-
 
 ROOT = Path(__file__).resolve().parents[2]
 

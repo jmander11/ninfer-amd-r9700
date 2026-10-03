@@ -11,7 +11,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-
 JOB_TEMP = {
     "aime25_t06": ("aime25", 0.6),
     "aime26_t06": ("aime26", 0.6),

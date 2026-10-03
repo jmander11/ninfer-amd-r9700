@@ -13,9 +13,9 @@ from unittest.mock import patch
 from tools.bench.prepare_whole_profile import main, prepare, prepare_low_context
 from tools.bench.run_ninfer_bench_matrix import (
     MATRIX_SCHEMA_VERSION,
-    REPORT_SCHEMA_VERSION,
     PHASE_TIMING_SEMANTICS,
     R9700_KV_PLANE_LAYOUTS,
+    REPORT_SCHEMA_VERSION,
 )
 
 

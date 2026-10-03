@@ -10,14 +10,13 @@ from tools.convert.qwen3.common.inventory import (
     DIRECT_FORMATS,
     FP32,
     I32,
+    W8,
     ResourceSpec,
     StoredObjectSpec,
     TensorSpec,
-    W8,
 )
 
 from . import inventory
-
 
 MODEL_ID = "qwen3.8-27b"
 WEIGHTS_ID = "r9700-w8g32-mse-eval"
@@ -67,11 +66,11 @@ __all__ = [
     "OBJECT_SPECS",
     "RECIPE_ID",
     "RESOURCE_SPECS",
-    "ResourceSpec",
     "TARGET_KEY",
     "TENSOR_ENCODED_BYTES",
     "TENSOR_SPECS",
-    "TensorSpec",
     "WEIGHTS_ID",
+    "ResourceSpec",
+    "TensorSpec",
     "validate_inventory",
 ]

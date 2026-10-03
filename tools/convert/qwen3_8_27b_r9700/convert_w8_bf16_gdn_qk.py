@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import time
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
@@ -106,30 +106,32 @@ def convert(
     output.parent.mkdir(parents=True, exist_ok=True)
     resource_payloads = {resource.name: resource.data for resource in preflight.resources}
 
-    with ShardReader(preflight.model_dir) as reader:
-        with ArtifactWriter(
+    with (
+        ShardReader(preflight.model_dir) as reader,
+        ArtifactWriter(
             output,
             ArtifactIdentity(
                 w8_bf16_gdn_qk_inventory.MODEL_ID,
                 w8_bf16_gdn_qk_inventory.WEIGHTS_ID,
             ),
             preflight.object_plan.specs,
-        ) as writer:
-            if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError("W8/BF16-GDN-QK writer plan differs from completed preflight")
-            for index, spec in enumerate(w8_bf16_gdn_qk_inventory.OBJECT_SPECS, start=1):
-                if isinstance(spec, w8_bf16_gdn_qk_inventory.ResourceSpec):
-                    payload = resource_payloads[spec.name]
-                else:
-                    tensor = _materialize_tensor(spec, reader, preflight.draft)
-                    payload = _encode_tensor(tensor, spec, resolved_device)
-                    del tensor
-                writer.write(spec.name, payload)
-                del payload
-                print(
-                    f"[{index}/{len(w8_bf16_gdn_qk_inventory.OBJECT_SPECS)}] {spec.name}",
-                    flush=True,
-                )
+        ) as writer,
+    ):
+        if writer.objects != preflight.object_plan.objects:
+            raise RuntimeError("W8/BF16-GDN-QK writer plan differs from completed preflight")
+        for index, spec in enumerate(w8_bf16_gdn_qk_inventory.OBJECT_SPECS, start=1):
+            if isinstance(spec, w8_bf16_gdn_qk_inventory.ResourceSpec):
+                payload = resource_payloads[spec.name]
+            else:
+                tensor = _materialize_tensor(spec, reader, preflight.draft)
+                payload = _encode_tensor(tensor, spec, resolved_device)
+                del tensor
+            writer.write(spec.name, payload)
+            del payload
+            print(
+                f"[{index}/{len(w8_bf16_gdn_qk_inventory.OBJECT_SPECS)}] {spec.name}",
+                flush=True,
+            )
 
     report = family_conversion.build_conversion_report(
         identity=ArtifactIdentity(

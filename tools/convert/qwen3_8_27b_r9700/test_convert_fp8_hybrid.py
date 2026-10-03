@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stdout
 import hashlib
 import io
 import json
+import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest import mock
 
 import torch
@@ -205,13 +205,15 @@ class Fp8HybridConverterTest(unittest.TestCase):
             self.assertEqual(summary["conversion_argv"][-1], "cuda")
             self.assertEqual(summary["validation_argv"][-1], "--validate-only")
 
-            with mock.patch.object(
-                convert_fp8_hybrid.shutil,
-                "disk_usage",
-                return_value=SimpleNamespace(free=projected),
+            with (
+                mock.patch.object(
+                    convert_fp8_hybrid.shutil,
+                    "disk_usage",
+                    return_value=SimpleNamespace(free=projected),
+                ),
+                self.assertRaisesRegex(OSError, "insufficient free space"),
             ):
-                with self.assertRaisesRegex(OSError, "insufficient free space"):
-                    convert_fp8_hybrid.preflight_destination(checked, output)
+                convert_fp8_hybrid.preflight_destination(checked, output)
             occupied = root / "occupied.ninfer"
             occupied.write_bytes(b"occupied")
             with self.assertRaisesRegex(FileExistsError, "already exists"):

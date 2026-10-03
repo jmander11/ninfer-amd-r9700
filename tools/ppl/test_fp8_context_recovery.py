@@ -2,9 +2,9 @@
 
 import copy
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from tools.ppl import fp8_context_recovery as recovery
@@ -30,17 +30,17 @@ def physical():
         "pci_bus_id": "0000:13:00.0",
         "hip_runtime_version": 10000000,
         "hipblaslt_version": 100000,
-        **{
-            key: 20 * 1024**3
-            for key in (
+        **dict.fromkeys(
+            (
                 "free_before_context",
                 "free_after_context",
                 "free_before_prepare",
                 "free_after_prepare",
                 "free_after_binding",
                 "free_after_execution",
-            )
-        },
+            ),
+            20 * 1024**3,
+        ),
         "profiles": [
             {"rows": n, "tokens": t, "fingerprint": "a" * 32, "matmul_workspace_bytes": 0}
             for n in (34816, 7168, 4096)

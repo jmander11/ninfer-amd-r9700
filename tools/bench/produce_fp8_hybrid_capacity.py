@@ -14,8 +14,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
@@ -23,7 +23,6 @@ if str(REPO) not in sys.path:
 
 from tools.artifact.layouts import align_up, encoded_size
 from tools.convert.qwen3_8_27b_r9700 import fp8_hybrid_inventory
-
 
 SCHEMA = "ninfer.r9700.fp8-hybrid-current-capacity.v2"
 HEADROOM = 1 << 30

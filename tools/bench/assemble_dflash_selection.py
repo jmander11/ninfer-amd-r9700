@@ -7,47 +7,44 @@ import argparse
 import json
 import math
 import os
-from pathlib import Path
-import stat
 import sys
 import tempfile
-from typing import Any, Sequence
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.bench.run_ninfer_bench_matrix import (
+    DFLASH_COMPANIONS,
+    DFLASH_PRODUCTION_PROFILES,
+    DFLASH_SHORTLIST_SCHEMA_VERSION,
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     R9700_POWER_PROFILE,
+    base_hybrid_shared_workspace_authority,
+    bind_n16_migration_receipt,
     build_cases,
-    dflash_shortlist_profiles,
     file_sha256,
+    inspect_artifact,
+    inspect_executable,
     load_bench_report,
     report_rows,
+    require_dflash_companion,
     validate_automatic_feasibility,
     validate_bound_diagnostic,
     validate_hybrid_shared_workspace_authority,
-    base_hybrid_shared_workspace_authority,
     write_dflash_determinism,
     write_dflash_greedy_parity,
     write_dflash_quality_evidence,
     write_dflash_shortlist,
-    DFLASH_COMPANIONS,
-    DFLASH_PRODUCTION_PROFILES,
-    DFLASH_SHORTLIST_SCHEMA_VERSION,
-    inspect_artifact,
-    inspect_executable,
-    bind_n16_migration_receipt,
-    require_dflash_companion,
 )
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes
-from tools.ppl.assemble_pareto import _missing_capacity_provenance
-from tools.ppl.assemble_pareto import _manifest_prefill_chunk
+from tools.ppl.assemble_pareto import _manifest_prefill_chunk, _missing_capacity_provenance
 from tools.ppl.pareto import validate_terminal_production_authority
-
 
 ARTIFACT_TYPE = "ninfer_r9700_dflash_selection"
 SCHEMA_VERSION = 5
@@ -293,7 +290,7 @@ def _records(
             or not isinstance(record.get("command"), list)
             or any(not isinstance(part, str) for part in record["command"])
             or (
-                cases.get((record.get("suite"), record.get("case")), None) is not None
+                cases.get((record.get("suite"), record.get("case"))) is not None
                 and cases[(record["suite"], record["case"])].diagnostic
                 and (
                     not isinstance(record.get("bound_diagnostic"), str)

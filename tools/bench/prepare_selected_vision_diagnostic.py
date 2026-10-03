@@ -15,9 +15,8 @@ import tempfile
 from pathlib import Path
 
 from tools.bench.prepare_selected_niah import resolve_route
-from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
 from tools.parity.qwen3_8_27b.vision_contract import EXPECTED_TRACE_NAMES, GATE
-
+from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
 
 REPO = Path(__file__).resolve().parents[2]
 PREPARE_INPUT = REPO / "tools/parity/qwen3_8_27b/prepare_vision_input.py"

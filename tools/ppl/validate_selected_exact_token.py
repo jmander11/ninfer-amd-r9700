@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import stat
@@ -16,10 +15,10 @@ from tools.ppl.run import (
     file_sha256,
     load_argmax,
     load_nlls,
-    sidecar_parity,
     load_reused_bf16_cells,
-    validate_bf16_repeat_comparison,
     require_bf16_decode_reuse_alignment,
+    sidecar_parity,
+    validate_bf16_repeat_comparison,
 )
 
 HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"

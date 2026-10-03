@@ -4,19 +4,31 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 import json
 import math
-from pathlib import Path
+import os
 import subprocess
 import tempfile
-from typing import Callable
+from collections.abc import Callable
+from pathlib import Path
 
 import torch
 from safetensors import safe_open
 
 from tools.artifact import dequantize_row_split
 from tools.artifact.numeric import QUANT_FORMATS
+from tools.parity.qwen3_8_27b.vision_contract import (
+    CRITERIA,
+    GROUP_ACTIVITY_FLOOR,
+    POSITION_WEIGHT_ABSOLUTE_LIMIT,
+    PREPROCESSING_ABSOLUTE_LIMIT,
+    PREPROCESSING_RELATIVE_RMSE_LIMIT,
+    PRODUCTION_COSINE_MINIMUM,
+    PRODUCTION_RELATIVE_RMSE_LIMIT,
+)
+from tools.parity.qwen3_8_27b.vision_contract import (
+    summarize as _summarize,
+)
 from tools.reference.qwen3.common.frontend import Frontend
 from tools.reference.qwen3.common.multimodal import MultimodalBatch, load_messages
 from tools.reference.qwen3.common.vision_ops import (
@@ -36,27 +48,6 @@ from tools.reference.qwen3_8_27b.ops import linear, residual_add
 from tools.reference.qwen3_8_27b.vision import VisionEncoder
 from tools.reference.qwen3_8_27b.weights import WeightStore
 from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
-
-
-from tools.parity.qwen3_8_27b.vision_contract import (
-    PRODUCTION_RELATIVE_RMSE_LIMIT,
-    PRODUCTION_COSINE_MINIMUM,
-    PRODUCTION_FINAL_RELATIVE_RMSE_LIMIT,
-    LOCAL_RELATIVE_RMSE_LIMIT,
-    LOCAL_COSINE_MINIMUM,
-    LOCAL_GROUP_SCALED_RMSE_LIMIT,
-    LOCAL_GROUP_COSINE_MINIMUM,
-    PREPROCESSING_ABSOLUTE_LIMIT,
-    PREPROCESSING_RELATIVE_RMSE_LIMIT,
-    POSITION_WEIGHT_ABSOLUTE_LIMIT,
-    SOURCE_RELATIVE_RMSE_LIMIT,
-    SOURCE_COSINE_MINIMUM,
-    SOURCE_FINAL_RELATIVE_RMSE_LIMIT,
-    SOURCE_FINAL_COSINE_MINIMUM,
-    GROUP_ACTIVITY_FLOOR,
-    CRITERIA,
-    summarize as _summarize,
-)
 
 WEIGHT_CRITERIA = {
     "Q4G64_F16S": {

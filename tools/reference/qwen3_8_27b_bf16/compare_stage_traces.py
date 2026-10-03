@@ -7,14 +7,14 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402
+from tools.reference.qwen3_8_27b_bf16.protocol import (
     ATTENTION_PV_EXECUTION,
     DETERMINISTIC_ENVIRONMENT,
     DETERMINISTIC_EXECUTION_PROFILE,
@@ -27,11 +27,11 @@ from tools.reference.qwen3_8_27b_bf16.protocol import (  # noqa: E402
     TOKEN_DOMAIN,
     TRITON_CODEGEN_EXECUTION,
 )
-from tools.reference.qwen3_8_27b_bf16.stage_trace import (  # noqa: E402
+from tools.reference.qwen3_8_27b_bf16.stage_trace import (
+    ATTENTION_DETAIL_HEAD_DIM,
     ATTENTION_DETAIL_KV_HEADS,
     ATTENTION_DETAIL_LAYER,
     ATTENTION_DETAIL_Q_PER_KV,
-    ATTENTION_DETAIL_HEAD_DIM,
     ATTENTION_DETAIL_STAGE_SHAPES,
     ATTENTION_KERNEL_DETAIL_STAGES,
     LOGIT_ROWS,
@@ -40,7 +40,6 @@ from tools.reference.qwen3_8_27b_bf16.stage_trace import (  # noqa: E402
     TYPE,
     VERSION,
 )
-
 
 COMPARISON_TYPE = "ninfer_qwen3_8_bf16_stage_trace_comparison"
 COMPARISON_VERSION = 8

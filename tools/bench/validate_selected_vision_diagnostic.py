@@ -15,8 +15,8 @@ from tools.bench.prepare_selected_vision_diagnostic import (
     GPU_PYTHON,
     MEDIA,
     MESSAGES,
-    REPO,
     REFERENCE_AUTHORITIES,
+    REPO,
     SOURCE,
     file_identity,
     inspect_python,
@@ -24,15 +24,15 @@ from tools.bench.prepare_selected_vision_diagnostic import (
     sha,
     validate_source_receipt,
 )
-
-
 from tools.parity.qwen3_8_27b.vision_contract import (
-    EXPECTED_TRACE_NAMES as CAPTURES,
+    CRITERIA,
     GATE,
     REPORT_FORMAT,
-    CRITERIA,
     summarize,
     trace_shapes,
+)
+from tools.parity.qwen3_8_27b.vision_contract import (
+    EXPECTED_TRACE_NAMES as CAPTURES,
 )
 
 

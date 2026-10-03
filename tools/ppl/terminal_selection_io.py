@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 """Exclusive publication helpers for the terminal schema-v7 selection authority."""
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import stat
 from pathlib import Path

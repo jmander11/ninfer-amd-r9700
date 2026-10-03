@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
-import json
 from pathlib import Path
 from unittest.mock import patch
 

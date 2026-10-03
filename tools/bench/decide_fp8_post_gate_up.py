@@ -9,13 +9,12 @@ import itertools
 import json
 import math
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from tools.artifact.layouts import encoded_size
 from tools.bench.analyze_e4m3_hybrid import expected_projection_objects
 from tools.convert.qwen3_8_27b_r9700 import e4m3_inventory, q4_inventory
-
 
 SCHEMA = "ninfer.r9700.fp8-post-gate-up-decision.v1"
 QUALIFIER_SCHEMA = "ninfer.r9700.fp8_projection_qualification.v1"

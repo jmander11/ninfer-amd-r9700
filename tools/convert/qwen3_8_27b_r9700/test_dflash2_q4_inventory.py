@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import unittest
+from collections import Counter
 
 from tools.convert.qwen3.common.inventory import TensorSpec
-from tools.convert.qwen3_8_27b_r9700 import dflash2_q4_inventory as inventory
 from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes as recipes
+from tools.convert.qwen3_8_27b_r9700 import dflash2_q4_inventory as inventory
 
 
 class DFlash2Q4InventoryTest(unittest.TestCase):

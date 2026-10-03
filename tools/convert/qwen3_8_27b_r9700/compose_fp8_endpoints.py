@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 
-from tools.artifact.container import Artifact, ArtifactIdentity, ArtifactWriter, TensorObject
-from tools.artifact.container import TensorSpec as StoredTensor, ResourceSpec as StoredResource
+from tools.artifact.container import Artifact, ArtifactIdentity, ArtifactWriter
+from tools.artifact.container import ResourceSpec as StoredResource
+from tools.artifact.container import TensorSpec as StoredTensor
 from tools.convert.qwen3.common.inventory import TensorSpec
+
 from . import convert_fp8_capped as capped
 from . import dflash2_q4_inventory as dflash
 from .compose_fp8_capped_dflash import payload_hash

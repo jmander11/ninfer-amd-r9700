@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
-from pathlib import Path
 import re
-
+from dataclasses import dataclass
+from pathlib import Path
 
 _IDENTITY = re.compile(
     r'NINFER_QWEN38_FP8_HYBRID_IDENTITY\(\s*"([^"]+)",\s*"([^"]+)",\s*"([0-9a-f]{64})"\s*\)',

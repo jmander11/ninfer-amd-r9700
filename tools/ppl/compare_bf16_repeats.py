@@ -6,14 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from pathlib import Path
 import sys
+from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.ppl import run
-
 
 ARTIFACT_TYPE = run.BF16_REPEAT_ARTIFACT_TYPE
 SCHEMA_VERSION = run.BF16_REPEAT_SCHEMA_VERSION

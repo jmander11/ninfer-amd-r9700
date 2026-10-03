@@ -14,16 +14,16 @@ import subprocess
 import sys
 import tempfile
 import urllib.parse
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from tools.bench.validate_fp8_gate_up_comparison import validate as validate_comparison
 from tools.bench.decide_fp8_post_gate_up import validate_qualifier as validate_projection
-
+from tools.bench.validate_fp8_gate_up_comparison import validate as validate_comparison
 
 FP8_QUANTIZE = "fp8_quantize_activation_kernel"
 FP8_POISON_BOUNDARIES = (

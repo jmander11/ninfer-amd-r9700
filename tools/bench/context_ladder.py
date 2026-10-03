@@ -11,10 +11,10 @@ import argparse
 import hashlib
 import json
 import math
-from pathlib import Path
 import statistics
 import struct
 import subprocess
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 POWER = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")

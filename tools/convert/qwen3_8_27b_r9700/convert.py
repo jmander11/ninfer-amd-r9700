@@ -9,11 +9,11 @@ performance evidence selects and names the production recipe.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import time
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
@@ -21,6 +21,7 @@ from tools.artifact.container import ArtifactIdentity, ArtifactWriter
 from tools.convert.common.quantize import pick_device
 from tools.convert.common.safetensors import ShardReader
 from tools.convert.qwen3.common import conversion as family_conversion
+
 from . import build_draft_ranking, draft_head, inventory, resources, source, source_recipe
 
 
@@ -99,24 +100,26 @@ def convert(
     output.parent.mkdir(parents=True, exist_ok=True)
     resources = {resource.name: resource.data for resource in preflight.resources}
 
-    with ShardReader(preflight.model_dir) as reader:
-        with ArtifactWriter(
+    with (
+        ShardReader(preflight.model_dir) as reader,
+        ArtifactWriter(
             output,
             ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),
             preflight.object_plan.specs,
-        ) as writer:
-            if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError("candidate writer object plan differs from completed preflight")
-            for index, spec in enumerate(inventory.OBJECT_SPECS, start=1):
-                if isinstance(spec, inventory.ResourceSpec):
-                    payload = resources[spec.name]
-                else:
-                    tensor = _materialize_tensor(spec, reader, preflight.draft)
-                    payload = _encode_tensor(tensor, spec, resolved_device)
-                    del tensor
-                writer.write(spec.name, payload)
-                del payload
-                print(f"[{index}/{len(inventory.OBJECT_SPECS)}] {spec.name}", flush=True)
+        ) as writer,
+    ):
+        if writer.objects != preflight.object_plan.objects:
+            raise RuntimeError("candidate writer object plan differs from completed preflight")
+        for index, spec in enumerate(inventory.OBJECT_SPECS, start=1):
+            if isinstance(spec, inventory.ResourceSpec):
+                payload = resources[spec.name]
+            else:
+                tensor = _materialize_tensor(spec, reader, preflight.draft)
+                payload = _encode_tensor(tensor, spec, resolved_device)
+                del tensor
+            writer.write(spec.name, payload)
+            del payload
+            print(f"[{index}/{len(inventory.OBJECT_SPECS)}] {spec.name}", flush=True)
 
     report = family_conversion.build_conversion_report(
         identity=ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),

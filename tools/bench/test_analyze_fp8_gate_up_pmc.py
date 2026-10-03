@@ -10,7 +10,6 @@ from unittest import mock
 
 from tools.bench.analyze_fp8_gate_up_pmc import validate_benchmark_report, validate_plan
 
-
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "profiles/rocprof/r9700-selected-fp8-gate-up-p2048-pmc-20260905/plan.json"
 

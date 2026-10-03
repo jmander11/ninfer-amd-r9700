@@ -18,16 +18,15 @@ import statistics
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
-
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.bench import run_serve_corpus as corpus  # noqa: E402
-
 
 SUITES = ("decode-saturation", "corpus-makespan")
 DEFAULT_STATS_INTERVAL_MS = 1000

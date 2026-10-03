@@ -14,8 +14,9 @@ import hashlib
 import json
 import math
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tools.r9700.a8q4_prefill_traffic import (
     M64_N64,
@@ -24,7 +25,6 @@ from tools.r9700.a8q4_prefill_traffic import (
     requested_traffic,
     requested_w8_traffic,
 )
-
 
 TIMING_TYPE = "ninfer_qwen3_8_27b_dispatch_timing"
 INVENTORY_TYPE = "ninfer_qwen3_8_27b_dispatch_inventory"

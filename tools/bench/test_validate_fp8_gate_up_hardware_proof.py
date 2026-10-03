@@ -9,9 +9,9 @@ from tools.bench.validate_fp8_gate_up_hardware_proof import (
     Q4_KERNEL,
     _hardware_profile,
     _is_fp8_poison_boundary,
+    _validate_qualifier_report,
     _validate_resource_binding,
     _validate_resources,
-    _validate_qualifier_report,
 )
 
 

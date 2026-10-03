@@ -7,14 +7,13 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import stat
 import statistics
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BINARY = ROOT / "tools/r9700/build/a8q4_n16k16_layout_harness"

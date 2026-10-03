@@ -11,7 +11,6 @@ from pathlib import Path
 
 from tools.bench.verify_selected_hardware_use import sha, snapshot, verify
 
-
 Q4_CTA = "_Z_a8q4g64_linear_prefill_cta_kernel"
 Q4_WAVE = "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_128a8q4g64_linear_wmma32_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjj"
 W8_CTA = "_Z_a8w8g32_linear_prefill_cta_kernel"

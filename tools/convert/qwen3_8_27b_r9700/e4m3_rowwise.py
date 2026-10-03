@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import math
-import struct
-from typing import Iterator
+from collections.abc import Iterator
 
 import numpy as np
 import torch
-
 
 K_ALIGNMENT = 128
 PLANE_ALIGNMENT = 256

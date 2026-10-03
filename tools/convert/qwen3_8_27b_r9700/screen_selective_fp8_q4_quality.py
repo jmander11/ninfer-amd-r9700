@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 import torch
 
@@ -24,7 +24,6 @@ from .screen_e4m3_quality import (
     sha256_file,
     write_no_clobber,
 )
-
 
 SCHEMA = "ninfer.qwen3_8_27b.selective-e4m3-vs-q4g64-sampled-quality.v1"
 SELECTED_ROLES = (

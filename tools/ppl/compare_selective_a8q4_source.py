@@ -6,8 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
@@ -28,7 +28,6 @@ from tools.ppl.selective_a8q4_source_diagnostic import (
     _profile_contract,
     _scope,
 )
-
 
 COMPARISON_TYPE = "ninfer_qwen3_8_selective_a8g128_q4g128_source_comparison"
 EXPECTED_BUDGET = 11

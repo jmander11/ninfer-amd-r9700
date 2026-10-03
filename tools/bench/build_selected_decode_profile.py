@@ -11,8 +11,8 @@ import os
 import stat
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from tools.bench.prepare_selected_decode_memory_profile import (
     MARKER_SOURCE,

@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import math
 import os
-from pathlib import Path
 import random
 import struct
 import unittest
+from pathlib import Path
 
 import torch
 

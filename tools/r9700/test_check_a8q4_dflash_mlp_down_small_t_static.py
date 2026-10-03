@@ -5,7 +5,6 @@ from pathlib import Path
 
 from tools.r9700.check_a8q4_dflash_mlp_down_small_t_static import check
 
-
 ASSEMBLY = Path(__file__).resolve().parent / "build" / "a8q4_dflash_mlp_down_small_t.s"
 
 

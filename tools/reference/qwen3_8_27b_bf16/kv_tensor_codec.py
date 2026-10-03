@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import torch
 
-
 E4M3FN_MAX = 448.0
 VALUE_CODE_MAX = 7
 VALUE_GROUPS = (16, 32)

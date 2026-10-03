@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from . import publish_n16_migration_receipt as receipts

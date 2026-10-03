@@ -19,6 +19,8 @@ from tools.ppl.compare_q4_group_source import _load_bf16, _source_key
 from tools.ppl.q4_group_source_diagnostic import _atomic_new, sha256_file
 from tools.ppl.validate_fp8_hybrid_greedy import (
     _candidate_sidecars,
+)
+from tools.ppl.validate_fp8_hybrid_greedy import (
     validate as validate_product,
 )
 

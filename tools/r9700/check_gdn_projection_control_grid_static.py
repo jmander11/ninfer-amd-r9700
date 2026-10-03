@@ -6,7 +6,6 @@ import json
 import re
 from pathlib import Path
 
-
 KERNEL = "gdn_projection_control_grid_qualification_kernel"
 
 

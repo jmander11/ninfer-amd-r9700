@@ -17,6 +17,7 @@ from tools.convert.qwen3_8_27b_r9700.codec import (
 
 try:
     import torch
+
     from tools.convert.common.quantize import quantize_and_encode, quantize_matrix
     from tools.convert.qwen3_8_27b_r9700.mse_quantize import (
         quantize_and_encode_mse,

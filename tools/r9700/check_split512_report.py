@@ -7,9 +7,9 @@ import argparse
 import hashlib
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
-
+from typing import Any
 
 SCHEMA = "ninfer_r9700_split512_attention_qualification"
 POWER_PATH = "/sys/class/drm/card2/device/power_dpm_force_performance_level"

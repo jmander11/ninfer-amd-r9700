@@ -1,4 +1,5 @@
 import unittest
+
 from tools.r9700.run_a8g128_q4g128_n16k16_gate import (
     BATCH_CONTRACT,
     CONTROL_CONTRACT,

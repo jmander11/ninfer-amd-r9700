@@ -5,15 +5,14 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from tools.ppl.compare_selective_q4g128_source import (
     _load_score,
     validate_comparison,
 )
-
 
 REPO = Path(__file__).resolve().parents[2]
 PYTHON = Path("/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python")

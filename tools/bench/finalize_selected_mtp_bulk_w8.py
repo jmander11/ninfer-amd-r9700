@@ -11,8 +11,8 @@ import os
 import re
 import stat
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
 from tools.bench.validate_profile_trace import _parse_database

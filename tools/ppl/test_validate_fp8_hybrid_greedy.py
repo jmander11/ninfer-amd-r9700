@@ -32,7 +32,7 @@ class HybridGreedyDiagnosticTest(unittest.TestCase):
     def test_candidate_sidecars_are_hash_and_domain_bound(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "8192.prefill.r9700-g16.json"
-            raw = {field: None for field in run.CANDIDATE_SCORER_REPORT_FIELDS}
+            raw = dict.fromkeys(run.CANDIDATE_SCORER_REPORT_FIELDS)
             raw.update(
                 {
                     "scheme": "r9700-g16",

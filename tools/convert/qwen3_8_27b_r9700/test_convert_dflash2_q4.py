@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
-from pathlib import Path
 import struct
 import sys
+import unittest
+from dataclasses import replace
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType
-import unittest
 from unittest.mock import MagicMock, patch
 
 from tools.artifact.container import ArtifactIdentity, ArtifactWriter, TensorSpec, plan_objects
@@ -121,7 +121,7 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                     0,
                     recipe.key,
                 )
-                matrix_payload = bytes((index % 251 for index in range(objects[base_count].bytes)))
+                matrix_payload = bytes(index % 251 for index in range(objects[base_count].bytes))
                 with (
                     patch.dict(
                         sys.modules,

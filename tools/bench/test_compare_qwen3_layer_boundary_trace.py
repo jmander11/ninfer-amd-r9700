@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from compare_qwen3_layer_boundary_trace import (
+    ATTENTION_FIELDS,
     GDN_FIELDS,
     GDN_PAYLOAD_BYTES,
     PAYLOAD_BYTES,
@@ -14,9 +15,8 @@ from compare_qwen3_layer_boundary_trace import (
     compare,
     compare_gdn,
     compare_recurrent_state,
-    fnv1a64,
-    ATTENTION_FIELDS,
     compare_selected_attention,
+    fnv1a64,
 )
 
 

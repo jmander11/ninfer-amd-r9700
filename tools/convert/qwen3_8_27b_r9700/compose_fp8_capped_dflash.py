@@ -12,7 +12,9 @@ import json
 from pathlib import Path
 
 from tools.artifact.container import Artifact, ArtifactIdentity, ArtifactWriter, TensorObject
-from tools.artifact.container import TensorSpec as StoredTensor, ResourceSpec as StoredResource
+from tools.artifact.container import ResourceSpec as StoredResource
+from tools.artifact.container import TensorSpec as StoredTensor
+
 from . import convert_fp8_capped as capped
 from . import dflash2_q4_inventory as dflash
 

@@ -12,16 +12,16 @@ from pathlib import Path
 
 from tools.bench.run_ninfer_bench_matrix import (
     DECODE_ATTENTION_PROFILE,
-    PACKED_DECODE_MIN_CONTEXT,
-    SPLIT512_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
+    PACKED_DECODE_MIN_CONTEXT,
     PRODUCT_CONCURRENCIES,
-    validate_report_phase_timing,
+    SPLIT512_MIN_CONTEXT,
     bind_n16_migration_receipt,
     inspect_artifact,
     inspect_executable,
     require_fp8_hybrid_artifact,
     validate_hybrid_shared_workspace_authority,
+    validate_report_phase_timing,
 )
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
 

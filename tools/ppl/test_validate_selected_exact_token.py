@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.ppl.run import file_sha256, sidecar_parity
 from tools.ppl import validate_selected_exact_token as validator_module
+from tools.ppl.run import file_sha256, sidecar_parity
 from tools.ppl.validate_selected_exact_token import _identity, _unlink_if_owned, validate
 
 

@@ -11,8 +11,9 @@ import os
 import sqlite3
 import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 # Support both `python3 -m tools.bench...` and the immutable package's direct absolute
 # script invocation. This executes before importing any repository package.
@@ -22,7 +23,6 @@ if __package__ in (None, ""):
 from tools.bench.analyze_whole_profile import analyze
 from tools.bench.run_ninfer_bench_matrix import R9700_KV_PLANE_LAYOUTS
 from tools.bench.validate_profile_trace import _parse_database
-
 
 PLAN_TYPE = "ninfer_r9700_retained_prefill_trace_plan"
 EVIDENCE_TYPE = "ninfer_r9700_retained_prefill_trace"

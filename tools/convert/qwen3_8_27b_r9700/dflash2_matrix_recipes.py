@@ -9,12 +9,11 @@ DFlash state retain their represented BF16 bytes.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from tools.artifact.layouts import encoded_size
 from tools.convert.qwen3.common.inventory import BF16, Q4, W8, TensorSpec, tensor_spec
-
 
 CANONICAL_Q4G64 = "canonical-q4g64"
 SOURCE_MSE_Q4G64 = "source-mse-q4g64"
@@ -184,10 +183,10 @@ def encode_matrix_reference(
 
 __all__ = [
     "CANONICAL_Q4G64",
-    "MatrixRecipe",
     "RECIPES",
     "SOURCE_MSE_Q4G64",
     "SOURCE_MSE_W8G32",
+    "MatrixRecipe",
     "encode_matrix_payload",
     "encode_matrix_reference",
     "get_recipe",

@@ -7,14 +7,15 @@ import argparse
 import hashlib
 import json
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tools.bench.run_ninfer_bench_matrix import (
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
-    validate_report_phase_timing,
     R9700_KV_PLANE_LAYOUTS,
+    validate_report_phase_timing,
 )
 from tools.bench.validate_low_context_prefill import validate_ladder
 

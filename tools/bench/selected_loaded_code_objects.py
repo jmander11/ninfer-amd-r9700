@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Resolve selected FP8 dispatches through rocprof code-object URIs to captured ELF bytes."""
 
 from __future__ import annotations
@@ -9,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from tools.bench.validate_fp8_gate_up_hardware_proof import _loaded_elf
-
 
 FP8_LINEAR = "Cijk_Alik_Bljk_F8BS_"
 

@@ -3,7 +3,6 @@ import re
 import sys
 from pathlib import Path
 
-
 KERNEL = "bf16_projected_control_t1_kernel"
 
 

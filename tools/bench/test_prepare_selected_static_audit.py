@@ -1,11 +1,10 @@
-from pathlib import Path
 import json
 from unittest.mock import patch
 
 import pytest
 
-from tools.bench import prepare_selected_static_audit as audit
 from tools.bench import build_selected_decode_profile as builder
+from tools.bench import prepare_selected_static_audit as audit
 from tools.bench import verify_selected_hardware_use as verifier
 
 

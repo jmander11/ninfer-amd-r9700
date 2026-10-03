@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import struct
 import tempfile
 import unittest
+from pathlib import Path
 
 from tools.convert.qwen3_8_27b_r9700 import build_draft_ranking as ranking
 

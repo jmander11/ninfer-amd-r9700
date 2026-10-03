@@ -1,12 +1,13 @@
 """Real-container checks for exact base/companion composition and rejected donors."""
 
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from tools.artifact.container import Artifact, ArtifactIdentity, ArtifactWriter, TensorSpec
-from tools.convert.qwen3.common.inventory import tensor_spec, BF16
+from tools.convert.qwen3.common.inventory import BF16, tensor_spec
+
 from . import compose_fp8_capped_dflash as compose
 
 

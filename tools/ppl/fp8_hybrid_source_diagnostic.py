@@ -11,13 +11,12 @@ persistent weight codec and is not product A8 execution evidence.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-import hashlib
 import json
 import math
-from pathlib import Path
 import sys
-from typing import Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
@@ -49,7 +48,6 @@ from tools.ppl.q4_group_source_diagnostic import (
     validate_source_metadata,
 )
 from tools.reference.qwen3_8_27b_bf16 import protocol
-
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_fp8_q4_hybrid_source_diagnostic"
 COMPARISON_TYPE = "ninfer_qwen3_8_fp8_q4_hybrid_source_comparison"

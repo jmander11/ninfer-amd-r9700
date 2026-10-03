@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import math
 import struct
-from typing import Sequence
-
+from collections.abc import Sequence
 
 GROUP_SIZE = 32
 K_ALIGNMENT = 128

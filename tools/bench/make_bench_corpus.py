@@ -32,8 +32,9 @@ import json
 import math
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 TOKENIZER_MODEL_ID = "Qwen/Qwen3.8-27B"
 DEFAULT_TOKENS = 65536

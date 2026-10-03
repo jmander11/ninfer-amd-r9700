@@ -2,6 +2,7 @@
 """Fail-closed gfx1201 static gate for production K256/token8 RMSNorm."""
 
 from __future__ import annotations
+
 import argparse
 import re
 from pathlib import Path

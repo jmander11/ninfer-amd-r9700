@@ -9,12 +9,11 @@ import hashlib
 import itertools
 import json
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from tools.artifact.layouts import encoded_size
 from tools.convert.qwen3_8_27b_r9700 import e4m3_inventory, q4_inventory
-
 
 SCHEMA = "ninfer.r9700.e4m3-q4-hybrid-selection.v1"
 FP8_ARCHITECTURAL_CEILING_TFLOPS = 400.835
@@ -100,7 +99,7 @@ def measured_q4_calls(kernel_trace: Path, marker_trace: Path) -> list[dict[str, 
 
     calls = []
     for ordinal, ((name, shape), quantize, linear) in enumerate(
-        ((item[0], item[1][0], item[1][1]) for item in zip(expected, pairs))
+        (item[0], item[1][0], item[1][1]) for item in zip(expected, pairs)
     ):
         if (
             "quantize" not in quantize["Kernel_Name"]

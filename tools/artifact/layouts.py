@@ -7,14 +7,15 @@ roles to tensors.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from functools import lru_cache
-from math import prod
 import importlib
 import operator
 import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
+from functools import lru_cache
+from math import prod
 from types import MappingProxyType
-from typing import Any, Sequence, TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 if TYPE_CHECKING:
     import torch
@@ -30,7 +31,6 @@ from .numeric import (
     fp8lut4_group_magnitudes,
     get_format,
 )
-
 
 PLANE_ALIGNMENT = 256
 K_ALIGNMENT = 128
@@ -404,7 +404,7 @@ def fp8lut4_magnitude_table() -> tuple[tuple[int, ...], ...]:
     return tuple(fp8lut4_group_magnitudes(code) for code in range(256))
 
 
-def fp8lut4_tile_codes(packed: "torch.Tensor") -> "torch.Tensor":
+def fp8lut4_tile_codes(packed: torch.Tensor) -> torch.Tensor:
     """Row-major packed codes uint8 [N, K/2] -> N16 x K64 tile order (flat uint8)."""
 
     n, half_k = packed.shape
@@ -416,16 +416,14 @@ def fp8lut4_tile_codes(packed: "torch.Tensor") -> "torch.Tensor":
     )
 
 
-def fp8lut4_tile_groups(groups: "torch.Tensor") -> "torch.Tensor":
+def fp8lut4_tile_groups(groups: torch.Tensor) -> torch.Tensor:
     """Row-major group codes uint8 [N, K/32] -> N16 x K64 tile order (flat uint8)."""
 
     n, k32 = groups.shape
     return groups.reshape(n // 16, 16, k32 // 2, 2).permute(0, 2, 3, 1).contiguous().reshape(-1)
 
 
-def encode_fp8lut4_planes(
-    codes: "torch.Tensor", groups: "torch.Tensor", scales: "torch.Tensor"
-) -> bytes:
+def encode_fp8lut4_planes(codes: torch.Tensor, groups: torch.Tensor, scales: torch.Tensor) -> bytes:
     """Pack exact FP8LUT4 words: codes uint8 [N, K_pad] in 0..15 (bit 3 = sign, bits 0..2 =
     magnitude index), group codes uint8 [N, K_pad / 32], FP32 row multipliers [N]."""
 
@@ -455,7 +453,7 @@ def encode_fp8lut4_planes(
     return bytes(out)
 
 
-def decode_fp8lut4(source: Payload, shape: Sequence[int]) -> "torch.Tensor":
+def decode_fp8lut4(source: Payload, shape: Sequence[int]) -> torch.Tensor:
     """Exact logical FP64 [N, K] values (E4M3 magnitude times FP32 row multiplier) of one
     FP8LUT4 payload."""
 
@@ -1201,44 +1199,44 @@ def dequantize_row_split(
 
 
 __all__ = [
-    "CodebookGeometry",
-    "R9700_FP8LUT4_N16K64_V1",
-    "fp8lut4_geometry",
-    "fp8lut4_tile_codes",
-    "fp8lut4_tile_groups",
-    "fp8lut4_magnitude_table",
-    "decode_fp8lut4",
-    "encode_fp8lut4_planes",
     "CONTIGUOUS_LE_V1",
     "K_ALIGNMENT",
     "LAYOUTS",
-    "Layout",
     "PLANE_ALIGNMENT",
-    "ROW_SPLIT_K128_V1",
+    "R9700_FP8LUT4_N16K64_V1",
     "R9700_Q4G64_N16_K16_V1",
     "R9700_W8G32_N16_K16_V1",
     "ROW_SCALED_K128_V1",
+    "ROW_SPLIT_K128_V1",
+    "CodebookGeometry",
+    "Layout",
     "RowPlanes",
-    "RowSplitGeometry",
     "RowScaledGeometry",
+    "RowSplitGeometry",
     "align_up",
     "assemble_row_planes",
     "decode_direct",
-    "decode_row_split_codes",
+    "decode_fp8lut4",
     "decode_q4_n16k16_codes",
-    "dequantize_row_split",
+    "decode_row_split_codes",
     "dequantize_q4_n16k16",
     "dequantize_q4_n16k16_rows",
+    "dequantize_row_split",
     "encode_direct",
-    "encode_row_split",
+    "encode_fp8lut4_planes",
     "encode_q4_n16k16",
+    "encode_row_split",
     "encoded_size",
+    "fp8lut4_geometry",
+    "fp8lut4_magnitude_table",
+    "fp8lut4_tile_codes",
+    "fp8lut4_tile_groups",
     "gather_row_planes",
     "get_layout",
-    "row_split_geometry",
     "q4_n16k16_geometry",
-    "w8_n16k16_geometry",
-    "transcode_w8_n16k16",
     "row_scaled_geometry",
+    "row_split_geometry",
     "split_row_planes",
+    "transcode_w8_n16k16",
+    "w8_n16k16_geometry",
 ]

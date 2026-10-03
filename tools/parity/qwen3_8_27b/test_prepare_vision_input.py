@@ -1,6 +1,6 @@
+import os
 import tempfile
 import unittest
-import os
 from pathlib import Path
 from unittest import mock
 

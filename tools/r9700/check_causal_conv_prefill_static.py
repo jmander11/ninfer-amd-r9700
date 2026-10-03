@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 TILES = (4, 8, 16, 32)
 MAX_VGPRS = 240

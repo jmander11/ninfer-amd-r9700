@@ -6,13 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tools.bench.prepare_whole_profile import _write_plan, file_sha256
 from tools.bench.verify_selected_hardware_use import selected_route
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
-
 
 HYBRID_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 CAPTURE_LIBRARY = (

@@ -1,6 +1,6 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from tools.r9700.check_gdn_affine_chunk_static import check
 

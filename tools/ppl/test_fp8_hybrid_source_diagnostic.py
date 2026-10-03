@@ -1,25 +1,23 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import torch
 
-from tools.convert.qwen3_8_27b_r9700 import fp8_hybrid_decision
-from tools.convert.qwen3_8_27b_r9700 import fp8_hybrid_inventory
-from tools.convert.qwen3_8_27b_r9700 import source_recipe
 from tools.convert.qwen3.common.recipe import expression_sources
+from tools.convert.qwen3_8_27b_r9700 import fp8_hybrid_decision, fp8_hybrid_inventory, source_recipe
 from tools.convert.qwen3_8_27b_r9700.e4m3_rowwise import (
     decode_e4m3_rowwise,
     encode_e4m3_rowwise,
 )
 from tools.ppl.compare_fp8_hybrid_source import compare
 from tools.ppl.fp8_hybrid_source_diagnostic import (
-    Fp8HybridCheckpoint,
     Q4_SOURCE_ROWS,
     SELECTED_SOURCE_ROWS,
     TEXT_SPECS,
+    Fp8HybridCheckpoint,
     _matrix_scope,
     quantize_decode_e4m3,
 )

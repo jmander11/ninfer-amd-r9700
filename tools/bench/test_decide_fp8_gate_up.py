@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from tools.bench.decide_fp8_gate_up import (
     _load_bound,
