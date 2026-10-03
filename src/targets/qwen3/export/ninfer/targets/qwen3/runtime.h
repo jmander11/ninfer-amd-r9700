@@ -199,7 +199,6 @@ public:
                                std::span<const std::uint8_t> cancelled,
                                std::span<const std::uint8_t> rejected = {});
     void abort_lane(std::uint32_t lane) noexcept;
-    void retain_lane(std::uint32_t lane);
     [[nodiscard]] bool retain_reusable_lane(std::uint32_t lane);
     [[nodiscard]] bool copy_reusable_prompt(std::uint32_t lane, std::uint32_t prompt_tokens,
                                             std::vector<TokenId>& tokens,
@@ -217,6 +216,8 @@ public:
                            const RequestPlan<Variant>& plan);
     void restore_disk_entry(std::uint32_t lane, std::uint64_t entry_id,
                             const RequestPlan<Variant>& plan);
+    // Whether a RAM entry's capture copies have landed, so its restore starts without waiting.
+    [[nodiscard]] bool ram_restore_ready(std::uint64_t entry_id) const;
     [[nodiscard]] bool disk_restore_ready(std::uint64_t entry_id) const;
     [[nodiscard]] bool kv_ram_reclaim_pending() const;
     void claim_ram_entry(std::uint64_t entry_id);

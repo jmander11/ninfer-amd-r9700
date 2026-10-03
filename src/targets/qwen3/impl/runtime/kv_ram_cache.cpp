@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <condition_variable>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -459,10 +458,15 @@ KVRamCache::~KVRamCache() {
             record.copies_start = nullptr;
         }
         if (record.copies_done != nullptr) {
-            maybe_copy_sync_stall();
+            maybe_copy_sync_hold();
             (void)hipEventSynchronize(record.copies_done);
             (void)hipEventDestroy(record.copies_done);
             record.copies_done = nullptr;
+        }
+        if (record.block_done != nullptr) {
+            (void)hipEventSynchronize(record.block_done);
+            (void)hipEventDestroy(record.block_done);
+            record.block_done = nullptr;
         }
     }
     records_.clear();
@@ -471,43 +475,137 @@ KVRamCache::~KVRamCache() {
 
 KVRamCache::Record& KVRamCache::require(std::uint64_t entry_id) {
     const auto it = records_.find(entry_id);
-    if (it == records_.end()) { throw std::logic_error("RAM cache entry id is unknown"); }
+    if (it == records_.end() || it->second.retired) {
+        throw std::logic_error("RAM cache entry id is unknown");
+    }
     return it->second;
 }
 
 const KVRamCache::Record& KVRamCache::require(std::uint64_t entry_id) const {
     const auto it = records_.find(entry_id);
+    if (it == records_.end() || it->second.retired) {
+        throw std::logic_error("RAM cache entry id is unknown");
+    }
+    return it->second;
+}
+
+const KVRamCache::Record& KVRamCache::require_block(std::uint64_t entry_id) const {
+    const auto it = records_.find(entry_id);
     if (it == records_.end()) { throw std::logic_error("RAM cache entry id is unknown"); }
     return it->second;
 }
 
-void KVRamCache::destroy_record(std::uint64_t entry_id, bool count_eviction,
-                                std::unique_lock<std::mutex>& lock) {
-    auto it = records_.find(entry_id);
-    if (it == records_.end()) { return; }
-    if (it->second.io_pins != 0) {
-        throw std::logic_error("RAM cache cannot destroy an I/O-pinned entry");
-    }
-    auto* const done = it->second.copies_done;
-    if (done != nullptr) { wait_event_unlocked(lock, done, entry_id); }
-    it = records_.find(entry_id);
-    if (it == records_.end()) { return; }
-    add_orphaned_seconds(it->second, harvest_record(it->second));
-    if (it->second.copies_start != nullptr) {
-        HIP_CHECK(hipEventDestroy(it->second.copies_start));
-        it->second.copies_start = nullptr;
-    }
-    if (it->second.copies_done != nullptr) {
-        HIP_CHECK(hipEventDestroy(it->second.copies_done));
-        it->second.copies_done = nullptr;
-    }
-    it->second.copies_timed = false;
-    if (it->second.block != nullptr) { arena_.free(it->second.block); }
-    records_.erase(it);
+void KVRamCache::retire_locked(std::uint64_t entry_id) {
+    const auto it = records_.find(entry_id);
+    if (it == records_.end() || it->second.retired) { return; }
+    it->second.retired = true;
+    it->second.pinned  = false;
     fifo_.erase(std::remove(fifo_.begin(), fifo_.end(), entry_id), fifo_.end());
+    // A retired block's unharvested copy time joins the lifetime totals when the block is freed.
     drop_pending_id(entry_id);
-    if (count_eviction) { ++evictions_; }
     bump_version();
+    if (retired_free_locked(it->second)) {
+        free_block_locked(it->second);
+        records_.erase(it);
+    }
+}
+
+bool KVRamCache::retired_free_locked(const Record& record) const {
+    if (!record.retired || record.io_pins != 0) { return false; }
+    for (hipEvent_t fence : {record.copies_done, record.block_done}) {
+        if (fence == nullptr) { continue; }
+        const hipError_t ready = hipEventQuery(fence);
+        if (ready == hipErrorNotReady) { return false; }
+        HIP_CHECK(ready);
+    }
+    return true;
+}
+
+void KVRamCache::free_block_locked(Record& record) {
+    // The copy fence has completed, so the timing pair is final and the block has no reader.
+    // Arena free uses metadata reserved at allocation time and cannot allocate.
+    add_unbilled_seconds(record, harvest_record(record));
+    if (record.copies_start != nullptr) {
+        HIP_CHECK(hipEventDestroy(record.copies_start));
+        record.copies_start = nullptr;
+    }
+    if (record.copies_done != nullptr) {
+        HIP_CHECK(hipEventDestroy(record.copies_done));
+        record.copies_done = nullptr;
+    }
+    if (record.block_done != nullptr) {
+        HIP_CHECK(hipEventDestroy(record.block_done));
+        record.block_done = nullptr;
+    }
+    record.copies_timed = false;
+    if (record.block != nullptr) {
+        arena_.free(record.block);
+        record.block = nullptr;
+    }
+}
+
+void KVRamCache::reap_retired_locked() {
+    for (auto it = records_.begin(); it != records_.end();) {
+        if (!retired_free_locked(it->second)) {
+            ++it;
+            continue;
+        }
+        free_block_locked(it->second);
+        it = records_.erase(it);
+    }
+}
+
+bool KVRamCache::retired_pending() const {
+    std::lock_guard lock(io_mutex_);
+    // A block whose fence completed and whose pins dropped is free at the next reap.
+    for (const auto& [id, record] : records_) {
+        if (record.retired && !retired_free_locked(record)) { return true; }
+    }
+    return false;
+}
+
+bool KVRamCache::retired_fence_pending() const {
+    std::lock_guard lock(io_mutex_);
+    for (const auto& [id, record] : records_) {
+        if (record.retired && record.io_pins == 0 && !retired_free_locked(record)) { return true; }
+    }
+    return false;
+}
+
+bool KVRamCache::wait_retired_copies() {
+    std::vector<std::uint64_t> ids;
+    std::vector<hipEvent_t> events;
+    std::size_t before = 0;
+    {
+        std::lock_guard lock(io_mutex_);
+        before = records_.size();
+        reap_retired_locked();
+        for (const auto& [id, record] : records_) {
+            if (record.retired && record.io_pins == 0 &&
+                (record.copies_done != nullptr || record.block_done != nullptr)) {
+                ids.push_back(id);
+            }
+        }
+        events.reserve(2 * ids.size());
+        // The pins keep each fence alive while it is waited with the mutex released.
+        for (const std::uint64_t id : ids) {
+            Record& record = records_.at(id);
+            ++record.io_pins;
+            for (hipEvent_t fence : {record.copies_done, record.block_done}) {
+                if (fence != nullptr) { events.push_back(fence); }
+            }
+        }
+    }
+    maybe_copy_sync_hold();
+    try {
+        for (hipEvent_t event : events) { HIP_CHECK(hipEventSynchronize(event)); }
+    } catch (...) {
+        unpin_copy_events(ids);
+        throw;
+    }
+    unpin_copy_events(ids);
+    std::lock_guard lock(io_mutex_);
+    return records_.size() < before;
 }
 
 void KVRamCache::create_copy_event(hipEvent_t* event, unsigned int flags) {
@@ -546,11 +644,14 @@ double KVRamCache::copy_elapsed_seconds(const Record& record) const {
     return static_cast<double>(milliseconds) / 1000.0;
 }
 
-void KVRamCache::add_orphaned_seconds(const Record& record, double seconds) noexcept {
+void KVRamCache::add_unbilled_seconds(const Record& record, double seconds) noexcept {
+    // No request harvested this copy before its record was retired or re-timed (a rolled-back
+    // capture, a failed admission): it counts toward the lifetime totals only, never toward
+    // whichever unrelated request harvests next.
     if (record.copies_are_load) {
-        orphaned_load_seconds_ += seconds;
+        load_seconds_ += seconds;
     } else {
-        orphaned_save_seconds_ += seconds;
+        save_seconds_ += seconds;
     }
 }
 
@@ -566,48 +667,27 @@ double KVRamCache::harvest_record(Record& record) {
 }
 
 KvRamCopySeconds KVRamCache::harvest_copy_seconds() {
-    std::unique_lock lock(io_mutex_);
+    std::lock_guard lock(io_mutex_);
+    reap_retired_locked();
     KvRamCopySeconds out;
-    out.save += orphaned_save_seconds_;
-    save_seconds_ += orphaned_save_seconds_;
-    orphaned_save_seconds_ = 0;
-    out.load += orphaned_load_seconds_;
-    load_seconds_ += orphaned_load_seconds_;
-    orphaned_load_seconds_ = 0;
-    std::vector<hipEvent_t> events;
-    std::vector<std::uint64_t> pinned;
-    pin_pending_copy_events(events, pinned);
-    lock.unlock();
-    maybe_copy_sync_stall();
-    try {
-        for (hipEvent_t event : events) { HIP_CHECK(hipEventSynchronize(event)); }
-    } catch (...) {
-        unpin_copy_events(pinned);
-        throw;
-    }
-    lock.lock();
-    for (std::uint64_t id : pending_save_ids_) {
-        const auto it = records_.find(id);
-        if (it == records_.end()) { continue; }
-        const double seconds = harvest_record(it->second);
-        out.save += seconds;
-        save_seconds_ += seconds;
-    }
-    pending_save_ids_.clear();
-    for (std::uint64_t id : pending_load_ids_) {
-        const auto it = records_.find(id);
-        if (it == records_.end()) { continue; }
-        const double seconds = harvest_record(it->second);
-        out.load += seconds;
-        load_seconds_ += seconds;
-    }
-    pending_load_ids_.clear();
-    for (std::uint64_t id : pinned) {
-        const auto it = records_.find(id);
-        if (it == records_.end() || it->second.io_pins == 0) { continue; }
-        --it->second.io_pins;
-    }
-    io_cv_.notify_all();
+    // Copies still in flight stay pending; removing ids only shrinks the vectors.
+    const auto harvest_ready = [&](std::vector<std::uint64_t>& ids, double& billed, double& total) {
+        std::size_t kept = 0;
+        for (const std::uint64_t id : ids) {
+            const auto it = records_.find(id);
+            if (it == records_.end()) { continue; }
+            if (!copies_ready_locked(id)) {
+                ids[kept++] = id;
+                continue;
+            }
+            const double seconds = harvest_record(it->second);
+            billed += seconds;
+            total += seconds;
+        }
+        ids.resize(kept);
+    };
+    harvest_ready(pending_save_ids_, out.save, save_seconds_);
+    harvest_ready(pending_load_ids_, out.load, load_seconds_);
     return out;
 }
 
@@ -667,6 +747,7 @@ void KVRamCache::wait_pending_copies() {
         std::lock_guard lock(io_mutex_);
         pin_pending_copy_events(events, pinned);
     }
+    maybe_copy_sync_hold();
     try {
         for (hipEvent_t event : events) { HIP_CHECK(hipEventSynchronize(event)); }
     } catch (...) {
@@ -707,44 +788,11 @@ void KVRamCache::wait_copies_on_stream(Record& record, hipStream_t stream) {
     wait_copies(record);
 }
 
-void KVRamCache::maybe_copy_sync_stall() const {
+void KVRamCache::maybe_copy_sync_hold() const {
     copy_sync_entered_.store(true, std::memory_order_release);
-    const int ms = copy_sync_stall_ms_.load(std::memory_order_acquire);
-    if (ms > 0) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
-}
-
-void KVRamCache::wait_event_unlocked(std::unique_lock<std::mutex>& lock, hipEvent_t event,
-                                     std::uint64_t entry_id) {
-    if (event == nullptr) { return; }
-    auto it = records_.find(entry_id);
-    if (it != records_.end()) { ++it->second.io_pins; }
-    lock.unlock();
-    maybe_copy_sync_stall();
-    try {
-        if (fail_next_copy_sync_) {
-            fail_next_copy_sync_ = false;
-            throw std::runtime_error("injected RAM copy sync failure");
-        }
-        HIP_CHECK(hipEventSynchronize(event));
-    } catch (...) {
-        lock.lock();
-        auto pinned = records_.find(entry_id);
-        if (pinned != records_.end() && pinned->second.io_pins > 0) { --pinned->second.io_pins; }
-        io_cv_.notify_all();
-        throw;
+    while (copy_sync_held_.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    lock.lock();
-    auto pinned = records_.find(entry_id);
-    if (pinned != records_.end() && pinned->second.io_pins > 0) { --pinned->second.io_pins; }
-    io_cv_.notify_all();
-    // The unlocked HIP wait permits unrelated disk-worker snapshots to borrow
-    // this event. Its transfer finishing does not retire those host-side leases.
-    io_cv_.wait(lock, [&] {
-        const auto live  = records_.find(entry_id);
-        const bool ready = live == records_.end() || live->second.io_pins == 0;
-        retirement_waiting_for_io_.store(!ready, std::memory_order_release);
-        return ready;
-    });
 }
 
 void KVRamCache::pin_pending_copy_events(std::vector<hipEvent_t>& events,
@@ -767,7 +815,7 @@ void KVRamCache::pin_pending_copy_events(std::vector<hipEvent_t>& events,
         // Every event is already recorded by the single executor. Holding the
         // mutex retains its owner while synchronously completing that snapshot;
         // HIP completion does not require another cache operation or worker.
-        maybe_copy_sync_stall();
+        maybe_copy_sync_hold();
         const auto wait = [&](std::uint64_t id) {
             const auto it = records_.find(id);
             if (it != records_.end() && it->second.copies_done != nullptr) {
@@ -796,7 +844,12 @@ void KVRamCache::unpin_copy_events(const std::vector<std::uint64_t>& ids) noexce
         if (it == records_.end() || it->second.io_pins == 0) { continue; }
         --it->second.io_pins;
     }
-    io_cv_.notify_all();
+    // The waited fences have completed: a retired block whose last pin was one of these frees
+    // now. HIP failures abort inside HIP_CHECK; nothing else here throws.
+    try {
+        reap_retired_locked();
+    } catch (...) { // NOLINT(bugprone-empty-catch): noexcept; the next mutating call reaps again.
+    }
 }
 
 void KVRamCache::drop_pending_save(std::uint64_t entry_id) noexcept {
@@ -835,42 +888,22 @@ void KVRamCache::release(std::uint64_t entry_id) {
 }
 
 void KVRamCache::consume(std::uint64_t entry_id) {
-    std::unique_lock lock(io_mutex_);
-    Record& record = require(entry_id);
+    std::lock_guard lock(io_mutex_);
+    reap_retired_locked();
+    const Record& record = require(entry_id);
     if (!record.pinned) { throw std::logic_error("RAM cache consume requires a claimed entry"); }
-    io_cv_.wait(lock, [&] { return record.io_pins == 0; });
-    auto* const done = record.copies_done;
-    if (done != nullptr) { wait_event_unlocked(lock, done, entry_id); }
-    Record& live          = require(entry_id);
-    const double leftover = copy_elapsed_seconds(live);
-    // The source event has completed above, so no deferred owner is needed.
-    // Arena free uses metadata reserved at allocation time and cannot allocate.
-    if (live.copies_done != nullptr) {
-        HIP_CHECK(hipEventDestroy(live.copies_done));
-        live.copies_done = nullptr;
-    }
-    arena_.free(live.block);
-    live.block = nullptr;
-    if (live.copies_start != nullptr) {
-        (void)hipEventDestroy(live.copies_start);
-        live.copies_start = nullptr;
-    }
-    add_orphaned_seconds(live, leftover);
-    live.copies_timed = false;
-    drop_pending_id(entry_id);
-    records_.erase(entry_id);
-    fifo_.erase(std::remove(fifo_.begin(), fifo_.end(), entry_id), fifo_.end());
     ++restores_;
-    bump_version();
+    retire_locked(entry_id);
 }
 
-std::optional<std::uint64_t> KVRamCache::peek_oldest_unpinned() const {
+void KVRamCache::discard(std::uint64_t entry_id) {
     std::lock_guard lock(io_mutex_);
-    for (std::uint64_t id : fifo_) {
-        const Record& record = require(id);
-        if (!record.pinned && record.io_pins == 0) { return id; }
-    }
-    return std::nullopt;
+    reap_retired_locked();
+    const auto it = records_.find(entry_id);
+    if (it == records_.end() || it->second.retired) { return; }
+    if (it->second.pinned) { throw std::logic_error("RAM cache cannot discard a claimed entry"); }
+    ++evictions_;
+    retire_locked(entry_id);
 }
 
 std::vector<std::uint64_t> KVRamCache::unpinned_ids() const {
@@ -897,23 +930,34 @@ void KVRamCache::pin_for_io(std::uint64_t entry_id) {
 
 void KVRamCache::unpin_for_io(std::uint64_t entry_id) {
     std::lock_guard lock(io_mutex_);
-    Record& record = require(entry_id);
-    if (record.io_pins == 0) { throw std::logic_error("RAM cache I/O pin is not held"); }
-    --record.io_pins;
-    io_cv_.notify_all();
+    const auto it = records_.find(entry_id);
+    if (it == records_.end() || it->second.io_pins == 0) {
+        throw std::logic_error("RAM cache I/O pin is not held");
+    }
+    --it->second.io_pins;
+    // The last reader of a retired block frees it once its copy fence has completed.
+    if (retired_free_locked(it->second)) {
+        free_block_locked(it->second);
+        records_.erase(it);
+    }
 }
 
 bool KVRamCache::evict_one_unpinned(std::uint64_t entry_id) {
-    std::unique_lock lock(io_mutex_);
+    std::lock_guard lock(io_mutex_);
+    reap_retired_locked();
     const auto it = records_.find(entry_id);
-    if (it == records_.end()) { return false; }
+    if (it == records_.end() || it->second.retired) { return false; }
     if (it->second.pinned || it->second.io_pins != 0) { return false; }
-    destroy_record(entry_id, true, lock);
+    ++evictions_;
+    retire_locked(entry_id);
     return true;
 }
 
 void KVRamCache::set_disk_entry_id(std::uint64_t entry_id, std::uint64_t disk_id) {
     std::lock_guard lock(io_mutex_);
+    const auto live = records_.find(entry_id);
+    // A spill that outlived its retired source has nobody left to read the ticket.
+    if (live != records_.end() && live->second.retired) { return; }
     Record& record = require(entry_id);
     if (fail_next_ticket_write_) {
         fail_next_ticket_write_ = false;
@@ -935,17 +979,17 @@ std::uint64_t KVRamCache::disk_entry_id(std::uint64_t entry_id) const {
 
 const void* KVRamCache::host_block(std::uint64_t entry_id) const {
     std::lock_guard lock(io_mutex_);
-    return require(entry_id).block;
+    return require_block(entry_id).block;
 }
 
 std::size_t KVRamCache::host_bytes(std::uint64_t entry_id) const {
     std::lock_guard lock(io_mutex_);
-    return require(entry_id).bytes;
+    return require_block(entry_id).bytes;
 }
 
 KVRamCache::HostKvView KVRamCache::host_kv(std::uint64_t entry_id) const {
     std::lock_guard lock(io_mutex_);
-    const Record& record    = require(entry_id);
+    const Record& record    = require_block(entry_id);
     const HeaderView header = read_header(record.block, record.bytes);
     const auto* raw         = static_cast<const std::uint8_t*>(record.block);
     HostKvView view;
@@ -1040,7 +1084,7 @@ std::optional<RamMatch> KVRamCache::plan_match(const PreparedPromptData& prompt,
 
 RamRestoredHost KVRamCache::load_host(std::uint64_t entry_id) const {
     std::lock_guard lock(io_mutex_);
-    const Record& record = require(entry_id);
+    const Record& record = require_block(entry_id);
     return host_from_header(record.block, read_header(record.block, record.bytes));
 }
 
@@ -1051,7 +1095,7 @@ KvRamSnapshot KVRamCache::snapshot() const noexcept {
     return KvRamSnapshot{
         .capacity_bytes = arena_.capacity(),
         .used_bytes     = used,
-        .entry_count    = records_.size(),
+        .entry_count    = fifo_.size(),
         .captures       = captures_,
         .restores       = restores_,
         .evictions      = evictions_,
@@ -1216,12 +1260,18 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         return {RamCaptureStatus::Dropped};
     }
 
-    void* block = arena_.try_alloc(header.entry_bytes, kDeviceAlign);
+    void* block = nullptr;
+    {
+        // The arena is shared with the disk worker, whose last I/O unpin frees retired blocks.
+        std::lock_guard lock(io_mutex_);
+        reap_retired_locked();
+        block = arena_.try_alloc(header.entry_bytes, kDeviceAlign);
+    }
     if (block == nullptr) {
         // A claimed restore source cannot be evicted to capture its GPU victim.
         // Check the largest interval that eviction could actually create before
-        // asking the caller to discard any other reusable entries. I/O pins are
-        // temporary: the caller cancels/drains idle spill before eviction.
+        // asking the caller to discard any other reusable entries. I/O pins and
+        // retired blocks are temporary: the reclaim path waits for their spill or fence.
         std::lock_guard lock(io_mutex_);
         std::vector<std::pair<std::size_t, std::size_t>> claimed;
         const auto* base = static_cast<const std::uint8_t*>(arena_.base());
@@ -1287,8 +1337,8 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         if (lengths[0] != 0) {
             std::memcpy(raw + header.offset[0], source.ledger.data(), lengths[0]);
         }
-        // Rewrite and ladder images are pinned host buffers; they copy on the stream's host
-        // callback thread so a capture during decode does not run ~150 MB memcpys here.
+        // Rewrite and ladder images are pinned host buffers; they copy by host callbacks on the
+        // cache's host-copy stream so a capture during decode does not run ~150 MB memcpys here.
         std::vector<HostCopy> host_copies;
         host_copies.reserve(6 + 4 * source.ladder_heads.size());
         if (lengths[1] != 0) { source.identity->pack(raw + header.offset[1]); }
@@ -1397,25 +1447,17 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         }
         if (!host_copies.empty()) {
             start_device_copies();
-            // Stream-ordered after the D2H that filled each image; each fence is re-recorded
-            // after the callback so the image's owner waits for these reads.
-            std::vector<hipEvent_t> fences;
-            fences.reserve(2 + source.ladder_heads.size());
-            const auto add_fence = [&fences](hipEvent_t fence) {
-                if (fence != nullptr &&
-                    std::find(fences.begin(), fences.end(), fence) == fences.end()) {
-                    fences.push_back(fence);
-                }
-            };
-            add_fence(source.rewrite_state.copies_done);
-            if (current_from_host) { add_fence(source.current_state.copies_done); }
-            for (const RamLadderHead& head : source.ladder_heads) { add_fence(head.copies_done); }
-            for (hipEvent_t fence : fences) {
-                HIP_CHECK(hipStreamWaitEvent(source.stream, fence, 0));
+            // The image copies wait only for each image's own fence, so they overlap the KV and
+            // state D2H above; the record fence recorded below on the copy stream covers both.
+            std::vector<hipEvent_t> image_fences;
+            image_fences.reserve(2 + source.ladder_heads.size());
+            image_fences.push_back(source.rewrite_state.copies_done);
+            image_fences.push_back(source.current_state.copies_done);
+            for (const RamLadderHead& head : source.ladder_heads) {
+                image_fences.push_back(head.copies_done);
             }
-            enqueue_host_copies(std::move(host_copies), source.stream);
             copies_launched = true;
-            for (hipEvent_t fence : fences) { HIP_CHECK(hipEventRecord(fence, source.stream)); }
+            host_copies_.run(host_copies, image_fences, source.stream);
         }
 
         if (next_id_ == 0) { throw std::logic_error("RAM cache entry id overflow"); }
@@ -1456,7 +1498,8 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         return {RamCaptureStatus::Captured, record.id};
     } catch (...) {
         if (copies_launched) {
-            maybe_copy_sync_stall();
+            maybe_copy_sync_hold();
+            (void)hipStreamSynchronize(host_copies_.stream());
             if (source.stream != nullptr) {
                 (void)hipStreamSynchronize(source.stream);
             } else {
@@ -1465,9 +1508,11 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         }
         if (copies_start != nullptr) { (void)hipEventDestroy(copies_start); }
         if (live_id != 0) {
-            std::unique_lock lock(io_mutex_);
-            destroy_record(live_id, false, lock);
+            // The stream is drained, so the block frees now unless a reader already pinned it.
+            std::lock_guard lock(io_mutex_);
+            retire_locked(live_id);
         } else {
+            std::lock_guard lock(io_mutex_);
             arena_.free(block);
         }
         throw;
@@ -1541,6 +1586,8 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
         }
         drop_pending_save(entry_id);
     }
+    // The block's capture must land before it is read. The scheduler polls copies_ready() while
+    // other lanes decode, so this waits only when nothing else can run.
     if (prior_done != nullptr) { HIP_CHECK(hipEventSynchronize(prior_done)); }
     double harvested         = 0;
     hipEvent_t harvest_start = nullptr;
@@ -1560,7 +1607,7 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
     {
         std::lock_guard lock(io_mutex_);
         Record& record = require(entry_id);
-        add_orphaned_seconds(record, harvested);
+        add_unbilled_seconds(record, harvested);
         if (record.copies_start != nullptr) {
             HIP_CHECK(hipEventDestroy(record.copies_start));
             record.copies_start = nullptr;
@@ -1607,6 +1654,12 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
                 }
                 target.gdn->unpack_slot_from_host(target.gdn_current_slot, matched_head->conv,
                                                   matched_head->recurrent, target.stream);
+            }
+            // The restored lane claims a valid tail hidden from the head, so a head without
+            // one cannot serve a staged restore.
+            if (target.tail_hidden != nullptr && target.tail_hidden->bytes() != 0 &&
+                (matched_head->hidden == nullptr || matched_head->hidden_bytes == 0)) {
+                throw std::logic_error("RAM context-checkpoint head has no hidden image");
             }
             if (target.tail_hidden != nullptr && matched_head->hidden != nullptr &&
                 matched_head->hidden_bytes != 0) {
@@ -1666,16 +1719,10 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
             rewrite_copies.push_back({target.rewrite_state.dflash, raw + header.offset[11],
                                       static_cast<std::size_t>(header.length[11])});
         }
-        if (!rewrite_copies.empty()) {
-            // Stream-ordered after every earlier reader or writer of the lane's image.
-            if (target.rewrite_state.copies_done != nullptr) {
-                HIP_CHECK(hipStreamWaitEvent(target.stream, target.rewrite_state.copies_done, 0));
-            }
-            enqueue_host_copies(std::move(rewrite_copies), target.stream);
-            if (target.rewrite_state.copies_done != nullptr) {
-                HIP_CHECK(hipEventRecord(target.rewrite_state.copies_done, target.stream));
-            }
-        }
+        // After every earlier reader or writer of the lane's image, but not behind the KV and
+        // state H2D above: the block's contents completed before prior_done was waited.
+        hipEvent_t image_fence = target.rewrite_state.copies_done;
+        host_copies_.run(rewrite_copies, std::span(&image_fence, 1), target.stream);
     } catch (...) {
         std::lock_guard lock(io_mutex_);
         const auto it = records_.find(entry_id);
@@ -1694,13 +1741,17 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
     return host_from_header(raw, header);
 }
 
-void KVRamCache::copy_from_entry(std::uint64_t entry_id, std::vector<HostCopy> copies,
-                                 hipStream_t stream) {
+void KVRamCache::copy_from_entry(std::uint64_t entry_id, std::span<const HostCopy> copies,
+                                 std::span<const hipEvent_t> image_fences) {
     if (copies.empty()) { return; }
     std::lock_guard lock(io_mutex_);
     Record& record = require(entry_id);
-    enqueue_host_copies(std::move(copies), stream);
-    record_copies(record, stream);
+    if (record.block_done == nullptr) {
+        create_copy_event(&record.block_done, hipEventDisableTiming | hipEventBlockingSync);
+    }
+    // The block's contents completed before unpack_device returned, so the copies need only
+    // their destinations' fences.
+    host_copies_.run_detached(copies, image_fences, record.block_done);
 }
 
 void KVRamCache::test_tamper_identity_digest(std::uint64_t entry_id, std::uint8_t byte) {
@@ -1724,9 +1775,9 @@ std::uint32_t KVRamCache::test_io_pins(std::uint64_t entry_id) const {
     return it == records_.end() ? 0 : it->second.io_pins;
 }
 
-void KVRamCache::test_set_copy_sync_stall_ms(int ms) {
+void KVRamCache::test_hold_copy_sync(bool held) {
     copy_sync_entered_.store(false, std::memory_order_release);
-    copy_sync_stall_ms_.store(ms, std::memory_order_release);
+    copy_sync_held_.store(held, std::memory_order_release);
 }
 
 bool KVRamCache::test_copy_sync_entered() const {

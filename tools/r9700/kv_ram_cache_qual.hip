@@ -213,9 +213,9 @@ void two_pending_loads_fold_as_loads(ninfer::DeviceContext& device,
         require(result.status == q3::detail::RamCaptureStatus::Captured, "two-load capture failed");
         ids.push_back(result.entry_id);
     }
-    (void)cache.harvest_copy_seconds();
-    auto dest_a = fixture.pool->reserve(1);
-    auto dest_b = fixture.pool->reserve(1);
+    const double saved = cache.harvest_copy_seconds().save;
+    auto dest_a        = fixture.pool->reserve(1);
+    auto dest_b        = fixture.pool->reserve(1);
     dest_a.materialize_pages(1, device.stream);
     dest_b.materialize_pages(1, device.stream);
     HIP_CHECK(hipStreamSynchronize(device.stream));
@@ -241,15 +241,18 @@ void two_pending_loads_fold_as_loads(ninfer::DeviceContext& device,
     restore(ids[1], dest_b, out_b_t);
     cache.consume(ids[0]);
     cache.consume(ids[1]);
-    const auto loaded = cache.harvest_copy_seconds();
+    // Consume retires both entries; their unharvested H2D counts toward the lifetime load once
+    // it lands, and the lifetime save stays the captures' alone.
     device.synchronize_all();
+    (void)cache.harvest_copy_seconds();
+    const auto totals = cache.snapshot();
     dest_a.release();
     dest_b.release();
-    if (loaded.save != 0.0 || loaded.load <= 0.0) {
-        std::cerr << "two pending loads harvested save=" << loaded.save << " load=" << loaded.load
-                  << '\n';
+    if (totals.save_seconds != saved || totals.load_seconds <= 0.0) {
+        std::cerr << "two pending loads lifetime save=" << totals.save_seconds << " (captures "
+                  << saved << ") load=" << totals.load_seconds << '\n';
     }
-    require(loaded.save == 0.0 && loaded.load > 0.0,
+    require(totals.save_seconds == saved && totals.load_seconds > 0.0,
             "a second restore orphaned the first restore's load as save time");
 }
 
@@ -631,8 +634,11 @@ int main() {
         require(eviction_cache.capture(source).status ==
                     q3::detail::RamCaptureStatus::NeedsEviction,
                 "full RAM cache did not request eviction");
-        const auto victim = eviction_cache.peek_oldest_unpinned();
-        require(victim && eviction_cache.evict_one_unpinned(*victim),
+        const std::vector<std::uint64_t> unpinned = eviction_cache.unpinned_ids();
+        require(!unpinned.empty(), "eviction probe found no unpinned entry");
+        // An evicted block is freed at return only once its copies completed.
+        eviction_cache.wait_entry_copies(unpinned.front());
+        require(eviction_cache.evict_one_unpinned(unpinned.front()),
                 "eviction probe could not release the oldest entry");
         require(eviction_cache.capture(source).status == q3::detail::RamCaptureStatus::Captured,
                 "eviction probe replacement capture failed");

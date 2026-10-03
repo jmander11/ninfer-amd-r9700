@@ -15,6 +15,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -376,6 +377,129 @@ std::vector<std::uint8_t> read_bytes(const std::filesystem::path& path) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
+// A lookup that reuses the whole `tokens` prefix of a TextCapture without tail hidden state.
+q3::PreparedPromptData lookup_prompt(std::vector<ninfer::TokenId> tokens) {
+    tokens.push_back(0);
+    return text_prompt(tokens);
+}
+
+std::optional<cache::DiskMatch> plan_tokens(cache::KVDiskCache& disk,
+                                            const std::vector<ninfer::TokenId>& tokens) {
+    const auto prompt = lookup_prompt(tokens);
+    return disk.plan_match(prompt, cache::prefix_hash_chain(prompt));
+}
+
+std::uint64_t planned_entry(cache::KVDiskCache& disk, const std::vector<ninfer::TokenId>& tokens) {
+    const auto match = plan_tokens(disk, tokens);
+    return match ? match->entry_id : 0;
+}
+
+// One scheduler admission round against a committed disk entry: plan, claim and release.
+bool disk_admission_round(cache::KVDiskCache& disk, const std::vector<ninfer::TokenId>& tokens,
+                          std::uint64_t expected_entry) {
+    const auto match = plan_tokens(disk, tokens);
+    if (!match || match->entry_id != expected_entry || !disk.claim(match->entry_id)) {
+        return false;
+    }
+    disk.release(match->entry_id);
+    return true;
+}
+
+bool ram_resident(const cache::KVRamCache& ram, std::uint64_t id) {
+    const auto ids = ram.fifo_ids();
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+}
+
+// Holds one unlocked disk-I/O window open, and releases it from a watchdog if a call under test
+// blocks on the held window instead of returning, so a regression fails instead of hanging.
+struct UnlockedIoHold {
+    cache::KVDiskCache& disk;
+    cache::DiskUnlockedIo window;
+    std::atomic<bool> done{false};
+    std::atomic<bool> fired{false};
+    std::jthread watchdog;
+
+    UnlockedIoHold(cache::KVDiskCache& target, cache::DiskUnlockedIo held)
+        : disk(target), window(held) {
+        disk.test_hold_unlocked_io(window, true);
+    }
+
+    UnlockedIoHold(const UnlockedIoHold&)            = delete;
+    UnlockedIoHold& operator=(const UnlockedIoHold&) = delete;
+
+    [[nodiscard]] bool entered() const {
+        return wait_pred([&] { return disk.test_unlocked_io_entered(window); },
+                         std::chrono::seconds(10));
+    }
+
+    void arm() {
+        if (watchdog.joinable()) { watchdog.join(); }
+        done.store(false);
+        watchdog = std::jthread([this] {
+            if (!wait_pred([&] { return done.load(); }, std::chrono::seconds(10))) {
+                fired.store(true);
+                disk.test_hold_unlocked_io(window, false);
+            }
+        });
+    }
+
+    // True when every armed call returned while the window was still held.
+    bool disarm() {
+        done.store(true);
+        if (watchdog.joinable()) { watchdog.join(); }
+        return !fired.load();
+    }
+
+    void release() { disk.test_hold_unlocked_io(window, false); }
+
+    ~UnlockedIoHold() {
+        done.store(true);
+        release();
+    }
+};
+
+// Releases a held spill encode on scope exit, and from a watchdog if a call under test blocks on
+// the held spill instead of returning, so a regression fails instead of hanging.
+struct EncodeHold {
+    cache::KVDiskCache& disk;
+    std::atomic<bool> done{false};
+    std::atomic<bool> fired{false};
+    std::jthread watchdog;
+
+    explicit EncodeHold(cache::KVDiskCache& target) : disk(target) {
+        disk.test_hold_spill_encode(true);
+    }
+
+    EncodeHold(const EncodeHold&)            = delete;
+    EncodeHold& operator=(const EncodeHold&) = delete;
+
+    [[nodiscard]] bool entered() const {
+        return wait_pred([&] { return disk.test_spill_encode_entered(); },
+                         std::chrono::seconds(10));
+    }
+
+    void arm() {
+        watchdog = std::jthread([this] {
+            if (!wait_pred([&] { return done.load(); }, std::chrono::seconds(10))) {
+                fired.store(true);
+                disk.test_hold_spill_encode(false);
+            }
+        });
+    }
+
+    // True when every armed call returned while the encode was still held.
+    bool disarm() {
+        done.store(true);
+        if (watchdog.joinable()) { watchdog.join(); }
+        return !fired.load();
+    }
+
+    ~EncodeHold() {
+        done.store(true);
+        disk.test_hold_spill_encode(false);
+    }
+};
+
 // An idle prepare that makes capacity releases the mutex for the eviction's MANIFEST write. A
 // cancellation in that window must stop the spill before it installs; otherwise
 // cancel_idle_spill waits for the whole idle image write.
@@ -404,33 +528,33 @@ void idle_cancel_during_capacity_eviction(ninfer::DeviceContext& device) {
     // The eviction's MANIFEST write is held until the cancellation has registered, so the
     // cancellation always lands inside the window regardless of host scheduling.
     disk.test_hold_manifest_io(true);
-    disk.test_set_payload_io_stall_ms(2000);
     disk.request_idle_spill();
-    if (!wait_pred([&] { return disk.test_manifest_io_entered(); }, std::chrono::seconds(5))) {
+    if (!wait_pred([&] { return disk.test_manifest_io_entered(); }, std::chrono::seconds(10))) {
         disk.test_hold_manifest_io(false);
-        disk.test_set_payload_io_stall_ms(0);
         disk.cancel_idle_spill();
         require(false, "idle-cancel-evict idle prepare did not reach capacity eviction");
     }
-    const std::uint64_t epoch = disk.test_idle_cancel_epoch();
-    std::chrono::steady_clock::time_point released;
-    std::chrono::steady_clock::time_point finished;
-    std::thread canceller([&] {
-        disk.cancel_idle_spill();
-        finished = std::chrono::steady_clock::now();
-    });
-    const bool registered =
-        wait_pred([&] { return disk.test_idle_cancel_epoch() != epoch; }, std::chrono::seconds(5));
-    released = std::chrono::steady_clock::now();
-    disk.test_hold_manifest_io(false);
-    canceller.join();
-    disk.test_set_payload_io_stall_ms(0);
-    const bool durable = disk.ram_is_durable(second);
+    bool registered = false;
+    bool prompt     = false;
+    bool durable    = false;
+    {
+        // Any payload write from here on stays held: a cancel that waits for a spill installed
+        // after the cancellation never returns while it is held.
+        UnlockedIoHold write(disk, cache::DiskUnlockedIo::PayloadWrite);
+        const std::uint64_t epoch = disk.test_idle_cancel_epoch();
+        std::thread canceller([&] { disk.cancel_idle_spill(); });
+        registered = wait_pred([&] { return disk.test_idle_cancel_epoch() != epoch; },
+                               std::chrono::seconds(10));
+        write.arm();
+        disk.test_hold_manifest_io(false);
+        canceller.join();
+        prompt  = write.disarm();
+        durable = disk.ram_is_durable(second);
+    }
     disk.wait_idle_and_fsync();
     require(registered,
             "idle-cancel-evict cancellation did not register during the MANIFEST write");
-    require(finished - released <= std::chrono::milliseconds(1200),
-            "idle cancel waited for a spill installed after cancellation");
+    require(prompt, "idle cancel waited for a spill installed after cancellation");
     require(!durable, "idle spill committed after cancellation");
 }
 
@@ -450,8 +574,9 @@ void spill_pin_waits_only_its_entry(ninfer::DeviceContext& device) {
     constexpr std::size_t kDelayBytes = 256ULL << 20;
     ninfer::DeviceBuffer delay_source(kDelayBytes);
     ninfer::PinnedHostBuffer delay_destination(kDelayBytes);
-    bool prompt  = false;
-    bool spilled = false;
+    bool captured_both = false;
+    bool prompt        = false;
+    bool spilled       = false;
     {
         StreamGate gate;
         gate.launch(side);
@@ -463,30 +588,32 @@ void spill_pin_waits_only_its_entry(ninfer::DeviceContext& device) {
                                  hipMemcpyDeviceToHost, device.copy_stream));
         TextCapture own(std::vector<ninfer::TokenId>(64, 24), allocation, pool, device.copy_stream);
         const auto captured = ram.capture(own.source);
-        if (gated && captured.status == cache::RamCaptureStatus::Captured) {
+        captured_both       = gated && captured.status == cache::RamCaptureStatus::Captured;
+        if (captured_both) {
             disk.note_ram_resident(captured.entry_id, 0);
-            std::atomic<bool> done{false};
             std::atomic<bool> result{false};
+            // Reaching the payload write proves the pin passed its own copy; the unrelated
+            // capture stays gated until after the check, so a pin that waits on it never does.
+            UnlockedIoHold write(disk, cache::DiskUnlockedIo::PayloadWrite);
             std::thread spiller([&] {
                 try {
                     result.store(disk.emergency_spill_ram(captured.entry_id));
                     // NOLINTNEXTLINE(bugprone-empty-catch): a throw leaves result false
                 } catch (...) {}
-                done.store(true);
             });
-            prompt = wait_pred([&] { return done.load(); }, std::chrono::milliseconds(1500));
+            prompt = write.entered();
+            write.release();
             gate.release();
             spiller.join();
             spilled = result.load();
         }
         gate.release();
-        require(gated && captured.status == cache::RamCaptureStatus::Captured,
-                "spill-own-copy fixture capture failed");
     }
     device.synchronize_all();
     HIP_CHECK(hipStreamSynchronize(side));
     HIP_CHECK(hipStreamDestroy(side));
     disk.wait_idle_and_fsync();
+    require(captured_both, "spill-own-copy fixture capture failed");
     require(prompt, "disk spill pin waited for an unrelated gated RAM copy");
     require(spilled, "spill-own-copy spill failed");
 }
@@ -514,24 +641,24 @@ void plan_match_during_compaction(ninfer::DeviceContext& device) {
     }
     const auto before = read_bytes(directory.path / "PACKSET");
     cache::KVDiskCache disk(options);
-    disk.test_set_compaction_copy_stall_ms(300);
-    std::thread maintenance([&] { disk.wait_idle_and_fsync(); });
-    if (!wait_pred([&] { return disk.test_compaction_copy_entered(); }, std::chrono::seconds(5))) {
-        disk.test_set_compaction_copy_stall_ms(0);
-        maintenance.join();
-        require(false, "compaction-lock maintenance never started copying");
+    bool copying         = false;
+    bool prompt_returned = false;
+    bool matched         = false;
+    {
+        UnlockedIoHold copy(disk, cache::DiskUnlockedIo::CompactionCopy);
+        std::jthread maintenance([&] { disk.wait_idle_and_fsync(); });
+        copying = copy.entered();
+        if (copying) {
+            copy.arm();
+            matched         = plan_tokens(disk, tokens_b).has_value();
+            prompt_returned = copy.disarm();
+        }
+        copy.release();
     }
-    auto ledger = tokens_b;
-    ledger.push_back(0);
-    const auto prompt  = text_prompt(ledger);
-    const auto started = std::chrono::steady_clock::now();
-    const auto match   = disk.plan_match(prompt, cache::prefix_hash_chain(prompt));
-    const auto elapsed = std::chrono::steady_clock::now() - started;
-    disk.test_set_compaction_copy_stall_ms(0);
-    maintenance.join();
     const auto after = read_bytes(directory.path / "PACKSET");
-    require(elapsed <= std::chrono::milliseconds(150), "plan_match waited for the compaction copy");
-    require(match.has_value(), "compaction-lock lost the retained entry");
+    require(copying, "compaction-lock maintenance never started copying");
+    require(prompt_returned, "plan_match waited for the compaction copy");
+    require(matched, "compaction-lock lost the retained entry");
     require(before.size() == 32 && after.size() == 32 &&
                 std::memcmp(before.data() + 12, after.data() + 12, sizeof(std::uint64_t)) != 0,
             "compaction-lock maintenance did not publish a new generation");
@@ -567,36 +694,30 @@ void ram_reclaim_never_blocks_on_disk(ninfer::DeviceContext& device) {
     disk.note_ram_resident(newer, 0);
     require(disk.emergency_spill_ram(newer), "ram-reclaim fixture spill failed");
     disk.wait_idle_and_fsync();
-    // Any disk write from here on would take seconds.
-    disk.test_set_payload_io_stall_ms(2000);
-    const auto resident = [&](std::uint64_t id) {
-        const auto ids = ram.fifo_ids();
-        return std::find(ids.begin(), ids.end(), id) != ids.end();
-    };
-    auto started = std::chrono::steady_clock::now();
-    auto result  = disk.reclaim_ram_entry(false);
-    auto elapsed = std::chrono::steady_clock::now() - started;
-    const bool durable_first =
-        result == cache::RamReclaim::Evicted && !resident(newer) && resident(older);
-    const bool durable_prompt = elapsed <= std::chrono::milliseconds(500);
-    const auto drops          = disk.snapshot().drops;
-    started                   = std::chrono::steady_clock::now();
-    result                    = disk.reclaim_ram_entry(false);
-    elapsed                   = std::chrono::steady_clock::now() - started;
-    const bool unsaved_kept   = result == cache::RamReclaim::Pending && resident(older);
-    const bool unsaved_prompt = elapsed <= std::chrono::milliseconds(500);
-    disk.test_set_payload_io_stall_ms(0);
+    auto result         = cache::RamReclaim::NoVictim;
+    bool durable_first  = false;
+    bool unsaved_kept   = false;
+    bool prompt         = false;
+    std::uint64_t drops = 0;
+    {
+        // Every disk write from here on stays held: a reclaim that waits on one never returns
+        // while it is held.
+        UnlockedIoHold write(disk, cache::DiskUnlockedIo::PayloadWrite);
+        write.arm();
+        result        = disk.reclaim_ram_entry(false);
+        durable_first = result == cache::RamReclaim::Evicted && !ram_resident(ram, newer) &&
+                        ram_resident(ram, older);
+        drops         = disk.snapshot().drops;
+        result        = disk.reclaim_ram_entry(false);
+        unsaved_kept  = result != cache::RamReclaim::Evicted && ram_resident(ram, older);
+        prompt        = write.disarm();
+    }
     const bool evicted_once_durable = reclaim_until_evicted(disk, result);
-    auto ledger                     = older_tokens;
-    ledger.push_back(0);
-    const auto prompt  = text_prompt(ledger);
-    const bool on_disk = disk.plan_match(prompt, cache::prefix_hash_chain(prompt)).has_value();
+    const bool on_disk              = plan_tokens(disk, older_tokens).has_value();
     require(durable_first, "non-blocking reclaim did not evict the disk-durable entry first");
-    require(durable_prompt, "reclaim of a durable entry waited on disk I/O");
-    require(unsaved_kept,
-            "non-blocking reclaim did not defer the unsaved oldest entry to its spill");
-    require(unsaved_prompt, "non-blocking reclaim spilled synchronously");
-    require(evicted_once_durable && !resident(older),
+    require(unsaved_kept, "non-blocking reclaim dropped the unsaved oldest entry");
+    require(prompt, "non-blocking reclaim waited on disk I/O or spilled synchronously");
+    require(evicted_once_durable && !ram_resident(ram, older),
             "non-blocking reclaim never evicted the spilled entry");
     require(disk.snapshot().drops == drops, "non-blocking reclaim dropped an unsaved RAM entry");
     require(on_disk, "reclaimed RAM entry is not on disk");
@@ -619,27 +740,25 @@ void ram_reclaim_waits_for_inflight_spill(ninfer::DeviceContext& device) {
     const auto newer =
         capture_tokens(ram, pool, allocation, device, std::vector<ninfer::TokenId>(64, 38));
     disk.note_ram_resident(newer, 0);
-    disk.test_set_payload_io_stall_ms(300);
-    disk.request_idle_spill();
-    if (!wait_pred([&] { return ram.test_io_pins(older) != 0; }, std::chrono::seconds(5))) {
-        disk.test_set_payload_io_stall_ms(0);
-        require(false, "ram-reclaim-inflight write-behind never started");
+    const auto drops = disk.snapshot().drops;
+    auto result      = cache::RamReclaim::NoVictim;
+    bool newer_kept  = false;
+    bool prompt      = false;
+    {
+        // The write-behind of the oldest entry stays in flight until the reclaim has returned.
+        UnlockedIoHold write(disk, cache::DiskUnlockedIo::PayloadWrite);
+        disk.request_idle_spill();
+        require(write.entered() && ram.test_io_pins(older) != 0,
+                "ram-reclaim-inflight write-behind never started");
+        write.arm();
+        result     = disk.reclaim_ram_entry(false);
+        newer_kept = result != cache::RamReclaim::Evicted && ram_resident(ram, newer);
+        prompt     = write.disarm();
     }
-    const auto resident = [&](std::uint64_t id) {
-        const auto ids = ram.fifo_ids();
-        return std::find(ids.begin(), ids.end(), id) != ids.end();
-    };
-    const auto drops      = disk.snapshot().drops;
-    const auto started    = std::chrono::steady_clock::now();
-    auto result           = disk.reclaim_ram_entry(false);
-    const auto elapsed    = std::chrono::steady_clock::now() - started;
-    const bool newer_kept = result != cache::RamReclaim::Evicted && resident(newer);
-    const bool prompt     = elapsed <= std::chrono::milliseconds(200);
-    const bool evicted    = reclaim_until_evicted(disk, result);
-    disk.test_set_payload_io_stall_ms(0);
+    const bool evicted = reclaim_until_evicted(disk, result);
     require(newer_kept, "reclaim dropped a newer entry while the oldest was spilling");
     require(prompt, "non-blocking reclaim waited for the in-flight spill");
-    require(evicted && !resident(older) && resident(newer),
+    require(evicted && !ram_resident(ram, older) && ram_resident(ram, newer),
             "reclaim did not evict the spilled oldest entry");
     require(disk.snapshot().drops == drops, "reclaim dropped an unsaved RAM entry");
 }
@@ -665,32 +784,31 @@ void ram_reclaim_skips_attempt_captures(ninfer::DeviceContext& device) {
     const auto attempt =
         capture_tokens(ram, pool, allocation, device, std::vector<ninfer::TokenId>(64, 48));
     disk.note_ram_resident(attempt, 0);
-    // Any disk write from here on would take seconds.
-    disk.test_set_payload_io_stall_ms(2000);
-    const auto resident = [&](std::uint64_t id) {
-        const auto ids = ram.fifo_ids();
-        return std::find(ids.begin(), ids.end(), id) != ids.end();
-    };
     const std::array<std::uint64_t, 1> keep{attempt};
     const auto drops = disk.snapshot().drops;
     const auto unsaved =
         disk.snapshot()
             .drop_reasons[static_cast<std::size_t>(ninfer::KvDiskDropReason::ReclaimUnsaved)];
-    const auto started       = std::chrono::steady_clock::now();
-    const auto first         = disk.reclaim_ram_entry(false, keep);
-    const bool dropped_older = first == cache::RamReclaim::Evicted && !resident(older) &&
-                               resident(attempt) && !disk.ram_reclaim_pending();
-    const bool drop_counted =
-        disk.snapshot().drops == drops + 1 &&
-        disk.snapshot()
-                .drop_reasons[static_cast<std::size_t>(ninfer::KvDiskDropReason::ReclaimUnsaved)] ==
-            unsaved + 1;
-    const auto second = disk.reclaim_ram_entry(false, keep);
-    const bool refused =
-        second == cache::RamReclaim::NoVictim && resident(attempt) && !disk.ram_reclaim_pending();
-    const bool prompt =
-        std::chrono::steady_clock::now() - started <= std::chrono::milliseconds(500);
-    disk.test_set_payload_io_stall_ms(0);
+    bool dropped_older = false;
+    bool drop_counted  = false;
+    bool refused       = false;
+    bool prompt        = false;
+    {
+        // Every disk write from here on stays held: a reclaim that waits on one never returns
+        // while it is held.
+        UnlockedIoHold write(disk, cache::DiskUnlockedIo::PayloadWrite);
+        write.arm();
+        const auto first  = disk.reclaim_ram_entry(false, keep);
+        dropped_older     = first == cache::RamReclaim::Evicted && !ram_resident(ram, older) &&
+                            ram_resident(ram, attempt) && !disk.ram_reclaim_pending();
+        drop_counted      = disk.snapshot().drops == drops + 1 &&
+                            disk.snapshot().drop_reasons[static_cast<std::size_t>(
+                                ninfer::KvDiskDropReason::ReclaimUnsaved)] == unsaved + 1;
+        const auto second = disk.reclaim_ram_entry(false, keep);
+        refused           = second == cache::RamReclaim::NoVictim && ram_resident(ram, attempt) &&
+                            !disk.ram_reclaim_pending();
+        prompt            = write.disarm();
+    }
     require(
         dropped_older,
         "reclaim targeted this attempt's capture instead of dropping the unsavable older entry");
@@ -752,6 +870,704 @@ void restore_setup_ready_tracks_window_reads(ninfer::DeviceContext& device) {
     require(drained_ready, "restore setup stayed busy after the window read finished");
 }
 
+// A stale claim (planned and claimed against one committed generation) must never restore a
+// newer one. A claim that lands while an idle refresh is outside the mutex after its meta rename
+// returns at once with the old generation; the refresh abandons, its meta rollback fails, and the
+// new generation is published. The stale claim's host load and device restore are then a
+// CacheRestoreFailure cache miss at setup.
+void disk_claim_rejects_refreshed_generation(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(32ULL << 20);
+    auto pages = pool.storage->reserve(1);
+    pages.materialize_pages(1, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
+    const std::vector<ninfer::TokenId> tokens(64, 71);
+    // An exact-token lookup reuses the whole prefix only while the tail hidden state is valid.
+    const auto prompt    = text_prompt(tokens);
+    const auto chain     = cache::prefix_hash_chain(prompt);
+    const auto ram_entry = [&](bool valid) {
+        TextCapture source(tokens, pages, pool, device.copy_stream);
+        source.source.tail_hidden_valid = valid;
+        const auto result               = ram.capture(source.source);
+        require(result.status == cache::RamCaptureStatus::Captured,
+                "generation fixture capture failed");
+        device.synchronize_all();
+        ram.wait_pending_copies();
+        return result.entry_id;
+    };
+    const auto capture = [&](bool valid, std::uint64_t ticket) {
+        const auto id = ram_entry(valid);
+        disk.note_ram_resident(id, ticket);
+        require(disk.emergency_spill_ram(id), "generation fixture spill failed");
+        return ram.load_host(id).disk_entry_id;
+    };
+    const auto id    = capture(true, 0);
+    const auto match = disk.plan_match(prompt, chain);
+    require(match && match.value().committed_generation != 0, "generation fixture match missing");
+    require(capture(false, id) == id, "generation fixture failed to refresh same entry");
+    const bool stale_claimed = disk.claim(
+        id, match.value().hash_f, match.value().execution_frontier, match.value().reuse_base,
+        match.value().reuse, match.value().committed_generation);
+    if (stale_claimed) { disk.release(id); }
+    require(!stale_claimed, "claim accepted changed same-hash frontier generation");
+    require(!disk.plan_match(prompt, chain), "refreshed invalid tail remained reusable");
+    require(capture(true, id) == id, "generation retry refresh failed");
+    const auto fresh = disk.plan_match(prompt, chain);
+    require(fresh && fresh.value().committed_generation > match.value().committed_generation &&
+                disk.claim(id, fresh.value().hash_f, fresh.value().execution_frontier,
+                           fresh.value().reuse_base, fresh.value().reuse,
+                           fresh.value().committed_generation),
+            "fresh generation could not be claimed after stale-plan rejection");
+    disk.release(id);
+
+    disk.note_ram_resident(ram_entry(true), id);
+    bool reached      = false;
+    bool claimed      = false;
+    bool prompt_claim = false;
+    {
+        UnlockedIoHold renamed(disk, cache::DiskUnlockedIo::CommitMetaRenamed);
+        disk.test_arm_fail_rollback_meta();
+        disk.request_idle_spill();
+        reached = renamed.entered();
+        if (reached) {
+            renamed.arm();
+            claimed      = disk.claim(id, fresh.value().hash_f, fresh.value().execution_frontier,
+                                      fresh.value().reuse_base, fresh.value().reuse,
+                                      fresh.value().committed_generation);
+            prompt_claim = renamed.disarm();
+        } else {
+            renamed.release();
+            disk.cancel_idle_spill();
+        }
+    }
+    if (claimed && !prompt_claim) { disk.release(id); }
+    require(reached, "claim-during-refresh never reached the meta rename");
+    require(prompt_claim, "claim waited for the in-flight refresh commit");
+    require(claimed, "claim of the current generation failed during a refresh");
+    disk.wait_idle_and_fsync();
+    const auto stale_restore_misses = [&](auto&& restore) {
+        try {
+            restore();
+        } catch (const ninfer::runtime::CacheRestoreFailure&) {
+            return true;
+        } catch (const std::exception& error) {
+            std::cerr << "stale-generation restore threw " << error.what() << '\n';
+        }
+        return false;
+    };
+    const bool host_missed =
+        stale_restore_misses([&] { (void)disk.load_host(id, fresh.value().committed_generation); });
+    bool device_missed = false;
+    {
+        auto destination = pool.storage->reserve(1);
+        destination.materialize_pages(1, device.stream);
+        device.synchronize_all();
+        cache::DiskRestoreTarget target;
+        target.text                 = &destination;
+        target.text_pool            = pool.storage.get();
+        target.text_semantics       = pool.semantics();
+        target.text_dst_pages       = 1;
+        target.stream               = device.copy_stream;
+        target.committed_generation = fresh.value().committed_generation;
+        device_missed = stale_restore_misses([&] { (void)disk.restore_device(id, target); });
+        if (!device_missed) {
+            disk.cancel_restore();
+            device.synchronize_all();
+        }
+    }
+    // Planning skips a claimed entry, so the published generation is visible once released.
+    disk.release(id);
+    require(host_missed, "stale claim's host load did not miss on the published generation");
+    require(device_missed, "stale claim's restore did not miss on the published generation");
+    const auto after_refresh = disk.plan_match(prompt, chain);
+    require(after_refresh &&
+                after_refresh.value().committed_generation > fresh.value().committed_generation,
+            "failed refresh rollback did not publish the new generation");
+    require(disk.claim(id, after_refresh.value().hash_f, after_refresh.value().execution_frontier,
+                       after_refresh.value().reuse_base, after_refresh.value().reuse,
+                       after_refresh.value().committed_generation),
+            "published refresh generation could not be claimed");
+    disk.release(id);
+}
+
+// A disk-hit claim of an entry whose idle Extend is in flight returns at once, while the Extend's
+// page write, its commit's object sync, or its commit after the meta.bin rename is still held:
+// the scheduler never waits for spill I/O. The claim makes the Extend abandon (before the rename,
+// or by rolling it back); the claimed generation stays in memory and on disk.
+void claim_returns_during_in_flight_idle_extend(ninfer::DeviceContext& device) {
+    using Window = cache::DiskUnlockedIo;
+    for (const Window window :
+         {Window::PayloadWrite, Window::CommitSync, Window::CommitMetaRenamed}) {
+        TemporaryDirectory directory;
+        Pool pool(8);
+        cache::KVRamCache ram(64ULL << 20);
+        auto allocation = pool.storage->reserve(4);
+        allocation.materialize_pages(3, device.stream);
+        const auto options =
+            config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
+        const std::vector<ninfer::TokenId> aligned(64, 4);
+        std::uint64_t entry_b    = 0;
+        std::uint32_t frontier_b = 0;
+        {
+            cache::KVDiskCache disk(options);
+            const auto ram_b = capture_tokens(ram, pool, allocation, device, aligned);
+            disk.note_ram_resident(ram_b, 0);
+            require(disk.emergency_spill_ram(ram_b), "claim-idle spill of B failed");
+            const auto match_b = plan_tokens(disk, aligned);
+            require(match_b.has_value(), "claim-idle match of B failed");
+            entry_b                               = match_b.value().entry_id;
+            frontier_b                            = disk.test_load_meta(entry_b).execution_frontier;
+            std::vector<ninfer::TokenId> extended = aligned;
+            extended.push_back(0);
+            extended.resize(128, 5);
+            const auto ram_d = capture_tokens(ram, pool, allocation, device, extended);
+            ram.set_disk_entry_id(ram_d, entry_b);
+            disk.note_ram_resident(ram_d, entry_b);
+            bool reached             = false;
+            bool claimed             = false;
+            bool returned_while_held = false;
+            {
+                UnlockedIoHold hold(disk, window);
+                disk.request_idle_spill();
+                reached = hold.entered();
+                if (reached) {
+                    std::atomic<bool> returned{false};
+                    std::thread claimer([&] {
+                        claimed = disk.claim(entry_b);
+                        returned.store(true);
+                    });
+                    returned_while_held =
+                        wait_pred([&] { return returned.load(); }, std::chrono::seconds(10));
+                    hold.release();
+                    claimer.join();
+                }
+                hold.release();
+            }
+            if (claimed && !returned_while_held) { disk.release(entry_b); }
+            require(reached, "claim-idle never entered the held Extend I/O");
+            require(returned_while_held, window == Window::PayloadWrite
+                                             ? "claim waited for the idle Extend's payload write"
+                                             : "claim waited for the idle Extend's commit fsync");
+            require(claimed, "claim-idle claim of B failed");
+            // The abandoned Extend drains (and rolls a renamed meta.bin back) while B is claimed.
+            disk.wait_idle_and_fsync();
+            disk.prefetch_window(entry_b, 1, 0);
+            const bool unchanged = disk.test_load_meta(entry_b).execution_frontier == frontier_b;
+            disk.release(entry_b);
+            require(unchanged, "in-flight idle extend mutated a claimed generation");
+        }
+        cache::KVDiskCache reopened(options);
+        const auto match = plan_tokens(reopened, aligned);
+        require(match && match.value().entry_id == entry_b &&
+                    match.value().reuse_base == frontier_b,
+                "reopen after a claim-abandoned extend lost the claimed generation");
+    }
+}
+
+// The measured stall: a RAM hit on an entry whose idle spill is in flight froze decoding for the
+// whole spill. A restore only reads the entry: claim and consume return while the spill is held
+// mid-encode, the spill keeps reading the I/O-pinned bytes and commits them, and the consumed
+// block is freed by the spill's last unpin.
+void ram_restore_does_not_wait_for_spill(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Zstd, 64ULL << 20));
+    const std::vector<ninfer::TokenId> tokens(64, 57);
+    const auto ram_id = capture_tokens(ram, pool, allocation, device, tokens);
+    disk.note_ram_resident(ram_id, 0);
+    const auto entry_bytes = ram.snapshot().used_bytes;
+    bool prompt            = false;
+    bool retained_block    = false;
+    {
+        EncodeHold hold(disk);
+        disk.request_idle_spill();
+        require(hold.entered() && ram.test_io_pins(ram_id) == 1,
+                "restore-during-spill: idle spill never pinned and reached its encode");
+        hold.arm();
+        ram.claim(ram_id);
+        ram.consume(ram_id);
+        disk.forget_ram_resident(ram_id);
+        prompt              = hold.disarm();
+        const auto consumed = ram.snapshot();
+        retained_block      = consumed.entry_count == 0 && consumed.used_bytes == entry_bytes &&
+                              ram.test_io_pins(ram_id) == 1;
+    }
+    const bool committed = wait_pred(
+        [&] { return ram.snapshot().used_bytes == 0 && plan_tokens(disk, tokens).has_value(); },
+        std::chrono::seconds(10));
+    require(prompt, "RAM claim/consume waited for the entry's in-flight spill");
+    require(retained_block,
+            "consumed entry left the index too late or lost its spill-pinned block");
+    require(committed, "spill of the consumed entry did not commit and free its block");
+    require(!ram.retired_pending(), "consumed block remained retired");
+}
+
+// Rolling a capture back never waits for its spill: abandon + discard return while the worker is
+// held mid-encode, the encode stops at its cancellation point, nothing commits, and the block is
+// freed when the abandoned prepare unpins it.
+void abandoned_capture_cancels_spill_without_waiting(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Zstd, 64ULL << 20));
+    const std::vector<ninfer::TokenId> tokens(64, 61);
+    const auto ram_id = capture_tokens(ram, pool, allocation, device, tokens);
+    disk.note_ram_resident(ram_id, 0);
+    bool prompt    = false;
+    bool unindexed = false;
+    bool freed     = false;
+    {
+        EncodeHold hold(disk);
+        disk.request_idle_spill();
+        require(hold.entered(), "abandon-spill: idle spill never reached its encode");
+        hold.arm();
+        disk.abandon_ram_spill(ram_id);
+        ram.discard(ram_id);
+        prompt    = hold.disarm();
+        unindexed = ram.snapshot().entry_count == 0 && !disk.test_has_ram_note(ram_id);
+        // Still held: only the cancellation lets the prepare finish and unpin.
+        freed = wait_pred([&] { return ram.snapshot().used_bytes == 0; }, std::chrono::seconds(10));
+    }
+    disk.wait_idle_and_fsync();
+    const bool committed = plan_tokens(disk, tokens).has_value();
+    require(prompt, "capture rollback waited for its in-flight spill");
+    require(unindexed, "rolled-back capture stayed indexed or kept its disk note");
+    require(freed, "abandoned prepare did not stop at its encode cancellation point");
+    require(!committed, "abandoned capture was committed to disk");
+}
+
+// A disk claim during the unlocked encode of an idle Extend sees no installed spill to cancel.
+// The prepare re-validates after relocking and abandons the Extend without marking the RAM entry
+// failed, so the retry branches from the claimed parent instead of rewriting it.
+void claim_during_encode_aborts_idle_extend(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Zstd, 64ULL << 20));
+    const std::vector<ninfer::TokenId> aligned(64, 4);
+    const auto ram_b = capture_tokens(ram, pool, allocation, device, aligned);
+    disk.note_ram_resident(ram_b, 0);
+    require(disk.emergency_spill_ram(ram_b), "claim-encode fixture spill of B failed");
+    const auto match_b = plan_tokens(disk, aligned);
+    require(match_b.has_value(), "claim-encode fixture match of B failed");
+    const auto entry_b                    = match_b.value().entry_id;
+    const auto generation_b               = disk.test_committed_generation(entry_b);
+    const auto frontier_b                 = disk.test_load_meta(entry_b).execution_frontier;
+    std::vector<ninfer::TokenId> extended = aligned;
+    extended.push_back(0);
+    extended.resize(128, 5);
+    const auto ram_d = capture_tokens(ram, pool, allocation, device, extended);
+    ram.set_disk_entry_id(ram_d, entry_b);
+    disk.note_ram_resident(ram_d, entry_b);
+    const auto drops = disk.snapshot().drops;
+    bool prompt      = false;
+    bool claimed     = false;
+    {
+        EncodeHold hold(disk);
+        disk.request_idle_spill();
+        require(hold.entered() && disk.test_disk_io_pins(entry_b) != 0,
+                "claim-encode: idle Extend never pinned B and reached its encode");
+        hold.arm();
+        claimed = disk.claim(entry_b);
+        prompt  = hold.disarm();
+    }
+    require(prompt, "disk claim waited for a preparing spill");
+    require(claimed, "claim-encode claim of B failed");
+    const bool branched =
+        wait_pred([&] { return disk.ram_is_durable(ram_d); }, std::chrono::seconds(10));
+    const bool parent_kept = disk.test_committed_generation(entry_b) == generation_b &&
+                             disk.test_load_meta(entry_b).execution_frontier == frontier_b;
+    const bool not_failed  = disk.snapshot().drops == drops;
+    disk.release(entry_b);
+    require(branched, "abandoned Extend was not retried as a branch of the claimed parent");
+    require(parent_kept, "idle spill rewrote a parent claimed during its encode");
+    require(not_failed, "re-validated Extend was counted as a failed spill");
+}
+
+// The spill's record CRC32C work runs with the index mutex released: the raw state encode that
+// seals each state record, and the page-batch header/CRC build. A scheduler admission round
+// completes while either window is held, and the held spill still commits.
+void spill_crc_runs_without_index_mutex(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
+    const std::vector<ninfer::TokenId> resident(64, 81);
+    const auto resident_ram = capture_tokens(ram, pool, allocation, device, resident);
+    disk.note_ram_resident(resident_ram, 0);
+    require(disk.emergency_spill_ram(resident_ram), "spill-crc-unlocked resident spill failed");
+    const std::uint64_t resident_entry = planned_entry(disk, resident);
+    bool encode_admitted               = false;
+    bool encode_committed              = false;
+    {
+        const std::vector<ninfer::TokenId> tokens(64, 82);
+        const auto ram_id = capture_tokens(ram, pool, allocation, device, tokens);
+        disk.note_ram_resident(ram_id, 0);
+        EncodeHold hold(disk);
+        disk.request_idle_spill();
+        require(hold.entered(), "spill-crc-unlocked raw spill never reached its encode");
+        hold.arm();
+        const bool admitted = disk_admission_round(disk, resident, resident_entry);
+        encode_admitted     = hold.disarm() && admitted;
+        disk.test_hold_spill_encode(false);
+        encode_committed =
+            wait_pred([&] { return disk.ram_is_durable(ram_id); }, std::chrono::seconds(10));
+    }
+    bool crc_admitted  = false;
+    bool crc_committed = false;
+    {
+        const std::vector<ninfer::TokenId> tokens(64, 83);
+        const auto ram_id = capture_tokens(ram, pool, allocation, device, tokens);
+        disk.note_ram_resident(ram_id, 0);
+        UnlockedIoHold hold(disk, cache::DiskUnlockedIo::PageBatchCrc);
+        disk.request_idle_spill();
+        require(hold.entered(), "spill-crc-unlocked spill never reached its page-batch CRC build");
+        hold.arm();
+        const bool admitted = disk_admission_round(disk, resident, resident_entry);
+        crc_admitted        = hold.disarm() && admitted;
+        hold.release();
+        crc_committed = wait_pred(
+            [&] { return disk.ram_is_durable(ram_id) && planned_entry(disk, tokens) != 0; },
+            std::chrono::seconds(10));
+    }
+    require(encode_admitted, "admission waited for a raw spill's state encode and CRC");
+    require(encode_committed, "raw spill held at its encode did not commit");
+    require(crc_admitted, "admission waited for a spill's page-batch CRC build");
+    require(crc_committed, "spill held at its page-batch CRC build did not commit");
+}
+
+// Capacity eviction is two-phase: the FIFO victim leaves planning under the mutex, its tombstone
+// is written and fsynced with the mutex released, and only then does it drop its references.
+// Admission of an unrelated entry completes while the tombstone write is held, and the eviction
+// is durable across a reopen.
+void capacity_eviction_tombstone_runs_without_index_mutex(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    auto options = config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
+    const std::vector<ninfer::TokenId> victim(64, 91);
+    const std::vector<ninfer::TokenId> survivor(64, 92);
+    const std::vector<ninfer::TokenId> incoming(64, 93);
+    std::size_t used = 0;
+    {
+        cache::KVDiskCache disk(options);
+        for (const auto* tokens : {&victim, &survivor}) {
+            const auto ram_id = capture_tokens(ram, pool, allocation, device, *tokens);
+            disk.note_ram_resident(ram_id, 0);
+            require(disk.emergency_spill_ram(ram_id),
+                    "evict-tombstone-unlocked fixture spill failed");
+        }
+        disk.wait_idle_and_fsync();
+        used = disk.snapshot().used_bytes;
+    }
+    options.capacity_bytes = used;
+    bool admitted          = false;
+    bool victim_hidden     = false;
+    bool victim_referenced = false;
+    bool committed         = false;
+    bool victim_dropped    = false;
+    {
+        cache::KVDiskCache disk(options);
+        const std::uint64_t victim_entry   = planned_entry(disk, victim);
+        const std::uint64_t survivor_entry = planned_entry(disk, survivor);
+        const auto ram_id = capture_tokens(ram, pool, allocation, device, incoming);
+        disk.note_ram_resident(ram_id, 0);
+        {
+            UnlockedIoHold hold(disk, cache::DiskUnlockedIo::EvictionTombstones);
+            disk.request_idle_spill();
+            require(hold.entered(),
+                    "evict-tombstone-unlocked spill never reached capacity eviction");
+            hold.arm();
+            const bool round  = disk_admission_round(disk, survivor, survivor_entry);
+            victim_hidden     = planned_entry(disk, victim) == 0 && !disk.claim(victim_entry);
+            admitted          = hold.disarm() && round;
+            victim_referenced = disk.test_entry_in_index(victim_entry);
+        }
+        committed =
+            wait_pred([&] { return disk.ram_is_durable(ram_id); }, std::chrono::seconds(10));
+        disk.wait_idle_and_fsync();
+        victim_dropped = !disk.test_entry_in_index(victim_entry);
+    }
+    cache::KVDiskCache reopened(options);
+    const bool restart_ok = planned_entry(reopened, victim) == 0 &&
+                            planned_entry(reopened, survivor) != 0 &&
+                            planned_entry(reopened, incoming) != 0;
+    require(admitted, "admission waited for a capacity-eviction tombstone write");
+    require(victim_hidden, "eviction victim stayed plannable while its tombstone was written");
+    require(victim_referenced, "eviction victim dropped its references before a durable tombstone");
+    require(committed, "spill did not commit after its capacity eviction");
+    require(victim_dropped, "tombstoned eviction victim stayed indexed");
+    require(restart_ok, "unlocked capacity eviction exposed the wrong restart generation");
+}
+
+// A capacity round whose victims did not all become durably tombstoned: the failed victim keeps
+// its references, returns to service without a tombstone, and the next FIFO candidate is evicted
+// instead. Optionally the failed victim is quarantined while its tombstone write is in flight; it
+// then stays out of planning and the worker evicts it afterwards.
+void capacity_eviction_tombstone_failure(ninfer::DeviceContext& device, bool quarantine) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    auto options = config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
+    const std::vector<ninfer::TokenId> failing(64, 111);
+    const std::vector<ninfer::TokenId> evicted(64, 112);
+    const std::vector<ninfer::TokenId> fallback(64, 113);
+    // Larger than one resident and at most two: the first round takes two victims.
+    const std::vector<ninfer::TokenId> incoming(128, 114);
+    std::size_t used = 0;
+    {
+        cache::KVDiskCache disk(options);
+        for (const auto* tokens : {&failing, &evicted, &fallback}) {
+            const auto ram_id = capture_tokens(ram, pool, allocation, device, *tokens);
+            disk.note_ram_resident(ram_id, 0);
+            require(disk.emergency_spill_ram(ram_id), "evict-fail fixture spill failed");
+        }
+        disk.wait_idle_and_fsync();
+        used = disk.snapshot().used_bytes;
+    }
+    options.capacity_bytes = used;
+    bool committed         = false;
+    bool failed_victim_ok  = false;
+    bool moved_past        = false;
+    {
+        cache::KVDiskCache disk(options);
+        const std::uint64_t failing_entry = planned_entry(disk, failing);
+        const auto ram_id                 = capture_tokens(ram, pool, allocation, device, incoming);
+        disk.note_ram_resident(ram_id, 0);
+        disk.test_arm_fail_tombstone();
+        {
+            UnlockedIoHold hold(disk, cache::DiskUnlockedIo::EvictionTombstones);
+            disk.request_idle_spill();
+            require(hold.entered(), "evict-fail spill never reached capacity eviction");
+            if (quarantine) { disk.invalidate_entry(failing_entry); }
+        }
+        committed =
+            wait_pred([&] { return disk.ram_is_durable(ram_id); }, std::chrono::seconds(10));
+        disk.wait_idle_and_fsync();
+        if (quarantine) {
+            failed_victim_ok = planned_entry(disk, failing) == 0 && !disk.claim(failing_entry) &&
+                               wait_pred([&] { return !disk.test_entry_in_index(failing_entry); },
+                                         std::chrono::seconds(10));
+        } else {
+            failed_victim_ok = planned_entry(disk, failing) == failing_entry;
+        }
+        moved_past = planned_entry(disk, evicted) == 0 && planned_entry(disk, fallback) == 0;
+    }
+    cache::KVDiskCache reopened(options);
+    const bool restart_ok = (planned_entry(reopened, failing) != 0) == !quarantine &&
+                            planned_entry(reopened, evicted) == 0 &&
+                            planned_entry(reopened, fallback) == 0 &&
+                            planned_entry(reopened, incoming) != 0;
+    require(committed, "evict-fail spill did not commit after skipping the failed victim");
+    require(failed_victim_ok, quarantine
+                                  ? "quarantine during a failed eviction did not keep the entry out"
+                                  : "victim without a durable tombstone did not return to service");
+    require(moved_past, "capacity eviction did not move past the failed victim");
+    require(restart_ok, "failed eviction round exposed the wrong restart generation");
+}
+
+// Compaction writes and renames PACKSET, and reaps the retired generation (remove_all and
+// directory fsyncs), with the index mutex released. Admission completes while either window is
+// held, and the old generation is gone once the reap finishes.
+void compaction_publish_and_reap_run_without_index_mutex(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(48ULL << 20);
+    auto allocation = pool.storage->reserve(3);
+    allocation.materialize_pages(2, device.stream);
+    const auto options =
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
+    const std::vector<ninfer::TokenId> dropped(64, 101);
+    const std::vector<ninfer::TokenId> retained(128, 102);
+    {
+        cache::KVDiskCache disk(options);
+        for (const auto* tokens : {&dropped, &retained}) {
+            const auto ram_id = capture_tokens(ram, pool, allocation, device, *tokens);
+            disk.note_ram_resident(ram_id, 0);
+            require(disk.emergency_spill_ram(ram_id), "compaction-unlocked fixture spill failed");
+        }
+        require(disk.test_fifo_evict_one(), "compaction-unlocked fixture eviction failed");
+    }
+    cache::KVDiskCache disk(options);
+    const auto packset           = read_bytes(directory.path / "PACKSET");
+    std::uint64_t old_generation = 0;
+    if (packset.size() == 32) {
+        std::memcpy(&old_generation, packset.data() + 12, sizeof(old_generation));
+    }
+    const auto old_root                = directory.path / "packs" / std::to_string(old_generation);
+    const std::uint64_t retained_entry = planned_entry(disk, retained);
+    require(old_generation != 0 && std::filesystem::exists(old_root) && retained_entry != 0,
+            "compaction-unlocked fixture is invalid");
+    const std::vector<ninfer::TokenId> urgent(64, 103);
+    // Captured up front; it is noted for the disk only while publication is held.
+    const auto urgent_ram = capture_tokens(ram, pool, allocation, device, urgent);
+    bool published        = false;
+    bool publish_admitted = false;
+    bool urgent_deferred  = false;
+    bool reaped           = false;
+    bool reap_admitted    = false;
+    std::atomic<bool> urgent_done{false};
+    std::atomic<bool> urgent_ok{false};
+    {
+        UnlockedIoHold publish(disk, cache::DiskUnlockedIo::CompactionPackset);
+        UnlockedIoHold reap(disk, cache::DiskUnlockedIo::GenerationReap);
+        std::jthread maintenance([&] { disk.wait_idle_and_fsync(); });
+        std::jthread urgent_spill;
+        published = publish.entered();
+        if (published) {
+            publish.arm();
+            const bool round = disk_admission_round(disk, retained, retained_entry);
+            publish_admitted = publish.disarm() && round;
+            // An emergency spill must not install an object writer while the generation switch
+            // is in flight; it starts once publication completes.
+            disk.note_ram_resident(urgent_ram, 0);
+            urgent_spill = std::jthread([&] {
+                try {
+                    urgent_ok.store(disk.emergency_spill_ram(urgent_ram));
+                    // NOLINTNEXTLINE(bugprone-empty-catch): a throw leaves urgent_ok false
+                } catch (...) {}
+                urgent_done.store(true);
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            urgent_deferred = !urgent_done.load() && !disk.ram_is_durable(urgent_ram);
+            publish.release();
+            reaped = reap.entered();
+            if (reaped) {
+                reap.arm();
+                const bool reap_round = disk_admission_round(disk, retained, retained_entry);
+                reap_admitted         = reap.disarm() && reap_round;
+            }
+        }
+        publish.release();
+        reap.release();
+    }
+    // wait_idle_and_fsync returns only after every in-flight reap has finished.
+    const bool old_removed   = !std::filesystem::exists(old_root);
+    const bool retained_kept = disk_admission_round(disk, retained, retained_entry);
+    require(published, "compaction-unlocked compaction never reached PACKSET publication");
+    require(publish_admitted, "admission waited for compaction PACKSET publication");
+    require(urgent_deferred, "emergency spill ran during compaction PACKSET publication");
+    require(reaped, "compaction-unlocked publication never reaped the retired generation");
+    require(reap_admitted, "admission waited for the retired-generation reap");
+    require(urgent_ok.load(), "emergency spill failed after publication");
+    require(old_removed, "retired pack generation was not reaped");
+    require(retained_kept, "retained entry was lost across the unlocked compaction");
+}
+
+// invalidate_entry never throws or waits for a spill that pins the entry: the quarantine is
+// immediate, the spill built on it abandons, and the disk worker evicts the entry once its pins
+// drop. The quarantine survives a reopen.
+void invalidate_during_spill_defers_eviction(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    const auto options =
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Zstd, 64ULL << 20);
+    const std::vector<ninfer::TokenId> aligned(64, 6);
+    std::vector<ninfer::TokenId> extended = aligned;
+    extended.push_back(0);
+    extended.resize(128, 7);
+    std::uint64_t entry_b  = 0;
+    bool prompt            = false;
+    bool quarantined       = false;
+    bool evicted_after_pin = false;
+    bool retried           = false;
+    bool not_republished   = false;
+    {
+        cache::KVDiskCache disk(options);
+        const auto ram_b = capture_tokens(ram, pool, allocation, device, aligned);
+        disk.note_ram_resident(ram_b, 0);
+        require(disk.emergency_spill_ram(ram_b), "invalidate-spill fixture spill of B failed");
+        const auto match_b = plan_tokens(disk, aligned);
+        require(match_b.has_value(), "invalidate-spill fixture match of B failed");
+        entry_b          = match_b.value().entry_id;
+        const auto ram_d = capture_tokens(ram, pool, allocation, device, extended);
+        ram.set_disk_entry_id(ram_d, entry_b);
+        disk.note_ram_resident(ram_d, entry_b);
+        {
+            EncodeHold hold(disk);
+            disk.request_idle_spill();
+            require(hold.entered() && disk.test_disk_io_pins(entry_b) != 0,
+                    "invalidate-spill: idle Extend never pinned B and reached its encode");
+            hold.arm();
+            bool threw = false;
+            try {
+                disk.invalidate_entry(entry_b);
+            } catch (const std::exception&) { threw = true; }
+            prompt               = hold.disarm() && !threw;
+            const auto replanned = plan_tokens(disk, aligned);
+            quarantined = !disk.claim(entry_b) && !(replanned && replanned->entry_id == entry_b) &&
+                          disk.test_entry_in_index(entry_b);
+        }
+        evicted_after_pin = wait_pred(
+            [&] {
+                return !disk.test_entry_in_index(entry_b) && disk.test_pending_invalidations() == 0;
+            },
+            std::chrono::seconds(10));
+        retried = wait_pred([&] { return disk.ram_is_durable(ram_d); }, std::chrono::seconds(10));
+        const auto match_d = plan_tokens(disk, extended);
+        not_republished    = match_d && match_d->entry_id != entry_b;
+        disk.wait_idle_and_fsync();
+    }
+    cache::KVDiskCache reopened(options);
+    const bool stayed_invalid = !reopened.test_entry_in_index(entry_b) && !reopened.claim(entry_b);
+    require(prompt, "invalidation of a spill-pinned entry threw or waited");
+    require(quarantined, "pinned invalid entry stayed selectable or was evicted under its pin");
+    require(evicted_after_pin, "disk worker did not evict the invalid entry after its pin dropped");
+    require(retried, "spill of the extension was not retried without its invalid parent");
+    require(not_republished, "abandoned Extend republished the invalid entry");
+    require(stayed_invalid, "invalidated entry resurrected on reopen");
+}
+
+// Rolling back a capture that a spill already pinned retires it at once; its block stays
+// allocated until the spill's unpin.
+void discard_while_spill_pinned_defers_free(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(16ULL << 20);
+    auto allocation = pool.storage->reserve(2);
+    allocation.materialize_pages(1, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 32ULL << 20));
+    const auto ram_id = capture_tokens(ram, pool, allocation, device, {4, 4, 4, 4});
+    disk.note_ram_resident(ram_id, 0);
+    const auto entry_bytes = ram.snapshot().used_bytes;
+    ram.pin_for_io(ram_id);
+    if (ram.evict_one_unpinned(ram_id)) {
+        ram.unpin_for_io(ram_id);
+        require(false, "reclaim eviction succeeded while an I/O pin was held");
+    }
+    disk.abandon_ram_spill(ram_id);
+    ram.discard(ram_id);
+    const bool retired = !disk.test_has_ram_note(ram_id) && ram.snapshot().entry_count == 0 &&
+                         ram.snapshot().used_bytes == entry_bytes && ram.test_io_pins(ram_id) == 1;
+    ram.unpin_for_io(ram_id);
+    const bool freed = ram.snapshot().used_bytes == 0 && !ram.retired_pending();
+    require(retired, "discard of a pinned capture did not retire it with its block intact");
+    require(freed, "the spill's unpin did not free the discarded block");
+}
+
 void run_stall_cases(ninfer::DeviceContext& device) {
     idle_cancel_during_capacity_eviction(device);
     spill_pin_waits_only_its_entry(device);
@@ -760,6 +1576,18 @@ void run_stall_cases(ninfer::DeviceContext& device) {
     ram_reclaim_waits_for_inflight_spill(device);
     ram_reclaim_skips_attempt_captures(device);
     restore_setup_ready_tracks_window_reads(device);
+    disk_claim_rejects_refreshed_generation(device);
+    claim_returns_during_in_flight_idle_extend(device);
+    ram_restore_does_not_wait_for_spill(device);
+    abandoned_capture_cancels_spill_without_waiting(device);
+    claim_during_encode_aborts_idle_extend(device);
+    spill_crc_runs_without_index_mutex(device);
+    capacity_eviction_tombstone_runs_without_index_mutex(device);
+    capacity_eviction_tombstone_failure(device, false);
+    capacity_eviction_tombstone_failure(device, true);
+    compaction_publish_and_reap_run_without_index_mutex(device);
+    invalidate_during_spill_defers_eviction(device);
+    discard_while_spill_pinned_defers_free(device);
 }
 
 } // namespace

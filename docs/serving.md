@@ -1057,8 +1057,9 @@ FP8-K/INT4-V growing-cache format, speculative backend, draft window, Vision set
 and Device Graph allowance. It
 uses a direct page-capacity calculation rather than allocation probing. Startup reports the policy,
 resolved capacity, runtime reservation, free memory after weights, automatic headroom, planned
-slack, actual free memory after complete startup, observed Graph memory, and pinned-host KV RAM
-occupancy in MiB. When `--kv-ram-capacity` is enabled, a post-warmup line reprints occupancy,
+slack, actual free memory after complete startup, observed Graph memory, the pinned
+checkpoint-image slab (`ckpt-pin=`) and its context-checkpoint head count (`ckpt-heads=`), and
+pinned-host KV RAM (`kv-ram=`) and disk (`kv-disk=`) occupancy, sizes in MiB. When `--kv-ram-capacity` is enabled, a post-warmup line reprints occupancy,
 periodic throughput lines print live host-resident `kv-ram=` used bytes plus `n=` / `restores=` /
 `evicts=` / `drops=` / `save=` / `load=`, plus device KV page entitlement (`gpu-kv=entitled/capacity`
 and `spec=` when a speculative pool exists) and non-zero `cache_fallbacks=`. Each `[req] done` line
@@ -1067,7 +1068,8 @@ includes `reuse_source=` and this request's non-zero `kv_ram_save=` / `kv_ram_lo
 occupancy. When `--kv-disk-capacity` is enabled, throughput lines also print `kv-disk=` occupancy,
 counters, and interval `h2d=`. `kv-ram=` / `n=` count chats still in the host FIFO, not chats
 already consumed after a restore onto a KV lane. RAM `save=` / `load=` are HIP D2H/H2D elapsed for
-that request or the throughput interval. Disk `save=` is spill-session wall harvested onto the
+that request's admission or the throughput interval; the copies of a capture rolled back by a
+deferred or failed admission count only toward lifetime and interval totals. Disk `save=` is spill-session wall harvested onto the
 request; disk `load=` is the host wall from the first live SSD read of that restore until the last
 page or state object has arrived in the pinned host window. Disk `h2d=` is the host wall from that
 last host arrival until the restore's page and state H2D complete (extra copy time after SSD is
@@ -1117,7 +1119,7 @@ head already sits at that `E` (skip, `captured_tokens = 0`; the rollback slot st
 later `true` at a new `E`). A later exact-hit `true` replaces the one rollback pin and leaves
 ladder heads. Ladder freeze borrows `C` and reloads the rollback image afterward. The rewrite
 checkpoints (`restore_turn_checkpoint`, `restore_response_checkpoint`) keep their GDN and DFlash
-state in lane-owned pinned host memory, about 187 MiB per lane with DFlash, rather than VRAM:
+state in the startup pinned checkpoint slab, about 187 MiB per lane with DFlash, rather than VRAM:
 capture snapshots the lane into staging on device and drains it to the host image on the copy
 stream behind later work, and restore copies staging back on device while it still holds that
 image, otherwise H2D from the image before the suffix prefill.

@@ -341,6 +341,23 @@ Host capacity is fixed by `--kv-ram-capacity`; `off` disables retained FIFO spil
 checkpoint state. Captures that do not fit are dropped without blocking admission. Active requests
 are never offloaded. Logged occupancy counts live host residents, not retired in-flight buffers.
 
+Consume, a rollback discard, and capacity eviction erase a host entry without waiting and retire
+its block. A retired block is freed once its copy and block events complete and its last I/O pin
+drops (a disk spill still reading the image, or a disk worker's pending-copy snapshot borrowing
+its event), so a RAM restore claim neither cancels nor waits for a spill of the same entry. A RAM
+restore starts only once the entry's own capture copies are ready; the copy-hold polls that while
+other lanes decode. Retired blocks and idle-spill I/O pins do not count against the capture fit
+decision; a blocking reclaim waits for a victim's copies or a retired block's fence, and a
+non-blocking reclaim selects only victims whose copies have landed and otherwise defers the
+admission. Harvest bills only completed copies. Rewrite-image and ladder-head copies between
+pinned host buffers run as 4 MiB host callbacks on the tier's startup host-copy stream, ordered
+only after each image's fence, so they overlap the entry's KV D2H/H2D. A middle-head hit installs
+only the entry's heads at or before the restored base into the Program's startup checkpoint pool;
+those copies wait for their own fences and are excluded from the entry's copy fence, which gates
+the lane's first prefill chunk, while a separate block fence keeps the retired block allocated
+until they land. Disk restore decodes saved heads straight into pool heads handed in with the
+restore target, after each head's previous DMA or host-copy owner has finished.
+
 A closed preserve-off turn is captured cut at its turn checkpoint. The request stopped on a stop
 token or string without a tool call, and its `TurnClosure` checkpoint `F` is its own generation
 opener (frontend `generation_opener`; a checkpoint inside a tool loop sits at the loop's first
@@ -390,13 +407,31 @@ copying a snapshot of live extents in 64 MiB slices with the cache mutex release
 objects committed to the source generation meanwhile. Lookups, claims, and statistics therefore
 never wait for the copy. Publication switches object locations to the new generation and waits
 only for no spill session or payload I/O; restores and reader claims continue across it on their
-generation leases. While compaction is pending an idle spill defers without marking its entry
+generation leases. Publication also waits for scheduler emergency preparation; the new `PACKSET`
+is written, synced and renamed with the mutex released, and a publishing flag keeps object writers
+out until the root fsync. Retired generations are reaped (descriptors closed, pack root and maps
+removed, directories fsynced) with the mutex released; `wait_idle_and_fsync` returns only after
+every in-flight reap. While compaction is pending an idle spill defers without marking its entry
 failed, and an emergency spill appends past the garbage threshold inside the copy-on-write
 reserve. A spill's room check counts the pending compaction copy but not later appends, so a
 compaction that no longer fits falls back to low-space eviction; a failed compaction is not
 retried until the durable generation changes. At most one spill session is
 installed: emergency preparation excludes the worker's idle preparation, and session teardown
 releases pins and resets the session in one critical section before unlinking its draft objects.
+Spill preparation encodes state blobs (zstd and record CRC32C) and page-record headers with the
+index mutex released, then relocks only to reserve object IDs and the append range and to
+re-validate cancellation, a claim of the entry an Extend or Refresh would rewrite, and quarantine or
+eviction of its source; an abandoned preparation does not mark the RAM entry failed. MANIFEST
+images are sequenced under the mutex and published by one writer (tmp write, fsync, rename,
+directory fsync); an image older than the last published one is dropped. Capacity and quarantine
+eviction are two-phase: victims are selected and made unavailable under the mutex, their
+tombstones are made durable with the mutex released, and only a durably tombstoned victim drops its
+references; any other victim returns to service unless quarantined. A disk claim never waits for
+an idle Extend or Refresh of its entry: it cancels the spill, whose commit abandons before its
+`meta.bin` rename or rolls it back. If that rollback fails, the newer generation is published and
+the claimed restore fails its committed-generation check as a `CacheRestoreFailure` cache miss,
+falling back to cold prefill. Quarantine makes an entry unavailable and invalidates RAM tickets
+naming it at once, without waiting for its pins; the disk worker evicts it once they drop.
 Stats observers and the scheduler's stats publication read the disk tier without blocking on
 its index lock and never see its counters step backwards.
 Durable publication orders pack namespace, map, entry and manifest before final synchronization.

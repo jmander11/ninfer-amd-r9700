@@ -102,14 +102,20 @@ NInfer 不支持 preemption，因此 request 只有在其 prompt、声明的最�
 
 RAM 第二层的 D2H/H2D 走独立的 copy engine（`DeviceContext::copy_stream`），不是 GPU scheduling
 unit，也不占用 compute owner。Copy 可以与**另一条** lane 的合法 compute unit 重叠；当前
-PrefillChunk / DecodeRound 正在读写的 pages 不得作为 copy source 或 destination。MTP prefill
-context-checkpoint 冻结是例外：staging GDN（slot `C`，与 lane current 不相交）以及 staging hidden
-的 D2H 可以与**同一条** lane 的下一 prefill chunk 重叠。冻结期间 `C` 从 turn-rollback occupant
+PrefillChunk / DecodeRound 正在读写的 pages 不得作为 copy source 或 destination。MTP/DFlash prefill
+context-checkpoint 冻结是例外：staging GDN（slot `C`，与 lane current 不相交）、staging hidden，
+以及 DFlash staging cyclic state 的 D2H 可以与**同一条** lane 的下一 prefill chunk 重叠。冻结期间 `C` 从 turn-rollback occupant
 借出，pack 后 H2D 把 rollback 装回；`occupied=false` 必须发生在 clobber D2D 之前。Rewrite-checkpoint
 capture 同样借用 staging：compute stream 先等待 staging 上一轮 copy（stream wait，不阻塞 host），
 D2D 把 lane current GDN 和 DFlash local lane 拷入 staging，`copy_stream` 再把 staging 以逐层线性
 D2H 拷入该 lane 的 pinned rewrite image，与后续 prefill/decode 重叠。`device.stream` 上的
-`synchronize()` 只排空 compute，不排空 copy_stream。
+`synchronize()` 只排空 compute，不排空 copy_stream。Checkpoint host images（每条 lane 的 rewrite
+image 与 MTP/DFlash context-checkpoint head pool）在启动时从一块 prefault 并注册的 pinned slab 切出，
+由 Program 拥有；head 离队后回池，后续 freeze、turn-rollback 与 RAM/disk restore 复用同一 image 与
+completion event，serving 期间不调用 `hipHostMalloc`/`hipHostFree`。Pool 容量是每 lane 一个 rollback
+head，加上所有 lane 在共享 KV capacity 内能同时持有的 ladder head 数（`--max-context` 之上的 mark
+不可达）；pool 用尽时跳过可选的 capture 或 restored head。复用 head 前等待其上一个 DMA/host-copy
+owner 一律是 stream wait（copy_stream 或 compute stream 等 head fence），scheduler 线程不 host wait。
 
 ### 2.7 Bounded ingress and output
 
@@ -873,25 +879,41 @@ The executor captures at each admission site that is about to destroy a retained
 3. a RAM restore that is about to cover a still-dirty target lane.
 
 Capture queues D2H on `copy_stream` and **holds the source pages mapped** until `copies_ready`.
-Admit is two-phase: bind records the request in its lane and any captured-but-not-evicted victims
-as copy-hold; other decode-ready lanes may run a DecodeRound while that D2H (and later restore
-H2D) is in flight. Admit-complete waits with `hipEventQuery` (and `hipEventSynchronize` on copy
-only when membership is empty), then `evict_retained_lane` / `kv.reset()`, optional restore H2D,
+Admit is two-phase: bind records the request in its lane and the retained victims awaiting release
+as copy-hold (including victims whose optional capture was dropped); other decode-ready lanes may
+run a DecodeRound while that D2H (and later restore H2D) is in flight. Admit-complete waits with `hipEventQuery` (and `hipEventSynchronize` on copy
+only when membership is empty), then `evict_retained_lane` / `kv.reset()`, optional restore H2D
+(a RAM restore starts only once its entry's own capture copies are ready, polled while others
+decode),
 `wait_kv_ram_copies_on_compute` immediately before this lane's `start_prefill_lane`, and harvest.
 Harvest of D2H/H2D elapsed happens after that wait, not on an overlapping DecodeRound launch.
 A cancellation while other lanes decode does not drain at once: `begin_copy_hold_cancel` stops
-further disk restore work and fences the copies already queued, the hold stays parked while
-DecodeRounds continue, and the drain below runs once `copy_hold_cancel_settled` (or membership is
-empty), so it no longer waits on in-flight SSD reads. If the held request is cancelled or fails
-before admit-complete, drain waits for those copies,
-harvests, releases an unused RAM claim, and `evict_retained_lane` on every captured victim so the
-D2H image is the only remaining copy. A later RAM hit exclusive-claims the matching host entry (pinned entries are invisible to later
-`plan_match`). `capture` and `unpack` record a start HIP event before the copies and a done event
+further disk restore work and records a fence on the copy stream behind the copies already queued,
+the hold stays parked while DecodeRounds continue, and the drain below runs once
+`copy_hold_cancel_settled` (or membership is empty), so it no longer waits on in-flight SSD reads.
+A shutdown with such a hold parked finishes it as cancelled.
+A `CacheRestoreFailure` before prefill consumes the prompt parks the hold the same way; once it
+settles, best-effort cleanup releases the claims and drops the failed RAM/disk entry, then a retry
+cold-prefills its lane and a new request re-enters FIFO admission as a cold fallback. Any other
+request-local failure (`RequestError`, or a `CacheRestoreFailure` after prefill starts) of an
+admission, copy-hold, or generation-recovery retry drains and fails only that request (a drain
+after any `CacheRestoreFailure`, or of a cancelled failed hold, also drops the failed entry);
+other exceptions remain Engine-fatal.
+If the held request is cancelled or fails before admit-complete, drain waits for those copies,
+harvests, releases unused RAM/disk claims (after a `CacheRestoreFailure` it also drops the failed
+entry, as above), and calls `evict_retained_lane` on every selected victim not yet evicted; a
+failed restore's fallback evicts them the same way.
+If capture succeeded, the completed D2H image is the only remaining copy. A later RAM hit
+exclusive-claims the matching host entry (pinned entries are invisible to later `plan_match`). `capture` and `unpack` record a start HIP event before the copies and a done event
 after them so other-lane decode can overlap the DMA. The pinned rewrite-checkpoint and ladder
-images (GDN conv/recurrent, DFlash cyclic; ~150 MB each) copy host-to-host through
-`enqueue_host_copies`, a stream-ordered host callback, because ROCm runs `hipMemcpyAsync` between
-host buffers as a CPU copy inside the call. Each image's `copies_done` fence is stream-waited
-before and re-recorded after those copies; disk restore does the same on its state stream. Consume then erases that entry wherever it
+images (GDN conv/recurrent, about 150 MB per image, plus DFlash cyclic) copy host-to-host through
+`enqueue_host_copies`, a stream-ordered `hipLaunchHostFunc` callback in 4 MiB chunks, because
+ROCm runs `hipMemcpyAsync` between host buffers as a CPU copy inside the call. Each image's `copies_done`
+fence is stream-waited before and re-recorded after those copies; disk restore does the same on
+its state stream. A RAM restore's installed ladder heads copy out of the entry on that host-copy
+stream behind only their own fences: no stream joins them and the entry's copy fence, which gates
+the lane's first prefill chunk, excludes them; a separate block fence keeps the entry's block
+allocated until they land. Consume then erases that entry wherever it
 sits in the FIFO and retires the host block, including after an incomplete first chunk; a throw
 before consume releases the claim and leaves the host row in place. After consume the bundle lives
 only in VRAM until a later spill recaptures it. Occupancy `used`/`entries` (human `kv-ram=` / `n=`)
@@ -969,7 +991,10 @@ opportunity，直到该 lane 的 copies 允许 `start_prefill_lane`。
 6. choose, prepare and launch one next GPU unit
 ```
 
-copy-hold 在 admission-turn gate 之前检查：membership 非空且 copies 未就绪时先跑其他 lane 的
+已取消或 restore 失败而 parked 的 copy-hold 最先检查：其 fenced copies settle 之前，只要 membership
+非空就只跑该 membership 的 DecodeRound，generation recovery、admission 和 prefill 都不推进；settle 后
+（或 membership 为空）才 cancel 该 lane，或丢弃失败 entry 并走 cold fallback。其余 copy-hold 在
+admission-turn gate 之前检查：membership 非空且 copies 未就绪时先跑其他 lane 的
 DecodeRound（不 harvest、不 `EventSynchronize` copy）；membership 空则 `EventSynchronize` copy
 并 complete。Harvest 只在该 request 的 `start_prefill_lane` wait 之后。
 
@@ -987,7 +1012,17 @@ forward 宽度，256 的倍数，`0` 表示 prefill-first；未设置时由 plan
 rounds，`D>=1`）：
 
 ```text
-if a prefill owner exists:
+if a parked copy-hold was cancelled or its restore failed:
+    if its fenced copies have not settled and requests are DECODE_READY:
+        run one DecodeRound containing them (nothing else advances)
+    else:
+        cancel it, or drop the failed entry and fall back to cold prefill
+else if an admitted copy-hold exists:
+    if its copies are not ready and requests are DECODE_READY:
+        run one DecodeRound containing them
+    else:
+        complete it and start its prefill
+else if a prefill owner exists:
     if N == 0 or no request is DECODE_READY:
         run the owner's next PrefillChunk (up to prefill_chunk tokens)
     else if the owner is mixable (§8.9):
@@ -995,6 +1030,10 @@ if a prefill owner exists:
         less the round's live verify columns
     else:
         run D DecodeRounds, then one PrefillChunk of <= N tokens
+else if a generation-recovery retry is queued:
+    start it (a host restore parks it as a copy-hold)
+else if a pending request is admissible and decode-admission budget permits:
+    admit it and start its prefill
 else if one or more requests are DECODE_READY:
     run one DecodeRound containing all of them
 else:
