@@ -5,10 +5,10 @@ repository by custom AMD ports, not merged ancestry; `AGENTS.md` states the sync
 
 ## Baseline
 
-Reconciled through upstream `f7f70d895a317617d8d0dcfb43b42d519a65fa9f` (2026-10-02), advanced
-from `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
+Reconciled through upstream `574a8d9167500be2717c0ce5e7d9f2e061a1f32e` (2026-10-02), advanced
+from `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
 `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`,
-`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `f7f70d89`
+`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `574a8d91`
 against current AMD behavior.
 
 ## Ported features (`c450798c..e04fad37`)
@@ -153,3 +153,62 @@ Evidence: `profiles/bench/r9700-upstream-sync-20260928/`.
   real test the AMD tree does not carry (the cached-versus-fresh interleavings resume check).
 
 Evidence: `profiles/bench/r9700-upstream-sync-20261002/`.
+
+## `f7f70d89..574a8d91` (31 upstream commits, reconciled 2026-10-02)
+
+Upstream's code-quality campaign (compiler-warning, clang-tidy, formatter, and lint gates, then
+compute-sanitizer) plus the races those tools found. The quality work reached `experimental` from
+the `quality/clang-tidy-backlog` branch, so `4051ebf0..26ba4203` are not descendants of
+`f7f70d89`; every non-merge commit in `f7f70d89..574a8d91` is dispositioned here.
+
+- Ported races: `2e11477f` p-less reduction helpers (trailing barriers after every shared-slot
+  result read, block-uniform inverse-CDF pick without the `red_idx[0]` round trip, register
+  `scan_done` in the tile scan) and the accept-kernel half of `8dba51cc` (no `done_sh` read beside
+  thread 0's write). The fork's helpers were the pre-fix upstream code; the new R9700 racecheck
+  reported the same sites before the port (`sampling_device.h` slot-0 reuse, moments, residual,
+  top-2 broadcast, and the compiler-hoisted `*found` load) and none after.
+- Ported defects from the lint census `a9c82edd`: disk-reuse planning moved from a `const
+  std::optional` (a copy of the restored host image per plan), and the eval CLI's missing
+  `PackageNotFoundError` import. Its other behavioral hunks are absent here or already equivalent
+  (q5 aliasing, the paged-KV scatter `__shared__` descriptor, the CRC32C `[[nodiscard]]` order,
+  w8 pair planning, `tools/kdev`).
+- Ported tooling with AMD equivalents (`docs/maintainer/code-quality.md`):
+  - `4051ebf0`, `be07884e`, `f2e67b06`: `cmake/warnings.cmake`, warnings as errors in project C++
+    (GCC 13) and HIP (ROCm clang) in place of the nvcc front-end flags; the HIP host pass does not
+    report device-only helpers as unused. `NINFER_SANITIZE` instruments the host compilation of
+    HIP translation units only (`-Xarch_host`), because gfx1201 device code cannot take ASan.
+    The fork's warning census (97 project findings: shadowing, unhandled FP8-capped profile
+    enumerators, dead fields and locals, sign compares, unchecked HIP event calls) is fixed.
+  - `4051ebf0`, `fe50f67d`, `edde8e88`, `26ba4203`: `.clang-tidy` and `scripts/run-clang-tidy.py`
+    on the ROCm toolchain's clang-tidy, reading the HIP compile database directly (no nvcc
+    translation or builder re-exec, so `a7238ed3` has no counterpart); `bugprone-signed-bitwise`,
+    new in LLVM 23 after upstream's 22.1.8 pin, is disabled.
+  - `4051ebf0`, `ce01f249`: `.pre-commit-config.yaml` (clang-format selects `.hip` by extension),
+    `ruff.toml`, `_typos.toml` with gfx12/ROCm vocabulary, and the auto-fixing `.githooks/pre-commit`.
+  - `f8ea8cf9`, `574a8d91`: compute-sanitizer has no gfx1201 counterpart (ROCm ASan needs
+    `xnack+`). `tools/r9700/gpu_check` and `scripts/gpu-check.sh` provide memcheck (guard pages),
+    initcheck (poisoned allocations), and racecheck (LDS instrumentation of optimized device
+    bitcode through the HIP compiler launcher) over the `gpucheck` CTest set (all 31 R9700
+    qualifiers). Racecheck also found a fork-only race: `nll_from_logits_kernel` (the prefill
+    NLL behind PPL and scoring) read the block maximum from `partial[0]` while wave 0 could
+    already be storing its sum partial there; a barrier now separates them. After the fixes the
+    set passes under memcheck, initcheck, and racecheck, and plainly (47 R9700 tests, 57 host).
+  - `33cf6b17`, `07d638b4`: the builder's memory cap at three quarters of host RAM without swap,
+    `--ulimit core=0`, and the update-then-restart rule.
+  - `6c64f009`: the dead `.codex` clang-format hook is removed.
+- Deferred: `ce6ad2d5` tree-wide clang-format/ruff reformat and its `2695ffbe` blame entry (about
+  1,700 C++/HIP and 400 Python files here; one mechanical commit when no other agent holds
+  unpushed edits), and `157161de` whole-tree clang-tidy as the gate (694 findings here, no
+  path-sensitive analyzer finding; `--changed` gates new work). The commit hook is opt-in until the
+  reformat. The fork's ruff findings that were defects are fixed (a never-executed assertion with
+  an undefined name in the bench-matrix tests, a stray expression in the FP8 hybrid converter).
+- Not ported: the clang-tidy backlog fixes `9ff23c4c`, `d40226e0`, `196cc237`, `9b9b9b47`,
+  `341822ba`, `1bd8f518` (style or hardening of upstream code; their defect hunks are covered
+  above), `ce01f249`'s `--fast` tier, `kernel` label, and master merge gates (the fork's test
+  runner is host-only by default and it has no master merge flow), and `f8ea8cf9`'s
+  `--sanitizer` reduced cases (the R9700 qualifiers complete under racecheck at full scope).
+  Absent here: `c1a37a5a` sparse-MoE scan race, `d5d01c3c` q5 epilogue and kdev guard, the
+  `8dba51cc` small-T reduce kernel (the split-KV merges here use separate scalars and barriers),
+  and the `test_attn_input_proj` sanitizer cases (`ninfer_r9700_target_variant_attention_projection_qual`
+  is an empty entry point).
+
