@@ -153,9 +153,10 @@ B128/S16/tau900 profile, selected chunk, candidate-local quality authority, and 
 BF16 source. It emits one future C1 command under
 `profiles/ppl/r9700-selected-exact-token-20260921`; run its `commands.sh` only under the exclusive
 GPU lease. Preparation requires the published selection and `apps/ninfer-ppl` in its exact selected
-build root. The fresh phase-sum roots initially contain bench/planner but not that scorer;
-the resource bridge preserves old prefill quality, not a claim that an old executable exercises
-the new selected runtime. Do not silently substitute the original panel scorer or rebuild a
+build root. The fresh phase-sum roots initially contain bench/planner but not that scorer.
+The FP8 context/reporting recovery bridges those roots relied on were retired with hipBLASLt
+(438f6a89), and a selection whose source provenance binds either bridge is rejected. Do not
+silently substitute the original panel scorer or rebuild a
 frozen root from this launcher. The launcher runs under the installed
 `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python` with the ROCm library paths exported.
 It reuses the selected quality campaign's bound BF16 prefill reference and exact repeat proof,

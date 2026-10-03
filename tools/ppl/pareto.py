@@ -32,11 +32,23 @@ INPUT_SCHEMA_VERSION = 4
 SELECTION_RULE = "same_recipe_static_profile_maximin_v2"
 TERMINAL_SELECTION_RULE = "global_maximin_whole_then_capacity_then_quality_then_canonical_v1"
 XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
+RETIRED_RECOVERY_BINDINGS = ("fp8_context_resource_recovery", "benchmark_reporting_recovery")
 TERMINAL_RECIPE_PROFILES = {
     "r9700-q4g64-n16k16-eval": "all-q4g64-v1",
     "r9700-q4-w8-mse-n16k16-eval": "mixed-q4g64-w8g32-mse-v1",
     "r9700-q4g64-f8e4m3-four-role-n16k16-eval": "four-role-rowwise-f8e4m3-all-other-q4g64-v0",
 }
+
+
+def reject_retired_recovery_bridges(sources: list) -> None:
+    """Fail closed on evidence bound to the retired hipBLASLt-era recovery bridges."""
+    if any(
+        isinstance(source, dict) and any(key in source for key in RETIRED_RECOVERY_BINDINGS)
+        for source in sources
+    ):
+        raise ValueError(
+            "FP8 context/reporting recovery bridges were retired with hipBLASLt (438f6a89)"
+        )
 
 
 def _valid_sha256(value: object) -> bool:
@@ -1005,28 +1017,7 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
             provenance_by_candidate.setdefault(source["candidate"], []).append(source)
     if len(provenance_by_candidate) != 12:
         raise ValueError("schema-v7 authority has malformed source provenance")
-    recovery_bindings = [
-        source.get("fp8_context_resource_recovery") for source in source_provenance
-    ]
-    from tools.ppl.benchmark_reporting_recovery import bound_bridge
-
-    reporting_recovery = bound_bridge(source_provenance)
-    if any(binding is not None for binding in recovery_bindings):
-        from tools.ppl.assemble_pareto import validate_chunk_candidate_bindings
-        from tools.ppl.fp8_context_recovery import checked_file, validate_bridge
-
-        if any(binding != recovery_bindings[0] for binding in recovery_bindings):
-            raise ValueError("schema-v7 resource recovery binding differs across candidates")
-        recovery_path = checked_file(recovery_bindings[0])
-        recovery = validate_bridge(recovery_path)
-        if recovery["chunk_selection"] != {
-            key: prefill_chunk_selection[key] for key in ("path", "sha256")
-        }:
-            raise ValueError("schema-v7 resource recovery differs from selected chunk authority")
-        chunk_record = json.loads(checked_file(recovery["chunk_selection"]).read_text())
-        validate_chunk_candidate_bindings(
-            chunk_record, source_provenance, recovery, reporting_recovery
-        )
+    reject_retired_recovery_bridges(source_provenance)
     for row in candidates:
         recipe = row.get("weight_recipe")
         cache = row.get("cache_profile")

@@ -959,7 +959,6 @@ def assemble_candidate(
     whole_root: Path | None,
     prefill_chunk: int,
     prefill_chunk_authority: dict[str, Any],
-    reporting_recovery: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if prefill_chunk not in PRODUCTION_PREFILL_CHUNKS:
         raise ValueError("selected prefill chunk is unsupported")
@@ -1026,31 +1025,10 @@ def assemble_candidate(
         elif manifest.get("hybrid_shared_workspace_authority") is not None:
             raise ValueError(f"{preset} non-hybrid candidate carries hybrid workspace authority")
     benches = {json.dumps(manifest["bench"], sort_keys=True) for manifest in manifests.values()}
-    if reporting_recovery is not None:
-        from tools.ppl.benchmark_reporting_recovery import expected_benchmark, mapping
-
-        reporting_source = {
-            "artifact": identity,
-            "cache_value_group": group,
-            "quality": {"representation": quality_source["representation"]},
-        }
-        reporting_row = mapping(
-            reporting_recovery, group, quality_source["representation"]["xattention_profile"]
-        )
-        for preset, manifest in manifests.items():
-            if manifest["bench"] != expected_benchmark(
-                reporting_source, preset, reporting_recovery
-            ):
-                raise ValueError("matrix benchmark differs from reporting recovery")
-            if weights_id == HYBRID_WEIGHTS_ID:
-                field = "new_planner" if preset == "pareto-whole" else "old_hybrid_planner"
-                if manifest["hybrid_shared_workspace_authority"]["tool"] != reporting_row[field]:
-                    raise ValueError("matrix planner differs from reporting recovery")
-    elif len(benches) != 1:
+    if len(benches) != 1:
         raise ValueError("capacity and whole matrices use different benchmark bytes")
     if (
-        reporting_recovery is None
-        and weights_id == HYBRID_WEIGHTS_ID
+        weights_id == HYBRID_WEIGHTS_ID
         and len(
             {
                 json.dumps(manifest["hybrid_shared_workspace_authority"]["tool"], sort_keys=True)
@@ -1123,11 +1101,7 @@ def assemble_candidate(
         "prefill_chunk_authority": prefill_chunk_authority,
         "cache_value_group": group,
         "artifact": identity,
-        "benchmark_executable": (
-            reporting_row["new_benchmark"]
-            if reporting_recovery is not None
-            else manifests["pareto-capacity"]["bench"]
-        ),
+        "benchmark_executable": manifests["pareto-capacity"]["bench"],
         "quality": {
             "path": str(quality_path),
             "sha256": file_sha256(quality_path),
@@ -1348,11 +1322,10 @@ def validate_xattention_dense_controls(
 def validate_chunk_candidate_bindings(
     chunk_selection: dict[str, Any],
     provenance: list[dict[str, Any]],
-    resource_recovery: dict[str, Any] | None = None,
-    reporting_recovery: dict[str, Any] | None = None,
 ) -> None:
-    from tools.ppl.fp8_context_recovery import resolved_benchmark
+    from tools.ppl.pareto import reject_retired_recovery_bridges
 
+    reject_retired_recovery_bridges(provenance)
     sources = chunk_selection.get("sources")
     if not isinstance(sources, list) or len(sources) != len(provenance):
         raise ValueError("prefill-chunk selection does not cover every Pareto candidate")
@@ -1377,35 +1350,13 @@ def validate_chunk_candidate_bindings(
             representation.get("xattention_profile"),
         )
         bound = expected.get(key)
-        from tools.ppl.benchmark_reporting_recovery import (
-            expected_benchmark,
-            validate_source_matrices,
-        )
-
-        capacity_benchmark = expected_benchmark(source, "pareto-capacity", reporting_recovery)
         if (
             bound is None
             or bound.get("artifact") != artifact
-            or resolved_benchmark(bound, resource_recovery) != capacity_benchmark
+            or bound.get("benchmark_executable") != source.get("benchmark_executable")
         ):
             raise ValueError("Pareto candidate does not match its prefill-chunk selection identity")
         actual.add(key)
-        if reporting_recovery is not None:
-            validate_source_matrices(source, reporting_recovery)
-        if resource_recovery is not None:
-            from tools.ppl.fp8_context_recovery import validate_recovered_capacity
-
-            # The resource bridge still owns the unchanged capacity proof. The
-            # reporting bridge above owns fresh whole benchmark/planner identity.
-            retained = (
-                source
-                if reporting_recovery is None
-                else {
-                    **source,
-                    "matrices": {"pareto-capacity": source["matrices"]["pareto-capacity"]},
-                }
-            )
-            validate_recovered_capacity(retained, resource_recovery)
     if actual != set(expected):
         raise ValueError("prefill-chunk selection and Pareto candidate sets differ")
 
@@ -1488,16 +1439,6 @@ def main() -> int:
         help="executed twelve-matrix capacity validation controlling whole eligibility",
     )
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument(
-        "--fp8-context-recovery",
-        type=Path,
-        help="qualified allocation-only hybrid build bridge; never a capacity waiver",
-    )
-    parser.add_argument(
-        "--benchmark-reporting-recovery",
-        type=Path,
-        help="reviewed host-reporting-only bridge retaining existing capacity",
-    )
     args = parser.parse_args()
     chunk_selection_path = args.prefill_chunk_selection.resolve()
     prefill_chunk_authority, chunk_selection = validate_prefill_chunk_authority(
@@ -1505,16 +1446,6 @@ def main() -> int:
     )
     chunk_selection_sha256 = prefill_chunk_authority["sha256"]
     prefill_chunk = chunk_selection["selected_prefill_chunk"]
-    reporting_recovery = None
-    if args.benchmark_reporting_recovery is not None:
-        from tools.ppl.benchmark_reporting_recovery import validate_bridge as validate_reporting
-        from tools.ppl.fp8_context_recovery import identity
-
-        reporting_recovery = validate_reporting(args.benchmark_reporting_recovery, chunk_selection)
-        if args.fp8_context_recovery is None or reporting_recovery[
-            "fp8_context_resource_recovery"
-        ] != identity(args.fp8_context_recovery):
-            raise ValueError("reporting bridge requires its exact FP8 resource authority")
     candidates, provenance = [], []
     for name, weights_id, group, quality, capacity, whole in args.candidate:
         whole_path = None if whole == "-" else Path(whole).resolve()
@@ -1527,23 +1458,12 @@ def main() -> int:
             whole_path,
             prefill_chunk,
             prefill_chunk_authority,
-            reporting_recovery,
         )
         candidates.append(candidate)
         provenance.append(source)
-        if reporting_recovery is not None:
-            source["benchmark_reporting_recovery"] = identity(args.benchmark_reporting_recovery)
     if args.require_xattention_dense_controls:
         validate_xattention_dense_controls(candidates, provenance)
-        recovery = None
-        if args.fp8_context_recovery is not None:
-            from tools.ppl.fp8_context_recovery import identity, validate_bridge
-
-            recovery = validate_bridge(args.fp8_context_recovery, chunk_selection)
-            binding = identity(args.fp8_context_recovery)
-            for source in provenance:
-                source["fp8_context_resource_recovery"] = binding
-        validate_chunk_candidate_bindings(chunk_selection, provenance, recovery, reporting_recovery)
+        validate_chunk_candidate_bindings(chunk_selection, provenance)
         if args.post_chunk_capacity_validation is None:
             raise SystemExit("static profile selection requires --post-chunk-capacity-validation")
         capacity_binding = bind_post_chunk_capacity_validation(
@@ -1555,11 +1475,7 @@ def main() -> int:
         )
         for source in provenance:
             source["post_chunk_capacity_validation"] = capacity_binding
-    elif (
-        args.post_chunk_capacity_validation is not None
-        or args.fp8_context_recovery is not None
-        or args.benchmark_reporting_recovery is not None
-    ):
+    elif args.post_chunk_capacity_validation is not None:
         raise SystemExit(
             "--post-chunk-capacity-validation requires --require-xattention-dense-controls"
         )

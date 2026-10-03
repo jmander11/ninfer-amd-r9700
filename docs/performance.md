@@ -25,7 +25,11 @@ Schema 20 instead used the maximum lane prefill duration and overstated aggregat
 throughput. Those concurrent prefill fields are ineligible for selection; retained C1, capacity,
 decode and independently measured whole-wall evidence remain valid in their respective scopes.
 The stopped attempt and valid raw results are retained in
-`profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/whole/closure.json`.
+`profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/whole/closure.json` as
+historical evidence. The FP8 shared-context resource bridge and the benchmark-reporting bridge
+that re-admitted the hipBLASLt-era four-role hybrid evaluation artifact were retired with
+hipBLASLt (438f6a89): their bound runtime sources and qualifier no longer exist, and the Pareto,
+cutover, and DFlash-selection tools now reject any authority that binds either bridge.
 
 ## Platform
 

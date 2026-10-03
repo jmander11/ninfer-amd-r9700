@@ -51,6 +51,7 @@ from tools.ppl.assemble_pareto import (  # noqa: E402  sys.path bootstrap
     _missing_capacity_provenance,
 )
 from tools.ppl.pareto import (  # noqa: E402  sys.path bootstrap
+    reject_retired_recovery_bridges,
     validate_terminal_production_authority,
 )
 
@@ -224,11 +225,7 @@ def _selected_hybrid_authority(
     ]
     if len(sources) != 1:
         raise ValueError("selected DFlash base lacks unique source provenance")
-    from tools.ppl.benchmark_reporting_recovery import bound_bridge, validate_source_matrices
-
-    reporting_recovery = bound_bridge(sources)
-    if reporting_recovery is not None:
-        validate_source_matrices(sources[0], reporting_recovery)
+    reject_retired_recovery_bridges(sources)
     bindings = sources[0].get("matrices")
     if not isinstance(bindings, dict) or set(bindings) != {"pareto-capacity", "pareto-whole"}:
         raise ValueError("selected DFlash base lacks exact matrix provenance")
@@ -248,7 +245,7 @@ def _selected_hybrid_authority(
                 manifest.get("hybrid_shared_workspace_authority"), [prefill_chunk]
             )
         )
-    if reporting_recovery is None and authorities[0] != authorities[1]:
+    if authorities[0] != authorities[1]:
         raise ValueError("selected hybrid base matrices bind different planners")
     return authorities[-1]
 

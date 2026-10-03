@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -19,7 +20,6 @@ from tools.bench.prefill_chunk_authority import (  # noqa: E402  sys.path bootst
     validate_prefill_chunk_authority,
 )
 from tools.ppl import run as ppl  # noqa: E402  sys.path bootstrap
-from tools.ppl.fp8_context_recovery import identity  # noqa: E402  sys.path bootstrap
 from tools.ppl.quality_recovery_io import validate_authority_map  # noqa: E402  sys.path bootstrap
 
 SELECTION = REPO / "profiles/bench/prefill-chunk-selection-panel-attention-20260921.json"
@@ -33,6 +33,12 @@ SOURCES = [
     REPO / "src/targets/qwen3_8_27b/impl" / name
     for name in ("r9700_full_attention.hip", "xattention_keep_trace.h")
 ]
+
+
+def identity(path: Path) -> dict:
+    path = path.resolve(strict=True)
+    with path.open("rb") as stream:
+        return {"path": str(path), "sha256": hashlib.file_digest(stream, "sha256").hexdigest()}
 
 
 def validate_rows(rows, prompt, group):
