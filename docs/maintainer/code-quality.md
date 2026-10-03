@@ -120,22 +120,25 @@ ASAN_OPTIONS=protect_shadow_gap=0 ctest --test-dir build-r9700-asan -LE r9700
 
 ## Current state
 
-The tools landed with the 2026-10-02 upstream sync. The compiler-warning gate and typos are clean;
-the other static gates have a backlog. Census on 2026-10-02 over `build-r9700`:
+The tools landed with the 2026-10-02 upstream sync, and on the same day the tree was brought clean
+under every gate: one tree-wide clang-format/ruff format commit (listed in
+[`.git-blame-ignore-revs`](../../.git-blame-ignore-revs); run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once per checkout), then the clang-tidy
+and ruff findings fixed or suppressed at the line with their reasons. Every gate is a hard gate:
+the commit hook is meant to be enabled in every checkout, and whole-tree
+`./scripts/run-clang-tidy.py` must report 0 diagnostics, with `--changed` as the fast check while
+editing.
 
-| Gate | Findings |
+| Gate | State |
 |---|---|
 | Compiler diagnostics | clean; warnings are errors (`NINFER_WARNINGS_AS_ERRORS=ON`) |
-| clang-tidy | 694 over 223 translation units, mostly `bugprone-unchecked-optional-access` (160), `bugprone-empty-catch` (102), and `readability-inconsistent-declaration-parameter-name` (97); no path-sensitive analyzer finding |
-| clang-format 22 | about 1,700 C++/HIP files would be reformatted |
-| ruff | 1,890 lint findings; 399 files would be reformatted |
-| typos | clean |
+| clang-tidy | clean over the whole tree |
+| pre-commit (clang-format 22, ruff lint and format, shellcheck, typos, file hygiene) | clean with `--all-files` |
 | Device checks (`gpucheck`, 31 qualifiers) | clean under memcheck, initcheck, and racecheck |
 
-Until the backlog is cleared, `--changed` is the clang-tidy gate for new work, and the commit hook
-is opt-in: it reformats whole staged files, so enabling it before the tree-wide reformat turns
-every edit into a reformat of the touched file. The tree-wide clang-format/ruff reformat is one
-mechanical commit, to be scheduled when no other agent holds unpushed edits.
+Byte-pinned candidate qualifiers under `tools/r9700/` whose source text static checkers compare
+are excluded from clang-format (the list is in `.pre-commit-config.yaml`); clang-tidy still
+covers them.
 
 ## Suppressions
 

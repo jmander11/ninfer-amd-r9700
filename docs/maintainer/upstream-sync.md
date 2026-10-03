@@ -196,12 +196,12 @@ the `quality/clang-tidy-backlog` branch, so `4051ebf0..26ba4203` are not descend
   - `33cf6b17`, `07d638b4`: the builder's memory cap at three quarters of host RAM without swap,
     `--ulimit core=0`, and the update-then-restart rule.
   - `6c64f009`: the dead `.codex` clang-format hook is removed.
-- Deferred: `ce6ad2d5` tree-wide clang-format/ruff reformat and its `2695ffbe` blame entry (about
-  1,700 C++/HIP and 400 Python files here; one mechanical commit when no other agent holds
-  unpushed edits), and `157161de` whole-tree clang-tidy as the gate (694 findings here, no
-  path-sensitive analyzer finding; `--changed` gates new work). The commit hook is opt-in until the
-  reformat. The fork's ruff findings that were defects are fixed (a never-executed assertion with
-  an undefined name in the bench-matrix tests, a stray expression in the FP8 hybrid converter).
+- Ported after the sync on 2026-10-02: `ce6ad2d5` tree-wide clang-format/ruff reformat with its
+  `2695ffbe` blame entry (byte-pinned candidate qualifiers excluded), and `157161de` whole-tree
+  clang-tidy as the gate: the 694 findings here are fixed or suppressed at the line, and the
+  commit hook is no longer opt-in. Defects found on the way: `kv_ram_cache_qual` swallowed a
+  waiter exception, and `bench-matrix` tests carried a never-executed assertion with an undefined
+  name and the FP8 hybrid converter a stray expression.
 - Not ported: the clang-tidy backlog fixes `9ff23c4c`, `d40226e0`, `196cc237`, `9b9b9b47`,
   `341822ba`, `1bd8f518` (style or hardening of upstream code; their defect hunks are covered
   above), `ce01f249`'s `--fast` tier, `kernel` label, and master merge gates (the fork's test
