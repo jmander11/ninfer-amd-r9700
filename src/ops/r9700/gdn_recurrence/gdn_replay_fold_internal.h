@@ -26,7 +26,7 @@ struct alignas(16) GdnReplayFoldKernelRows {
 
 // Validated device arguments of one layer's deferred fold (gdn_replay_fold_layer), shared by the
 // standalone kernel and fused consumers (the FP8 GDN front).
-[[nodiscard]] fold::LayerArgs replay_fold_layer_args(const GdnLayerFold& fold);
+[[nodiscard]] fold::LayerArgs replay_fold_layer_args(const GdnLayerFold& layer_fold);
 void launch_replay_fold_layer(const fold::LayerArgs& args, hipStream_t stream);
 
 void launch_replay_fold(const GdnReplayRecords& records, LinearAttentionStateAllLayersView states,

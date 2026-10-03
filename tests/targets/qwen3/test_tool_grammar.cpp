@@ -9,11 +9,19 @@
 #include <array>
 #include <set>
 
+// Builds one string from its parts without a temporary per `+`.
+template <typename... Parts>
+std::string concat(const Parts&... parts) {
+    std::string out;
+    ((out += parts), ...);
+    return out;
+}
+
 std::string envelope(const std::string& name,
                      const std::vector<std::pair<std::string, std::string>>& arguments) {
     std::string text = "<tool_call>\n<function=" + name + ">\n";
     for (const auto& [key, value] : arguments) {
-        text += "<parameter=" + key + ">\n" + value + "\n</parameter>\n";
+        text += concat("<parameter=", key, ">\n", value, "\n</parameter>\n");
     }
     if (arguments.empty()) { text += '\n'; }
     return text + "</function>\n</tool_call>";
@@ -50,12 +58,13 @@ int real_tokenizer_probe(const char* directory, const char* fixture_path) {
     xgrammar::GrammarMatcher matcher(grammar->compiled);
     std::vector<std::uint32_t> words((ninfer::targets::qwen3::kTokenDomain + 31) / 32);
     std::int64_t shape = words.size();
-    DLTensor mask{};
-    mask.data    = words.data();
-    mask.device  = {kDLCPU, 0};
-    mask.ndim    = 1;
-    mask.dtype   = {kDLInt, 32, 1};
-    mask.shape   = &shape;
+    DLTensor mask{.data        = words.data(),
+                  .device      = {kDLCPU, 0},
+                  .ndim        = 1,
+                  .dtype       = {kDLInt, 32, 1},
+                  .shape       = &shape,
+                  .strides     = nullptr,
+                  .byte_offset = 0};
     int failures = 0;
     for (int token : ids) {
         (void)matcher.FillNextTokenBitmask(&mask);
@@ -148,7 +157,7 @@ int real_tokenizer_probe(const char* directory, const char* fixture_path) {
         xgrammar::GrammarMatcher premature(grammar->compiled);
         bool masked     = false;
         const auto call = text.substr(text.find("<tool_call>"));
-        for (int token : tokenizer->encode("Let me make the call.\n" + call + "\n" + call)) {
+        for (int token : tokenizer->encode(concat("Let me make the call.\n", call, "\n", call))) {
             (void)premature.FillNextTokenBitmask(&mask);
             if (!(words[token / 32] & (1u << (token % 32)))) {
                 masked = true;
@@ -347,7 +356,7 @@ int main(int argc, char** argv) {
               "required call admitted an undeclared function");
         const auto call = envelope("read", {{"filePath", "true"}, {"limit", "64"}});
         xgrammar::GrammarMatcher valid(required->compiled);
-        check(valid.AcceptString(prefix + call + "Done." + call) && valid.AcceptToken(7),
+        check(valid.AcceptString(concat(prefix, call, "Done.", call)) && valid.AcceptToken(7),
               "required call rejected valid call, subsequent prose/call, or stop");
         fi::ToolGrammarState state(required);
         std::vector<ninfer::TokenId> tokens;
@@ -539,8 +548,8 @@ int main(int argc, char** argv) {
               std::string("</function = null>"), std::string("</function"),
               std::string("<function = null>"), std::string("<parameter=limit>\n"),
               std::string("<invoke name=read>"), std::string("<tool_call = null>")}) {
-            for (const auto& before : {reasoning_prefix + "Plain prose.\n",
-                                       reasoning_prefix + "Plain prose.\n" + raw + "\n"}) {
+            for (const auto& before : {concat(reasoning_prefix, "Plain prose.\n"),
+                                       concat(reasoning_prefix, "Plain prose.\n", raw, "\n")}) {
                 xgrammar::GrammarMatcher whole(grammar->compiled);
                 check(!whole.AcceptString(before + tail),
                       "orphan protocol close admitted in prose");
@@ -557,8 +566,8 @@ int main(int argc, char** argv) {
             }
         }
         xgrammar::GrammarMatcher multiple(grammar->compiled);
-        check(multiple.AcceptString(reasoning_prefix + "<div>ordinary XML</div>\n" + raw +
-                                    "\nNext action.\n" + raw),
+        check(multiple.AcceptString(concat(reasoning_prefix, "<div>ordinary XML</div>\n", raw,
+                                           "\nNext action.\n", raw)),
               "orphan exclusion blocked ordinary XML, inter-call prose, or a second valid call");
         auto literal_raw = raw;
         const std::string literal =
@@ -620,12 +629,13 @@ int main(int argc, char** argv) {
         xgrammar::GrammarMatcher matcher(grammar->compiled);
         std::vector<std::uint32_t> words((ninfer::targets::qwen3::kTokenDomain + 31) / 32);
         std::int64_t shape = words.size();
-        DLTensor mask{};
-        mask.data   = words.data();
-        mask.device = {kDLCPU, 0};
-        mask.ndim   = 1;
-        mask.dtype  = {kDLInt, 32, 1};
-        mask.shape  = &shape;
+        DLTensor mask{.data        = words.data(),
+                      .device      = {kDLCPU, 0},
+                      .ndim        = 1,
+                      .dtype       = {kDLInt, 32, 1},
+                      .shape       = &shape,
+                      .strides     = nullptr,
+                      .byte_offset = 0};
         auto allows = [&](int token) {
             (void)matcher.FillNextTokenBitmask(&mask);
             return (words[token / 32] & (1u << (token % 32))) != 0;

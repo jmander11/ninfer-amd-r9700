@@ -29,6 +29,7 @@ void expect_throws(Function&& function, const char* message) {
     try {
         function();
         expect(false, message);
+        // NOLINTNEXTLINE(bugprone-empty-catch): the expected exception is the pass path
     } catch (const Exception&) {
     } catch (...) { expect(false, message); }
 }

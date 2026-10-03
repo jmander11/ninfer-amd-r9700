@@ -311,14 +311,14 @@ fi::ChatMessage chat_message(ninfer::ChatRole role, std::string content) {
     return message;
 }
 
-fi::RenderedChat render_chat(std::vector<fi::ChatMessage> messages,
-                             fi::ChatRenderOptions options = {}) {
-    return thinking_toggle_template().render(messages, std::move(options));
+fi::RenderedChat render_chat(const std::vector<fi::ChatMessage>& messages,
+                             const fi::ChatRenderOptions& options = {}) {
+    return thinking_toggle_template().render(messages, options);
 }
 
-std::string render_chat_text(std::vector<fi::ChatMessage> messages,
-                             fi::ChatRenderOptions options = {}) {
-    return render_chat(std::move(messages), std::move(options)).text;
+std::string render_chat_text(const std::vector<fi::ChatMessage>& messages,
+                             const fi::ChatRenderOptions& options = {}) {
+    return render_chat(messages, options).text;
 }
 
 template <class Callable>
@@ -875,8 +875,9 @@ int test_reasoning_effort_chat_template() {
 }
 
 int test_reasoning_effort_empty_history_think() {
-    const auto render = [](std::vector<fi::ChatMessage> messages, fi::ChatRenderOptions options) {
-        return reasoning_effort_template().render(std::move(messages), std::move(options)).text;
+    const auto render = [](const std::vector<fi::ChatMessage>& messages,
+                           const fi::ChatRenderOptions& options) {
+        return reasoning_effort_template().render(messages, options).text;
     };
 
     fi::ChatRenderOptions medium_closed;

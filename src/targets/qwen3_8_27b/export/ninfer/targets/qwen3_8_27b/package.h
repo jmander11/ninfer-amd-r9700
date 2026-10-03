@@ -65,42 +65,33 @@ enum class WeightsProfile : std::uint8_t {
 #undef NINFER_QWEN38_FP8_ENDPOINT
 };
 
+// The endpoint rows are generated lookups whose results repeat across consecutive rows, so they
+// are independent early returns rather than switch cases.
 [[nodiscard]] constexpr WeightsProfile fp8_capped_base_profile(WeightsProfile profile) noexcept {
-    switch (profile) {
-    case WeightsProfile::R9700Fp8Lut4:
+    if (profile == WeightsProfile::R9700Fp8Lut4) {
         return WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
+    }
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
-    case WeightsProfile::symbol:                                                                   \
-        return WeightsProfile::base;
+    if (profile == WeightsProfile::symbol) return WeightsProfile::base;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default:
-        return profile;
-    }
+    return profile;
 }
 
 [[nodiscard]] constexpr bool fp8_capped_w8_embedding(WeightsProfile profile) noexcept {
-    switch (profile) {
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
-    case WeightsProfile::symbol:                                                                   \
-        return embed != 0;
+    if (profile == WeightsProfile::symbol) return (embed) != 0;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default:
-        return false;
-    }
+    return false;
 }
 
 [[nodiscard]] constexpr bool fp8_capped_w8_head(WeightsProfile profile) noexcept {
-    switch (profile) {
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
-    case WeightsProfile::symbol:                                                                   \
-        return head != 0;
+    if (profile == WeightsProfile::symbol) return (head) != 0;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default:
-        return false;
-    }
+    return false;
 }
 
 // Text projections outside the profile's FP8 protections (`fp8_capped_selection.inc`), and the

@@ -27,6 +27,7 @@
 #include "ninfer/types.h"
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 constexpr std::size_t kMiB        = 1024ULL * 1024ULL;

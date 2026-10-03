@@ -52,7 +52,7 @@ public:
 
 class VisionContext {
 public:
-    VisionContext(DeviceContext& device, const LoadedModelData& model);
+    VisionContext(DeviceContext& ctx, const LoadedModelData& weights);
 
     [[nodiscard]] static std::size_t output_transient_bytes(std::size_t merged_tokens);
     [[nodiscard]] static std::size_t workspace_bytes(const qwen3::VisionItemControl& item,

@@ -1804,7 +1804,7 @@ std::vector<GraphExecutionProfile> Variant::mtp_graph_profiles(std::uint32_t cap
     const std::uint32_t width                   = draft_window + 1U;
     for (GraphExecutionProfile& profile : profiles) {
         const std::size_t maximum_visible =
-            static_cast<std::size_t>(profile.max) + 2U * draft_window;
+            static_cast<std::size_t>(profile.max) + std::size_t{2} * draft_window;
         const std::size_t maximum_text_visible =
             static_cast<std::size_t>(profile.max) + draft_window + 1U;
         profile.topology_class =

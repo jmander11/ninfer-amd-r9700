@@ -477,6 +477,7 @@ int main(int argc, char** argv) {
         try {
             write_json(path, false, error.what(), device, workspace_bytes, workspace_rewound,
                        maximum_bf16_steps, status_poisoned, maximum_logical_error);
+            // NOLINTNEXTLINE(bugprone-empty-catch): best-effort report; the error is returned below
         } catch (...) {}
         std::cerr << "Q4 Tensor/WorkspaceArena qualifier: FAIL: " << error.what() << '\n';
         return 1;

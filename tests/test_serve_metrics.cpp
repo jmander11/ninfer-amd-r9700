@@ -45,7 +45,8 @@ std::string between(const std::string& text, const std::string& start, const std
     return text.substr(from, stop - from);
 }
 
-struct CommaDecimal : std::numpunct<char> {
+class CommaDecimal : public std::numpunct<char> {
+protected:
     char do_decimal_point() const override { return ','; }
 
     char do_thousands_sep() const override { return '.'; }
@@ -82,7 +83,7 @@ GenerationOutcome success_outcome() {
 int main() {
     int failures = 0;
     ServeMetrics metrics;
-    const std::locale classic = std::locale::classic();
+    const std::locale& classic = std::locale::classic();
     std::locale::global(std::locale(classic, new CommaDecimal));
 
     ninfer::LoadSummary load;

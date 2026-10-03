@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 auto ordinary_batch_body(OrdinaryBatchContext& state, std::int32_t batch_size) {

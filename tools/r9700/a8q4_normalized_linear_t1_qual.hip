@@ -15,11 +15,13 @@ constexpr int kNormCopies        = 3;
 constexpr int kNormTrials        = 24;
 constexpr float kNormEps         = 1.0e-6F;
 constexpr std::size_t kNormGuard = 256;
-const std::filesystem::path kNormPower =
-    "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
+
+std::filesystem::path norm_power_path() {
+    return "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
+}
 
 void auto_power() {
-    if (read_text(kNormPower) != "auto") fail("normalized Linear requires auto power");
+    if (read_text(norm_power_path()) != "auto") fail("normalized Linear requires auto power");
 }
 
 void transfer(void* dst, const void* src, std::size_t bytes, hipMemcpyKind kind,
@@ -382,8 +384,8 @@ int main(int argc, char** argv) {
         }
         require_fresh_output(argv[2]);
         if (linear::kQ4ActivationBits != 8) fail("qualifier must link the A8 profile");
-        if (read_text(kNormPower.parent_path() / "vendor") != "0x1002" ||
-            read_text(kNormPower.parent_path() / "device") != "0x7551")
+        if (read_text(norm_power_path().parent_path() / "vendor") != "0x1002" ||
+            read_text(norm_power_path().parent_path() / "device") != "0x7551")
             fail("wrong physical R9700 PCI function");
         auto_power();
         HIP_CHECK(hipSetDevice(0));
@@ -396,7 +398,7 @@ int main(int argc, char** argv) {
         std::string pci_text = pci;
         if (pci_text.size() == 7) pci_text = "0000:" + pci_text;
         if (std::filesystem::canonical(std::filesystem::path("/sys/bus/pci/devices") / pci_text) !=
-            std::filesystem::canonical(kNormPower.parent_path()))
+            std::filesystem::canonical(norm_power_path().parent_path()))
             fail("HIP device differs from pre-initialization power device");
         hipStream_t stream{};
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));

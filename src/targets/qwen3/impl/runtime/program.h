@@ -301,8 +301,8 @@ struct RequestControl {
 
 class ProgramImplCore {
 public:
-    ProgramImplCore(const LoadedModelData& model, const SequencePlanImpl& plan,
-                    DeviceContext& device, std::unique_ptr<HostPinnedArena> kv_ram_arena);
+    ProgramImplCore(const LoadedModelData& model_in, const SequencePlanImpl& plan,
+                    DeviceContext& device_in, std::unique_ptr<HostPinnedArena> kv_ram_arena);
     ~ProgramImplCore() noexcept;
 
     [[nodiscard]] RequestBasePlan
@@ -310,11 +310,11 @@ public:
                       const runtime::ResolvedExecutionOptions& options);
     [[nodiscard]] RequestPlan plan_request_for_lane(std::uint32_t lane,
                                                     const PreparedPromptData& prompt,
-                                                    const RequestBasePlan& base);
+                                                    const RequestBasePlan& base_plan);
     [[nodiscard]] RequestPlan plan_ram_reuse(const PreparedPromptData& prompt,
-                                             const RequestBasePlan& base);
+                                             const RequestBasePlan& base_plan);
     [[nodiscard]] RequestPlan plan_disk_reuse(const PreparedPromptData& prompt,
-                                              const RequestBasePlan& base);
+                                              const RequestBasePlan& base_plan);
     [[nodiscard]] bool can_admit_lane(std::uint32_t lane, const RequestPlan& plan) const noexcept;
     [[nodiscard]] bool
     can_admit_lane_after_retained_eviction(std::uint32_t lane,

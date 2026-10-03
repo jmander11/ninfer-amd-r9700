@@ -1218,6 +1218,7 @@ std::string shell_quote(std::string_view value) {
 
 [[maybe_unused]] std::string sha256_file(const std::filesystem::path& path) {
     const std::string command = "sha256sum -- " + shell_quote(path.string());
+    // NOLINTNEXTLINE(bugprone-command-processor): fixed sha256sum on a shell-quoted path
     FILE* pipe = popen(command.c_str(), "r");
     if (pipe == nullptr) fail("cannot launch sha256sum");
     std::array<char, 128> buffer{};

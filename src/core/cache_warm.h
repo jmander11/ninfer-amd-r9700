@@ -83,6 +83,7 @@ __device__ inline void warm_cache(const CacheWarm& warm, std::uint32_t cta, std:
                 static_cast<const std::uint8_t*>(range.data) + line * kCacheWarmStride);
         line -= lines;
     }
+    // NOLINTNEXTLINE(portability-no-assembler): empty asm keeps the warming loads live
     asm volatile("" ::"v"(sink));
 }
 #endif

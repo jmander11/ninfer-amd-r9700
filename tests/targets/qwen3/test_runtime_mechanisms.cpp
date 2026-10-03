@@ -134,8 +134,9 @@ void test_fp8_k_int4_v_decoder_layout() {
                layout.mtp_kv->storage.spec.plane_layouts.value ==
                    ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
            "typed MTP owns an independent three-plane cache identity");
-    expect(layout.kv_payload_bytes() ==
-               layout.text_kv.payload_bytes() + layout.mtp_kv->payload_bytes(),
+    expect(layout.mtp_kv.has_value() &&
+               layout.kv_payload_bytes() ==
+                   layout.text_kv.payload_bytes() + layout.mtp_kv->payload_bytes(),
            "typed Text and MTP payload accounting stays independent");
 
     expect_throw(
@@ -170,7 +171,7 @@ void test_round_layout() {
     expect(round.mtp.has_value() && round.mtp->draft_tokens.shape[0] == 5 &&
                round.mtp->target_input_ids.shape[0] == 6,
            "MTP prefill scratch shapes");
-    expect(round.logits.region.offset < exact_prefill.region.offset &&
+    expect(round.mtp.has_value() && round.logits.region.offset < exact_prefill.region.offset &&
                exact_prefill.region.offset < round.mtp->draft_tokens.region.offset,
            "exact prefill extension retains established round-region order");
     expect(round.mtp.has_value() && round.mtp->position.shape[0] == 1,

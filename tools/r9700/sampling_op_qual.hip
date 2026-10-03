@@ -574,16 +574,19 @@ void qualify_validation(ninfer::DeviceContext& device) {
         ninfer::ops::sample(absent, output, 1, nullptr, position, ninfer::ops::kSamplePurposeDecode,
                             workspace, device.stream);
         fail("sampling accepted null device pointers");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     try {
         (void)ninfer::ops::sampling_workspace_capacity_bytes(
             1, 0, static_cast<int>(ninfer::kMaximumConcurrency));
         fail("sampling workspace accepted an invalid lane interval");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     try {
         (void)ninfer::ops::sampling_workspace_capacity_bytes(
             1, 1, static_cast<int>(ninfer::kMaximumConcurrency) + 1);
         fail("sampling workspace accepted a lane count above product concurrency");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 }
 

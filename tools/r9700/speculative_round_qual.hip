@@ -429,6 +429,7 @@ ChainExpected chain_oracle(int token_domain, int k, int batch, const std::vector
             }
             for (int column = 0; config.p_less == 0 && column <= extent; ++column) {
                 std::vector<int> overlay;
+                overlay.reserve(static_cast<std::size_t>(column));
                 for (int index = 0; index < column; ++index) {
                     overlay.push_back(drafts[static_cast<std::size_t>(row * k + index)]);
                 }
@@ -1583,16 +1584,19 @@ void qualify_validation(ninfer::DeviceContext& device) {
         (void)ninfer::ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
             1, 0, 8, 1, static_cast<int>(ninfer::kMaximumConcurrency));
         fail("chain workspace accepted K=0");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     try {
         (void)ninfer::ops::speculative_accept_tree_drafts_workspace_capacity_bytes(
             1, 1, 16, 1, static_cast<int>(ninfer::kMaximumConcurrency));
         fail("tree workspace accepted W=1");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     try {
         (void)ninfer::ops::speculative_accept_tree_drafts_workspace_capacity_bytes(
             1, 2, 16, 1, static_cast<int>(ninfer::kMaximumConcurrency) + 1);
         fail("tree workspace accepted B above product concurrency");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 
     ninfer::DeviceBuffer d_i32(64);
@@ -1601,10 +1605,12 @@ void qualify_validation(ninfer::DeviceContext& device) {
     try {
         ninfer::ops::speculative_prepare_verify_ids(vector, vector, vector, matrix, nullptr);
         fail("prepare accepted a null stream");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     try {
         ninfer::ops::speculative_prepare_verify_ids(vector, vector, vector, matrix, device.stream);
         fail("prepare accepted overlapping tensors");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 
     constexpr int token_domain = 1024;
@@ -1651,6 +1657,7 @@ void qualify_validation(ninfer::DeviceContext& device) {
             target, logits_tensor, draft, extent, length, anchor, licensed, licensed_count,
             accepted, token_domain, nullptr, workspace, device.stream);
         fail("chain acceptance accepted a null config pointer");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     try {
         ninfer::ops::speculative_accept_greedy_drafts(
@@ -1659,6 +1666,7 @@ void qualify_validation(ninfer::DeviceContext& device) {
             static_cast<const ninfer::ops::SamplingConfig*>(d_config.data()), workspace,
             device.stream, &selector_ids, nullptr);
         fail("chain acceptance accepted an unpaired selector");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     try {
         ninfer::DeviceArena undersized(needed - 1);
@@ -1668,6 +1676,7 @@ void qualify_validation(ninfer::DeviceContext& device) {
             static_cast<const ninfer::ops::SamplingConfig*>(d_config.data()), undersized,
             device.stream);
         fail("chain acceptance accepted undersized workspace");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::bad_alloc&) {}
     try {
         ninfer::Tensor aliased_output(d_target.data(), ninfer::DType::I32, {2});
@@ -1677,6 +1686,7 @@ void qualify_validation(ninfer::DeviceContext& device) {
             static_cast<const ninfer::ops::SamplingConfig*>(d_config.data()), workspace,
             device.stream);
         fail("chain acceptance accepted output/input aliasing");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 
     try {
@@ -1684,6 +1694,7 @@ void qualify_validation(ninfer::DeviceContext& device) {
         ninfer::ops::proposal_remap_token_ids(tokens, static_cast<const int*>(d_target.data()), 2,
                                               device.stream);
         fail("proposal remap accepted an overlapping id map");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 }
 

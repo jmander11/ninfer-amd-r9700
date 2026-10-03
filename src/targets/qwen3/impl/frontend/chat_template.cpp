@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -213,7 +214,8 @@ constexpr std::string_view kToolInstructions =
     "knowledge and do not tell the user about function calls\n"
     "</IMPORTANT>";
 
-struct JsonWalkError {};
+// Signals that the fast JSON walker cannot handle the input; callers fall back to the full parser.
+struct JsonWalkError : std::exception {};
 
 void skip_json_ws(std::string_view text, std::size_t& index) {
     while (index < text.size()) {
@@ -483,7 +485,7 @@ std::string tojson_text(const OrderedJson& value) {
             if (index != 0) { rendered += ", "; }
             rendered += tojson_text(value[index]);
         }
-        rendered += "]";
+        rendered += ']';
         return rendered;
     }
     if (value.is_object()) {
@@ -495,7 +497,7 @@ std::string tojson_text(const OrderedJson& value) {
             rendered += ": ";
             rendered += tojson_text(it.value());
         }
-        rendered += "}";
+        rendered += '}';
         return rendered;
     }
     return value.dump();
@@ -806,7 +808,7 @@ PromptCapabilities CompiledChatTemplate::capabilities() const noexcept {
 }
 
 RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messages,
-                                          ChatRenderOptions options) const {
+                                          const ChatRenderOptions& options) const {
     if (messages.empty()) { throw std::invalid_argument("chat messages must not be empty"); }
 
     const bool effort_template = semantics_ == ChatTemplateSemantics::ReasoningEffort;
@@ -900,7 +902,7 @@ RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messag
 }
 
 RenderedFragment CompiledChatTemplate::render_fragment(const std::vector<ChatMessage>& messages,
-                                                       ChatRenderOptions options) const {
+                                                       const ChatRenderOptions& options) const {
     if (messages.empty()) { return {}; }
     const bool effort_template   = semantics_ == ChatTemplateSemantics::ReasoningEffort;
     const bool preserve_thinking = options.preserve_thinking.value_or(effort_template);

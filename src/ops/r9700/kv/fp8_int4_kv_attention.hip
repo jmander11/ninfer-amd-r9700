@@ -928,6 +928,7 @@ dense_attention_block(const std::uint16_t* staged_keys, const std::uint16_t* sta
         std::uint32_t row_context;
         if constexpr (std::is_pointer_v<RowContext>) {
             RowContext entry = row_context_source;
+            // NOLINTNEXTLINE(portability-no-assembler): register-only scheduling barrier
             asm volatile("" : "+v"(entry));
             row_context = *entry;
         } else {
@@ -1391,6 +1392,7 @@ __launch_bounds__(kHeadDim) void dense_verify_merge_kernel(DenseVerifySequences 
     for (std::uint32_t chunk = 0U; chunk < chunks; ++chunk) {
         const float weight = weights[chunk];
         // A NaN denominator (invalid row, poisoned score or page fault) poisons the row.
+        // NOLINTNEXTLINE(misc-redundant-expression): self-inequality is the NaN test
         denominator = denominators[chunk] != denominators[chunk]
                           ? __builtin_nanf("")
                           : fmaf(denominators[chunk], weight, denominator);

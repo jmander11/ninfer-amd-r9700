@@ -15,7 +15,7 @@ namespace ninfer::ops::r9700::linear {
 // Concurrent-DFlash widths T17..64 of the drafter shapes and the N131072/K5120 draft head take
 // the measured wide route below (N1280/K5120: its TiledM widths and T49..64).
 // No allocation or persistent-weight transformation.
-[[nodiscard]] hipError_t a8q4_small_batch_projection(const A8Q4G64CandidateArgs& args,
+[[nodiscard]] hipError_t a8q4_small_batch_projection(const A8Q4G64CandidateArgs& a,
                                                      hipStream_t stream) noexcept;
 
 namespace detail {
@@ -108,16 +108,16 @@ select_a8q4_small_batch_wide_route(unsigned tokens, unsigned rows, unsigned colu
 // Internal prepared launch only: the generic owner has validated all planes,
 // selected the exact predicate above and freshly quantized its A8 workspace.
 // No second quantization, stream query, workspace binding or allocation.
-[[nodiscard]] hipError_t launch_a8q4_small_batch_projection(const A8Q4G64LinearArgs& args,
+[[nodiscard]] hipError_t launch_a8q4_small_batch_projection(const A8Q4G64LinearArgs& a,
                                                             hipStream_t stream) noexcept;
 // Two non-accumulating small-batch projections of the same prepared K5120 activation in one
 // launch (the GDN query-key/value-z and the attention query-key/gate-value pairs), with the
 // per-output arithmetic of the split small-batch route. The predicate requires identical
 // activation planes and widths; the launcher requires it.
-[[nodiscard]] bool use_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& first,
-                                                        const A8Q4G64LinearArgs& second) noexcept;
-[[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& first,
-                                                                 const A8Q4G64LinearArgs& second,
+[[nodiscard]] bool use_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& a,
+                                                        const A8Q4G64LinearArgs& b) noexcept;
+[[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& a,
+                                                                 const A8Q4G64LinearArgs& b,
                                                                  hipStream_t stream) noexcept;
 
 // The attention pair (two N7168/K5120 matrices) at T5/T6 with each matrix's rows split at
@@ -131,11 +131,11 @@ struct A8Q4PairSplitOutputs {
     std::uint32_t split           = 0;
 };
 
-[[nodiscard]] bool use_a8q4_small_batch_projection_pair_split(const A8Q4G64LinearArgs& first,
-                                                              const A8Q4G64LinearArgs& second,
+[[nodiscard]] bool use_a8q4_small_batch_projection_pair_split(const A8Q4G64LinearArgs& a,
+                                                              const A8Q4G64LinearArgs& b,
                                                               std::uint32_t split) noexcept;
 [[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair_split(
-    const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second,
-    const A8Q4PairSplitOutputs& outputs, hipStream_t stream) noexcept;
+    const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b, const A8Q4PairSplitOutputs& outputs,
+    hipStream_t stream) noexcept;
 } // namespace detail
 } // namespace ninfer::ops::r9700::linear

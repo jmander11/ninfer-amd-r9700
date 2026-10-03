@@ -27,6 +27,7 @@ void expect_throws(Function&& function, const char* message) {
     try {
         function();
         expect(false, message);
+        // NOLINTNEXTLINE(bugprone-empty-catch): the expected exception is the pass path
     } catch (const Exception&) {
     } catch (...) { expect(false, message); }
 }
@@ -173,8 +174,12 @@ void test_attention_decodes_storage_then_evaluates_fp64() {
     }
 
     // This guards against accidentally using the pre-quantized key in the formula.
+    constexpr double source_score0 = 1.0625;
+    constexpr double source_score1 = -1.0625;
+    const double source_max        = std::max(source_score0, source_score1);
     const double source_p0 =
-        std::exp(1.0625 - 1.0625) / (std::exp(1.0625 - 1.0625) + std::exp(-1.0625 - 1.0625));
+        std::exp(source_score0 - source_max) /
+        (std::exp(source_score0 - source_max) + std::exp(source_score1 - source_max));
     const double source_result = source_p0 * values.at(0, 0) + (1.0 - source_p0) * values.at(1, 0);
     expect(std::abs(actual[0] - source_result) > 1.0e-4,
            "attention oracle must not consume unrepresented key source values");

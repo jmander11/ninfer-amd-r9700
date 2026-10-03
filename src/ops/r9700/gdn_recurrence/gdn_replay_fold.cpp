@@ -71,7 +71,7 @@ MemoryRange layer_range(const Tensor& layer0, std::int64_t stride_bytes, std::in
     if (offset > std::numeric_limits<std::uintptr_t>::max() - base) {
         throw std::overflow_error(std::string(label) + " layer address overflows");
     }
-    return make_range(reinterpret_cast<const void*>(base + offset), layer0.bytes(), label);
+    return make_range(static_cast<const std::byte*>(layer0.data) + offset, layer0.bytes(), label);
 }
 
 bool overlaps(MemoryRange lhs, MemoryRange rhs) {

@@ -238,7 +238,7 @@ ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
                 plan.bindings.output_head.format == base_other &&
                 plan.bindings.draft_head.format == q4_format,
             "DFlash2 evaluation base formats are inconsistent");
-    const auto& dflash = *plan.bindings.dflash;
+    const auto& dflash = plan.bindings.dflash.value();
     require(dflash.feature_projection.format == q4_format &&
                 dflash.hidden_projection.format == q4_format,
             "DFlash2 global matrices are not directly bound Q4G64");

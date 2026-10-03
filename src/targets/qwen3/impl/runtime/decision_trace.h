@@ -148,6 +148,7 @@ public:
             std::lock_guard<std::mutex> lock(mutex_);
             output_ << "\n  ]\n}\n";
             output_.flush();
+            // NOLINTNEXTLINE(bugprone-empty-catch): a diagnostic trace must not throw at teardown
         } catch (...) {}
     }
 

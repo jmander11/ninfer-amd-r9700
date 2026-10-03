@@ -25,7 +25,7 @@ struct Fp8Int4KvCompactArgs {
 // Compacts a monotone speculative path in place across the exact three persistent cache planes.
 // selected_path[i] must be >= i; the caller validates it, owns the zeroed status word, and only
 // commits the new frontier after status remains zero.
-[[nodiscard]] hipError_t fp8_int4_kv_compact(const Fp8Int4KvCompactArgs& args,
+[[nodiscard]] hipError_t fp8_int4_kv_compact(const Fp8Int4KvCompactArgs& a,
                                              hipStream_t stream) noexcept;
 
 } // namespace ninfer::ops::r9700::kv

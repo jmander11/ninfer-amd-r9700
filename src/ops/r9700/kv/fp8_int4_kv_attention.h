@@ -27,13 +27,13 @@ struct Fp8KvQkArgs {
     float* scores                       = nullptr; // [query_heads][context]
 };
 
-[[nodiscard]] hipError_t fp8_kv_qk_vector(const Fp8KvQkArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t fp8_kv_qk_vector(const Fp8KvQkArgs& a, hipStream_t stream) noexcept;
 
 // Raw gfx12 wave32 FP8xFP8-to-FP32 WMMA challenger. It tiles one KV head's six Q heads by sixteen
 // context tokens, leaves the unused ten WMMA rows zero, and uses the owned fragment map qualified
 // by r9700_qual. Its execution profile explicitly quantizes represented BF16 Q to E4M3FN before
 // the dot product; its FP8-Q oracle is therefore distinct from the vector baseline's BF16-Q oracle.
-[[nodiscard]] hipError_t fp8_kv_qk_wmma(const Fp8KvQkArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t fp8_kv_qk_wmma(const Fp8KvQkArgs& a, hipStream_t stream) noexcept;
 
 struct Int4KvPvArgs {
     const float* probabilities              = nullptr; // [query_heads][context], FP32
@@ -55,7 +55,7 @@ struct Int4KvPvArgs {
     float* output                           = nullptr; // [query_heads][256]
 };
 
-[[nodiscard]] hipError_t int4_kv_pv_vector(const Int4KvPvArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t int4_kv_pv_vector(const Int4KvPvArgs& a, hipStream_t stream) noexcept;
 
 // Correctness-first fused A3 candidate. One wave32 block owns one Q head and streams the paged
 // context without materializing scores: BF16-Q/FP8-K scores feed online FP32 softmax, then each
@@ -115,7 +115,7 @@ struct Fp8Int4KvAttentionArgs {
     float* output          = nullptr; // [query_rows][query_heads][256]
 };
 
-[[nodiscard]] hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& args,
+[[nodiscard]] hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,
                                                      hipStream_t stream) noexcept;
 
 struct DensePrefillWmmaResources {
@@ -130,7 +130,7 @@ struct DensePrefillWmmaResources {
 // Row positions are absolute; invalid rows, positions, page-table rows, and physical pages
 // poison exactly the dependent rows with NaN, and device-inactive rows are exact positive zero.
 // The launch needs no caller-owned workspace.
-[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill(const Fp8Int4KvAttentionArgs& args,
+[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill(const Fp8Int4KvAttentionArgs& a,
                                                              hipStream_t stream) noexcept;
 // `split` selects the mid-row context-split instantiation of the same tile body.
 [[nodiscard]] hipError_t
@@ -151,14 +151,14 @@ fp8_int4_kv_attention_mid_rows_workspace_bytes(std::size_t context, std::uint32_
 [[nodiscard]] std::size_t
 fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(std::size_t context,
                                                         std::uint32_t max_rows) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& args,
+[[nodiscard]] hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& a,
                                                         hipStream_t stream) noexcept;
 
 // Native gfx12 decode challenger: raw wave32 FP8-Q/FP8-K WMMA writes one reusable FP32 score
 // workspace, followed by a stable FP32 softmax plus exact signed-INT4-times-FP16-scale PV consumer.
 // Q's private E4M3 cast is an implementation profile and is checked directly against the same
 // represented-input FP64 attention oracle; no FP16 probability or V materialization is introduced.
-[[nodiscard]] hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& args,
+[[nodiscard]] hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& a,
                                                     hipStream_t stream) noexcept;
 
 // Production packed decode route (1..8 host-fixed rows: ordinary decode, MTP, DFlash chain
@@ -191,9 +191,8 @@ fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentionArgs> sequ
 [[nodiscard]] std::size_t
 fp8_int4_kv_attention_split512_workspace_capacity_bytes(std::uint32_t query_rows,
                                                         std::size_t context) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_split512(const Fp8Int4KvAttentionArgs& args,
-                                                        void* workspace,
-                                                        std::size_t workspace_bytes,
+[[nodiscard]] hipError_t fp8_int4_kv_attention_split512(const Fp8Int4KvAttentionArgs& a,
+                                                        void* storage, std::size_t storage_bytes,
                                                         hipStream_t stream) noexcept;
 
 } // namespace ninfer::ops::r9700::kv

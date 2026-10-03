@@ -252,6 +252,7 @@ int test_roctx_gate() {
         worker.join();
         failures += expect(worker_observed, "ROCTX worker visibility");
         throw std::runtime_error("exercise exceptional restoration");
+        // NOLINTNEXTLINE(bugprone-empty-catch): deliberate throw; restoration checked below
     } catch (const std::runtime_error&) {}
     failures += expect(!ninfer::roctx::ranges_enabled(), "ROCTX exceptional restoration");
 
@@ -326,6 +327,7 @@ int test_roctx_profiler_region() {
         try {
             ninfer::roctx::ScopedProfilerRegion region("measured", mock_control(state));
             throw std::runtime_error("exercise profiler-region unwinding");
+            // NOLINTNEXTLINE(bugprone-empty-catch): deliberate throw; restoration checked below
         } catch (const std::runtime_error&) {}
         failures += expect(
             state.events == std::vector<ProfilerEvent>({ProfilerEvent::Resume, ProfilerEvent::Push,

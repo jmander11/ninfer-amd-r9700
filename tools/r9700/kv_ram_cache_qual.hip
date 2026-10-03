@@ -265,6 +265,7 @@ void stream_wait_does_not_block_host(ninfer::DeviceContext& device,
     ninfer::Tensor hidden(bulk.data(), ninfer::DType::U8, {1 << 20});
     bool captured = false;
     bool prompt   = false;
+    std::atomic<bool> wait_threw{false};
     {
         StreamGate gate;
         gate.launch(device.copy_stream);
@@ -275,7 +276,7 @@ void stream_wait_does_not_block_host(ninfer::DeviceContext& device,
             std::thread waiter([&] {
                 try {
                     cache.wait_pending_copies_on_stream(device.stream);
-                } catch (...) {}
+                } catch (...) { wait_threw.store(true); }
                 returned.store(true);
             });
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
@@ -291,6 +292,7 @@ void stream_wait_does_not_block_host(ninfer::DeviceContext& device,
     source.release();
     require(captured, "stream-wait capture failed");
     require(prompt, "stream-ordered RAM wait blocked the host on a gated copy");
+    require(!wait_threw.load(), "stream-ordered RAM wait threw");
 }
 
 // A restore that fails validation after enqueueing H2D reads must still fence the record;
@@ -592,7 +594,7 @@ int main() {
         wrong.text_semantics.value_group = 32;
         bool rejected_mismatch           = false;
         try {
-            (void)cache.unpack_device(match->entry_id, wrong);
+            (void)cache.unpack_device(match.value().entry_id, wrong);
         } catch (const std::invalid_argument&) { rejected_mismatch = true; }
         HIP_CHECK(hipStreamSynchronize(device.stream));
         require(rejected_mismatch, "semantic fingerprint mismatch was accepted");
@@ -603,14 +605,15 @@ int main() {
         wrong_backend.backend_semantics->value_group = 32;
         rejected_mismatch                            = false;
         try {
-            (void)cache.unpack_device(match->entry_id, wrong_backend);
+            (void)cache.unpack_device(match.value().entry_id, wrong_backend);
         } catch (const std::invalid_argument&) { rejected_mismatch = true; }
         HIP_CHECK(hipStreamSynchronize(device.stream));
         require(rejected_mismatch, "backend semantic fingerprint mismatch was accepted");
         require(all_bytes_equal(text_dest_backing, 0xA5) && all_bytes_equal(mtp_dest_backing, 0xA5),
                 "backend semantic mismatch modified a destination byte");
 
-        const q3::detail::RamRestoredHost restored = cache.unpack_device(match->entry_id, target);
+        const q3::detail::RamRestoredHost restored =
+            cache.unpack_device(match.value().entry_id, target);
         HIP_CHECK(hipStreamSynchronize(device.stream));
         require(restored.text_kv_valid == 6 && restored.mtp_kv_valid == 5,
                 "restored Text/MTP frontiers changed");

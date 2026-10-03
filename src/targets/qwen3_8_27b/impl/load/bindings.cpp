@@ -27,13 +27,9 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
     profile = fp8_capped_base_profile(profile);
     switch (profile) {
     case WeightsProfile::R9700W8G32Candidate:
-        return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700W8Bf16EmbeddingEvaluation:
-        return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700W8Bf16AttentionQueryKeyEvaluation:
-        return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700W8Bf16AttentionValueOutputEvaluation:
-        return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700W8Bf16GdnQueryKeyEvaluation:
         return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700Q4G64Evaluation:

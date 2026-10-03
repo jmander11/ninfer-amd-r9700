@@ -23,6 +23,7 @@
 #include <string>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 std::size_t checked_mul(std::size_t a, std::size_t b, const char* label) {

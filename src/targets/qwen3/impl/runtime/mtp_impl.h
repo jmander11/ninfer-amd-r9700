@@ -18,6 +18,7 @@
 #include <utility>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 class MtpKvTransactionBatch {
@@ -33,8 +34,7 @@ public:
 
     void append(qwen3::PagedKVTransaction transaction) {
         if (next_ >= size_) { throw std::logic_error("MTP KV transaction batch overflow"); }
-        transactions_[next_].emplace(std::move(transaction));
-        bindings_[next_] = &*transactions_[next_];
+        bindings_[next_] = &transactions_[next_].emplace(std::move(transaction));
         ++next_;
     }
 
@@ -46,7 +46,7 @@ public:
     void commit() {
         if (next_ != size_) { throw std::logic_error("MTP KV transaction batch is incomplete"); }
         for (std::size_t row = 0; row < size_; ++row) {
-            committed_frontiers_[row] = transactions_[row]->commit();
+            committed_frontiers_[row] = transactions_[row].value().commit();
         }
         committed_ = true;
     }

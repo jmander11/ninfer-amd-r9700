@@ -434,8 +434,7 @@ Outcome qualify(Scenario& s, std::size_t launches, std::size_t expected_lowered,
     std::cout << (outcome.pass ? "PASS " : "FAIL ") << outcome.name << ": " << outcome.captured
               << " launches -> " << outcome.lowered << " node(s), " << outcome.buffers
               << " buffers (" << outcome.bytes / 1024U << " KiB) compared bitwise x3, "
-              << outcome.seconds << " s" << (outcome.pass ? "" : "\n  ") << outcome.detail
-              << std::endl;
+              << outcome.seconds << " s" << (outcome.pass ? "" : "\n  ") << outcome.detail << '\n';
     return outcome;
 }
 
@@ -914,7 +913,7 @@ int main(int argc, char** argv) {
         std::cout << "persistent decode qualification: PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "persistent decode qualification failed: " << error.what() << std::endl;
+        std::cerr << "persistent decode qualification failed: " << error.what() << '\n';
         return 1;
     }
 }

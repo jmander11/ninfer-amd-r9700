@@ -217,13 +217,14 @@ void run_roundtrip(ninfer::DeviceContext& device, ninfer::KvDiskCompress compres
     cache::KVDiskCache reopened(config(directory.path, destination_pool, ram, compression));
     const auto chain = cache::prefix_hash_chain(retained);
     const auto match = reopened.plan_match(retained, chain);
-    require(match && match->reuse_base == 129, "durable vision prefix missing after reopen");
+    require(match && match.value().reuse_base == 129, "durable vision prefix missing after reopen");
     auto different_media = retained;
     different_media.vision_items[0].content_digest[0] ^= 1;
     require(!reopened.plan_match(different_media, cache::prefix_hash_chain(different_media)),
             "changed Vision digest incorrectly reused disk state");
-    require(reopened.claim(match->entry_id, match->hash_f, match->execution_frontier,
-                           match->reuse_base, match->reuse, match->committed_generation),
+    require(reopened.claim(match.value().entry_id, match.value().hash_f,
+                           match.value().execution_frontier, match.value().reuse_base,
+                           match.value().reuse, match.value().committed_generation),
             "durable generation could not be claimed");
     auto destination = destination_pool.storage->reserve(3);
     destination.materialize_pages(3, device.stream);
@@ -233,15 +234,15 @@ void run_roundtrip(ninfer::DeviceContext& device, ninfer::KvDiskCompress compres
     target.text_pool      = destination_pool.storage.get();
     target.text_semantics = destination_pool.semantics();
     target.text_dst_pages = 3;
-    target.reuse          = match->reuse;
-    target.reuse_base     = match->reuse_base;
+    target.reuse          = match.value().reuse;
+    target.reuse_base     = match.value().reuse_base;
     target.stream         = device.copy_stream;
-    const auto ticket     = reopened.restore_device(match->entry_id, target);
+    const auto ticket     = reopened.restore_device(match.value().entry_id, target);
     reopened.wait_copies(ticket);
     require(!reopened.restore_failed(), "disk restore failed");
     device.synchronize_all();
     reopened.release_restore_ticket(ticket);
-    reopened.release(match->entry_id);
+    reopened.release(match.value().entry_id);
     for (std::uint32_t index = 0; index < 3; ++index) {
         ninfer::pack_paged_kv_logical_page_to_host(destination, *destination_pool.storage, index,
                                                    page.data(), device.copy_stream);
@@ -250,22 +251,22 @@ void run_roundtrip(ninfer::DeviceContext& device, ninfer::KvDiskCompress compres
                 "SSD scatter/restore changed fixed-codec bytes");
     }
 
-    const auto objects = reopened.test_main_page_ids(match->entry_id);
+    const auto objects = reopened.test_main_page_ids(match.value().entry_id);
     require(!objects.empty(), "restored entry has no persistent pages");
     reopened.test_break_object(objects.front(), cache::DiskObjectKind::Main);
-    require(reopened.claim(match->entry_id), "corruption probe could not claim entry");
+    require(reopened.claim(match.value().entry_id), "corruption probe could not claim entry");
     bool rejected                = false;
     std::uint64_t corrupt_ticket = 0;
     try {
-        corrupt_ticket = reopened.restore_device(match->entry_id, target);
+        corrupt_ticket = reopened.restore_device(match.value().entry_id, target);
         reopened.wait_copies(corrupt_ticket);
     } catch (const ninfer::runtime::CacheRestoreFailure&) { rejected = true; }
     reopened.cancel_restore();
     device.synchronize_all();
     if (corrupt_ticket != 0) { reopened.release_restore_ticket(corrupt_ticket); }
-    reopened.release(match->entry_id);
+    reopened.release(match.value().entry_id);
     require(rejected, "corrupted SSD page was not rejected by restore CRC validation");
-    reopened.invalidate_entry(match->entry_id);
+    reopened.invalidate_entry(match.value().entry_id);
     require(!reopened.plan_match(retained, chain), "invalidated corrupt prefix remained reusable");
 }
 
@@ -469,6 +470,7 @@ void spill_pin_waits_only_its_entry(ninfer::DeviceContext& device) {
             std::thread spiller([&] {
                 try {
                     result.store(disk.emergency_spill_ram(captured.entry_id));
+                    // NOLINTNEXTLINE(bugprone-empty-catch): a throw leaves result false
                 } catch (...) {}
                 done.store(true);
             });
@@ -729,21 +731,22 @@ void restore_setup_ready_tracks_window_reads(ninfer::DeviceContext& device) {
     const auto prompt_b = text_prompt(ledger_b);
     const auto match_a  = disk.plan_match(prompt_a, cache::prefix_hash_chain(prompt_a));
     const auto match_b  = disk.plan_match(prompt_b, cache::prefix_hash_chain(prompt_b));
-    require(match_a && match_b && disk.claim(match_b->entry_id),
+    require(match_a && match_b && disk.claim(match_b.value().entry_id),
             "restore-ready fixture could not claim the prefetched entry");
-    const bool idle_ready = disk.restore_setup_ready(match_a->entry_id);
+    const bool idle_ready = disk.restore_setup_ready(match_a.value().entry_id);
     disk.test_arm_page_read_barrier();
-    disk.prefetch_window(match_b->entry_id, 1, 0);
+    disk.prefetch_window(match_b.value().entry_id, 1, 0);
     if (!wait_pred([&] { return disk.test_page_read_entered(); }, std::chrono::seconds(2))) {
         disk.test_release_page_read_barrier();
-        disk.release(match_b->entry_id);
+        disk.release(match_b.value().entry_id);
         require(false, "restore-ready prefetch did not enter its page read");
     }
-    const bool busy_ready = disk.restore_setup_ready(match_a->entry_id);
+    const bool busy_ready = disk.restore_setup_ready(match_a.value().entry_id);
     disk.test_release_page_read_barrier();
-    const bool drained_ready = wait_pred(
-        [&] { return disk.restore_setup_ready(match_a->entry_id); }, std::chrono::seconds(2));
-    disk.release(match_b->entry_id);
+    const bool drained_ready =
+        wait_pred([&] { return disk.restore_setup_ready(match_a.value().entry_id); },
+                  std::chrono::seconds(2));
+    disk.release(match_b.value().entry_id);
     require(idle_ready, "restore setup reported busy with no window reads");
     require(!busy_ready, "restore setup reported ready while another entry's read was in flight");
     require(drained_ready, "restore setup stayed busy after the window read finished");

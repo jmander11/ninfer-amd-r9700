@@ -170,11 +170,13 @@ namespace ninfer::ops::r9700::gdn {
 // past the front grid apply `fold` (when non-null: that layer's deferred replay fold, bitwise
 // ops::gdn_replay_fold_layer, whose state it alone touches) and then touch `warm`
 // (core/cache_warm.h).
-[[nodiscard]] hipError_t fp8_gdn_normalized_front(
-    const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
-    const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
-    const float* dt_bias, float* g, float* beta, const linear::Fp8ActivationWorkspace& image,
-    hipStream_t stream, const CacheWarm& warm = {}, const GdnLayerFold* fold = nullptr) noexcept;
+[[nodiscard]] hipError_t
+fp8_gdn_normalized_front(const hip_bfloat16* residual, const hip_bfloat16* norm, float eps,
+                         bool unit_offset, const hip_bfloat16* a_weight,
+                         const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
+                         float* g, float* beta, const linear::Fp8ActivationWorkspace& image,
+                         hipStream_t stream, const CacheWarm& warm = {},
+                         const GdnLayerFold* layer_fold = nullptr) noexcept;
 
 // Exact FP32 state movement for transaction/checkpoint publication. Source/destination are
 // non-overlapping FP32 elements and count is positive.

@@ -317,14 +317,13 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
 
 } // namespace
 
-void linear(const Tensor& x, const Weight& weight, Tensor& output, WorkspaceArena& workspace,
+void linear(const Tensor& x, const Weight& w, Tensor& out, WorkspaceArena& workspace,
             hipStream_t stream) {
-    const std::size_t workspace_bytes =
-        linear_workspace_capacity_bytes(weight.qtype, x.ne[1], x.ne[0]);
-    auto scope = workspace.scope();
+    const std::size_t workspace_bytes = linear_workspace_capacity_bytes(w.qtype, x.ne[1], x.ne[0]);
+    auto scope                        = workspace.scope();
     const DeviceSpan activation =
         workspace_bytes == 0U ? DeviceSpan{} : workspace.alloc_bytes(workspace_bytes);
-    linear_with_workspace(x, weight, output, activation, stream);
+    linear_with_workspace(x, w, out, activation, stream);
 }
 
 std::size_t normalized_linear_workspace_capacity_bytes(std::int32_t tokens, std::int32_t columns,
@@ -367,7 +366,7 @@ void normalized_linear(const Tensor& input, const Tensor& norm, float eps, bool 
     const std::size_t required =
         normalized_linear_workspace_capacity_bytes(input.ne[1], input.ne[0], output.ne[0]);
     constexpr std::size_t code_bytes  = 34816U * 5120U / 2U;
-    constexpr std::size_t scale_bytes = 34816U * 80U * sizeof(std::uint16_t);
+    constexpr std::size_t scale_bytes = std::size_t{34816U} * 80U * sizeof(std::uint16_t);
     if (weight.qdata_bytes != code_bytes || weight.scale_bytes != scale_bytes ||
         workspace.bytes != required)
         throw std::invalid_argument("normalized linear: plane or workspace extent differs");
@@ -516,22 +515,22 @@ void projected_residual_t1(const Tensor& input, const Weight& weight, Tensor& re
         stream));
 }
 
-void linear(const Tensor& x, const Weight& weight, Tensor& output,
-            const DeviceSpan& activation_workspace, hipStream_t stream) {
-    linear_with_workspace(x, weight, output, activation_workspace, stream);
+void linear(const Tensor& x, const Weight& w, Tensor& out, const DeviceSpan& activation_workspace,
+            hipStream_t stream) {
+    linear_with_workspace(x, w, out, activation_workspace, stream);
 }
 
-void linear(const Tensor& x, const Weight& weight, Tensor& output, hipStream_t stream) {
-    if (x.dtype != DType::BF16 || output.dtype != DType::BF16 || x.ne[2] != 1 || x.ne[3] != 1 ||
-        output.ne[2] != 1 || output.ne[3] != 1) {
+void linear(const Tensor& x, const Weight& w, Tensor& out, hipStream_t stream) {
+    if (x.dtype != DType::BF16 || out.dtype != DType::BF16 || x.ne[2] != 1 || x.ne[3] != 1 ||
+        out.ne[2] != 1 || out.ne[3] != 1) {
         throw std::invalid_argument("linear: expected BF16 x[K,T] and output[N,T]");
     }
     const std::uint32_t columns = checked_extent(x.ne[0], "K");
     const std::uint32_t tokens  = checked_extent(x.ne[1], "T");
-    const std::uint32_t rows    = checked_extent(output.ne[0], "N");
-    if (output.ne[1] != x.ne[1] || weight.ndim != 2 || weight.n != output.ne[0] ||
-        weight.k != x.ne[0] || weight.shape[0] != output.ne[0] || weight.shape[1] != x.ne[0] ||
-        !x.is_contiguous() || !output.is_contiguous()) {
+    const std::uint32_t rows    = checked_extent(out.ne[0], "N");
+    if (out.ne[1] != x.ne[1] || w.ndim != 2 || w.n != out.ne[0] || w.k != x.ne[0] ||
+        w.shape[0] != out.ne[0] || w.shape[1] != x.ne[0] || !x.is_contiguous() ||
+        !out.is_contiguous()) {
         throw std::invalid_argument("linear: shape or contiguous-layout mismatch");
     }
 
@@ -540,52 +539,50 @@ void linear(const Tensor& x, const Weight& weight, Tensor& output, hipStream_t s
     const std::uint64_t output_bytes =
         checked_mul(checked_mul(rows, tokens, "output"), sizeof(hip_bfloat16), "output");
     const ByteRange input_range  = byte_range(x.data, input_bytes, "input");
-    const ByteRange output_range = byte_range(output.data, output_bytes, "output");
+    const ByteRange output_range = byte_range(out.data, output_bytes, "output");
     require_disjoint(output_range, input_range, "input");
 
-    if (weight.qtype == QType::BF16_CTRL) {
+    if (w.qtype == QType::BF16_CTRL) {
         const std::uint64_t weight_bytes =
             checked_mul(checked_mul(rows, columns, "weight"), sizeof(hip_bfloat16), "weight");
-        if (weight.layout != QuantLayout::Contiguous || weight.qdata == nullptr ||
-            weight.qhigh != nullptr || weight.scales != nullptr || weight.group != 0 ||
-            weight.group_size != 0 || weight.qdata_bytes != weight_bytes ||
-            weight.payload_bytes != weight_bytes || weight.padded_shape[0] != weight.shape[0] ||
-            weight.padded_shape[1] != weight.shape[1]) {
+        if (w.layout != QuantLayout::Contiguous || w.qdata == nullptr || w.qhigh != nullptr ||
+            w.scales != nullptr || w.group != 0 || w.group_size != 0 ||
+            w.qdata_bytes != weight_bytes || w.payload_bytes != weight_bytes ||
+            w.padded_shape[0] != w.shape[0] || w.padded_shape[1] != w.shape[1]) {
             throw std::invalid_argument("linear: malformed BF16_CTRL weight");
         }
-        require_disjoint(output_range, byte_range(weight.qdata, weight_bytes, "weight"), "weight");
-        HIP_CHECK(
-            r9700::linear::bf16_linear({.input   = static_cast<const hip_bfloat16*>(x.data),
-                                        .weights = static_cast<const hip_bfloat16*>(weight.qdata),
-                                        .output  = static_cast<hip_bfloat16*>(output.data),
-                                        .tokens  = tokens,
-                                        .rows    = rows,
-                                        .columns = columns},
-                                       stream));
+        require_disjoint(output_range, byte_range(w.qdata, weight_bytes, "weight"), "weight");
+        HIP_CHECK(r9700::linear::bf16_linear({.input   = static_cast<const hip_bfloat16*>(x.data),
+                                              .weights = static_cast<const hip_bfloat16*>(w.qdata),
+                                              .output  = static_cast<hip_bfloat16*>(out.data),
+                                              .tokens  = tokens,
+                                              .rows    = rows,
+                                              .columns = columns},
+                                             stream));
         return;
     }
 
-    if (weight.qtype != QType::W8G32_F16S) {
+    if (w.qtype != QType::W8G32_F16S) {
         throw std::invalid_argument("linear: Q4G64_F16S requires caller-owned workspace; "
                                     "workspace-free route supports only BF16_CTRL and W8G32_F16S");
     }
     const std::uint32_t padded     = padded_columns(columns);
-    const W8PayloadExtents extents = validate_w8_weight(weight, rows, columns, padded);
-    const ByteRange code_range     = byte_range(weight.qdata, extents.code_bytes, "W8 code plane");
-    const ByteRange scale_range = byte_range(weight.scales, extents.scale_bytes, "W8 scale plane");
+    const W8PayloadExtents extents = validate_w8_weight(w, rows, columns, padded);
+    const ByteRange code_range     = byte_range(w.qdata, extents.code_bytes, "W8 code plane");
+    const ByteRange scale_range    = byte_range(w.scales, extents.scale_bytes, "W8 scale plane");
     require_disjoint(output_range, code_range, "W8 code plane");
     require_disjoint(output_range, scale_range, "W8 scale plane");
     if (overlaps(code_range, scale_range)) {
         throw std::invalid_argument("linear: W8 code and scale planes overlap");
     }
-    const auto launch = weight.layout == QuantLayout::W8N16K16 ? r9700::linear::w8g32_tiled_head
-                                                               : r9700::linear::w8g32_linear;
+    const auto launch = w.layout == QuantLayout::W8N16K16 ? r9700::linear::w8g32_tiled_head
+                                                          : r9700::linear::w8g32_linear;
     HIP_CHECK(launch({.input          = static_cast<const hip_bfloat16*>(x.data),
-                      .codes          = static_cast<const std::int8_t*>(weight.qdata),
+                      .codes          = static_cast<const std::int8_t*>(w.qdata),
                       .code_bytes     = static_cast<std::size_t>(extents.code_bytes),
-                      .scales         = static_cast<const std::uint16_t*>(weight.scales),
+                      .scales         = static_cast<const std::uint16_t*>(w.scales),
                       .scale_bytes    = static_cast<std::size_t>(extents.scale_bytes),
-                      .output         = static_cast<hip_bfloat16*>(output.data),
+                      .output         = static_cast<hip_bfloat16*>(out.data),
                       .tokens         = tokens,
                       .rows           = rows,
                       .columns        = columns,

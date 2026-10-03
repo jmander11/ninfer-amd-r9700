@@ -123,28 +123,28 @@ void validate_cyclic(const CyclicKVCacheLayerView& cache) {
 
 } // namespace
 
-void kv_cache_append_prefix(const Tensor& key, const Tensor& value, const Tensor& positions,
+void kv_cache_append_prefix(const Tensor& k, const Tensor& v, const Tensor& positions,
                             const Tensor& counts, const Tensor& table_rows,
                             KVCacheAppendPrefixExecutionEnvelope envelope,
                             const KVCacheAppendPrefixPagedView& cache, hipStream_t stream) {
-    validate_common(key, value, positions, counts, table_rows, envelope, stream);
+    validate_common(k, v, positions, counts, table_rows, envelope, stream);
     validate_paged(cache);
-    require_disjoint(std::array<const Tensor*, 8>{&key, &value, &positions, &counts, &table_rows,
+    require_disjoint(std::array<const Tensor*, 8>{&k, &v, &positions, &counts, &table_rows,
                                                   &cache.key_pages, &cache.value_pages,
                                                   &cache.block_tables});
-    r9700::dflash::kv_cache_append_prefix_paged_launch(key, value, positions, counts, table_rows,
-                                                       cache, envelope, stream);
+    r9700::dflash::kv_cache_append_prefix_paged_launch(k, v, positions, counts, table_rows, cache,
+                                                       envelope, stream);
 }
 
-void kv_cache_append_prefix(const Tensor& key, const Tensor& value, const Tensor& positions,
+void kv_cache_append_prefix(const Tensor& k, const Tensor& v, const Tensor& positions,
                             const Tensor& counts, const Tensor& lanes,
                             KVCacheAppendPrefixExecutionEnvelope envelope,
                             const CyclicKVCacheLayerView& cache, hipStream_t stream) {
-    validate_common(key, value, positions, counts, lanes, envelope, stream);
+    validate_common(k, v, positions, counts, lanes, envelope, stream);
     validate_cyclic(cache);
-    require_disjoint(std::array<const Tensor*, 7>{&key, &value, &positions, &counts, &lanes,
-                                                  &cache.k, &cache.v});
-    r9700::dflash::kv_cache_append_prefix_cyclic_launch(key, value, positions, counts, lanes, cache,
+    require_disjoint(
+        std::array<const Tensor*, 7>{&k, &v, &positions, &counts, &lanes, &cache.k, &cache.v});
+    r9700::dflash::kv_cache_append_prefix_cyclic_launch(k, v, positions, counts, lanes, cache,
                                                         envelope, stream);
 }
 

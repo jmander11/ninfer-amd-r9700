@@ -91,6 +91,7 @@ a8q4_pipeline_sums(const std::uint8_t* low, const std::uint8_t* high, const std:
         // successor into opposite halves of one VGPR, forcing an early wait.
         // This empty register-only boundary prevents that fold; it changes no
         // bits, arithmetic or memory ordering.
+        // NOLINTNEXTLINE(portability-no-assembler): register-only boundary described above
         asm volatile("" : "+v"(ws), "+v"(gathered));
         // Scheduling barriers constrain instruction motion, not memory
         // completion. ISA admission must demonstrate successor VMEM before

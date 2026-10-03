@@ -867,7 +867,7 @@ private:
     void unlink_unreferenced(std::uint64_t id);
     bool make_capacity(std::uint64_t needed, std::unique_lock<std::mutex>& lock);
     void fifo_evict_one();
-    bool evict_entry(std::uint64_t entry_id);
+    bool evict_entry(std::uint64_t key);
     bool gc_skipped_one();
 
     void pin_disk(std::uint64_t entry_id);

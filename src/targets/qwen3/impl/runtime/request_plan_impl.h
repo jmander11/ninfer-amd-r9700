@@ -12,6 +12,7 @@
 #include <vector>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 void validate_sampling(const ResolvedSamplingParameters& sampling) {
@@ -297,12 +298,8 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
     if (speculative_backend == SpeculativeBackend::Mtp) {
         if (plan.reuse == ReusePath::FullReset) {
             plan.prepare_mtp = true;
-        } else if (plan.reuse == ReusePath::AppendAtFrontier) {
-            plan.prepare_mtp = true;
-            plan.mtp_bridge  = plan.reuse_base < plan.summary.prompt_tokens
-                                   ? MtpBridgeMode::BeforeSuffix
-                                   : MtpBridgeMode::AfterExactHit;
-        } else if (is_complete_checkpoint_restore(plan.reuse)) {
+        } else if (plan.reuse == ReusePath::AppendAtFrontier ||
+                   is_complete_checkpoint_restore(plan.reuse)) {
             plan.prepare_mtp = true;
             plan.mtp_bridge  = plan.reuse_base < plan.summary.prompt_tokens
                                    ? MtpBridgeMode::BeforeSuffix

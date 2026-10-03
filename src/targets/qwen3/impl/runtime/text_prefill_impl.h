@@ -134,7 +134,7 @@ void mtp_bridge_multimodal(PrefillContext& state, const PreparedPromptData& prom
         throw std::logic_error("multimodal MTP bridge does not match the reusable frontier");
     }
 
-    Tensor bridge_token = state.execution.io.mtp->target_input_ids.slice(0, 0, 1);
+    Tensor bridge_token = state.execution.io.mtp.value().target_input_ids.slice(0, 0, 1);
     const TokenId token = prompt.token_ids[state.text_kv_base];
     HIP_CHECK(hipMemcpyAsync(bridge_token.data, &token, sizeof(token), hipMemcpyHostToDevice,
                              state.execution.device.stream));

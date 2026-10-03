@@ -281,6 +281,7 @@ constexpr std::size_t kRouteCount = std::size(kRoutes);
     for (std::size_t i = 0; i < kRouteCount; ++i) {
         if (route == kRoutes[i].route) { return i; }
     }
+    // NOLINTNEXTLINE(bugprone-std-exception-baseclass): consteval; any throw is a compile error
     throw "route is not in kRoutes";
 }
 

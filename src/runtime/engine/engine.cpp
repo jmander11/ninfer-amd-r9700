@@ -40,8 +40,8 @@ class PreparedPrompt::Impl {
 public:
     Impl(PromptSummary prompt_summary, double frontend_seconds, SamplingMode mode,
          targets::qwen3::PreparedPrompt prepared)
-        : summary(std::move(prompt_summary)), prepare_seconds(frontend_seconds),
-          sampling_mode(mode), value(std::move(prepared)) {}
+        : summary(prompt_summary), prepare_seconds(frontend_seconds), sampling_mode(mode),
+          value(std::move(prepared)) {}
 
     PromptSummary summary;
     double prepare_seconds     = 0.0;
@@ -149,6 +149,7 @@ public:
         executor.reset();
         try {
             device.synchronize_all();
+            // NOLINTNEXTLINE(bugprone-empty-catch): noexcept teardown has no one to report to
         } catch (...) {}
     }
 
@@ -318,10 +319,11 @@ std::vector<ScoreResult> Engine::score_many(std::vector<PreparedPrompt> prompts,
             throw RequestError(RequestErrorKind::ContextLengthExceeded,
                                context_capacity_error(count, impl_->options.max_context));
         }
-        if (count < 2 || (options[i].schedule == ScoreSchedule::Decode && count < 3)) {
+        const ScoreOptions& option = options[i];
+        if (count < 2 || (option.schedule == ScoreSchedule::Decode && count < 3)) {
             throw std::invalid_argument("score sequence has too few tokens for its schedule");
         }
-        if (options[i].skip_tokens && *options[i].skip_tokens > count - 2) {
+        if (option.skip_tokens && *option.skip_tokens > count - 2) {
             throw std::invalid_argument("score skip leaves no teacher-forced target");
         }
         total_tokens += count;

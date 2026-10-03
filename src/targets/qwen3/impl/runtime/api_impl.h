@@ -533,11 +533,13 @@ SequencePlanner<Variant> make_sequence_planner<Variant>(DeviceContext& device,
         device, options, weights_profile));
 }
 
+// The plan is consumed (its impl_ reset) only on success; on failure the caller keeps it.
 template <>
-std::unique_ptr<Program<Variant>>
-create_program<Variant>(const Variant::ModelView& model, Variant::WeightsProfile weights_profile,
-                        SequencePlan<Variant>&& plan, DeviceContext& device,
-                        std::unique_ptr<HostPinnedArena> kv_ram_arena) {
+std::unique_ptr<Program<Variant>> create_program<Variant>(
+    const Variant::ModelView& model, Variant::WeightsProfile weights_profile,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved): see above
+    SequencePlan<Variant>&& plan, DeviceContext& device,
+    std::unique_ptr<HostPinnedArena> kv_ram_arena) {
     if (plan.impl_ == nullptr) { throw std::invalid_argument("sequence plan is empty"); }
     if (plan.impl_->weights_profile != weights_profile) {
         throw std::invalid_argument(

@@ -135,6 +135,8 @@ hipError_t launch_wide(const A8Q4G64LinearArgs& a, hipStream_t stream) {
                 return launch_width<N, K, 42>(a, stream);
             case 48:
                 return launch_width<N, K, 48>(a, stream);
+            default:
+                break;
             }
         }
         break;
@@ -240,6 +242,8 @@ hipError_t launch_pair(const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b, h
         return launch_pair_width<N0, N1, K, 28>(a, b, stream);
     case 32:
         return launch_pair_width<N0, N1, K, 32>(a, b, stream);
+    default:
+        break;
     }
     return hipErrorNotSupported;
 }
@@ -264,6 +268,8 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
                 return launch_width<N, K, 3>(a, stream);
             case 4:
                 return launch_width<N, K, 4>(a, stream);
+            default:
+                break;
             }
         }
         {
@@ -278,6 +284,8 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
                 return launch_width<N, K, 15>(a, stream);
             case 16:
                 return launch_width<N, K, 16>(a, stream);
+            default:
+                break;
             }
         }
         if constexpr (has_t18_32_table<N, K>()) {
@@ -294,6 +302,8 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
                 return launch_width<N, K, 28>(a, stream);
             case 32:
                 return launch_width<N, K, 32>(a, stream);
+            default:
+                break;
             }
         }
         if (a.tokens == 4) return launch_width<N, K, 4>(a, stream);

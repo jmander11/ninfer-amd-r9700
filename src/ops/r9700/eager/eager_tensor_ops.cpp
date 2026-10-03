@@ -320,28 +320,26 @@ void increment_i64_scalar(Tensor& scalar, hipStream_t stream) {
     HIP_CHECK(r9700::eager::i64_increment(static_cast<std::int64_t*>(scalar.data), stream));
 }
 
-void scatter(const Tensor& source, const Tensor& indices, Tensor& destination, hipStream_t stream) {
+void scatter(const Tensor& src, const Tensor& indices, Tensor& dst, hipStream_t stream) {
     constexpr const char* operation = "scatter";
-    require_dtype(source, DType::BF16, operation, "source");
-    require_dtype(destination, DType::BF16, operation, "destination");
+    require_dtype(src, DType::BF16, operation, "source");
+    require_dtype(dst, DType::BF16, operation, "destination");
     require_vector(indices, DType::I32, operation, "indices");
-    if (source.ne[0] <= 0 || source.ne[1] <= 0 || source.ne[2] != 1 || source.ne[3] != 1 ||
-        destination.ne[0] != source.ne[0] || destination.ne[1] <= 0 || destination.ne[2] != 1 ||
-        destination.ne[3] != 1 || indices.ne[0] != source.ne[1]) {
+    if (src.ne[0] <= 0 || src.ne[1] <= 0 || src.ne[2] != 1 || src.ne[3] != 1 ||
+        dst.ne[0] != src.ne[0] || dst.ne[1] <= 0 || dst.ne[2] != 1 || dst.ne[3] != 1 ||
+        indices.ne[0] != src.ne[1]) {
         throw std::invalid_argument(
             "scatter: expected source [D,V], indices [V], destination [D,T]");
     }
-    require_contiguous_nonnull(source, operation, "source");
-    require_contiguous_nonnull(destination, operation, "destination");
-    if (source.data == destination.data || indices.data == destination.data) {
+    require_contiguous_nonnull(src, operation, "source");
+    require_contiguous_nonnull(dst, operation, "destination");
+    if (src.data == dst.data || indices.data == dst.data) {
         throw std::invalid_argument("scatter: destination must not alias inputs");
     }
     HIP_CHECK(r9700::eager::bf16_scatter_columns(
-        static_cast<const hip_bfloat16*>(source.data),
-        static_cast<const std::int32_t*>(indices.data),
-        static_cast<hip_bfloat16*>(destination.data), static_cast<std::uint32_t>(source.ne[0]),
-        static_cast<std::uint32_t>(source.ne[1]), static_cast<std::uint32_t>(destination.ne[1]),
-        stream));
+        static_cast<const hip_bfloat16*>(src.data), static_cast<const std::int32_t*>(indices.data),
+        static_cast<hip_bfloat16*>(dst.data), static_cast<std::uint32_t>(src.ne[0]),
+        static_cast<std::uint32_t>(src.ne[1]), static_cast<std::uint32_t>(dst.ne[1]), stream));
 }
 
 void scatter_bf16_batch(const Tensor& source, const Tensor& lanes, const Tensor& valid_columns,
@@ -497,81 +495,77 @@ void residual_add(const Tensor& y, Tensor& x, hipStream_t stream) {
                                               stream));
 }
 
-void residual_rmsnorm(const Tensor& y, Tensor& x, const Tensor& weight, float eps, Tensor& output,
+void residual_rmsnorm(const Tensor& y, Tensor& x, const Tensor& weight, float eps, Tensor& out,
                       hipStream_t stream) {
     constexpr const char* operation = "residual_rmsnorm";
     require_dtype(y, DType::BF16, operation, "y");
     require_dtype(x, DType::BF16, operation, "x");
     require_same_shape(y, x, operation);
-    require_norm(x, output, &weight, nullptr, nullptr, eps, operation);
+    require_norm(x, out, &weight, nullptr, nullptr, eps, operation);
     require_contiguous_nonnull(y, operation, "y");
-    if (y.data == x.data || y.data == output.data || x.data == output.data) {
+    if (y.data == x.data || y.data == out.data || x.data == out.data) {
         throw std::invalid_argument("residual_rmsnorm: mutable outputs must not alias inputs");
     }
     const std::size_t elements = checked_numel(x, operation, "x");
     HIP_CHECK(r9700::eager::residual_rmsnorm_bf16(
         static_cast<const hip_bfloat16*>(y.data), static_cast<hip_bfloat16*>(x.data),
-        static_cast<const hip_bfloat16*>(weight.data), static_cast<hip_bfloat16*>(output.data),
+        static_cast<const hip_bfloat16*>(weight.data), static_cast<hip_bfloat16*>(out.data),
         static_cast<std::uint32_t>(x.ne[0]), rows_for(x, elements, operation), eps, stream));
 }
 
-void rmsnorm(const Tensor& input, const Tensor& weight, float eps, bool unit_offset, Tensor& output,
+void rmsnorm(const Tensor& x, const Tensor& weight, float eps, bool unit_offset, Tensor& out,
              hipStream_t stream) {
     constexpr const char* operation = "rmsnorm";
-    require_norm(input, output, &weight, nullptr, nullptr, eps, operation);
-    const std::size_t elements = checked_numel(input, operation, "input");
+    require_norm(x, out, &weight, nullptr, nullptr, eps, operation);
+    const std::size_t elements = checked_numel(x, operation, "input");
     HIP_CHECK(r9700::eager::rmsnorm_bf16(
-        static_cast<const hip_bfloat16*>(input.data), static_cast<const hip_bfloat16*>(weight.data),
-        static_cast<hip_bfloat16*>(output.data), static_cast<std::uint32_t>(input.ne[0]),
-        rows_for(input, elements, operation), eps, unit_offset, stream));
+        static_cast<const hip_bfloat16*>(x.data), static_cast<const hip_bfloat16*>(weight.data),
+        static_cast<hip_bfloat16*>(out.data), static_cast<std::uint32_t>(x.ne[0]),
+        rows_for(x, elements, operation), eps, unit_offset, stream));
 }
 
-void gated_rmsnorm(const Tensor& input, const Tensor& weight, const Tensor& gate, float eps,
-                   Tensor& output, hipStream_t stream) {
+void gated_rmsnorm(const Tensor& x, const Tensor& weight, const Tensor& z, float eps, Tensor& out,
+                   hipStream_t stream) {
     constexpr const char* operation = "gated_rmsnorm";
-    require_norm(input, output, &weight, nullptr, &gate, eps, operation);
-    const std::size_t elements = checked_numel(input, operation, "input");
+    require_norm(x, out, &weight, nullptr, &z, eps, operation);
+    const std::size_t elements = checked_numel(x, operation, "input");
     HIP_CHECK(r9700::eager::gated_rmsnorm_bf16(
-        static_cast<const hip_bfloat16*>(input.data), static_cast<const hip_bfloat16*>(weight.data),
-        static_cast<const hip_bfloat16*>(gate.data), static_cast<hip_bfloat16*>(output.data),
-        static_cast<std::uint32_t>(input.ne[0]), rows_for(input, elements, operation), eps,
-        stream));
+        static_cast<const hip_bfloat16*>(x.data), static_cast<const hip_bfloat16*>(weight.data),
+        static_cast<const hip_bfloat16*>(z.data), static_cast<hip_bfloat16*>(out.data),
+        static_cast<std::uint32_t>(x.ne[0]), rows_for(x, elements, operation), eps, stream));
 }
 
-void l2norm(const Tensor& input, float eps, Tensor& output, hipStream_t stream) {
+void l2norm(const Tensor& x, float eps, Tensor& out, hipStream_t stream) {
     constexpr const char* operation = "l2norm";
-    require_norm(input, output, nullptr, nullptr, nullptr, eps, operation);
-    const std::size_t elements = checked_numel(input, operation, "input");
-    HIP_CHECK(r9700::eager::l2norm_bf16(static_cast<const hip_bfloat16*>(input.data),
-                                        static_cast<hip_bfloat16*>(output.data),
-                                        static_cast<std::uint32_t>(input.ne[0]),
-                                        rows_for(input, elements, operation), eps, stream));
+    require_norm(x, out, nullptr, nullptr, nullptr, eps, operation);
+    const std::size_t elements = checked_numel(x, operation, "input");
+    HIP_CHECK(r9700::eager::l2norm_bf16(
+        static_cast<const hip_bfloat16*>(x.data), static_cast<hip_bfloat16*>(out.data),
+        static_cast<std::uint32_t>(x.ne[0]), rows_for(x, elements, operation), eps, stream));
 }
 
-void l2norm_dump(const Tensor& input, float eps, Tensor& output, hipStream_t stream,
-                 L2NormDump& dump) {
+void l2norm_dump(const Tensor& x, float eps, Tensor& out, hipStream_t stream, L2NormDump& dump) {
     constexpr const char* operation = "l2norm_dump";
-    require_norm(input, output, nullptr, nullptr, nullptr, eps, operation);
+    require_norm(x, out, nullptr, nullptr, nullptr, eps, operation);
     if (dump.sumsq == nullptr || dump.inv_r == nullptr) {
         throw std::invalid_argument("l2norm_dump: dump buffers must be non-null");
     }
-    const std::size_t elements = checked_numel(input, operation, "input");
+    const std::size_t elements = checked_numel(x, operation, "input");
     HIP_CHECK(r9700::eager::l2norm_bf16_dump(
-        static_cast<const hip_bfloat16*>(input.data), static_cast<hip_bfloat16*>(output.data),
-        static_cast<std::uint32_t>(input.ne[0]), rows_for(input, elements, operation), eps,
-        dump.sumsq, dump.inv_r, stream));
+        static_cast<const hip_bfloat16*>(x.data), static_cast<hip_bfloat16*>(out.data),
+        static_cast<std::uint32_t>(x.ne[0]), rows_for(x, elements, operation), eps, dump.sumsq,
+        dump.inv_r, stream));
 }
 
-void layer_norm(const Tensor& input, const Tensor& weight, const Tensor& bias, float eps,
-                Tensor& output, hipStream_t stream) {
+void layer_norm(const Tensor& x, const Tensor& weight, const Tensor& bias, float eps, Tensor& out,
+                hipStream_t stream) {
     constexpr const char* operation = "layer_norm";
-    require_norm(input, output, &weight, &bias, nullptr, eps, operation);
-    const std::size_t elements = checked_numel(input, operation, "input");
+    require_norm(x, out, &weight, &bias, nullptr, eps, operation);
+    const std::size_t elements = checked_numel(x, operation, "input");
     HIP_CHECK(r9700::eager::layernorm_bf16(
-        static_cast<const hip_bfloat16*>(input.data), static_cast<const hip_bfloat16*>(weight.data),
-        static_cast<const hip_bfloat16*>(bias.data), static_cast<hip_bfloat16*>(output.data),
-        static_cast<std::uint32_t>(input.ne[0]), rows_for(input, elements, operation), eps,
-        stream));
+        static_cast<const hip_bfloat16*>(x.data), static_cast<const hip_bfloat16*>(weight.data),
+        static_cast<const hip_bfloat16*>(bias.data), static_cast<hip_bfloat16*>(out.data),
+        static_cast<std::uint32_t>(x.ne[0]), rows_for(x, elements, operation), eps, stream));
 }
 
 void gelu(Tensor& x, GeluMode mode, hipStream_t stream) {
@@ -587,25 +581,25 @@ void gelu(Tensor& x, GeluMode mode, hipStream_t stream) {
         r9700::eager::gelu_bf16(static_cast<hip_bfloat16*>(x.data), elements, raw_mode, stream));
 }
 
-void silu_mul(const Tensor& gate, const Tensor& up, Tensor& output, hipStream_t stream) {
+void silu_mul(const Tensor& gate, const Tensor& up, Tensor& out, hipStream_t stream) {
     constexpr const char* operation = "silu_mul";
     require_dtype(gate, DType::BF16, operation, "gate");
     require_dtype(up, DType::BF16, operation, "up");
-    require_dtype(output, DType::BF16, operation, "output");
+    require_dtype(out, DType::BF16, operation, "output");
     require_same_shape(gate, up, operation);
-    require_same_shape(gate, output, operation);
+    require_same_shape(gate, out, operation);
     const std::size_t elements  = checked_numel(gate, operation, "gate");
     const std::size_t gate_span = require_valid_strided_nonnull(gate, operation, "gate");
     const std::size_t up_span   = require_valid_strided_nonnull(up, operation, "up");
-    require_contiguous_nonnull(output, operation, "output");
-    if (storage_ranges_overlap(output.data, output.bytes(), gate.data, gate_span) ||
-        storage_ranges_overlap(output.data, output.bytes(), up.data, up_span)) {
+    require_contiguous_nonnull(out, operation, "output");
+    if (storage_ranges_overlap(out.data, out.bytes(), gate.data, gate_span) ||
+        storage_ranges_overlap(out.data, out.bytes(), up.data, up_span)) {
         throw std::invalid_argument("silu_mul: output must not alias inputs");
     }
     if (gate.is_contiguous() && up.is_contiguous()) {
         HIP_CHECK(r9700::eager::silu_mul_bf16(
             static_cast<const hip_bfloat16*>(gate.data), static_cast<const hip_bfloat16*>(up.data),
-            static_cast<hip_bfloat16*>(output.data), elements, stream));
+            static_cast<hip_bfloat16*>(out.data), elements, stream));
         return;
     }
     r9700::eager::SiluMulStridedShape shape{};
@@ -618,7 +612,7 @@ void silu_mul(const Tensor& gate, const Tensor& up, Tensor& output, hipStream_t 
     }
     HIP_CHECK(r9700::eager::silu_mul_bf16_strided(
         static_cast<const hip_bfloat16*>(gate.data), static_cast<const hip_bfloat16*>(up.data),
-        static_cast<hip_bfloat16*>(output.data), elements, shape, stream));
+        static_cast<hip_bfloat16*>(out.data), elements, shape, stream));
 }
 
 void sigmoid_mul(const Tensor& gate, Tensor& x, hipStream_t stream) {
@@ -655,8 +649,8 @@ void sigmoid_mul(const Tensor& gate, const Tensor& x, Tensor& out, hipStream_t s
         static_cast<hip_bfloat16*>(out.data), elements, stream));
 }
 
-void embedding(const Tensor& ids, const Weight& table, Tensor& output, hipStream_t stream) {
-    require_embedding_common(ids, table, output);
+void embedding(const Tensor& ids, const Weight& table, Tensor& out, hipStream_t stream) {
+    require_embedding_common(ids, table, out);
     const auto vocabulary = static_cast<std::uint32_t>(table.shape[0]);
     const auto features   = static_cast<std::uint32_t>(table.shape[1]);
     const auto rows       = static_cast<std::uint32_t>(ids.ne[0]);
@@ -673,7 +667,7 @@ void embedding(const Tensor& ids, const Weight& table, Tensor& output, hipStream
         }
         HIP_CHECK(r9700::eager::embedding_gather_bf16(static_cast<const hip_bfloat16*>(table.qdata),
                                                       static_cast<const std::int32_t*>(ids.data),
-                                                      static_cast<hip_bfloat16*>(output.data),
+                                                      static_cast<hip_bfloat16*>(out.data),
                                                       vocabulary, features, rows, stream));
     } break;
     case QType::Q4G64_F16S: {
@@ -694,16 +688,16 @@ void embedding(const Tensor& ids, const Weight& table, Tensor& output, hipStream
             (table.payload_bytes != 0 && table.payload_bytes < scale_offset + scale_bytes)) {
             throw std::invalid_argument("embedding: Q4G64_F16S payload is malformed");
         }
-        if (storage_ranges_overlap(output.data, output.bytes(), table.qdata, code_bytes) ||
-            storage_ranges_overlap(output.data, output.bytes(), table.scales, scale_bytes) ||
-            storage_ranges_overlap(output.data, output.bytes(), ids.data, ids.bytes()) ||
+        if (storage_ranges_overlap(out.data, out.bytes(), table.qdata, code_bytes) ||
+            storage_ranges_overlap(out.data, out.bytes(), table.scales, scale_bytes) ||
+            storage_ranges_overlap(out.data, out.bytes(), ids.data, ids.bytes()) ||
             storage_ranges_overlap(table.qdata, code_bytes, table.scales, scale_bytes)) {
             throw std::invalid_argument("embedding: Q4G64_F16S storage planes overlap");
         }
         HIP_CHECK(r9700::eager::embedding_gather_q4g64_f16s(
             static_cast<const std::uint8_t*>(table.qdata),
             static_cast<const std::uint16_t*>(table.scales),
-            static_cast<const std::int32_t*>(ids.data), static_cast<hip_bfloat16*>(output.data),
+            static_cast<const std::int32_t*>(ids.data), static_cast<hip_bfloat16*>(out.data),
             vocabulary, features, static_cast<std::uint32_t>(padded), rows, stream));
     } break;
     case QType::Q6G64_F16S: {
@@ -731,7 +725,7 @@ void embedding(const Tensor& ids, const Weight& table, Tensor& output, hipStream
             static_cast<const std::uint8_t*>(table.qdata),
             static_cast<const std::uint8_t*>(table.qhigh),
             static_cast<const std::uint16_t*>(table.scales),
-            static_cast<const std::int32_t*>(ids.data), static_cast<hip_bfloat16*>(output.data),
+            static_cast<const std::int32_t*>(ids.data), static_cast<hip_bfloat16*>(out.data),
             vocabulary, features, static_cast<std::uint32_t>(padded), rows, stream));
     } break;
     case QType::W8G32_F16S: {
@@ -754,7 +748,7 @@ void embedding(const Tensor& ids, const Weight& table, Tensor& output, hipStream
         HIP_CHECK(r9700::eager::embedding_gather_w8g32_f16s(
             static_cast<const std::uint8_t*>(table.qdata),
             static_cast<const std::uint16_t*>(table.scales),
-            static_cast<const std::int32_t*>(ids.data), static_cast<hip_bfloat16*>(output.data),
+            static_cast<const std::int32_t*>(ids.data), static_cast<hip_bfloat16*>(out.data),
             vocabulary, features, static_cast<std::uint32_t>(padded), rows, stream));
     } break;
     default:
@@ -762,64 +756,64 @@ void embedding(const Tensor& ids, const Weight& table, Tensor& output, hipStream
     }
 }
 
-void argmax(const Tensor& logits, Tensor& output, std::int32_t valid_rows, hipStream_t stream) {
+void argmax(const Tensor& logits, Tensor& out, std::int32_t valid_rows, hipStream_t stream) {
     constexpr const char* operation = "argmax";
     require_dtype(logits, DType::BF16, operation, "logits");
-    require_vector(output, DType::I32, operation, "output");
+    require_vector(out, DType::I32, operation, "output");
     if (logits.ne[0] <= 0 || logits.ne[1] <= 0 || logits.ne[2] != 1 || logits.ne[3] != 1 ||
-        output.ne[0] != logits.ne[1] || valid_rows <= 0 || valid_rows > logits.ne[0]) {
+        out.ne[0] != logits.ne[1] || valid_rows <= 0 || valid_rows > logits.ne[0]) {
         throw std::invalid_argument("argmax: invalid [physical_rows,T] geometry");
     }
     require_contiguous_nonnull(logits, operation, "logits");
-    if (logits.data == output.data) {
+    if (logits.data == out.data) {
         throw std::invalid_argument("argmax: output must not alias logits");
     }
     HIP_CHECK(r9700::eager::argmax_bf16(
-        static_cast<const hip_bfloat16*>(logits.data), static_cast<std::int32_t*>(output.data),
+        static_cast<const hip_bfloat16*>(logits.data), static_cast<std::int32_t*>(out.data),
         static_cast<std::uint32_t>(logits.ne[0]), static_cast<std::uint32_t>(valid_rows),
         static_cast<std::uint32_t>(logits.ne[1]), stream));
 }
 
-void mtp_pack_fc_input(const Tensor& embedding_norm, const Tensor& hidden_norm, Tensor& output,
+void mtp_pack_fc_input(const Tensor& embedding_norm, const Tensor& hidden_norm, Tensor& out,
                        hipStream_t stream) {
     constexpr const char* operation = "mtp_pack_fc_input";
     require_dtype(embedding_norm, DType::BF16, operation, "embedding_norm");
     require_dtype(hidden_norm, DType::BF16, operation, "hidden_norm");
-    require_dtype(output, DType::BF16, operation, "output");
+    require_dtype(out, DType::BF16, operation, "output");
     if (embedding_norm.ne[0] != 5120 || embedding_norm.ne[1] <= 0 || embedding_norm.ne[2] != 1 ||
         embedding_norm.ne[3] != 1 || hidden_norm.ne[0] != 5120 ||
         hidden_norm.ne[1] != embedding_norm.ne[1] || hidden_norm.ne[2] != 1 ||
-        hidden_norm.ne[3] != 1 || output.ne[0] != 10240 || output.ne[1] != embedding_norm.ne[1] ||
-        output.ne[2] != 1 || output.ne[3] != 1) {
+        hidden_norm.ne[3] != 1 || out.ne[0] != 10240 || out.ne[1] != embedding_norm.ne[1] ||
+        out.ne[2] != 1 || out.ne[3] != 1) {
         throw std::invalid_argument("mtp_pack_fc_input: expected [5120,T],[5120,T] -> [10240,T]");
     }
     require_contiguous_nonnull(embedding_norm, operation, "embedding_norm");
     require_contiguous_nonnull(hidden_norm, operation, "hidden_norm");
-    require_contiguous_nonnull(output, operation, "output");
-    if (tensors_overlap(embedding_norm, hidden_norm) || tensors_overlap(embedding_norm, output) ||
-        tensors_overlap(hidden_norm, output)) {
+    require_contiguous_nonnull(out, operation, "output");
+    if (tensors_overlap(embedding_norm, hidden_norm) || tensors_overlap(embedding_norm, out) ||
+        tensors_overlap(hidden_norm, out)) {
         throw std::invalid_argument("mtp_pack_fc_input: tensors must not alias");
     }
     const std::size_t row_bytes =
         static_cast<std::size_t>(embedding_norm.ne[0]) * sizeof(hip_bfloat16);
     const std::size_t output_pitch = row_bytes * 2U;
-    HIP_CHECK(hipMemcpy2DAsync(output.data, output_pitch, embedding_norm.data, row_bytes, row_bytes,
+    HIP_CHECK(hipMemcpy2DAsync(out.data, output_pitch, embedding_norm.data, row_bytes, row_bytes,
                                static_cast<std::size_t>(embedding_norm.ne[1]),
                                hipMemcpyDeviceToDevice, stream));
     HIP_CHECK(hipMemcpy2DAsync(
-        static_cast<std::byte*>(output.data) + row_bytes, output_pitch, hidden_norm.data, row_bytes,
+        static_cast<std::byte*>(out.data) + row_bytes, output_pitch, hidden_norm.data, row_bytes,
         row_bytes, static_cast<std::size_t>(hidden_norm.ne[1]), hipMemcpyDeviceToDevice, stream));
 }
 
-void mtp_split_attn_in(const Tensor& input, Tensor& query, Tensor& key, Tensor& gate, Tensor& value,
+void mtp_split_attn_in(const Tensor& attn_in, Tensor& q, Tensor& k, Tensor& gate, Tensor& v,
                        hipStream_t stream) {
     constexpr const char* operation = "mtp_split_attn_in";
-    require_dtype(input, DType::BF16, operation, "input");
-    require_contiguous_nonnull(input, operation, "input");
-    if (input.ne[0] != 14336 || input.ne[1] <= 0 || input.ne[2] != 1 || input.ne[3] != 1) {
+    require_dtype(attn_in, DType::BF16, operation, "input");
+    require_contiguous_nonnull(attn_in, operation, "input");
+    if (attn_in.ne[0] != 14336 || attn_in.ne[1] <= 0 || attn_in.ne[2] != 1 || attn_in.ne[3] != 1) {
         throw std::invalid_argument("mtp_split_attn_in: input must have shape [14336,T]");
     }
-    const std::int32_t tokens = input.ne[1];
+    const std::int32_t tokens = attn_in.ne[1];
     const auto require_output = [&](Tensor& tensor, std::int32_t heads, const char* label) {
         require_dtype(tensor, DType::BF16, operation, label);
         require_contiguous_nonnull(tensor, operation, label);
@@ -828,11 +822,11 @@ void mtp_split_attn_in(const Tensor& input, Tensor& query, Tensor& key, Tensor& 
             throw std::invalid_argument(std::string("mtp_split_attn_in: malformed ") + label);
         }
     };
-    require_output(query, 24, "query");
-    require_output(key, 4, "key");
+    require_output(q, 24, "query");
+    require_output(k, 4, "key");
     require_output(gate, 24, "gate");
-    require_output(value, 4, "value");
-    const std::array<const Tensor*, 5> tensors{&input, &query, &key, &gate, &value};
+    require_output(v, 4, "value");
+    const std::array<const Tensor*, 5> tensors{&attn_in, &q, &k, &gate, &v};
     for (std::size_t first = 0; first < tensors.size(); ++first) {
         for (std::size_t second = first + 1; second < tensors.size(); ++second) {
             if (tensors_overlap(*tensors[first], *tensors[second])) {
@@ -844,15 +838,15 @@ void mtp_split_attn_in(const Tensor& input, Tensor& query, Tensor& key, Tensor& 
     const auto copy = [&](Tensor& destination, std::size_t source_row, std::size_t rows) {
         const std::size_t width = rows * sizeof(hip_bfloat16);
         HIP_CHECK(hipMemcpy2DAsync(destination.data, width,
-                                   static_cast<const std::byte*>(input.data) +
+                                   static_cast<const std::byte*>(attn_in.data) +
                                        source_row * sizeof(hip_bfloat16),
                                    source_pitch, width, static_cast<std::size_t>(tokens),
                                    hipMemcpyDeviceToDevice, stream));
     };
-    copy(query, 0, 6144);
-    copy(key, 6144, 1024);
+    copy(q, 0, 6144);
+    copy(k, 6144, 1024);
     copy(gate, 7168, 6144);
-    copy(value, 13312, 1024);
+    copy(v, 13312, 1024);
 }
 
 } // namespace ninfer::ops

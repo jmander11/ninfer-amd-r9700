@@ -61,7 +61,7 @@ struct PackedTable {
     uint2 words[256];
 };
 
-constexpr PackedTable make_packed() {
+constexpr PackedTable make_packed() noexcept {
     PackedTable out{};
     for (std::uint32_t code = 0; code < 256U; ++code) {
         std::uint32_t low = 0U, high = 0U;
@@ -74,8 +74,9 @@ constexpr PackedTable make_packed() {
     return out;
 }
 
-namespace {
 // Internal linkage: every translation unit carries its own constant copy.
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): per-TU __constant__ copy is intended
+namespace {
 __constant__ PackedTable kDeviceTable = make_packed();
 } // namespace
 

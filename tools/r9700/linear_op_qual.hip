@@ -596,6 +596,7 @@ void run_public_tensor_case(std::uint32_t tokens) {
     try {
         ninfer::ops::linear(x, malformed, output, nullptr);
         fail("public linear accepted a short W8 scale plane");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     std::cout << "public-linear: T=" << tokens << " BF16/W8/row-view/rejection PASS\n";
 }
@@ -914,18 +915,21 @@ void run_product_head_shape(const char* label, std::uint32_t rows, std::uint32_t
     try {
         ninfer::ops::linear(x, malformed, output, stream);
         fail(std::string(label) + ": accepted short W8 code plane");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     malformed = weight;
     --malformed.scale_bytes;
     try {
         ninfer::ops::linear(x, malformed, output, stream);
         fail(std::string(label) + ": accepted short W8 scale plane");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     malformed = weight;
     malformed.padded_shape[1] += kKAlignment;
     try {
         ninfer::ops::linear(x, malformed, output, stream);
         fail(std::string(label) + ": accepted incorrect W8 K padding");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 
     const double resident_mib =

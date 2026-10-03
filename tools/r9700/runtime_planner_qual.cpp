@@ -506,10 +506,10 @@ void qualify_host_mtp_graph_allowance() {
 
 using WeightsProfile = ninfer::targets::qwen3_8_27b::detail::WeightsProfile;
 
-constexpr std::uint32_t kCapacityEnvelopeContext = 262144U;
-constexpr std::uint32_t kCapacityEnvelopeChunk   = 4096U;
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION) && NINFER_R9700_XATTENTION_STRIDE == 16 &&      \
     NINFER_R9700_XATTENTION_TAU_PERMILLE == 900
+constexpr std::uint32_t kCapacityEnvelopeContext       = 262144U;
+constexpr std::uint32_t kCapacityEnvelopeChunk         = 4096U;
 constexpr std::size_t kCapacityEnvelopeSparseLeafBytes = 601361408ULL;
 constexpr std::size_t kCapacityEnvelopeWorkspaceBytes  = 1085967619ULL;
 #endif

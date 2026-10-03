@@ -81,6 +81,8 @@ struct Binding {
         case 4:
             workspace.data = value;
             break;
+        default:
+            throw std::out_of_range("projected residual binding has five planes");
         }
     }
 };
@@ -125,19 +127,23 @@ void malformed_bindings(std::int32_t columns) {
     for (unsigned plane = 0; plane < 5; ++plane) {
         reject(columns, "null plane", [=](auto& b) { b.set_pointer(plane, nullptr); });
         reject(columns, "unaligned plane", [=](auto& b) {
-            b.set_pointer(plane, reinterpret_cast<void*>(
-                                     reinterpret_cast<std::uintptr_t>(b.pointer(plane)) + 1U));
+            const auto address = reinterpret_cast<std::uintptr_t>(b.pointer(plane)) + 1U;
+            // NOLINTNEXTLINE(performance-no-int-to-ptr): synthetic address, never dereferenced
+            b.set_pointer(plane, reinterpret_cast<void*>(address));
         });
         reject(columns, "overflowing range", [=](auto& b) {
             b.set_pointer(
-                plane, reinterpret_cast<void*>(std::numeric_limits<std::uintptr_t>::max() - 255U));
+                plane,
+                // NOLINTNEXTLINE(performance-no-int-to-ptr): synthetic address, never dereferenced
+                reinterpret_cast<void*>(std::numeric_limits<std::uintptr_t>::max() - 255U));
         });
         for (unsigned other = plane + 1; other < 5; ++other) {
             reject(columns, "aliased planes",
                    [=](auto& b) { b.set_pointer(other, b.pointer(plane)); });
             reject(columns, "partially overlapping planes", [=](auto& b) {
-                b.set_pointer(other, reinterpret_cast<void*>(
-                                         reinterpret_cast<std::uintptr_t>(b.pointer(plane)) + 8U));
+                const auto address = reinterpret_cast<std::uintptr_t>(b.pointer(plane)) + 8U;
+                // NOLINTNEXTLINE(performance-no-int-to-ptr): synthetic address, never dereferenced
+                b.set_pointer(other, reinterpret_cast<void*>(address));
             });
         }
     }

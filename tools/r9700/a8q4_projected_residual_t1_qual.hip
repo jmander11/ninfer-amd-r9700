@@ -41,11 +41,13 @@ constexpr std::size_t kResidualTrials     = 12U;
 constexpr std::size_t kSamplesPerCopy     = kResidualTrials / kCopies;
 constexpr std::size_t kScrubBytes         = 80U * 1024U * 1024U;
 constexpr double kRequiredSavingMs        = 0.2;
-const std::filesystem::path kPowerPath =
-    "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
+
+std::filesystem::path power_path() {
+    return "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
+}
 
 void require_auto_power(const char* stage) {
-    if (read_text(kPowerPath) != "auto")
+    if (read_text(power_path()) != "auto")
         fail(std::string("projected residual requires auto power ") + stage);
 }
 
@@ -478,8 +480,8 @@ std::string read_all_text(const std::filesystem::path& path) {
 
 int down_benchmark(const std::filesystem::path& output) {
     require_fresh_output(output);
-    if (read_text(kPowerPath.parent_path() / "vendor") != "0x1002" ||
-        read_text(kPowerPath.parent_path() / "device") != "0x7551")
+    if (read_text(power_path().parent_path() / "vendor") != "0x1002" ||
+        read_text(power_path().parent_path() / "device") != "0x7551")
         fail("down benchmark requires the physical R9700 PCI function");
     require_auto_power("before HIP initialization");
     HIP_CHECK(hipSetDevice(0));
@@ -495,7 +497,7 @@ int down_benchmark(const std::filesystem::path& output) {
                    [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
     if (std::filesystem::canonical(std::filesystem::path("/sys/bus/pci/devices") / pci /
                                    "power_dpm_force_performance_level") !=
-        std::filesystem::canonical(kPowerPath))
+        std::filesystem::canonical(power_path()))
         fail("HIP device differs from pre-initialization R9700 PCI function");
     int runtime_version = 0;
     HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
@@ -586,6 +588,7 @@ int main(int argc, char** argv) {
         const std::string static_command = "python3 " + shell_quote(checker.string()) + " " +
                                            shell_quote(assembly.string()) + " --expect-receipt " +
                                            shell_quote(static_receipt.string());
+        // NOLINTNEXTLINE(bugprone-command-processor): runs the in-tree checker on quoted paths
         if (std::system(static_command.c_str()) != 0) fail("projected residual static gate failed");
         const std::string static_text = read_text(static_receipt);
         std::smatch static_match;
@@ -598,8 +601,8 @@ int main(int argc, char** argv) {
         // DRM card ordinals can change across driver/container lifecycles. Bind
         // the pre-HIP check to this machine's physical R9700 PCI function, then
         // require HIP device 0 to resolve to that same function below.
-        if (read_text(kPowerPath.parent_path() / "vendor") != "0x1002" ||
-            read_text(kPowerPath.parent_path() / "device") != "0x7551")
+        if (read_text(power_path().parent_path() / "vendor") != "0x1002" ||
+            read_text(power_path().parent_path() / "device") != "0x7551")
             fail("pre-initialization power device is not the R9700 PCI function");
         require_auto_power("before HIP initialization");
         HIP_CHECK(hipSetDevice(0));
@@ -616,9 +619,9 @@ int main(int argc, char** argv) {
                        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
         const std::filesystem::path power = std::filesystem::path("/sys/bus/pci/devices") / pci /
                                             "power_dpm_force_performance_level";
-        if (std::filesystem::canonical(power) != std::filesystem::canonical(kPowerPath))
+        if (std::filesystem::canonical(power) != std::filesystem::canonical(power_path()))
             fail("HIP device " + pci + " differs from pre-initialization power device " +
-                 kPowerPath.parent_path().filename().string());
+                 power_path().parent_path().filename().string());
         const std::string power_before = read_text(power);
         if (power_before != "auto") fail("projected residual qualification requires auto power");
         int runtime_version = 0;

@@ -269,15 +269,20 @@ private:
 
 } // namespace
 
+// std::visit throws bad_variant_access only for a valueless variant. A valueless descriptor is a
+// broken invariant, and noexcept turning it into termination is the intended response.
+// NOLINTNEXTLINE(bugprone-exception-escape): throws only if valueless (see above)
 std::string_view object_name(const ObjectDescriptor& object) noexcept {
     return std::visit([](const auto& descriptor) -> std::string_view { return descriptor.name; },
                       object);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): throws only if valueless (see above)
 std::uint64_t object_offset(const ObjectDescriptor& object) noexcept {
     return std::visit([](const auto& descriptor) { return descriptor.offset; }, object);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): throws only if valueless (see above)
 std::uint64_t object_bytes(const ObjectDescriptor& object) noexcept {
     return std::visit([](const auto& descriptor) { return descriptor.bytes; }, object);
 }

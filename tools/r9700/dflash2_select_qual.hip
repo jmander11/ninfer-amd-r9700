@@ -801,6 +801,7 @@ void expect_invalid(Function&& function, const char* label) {
     try {
         function();
         fail(std::string(label) + ": malformed weight was accepted");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 }
 

@@ -398,6 +398,7 @@ __global__ void w8g32_linear_kernel(const hip_bfloat16* input, const std::int8_t
     const std::size_t w_base         = static_cast<std::size_t>(column) * padded_columns;
     const std::size_t groups_per_row = padded_columns / kW8Group;
     for (std::uint32_t k = threadIdx.x; k < columns; k += blockDim.x) {
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse): sign-extends the signed W8 code
         const std::int32_t code = codes[w_base + k];
         const std::uint16_t scale_bits =
             scale_words[static_cast<std::size_t>(column) * groups_per_row + k / kW8Group];
@@ -1250,6 +1251,7 @@ __global__ void wave8_linear_kernel(const hip_bfloat16* input, const void* weigh
         // only 256 values. Extra consumer waves must not write beyond it.
         if (threadIdx.x < kCooperativeTile && k < columns) {
             if constexpr (W8) {
+                // NOLINTNEXTLINE(bugprone-signed-char-misuse): sign-extends the signed W8 code
                 const std::int32_t code = static_cast<std::int8_t>(
                     codes[static_cast<std::size_t>(row) * padded_columns + k]);
                 const std::uint16_t scale_bits =
@@ -4255,10 +4257,10 @@ hipError_t a8q4g64_normalized_shared_activation_linear(const A8Q4G64SharedActiva
         result = run_a8q4_projection(linear[index], stream);
         if (result != hipSuccess) return result;
     }
-    if ((result = hipEventRecord(side->fork, stream)) != hipSuccess ||
-        (result = hipStreamWaitEvent(side->stream, side->fork, 0)) != hipSuccess ||
-        (result = run_a8q4_projection(linear[last], side->stream)) != hipSuccess)
-        return result;
+    result = hipEventRecord(side->fork, stream);
+    if (result == hipSuccess) result = hipStreamWaitEvent(side->stream, side->fork, 0);
+    if (result == hipSuccess) result = run_a8q4_projection(linear[last], side->stream);
+    if (result != hipSuccess) return result;
     return hipEventRecord(side->join, side->stream);
 #else
     (void)unit_offset;

@@ -63,6 +63,7 @@ template <class Indices, class... A>
 struct PackImpl;
 
 template <std::size_t... I, class... A>
+// NOLINTNEXTLINE(misc-multiple-inheritance): one index-tagged value holder per packed argument
 struct PackImpl<std::index_sequence<I...>, A...> : Slot<I, A>... {
     static constexpr std::size_t size = sizeof...(A);
     template <std::size_t J>
@@ -98,6 +99,7 @@ __device__ __forceinline__ decltype(auto) body_arg(const T& value) {
         };
         const std::uint64_t words = word(address) | word(address >> 32U) << 32U;
         using Pointee             = std::remove_pointer_t<T>;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr): rebuilds the uniform global pointer
         return (T)((persistent::Global<Pointee>*)(words)); // global to generic
     } else {
         return (value);
@@ -524,6 +526,7 @@ __device__ __forceinline__ std::uint64_t next_code(std::uint32_t entry, std::uin
 __device__ __forceinline__ void prefetch_code(std::uint32_t entry, std::uint64_t bytes) {
     const std::uint64_t first = next_code(entry, 0U), end = next_code(entry, 1U);
     for (std::uint64_t pc = first; pc != 0U && pc < end && pc < first + bytes; pc += 4096U)
+        // NOLINTNEXTLINE(portability-no-assembler): explicit gfx12 instruction prefetch
         asm volatile("s_prefetch_inst %0, 0x0, null, 31" ::"s"(pc));
 }
 
@@ -560,7 +563,9 @@ __device__ __forceinline__ void grid_barrier(std::uint64_t* arrivals, const Phas
             const std::uint32_t loaded =
                 address == 0U
                     ? 0U
+                    // NOLINTNEXTLINE(performance-no-int-to-ptr): streamed prefetch line address
                     : *persistent::global(reinterpret_cast<const std::uint32_t*>(address));
+            // NOLINTNEXTLINE(portability-no-assembler): empty asm keeps the prefetch load live
             asm volatile("" ::"v"(loaded));
             // Past the block's lines: wait without loading.
             if (__syncthreads_and(address == 0U)) break;
@@ -626,6 +631,7 @@ __device__ __forceinline__ void store_phase_word(std::uint32_t slot, std::uint32
 
 __device__ __forceinline__ std::uint64_t program_counter() {
     std::uint64_t pc;
+    // NOLINTNEXTLINE(portability-no-assembler): volatile PC read pinned at this point
     asm volatile("s_getpc_b64 %0" : "=s"(pc));
     return pc;
 }
@@ -653,6 +659,7 @@ __device__ __forceinline__ void run_phase(std::uint32_t slot) {
     // Opaque per phase: thread-derived address arithmetic of the inlined bodies must not be
     // hoisted out of the phase loop, where it would stay live across every phase.
     std::uint32_t thread = threadIdx.x - group * E::threads;
+    // NOLINTNEXTLINE(portability-no-assembler): opaque barrier against hoisting (see above)
     asm volatile("" : "+v"(thread));
     const persistent::PhaseCta<kWholeBlock> first{
         thread, E::threads, uint3{}, grid, &group_barriers[group], E::threads / kWaveSize};
@@ -716,7 +723,9 @@ struct HostEntry {
 
 template <class P, std::size_t... I>
 void pack_params(void* const* params, P& out, std::index_sequence<I...>) {
-    (std::memcpy(&slot_value<I>(out), params[I], sizeof(typename P::template Type<I>)), ...);
+    (std::memcpy(static_cast<void*>(&slot_value<I>(out)), params[I],
+                 sizeof(typename P::template Type<I>)),
+     ...);
 }
 
 template <class E>

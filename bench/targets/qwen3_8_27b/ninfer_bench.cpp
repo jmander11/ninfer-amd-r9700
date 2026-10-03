@@ -85,7 +85,7 @@ public:
         if (!active_) { return; }
         const hipError_t status = hipDeviceSynchronize();
         active_                 = false;
-        region_->finish();
+        region_.value().finish();
         require_hip(status, "profile post-boundary synchronize");
     }
 
@@ -302,7 +302,7 @@ std::string run_contention(ninfer::Engine& engine, const ninfer::bench::BenchOpt
                            const std::vector<ninfer::TokenId>& corpus,
                            std::uint32_t decode_output_tokens) {
     using Clock                           = std::chrono::steady_clock;
-    const auto [prefill_tokens, prefills] = *options.contention;
+    const auto [prefill_tokens, prefills] = options.contention.value();
     const std::uint32_t decode_lanes =
         options.contention_lanes != 0 ? options.contention_lanes : options.concurrency - 1U;
     const int decode_prompt_tokens = static_cast<int>(options.contention_context);
@@ -317,10 +317,12 @@ std::string run_contention(ninfer::Engine& engine, const ninfer::bench::BenchOpt
     decode.output.preserve_special_tokens    = true;
     const std::uint64_t rounds_before        = engine.runtime_stats().decode_rounds;
     std::vector<ninfer::GenerationHandle> decoding;
+    decoding.reserve(decode_lanes);
     for (std::uint32_t lane = 0; lane < decode_lanes; ++lane) {
         decoding.push_back(engine.submit(
-            engine.prepare_tokens(
-                ninfer::bench::prompt_slice(corpus, decode_prompt_tokens, 4099U * lane), false),
+            engine.prepare_tokens(ninfer::bench::prompt_slice(corpus, decode_prompt_tokens,
+                                                              std::size_t{4099U} * lane),
+                                  false),
             decode, ninfer::OutputDelivery::TerminalOnly, kBenchmarkPendingDeadline));
     }
     // The decode lanes prefill first: allow about 1000 prompt tokens per second per lane.
@@ -399,7 +401,7 @@ std::string run_contention(ninfer::Engine& engine, const ninfer::bench::BenchOpt
 // numerics, so comparing runs across prefill policies checks the mixed paths end to end.
 std::string run_pair_check(ninfer::Engine& engine, const ninfer::bench::BenchOptions& options,
                            const std::vector<ninfer::TokenId>& corpus) {
-    const auto [prompt_tokens, generated] = *options.pair_check;
+    const auto [prompt_tokens, generated] = options.pair_check.value();
     ninfer::RequestOptions request;
     request.execution.allow_prefix_reuse        = false;
     request.execution.sampling.temperature      = 0.0F;

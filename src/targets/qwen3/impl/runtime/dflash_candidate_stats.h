@@ -32,6 +32,7 @@ inline bool dflash_candidate_stats_enabled() {
 }
 
 namespace dflash_candidate_stats {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 constexpr int kMaxDrafts = 11;

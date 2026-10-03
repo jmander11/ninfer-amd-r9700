@@ -13,16 +13,16 @@
 namespace ninfer::ops::r9700::linear {
 namespace {
 
-using fp8lut4_kernels::bf16_float;
-using fp8lut4_kernels::decode8;
+using fp8lut4_kernels::bf16_float; // NOLINT(misc-unused-using-decls): device-pass use
+using fp8lut4_kernels::decode8;    // NOLINT(misc-unused-using-decls): device-pass use
 using fp8lut4_kernels::F32x8;
 using fp8lut4_kernels::fp8lut4_small_t_kernel;
 using fp8lut4_kernels::I32x2;
-using fp8lut4_kernels::kCanonicalBf16QuietNan;
+using fp8lut4_kernels::kCanonicalBf16QuietNan; // NOLINT(misc-unused-using-decls): device-pass use
 using fp8lut4_kernels::KernelArgs;
-using fp8lut4_kernels::output_at;
-using fp8lut4_kernels::round_bf16;
-using fp8lut4_kernels::silu_pair_value;
+using fp8lut4_kernels::output_at;       // NOLINT(misc-unused-using-decls): device-pass use
+using fp8lut4_kernels::round_bf16;      // NOLINT(misc-unused-using-decls): device-pass use
+using fp8lut4_kernels::silu_pair_value; // NOLINT(misc-unused-using-decls): device-pass use
 using fp8lut4_kernels::U32x4;
 
 // ---- Mid T (T 33..128, kTiles token tiles of 16): eight waves; wave w owns row block w %
@@ -240,6 +240,7 @@ __global__ __launch_bounds__(256) void fp8lut4_mid_t_kernel(KernelArgs a) {
 __device__ __forceinline__ void lds_barrier() {
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     // This wave's LDS accesses, explicitly (no builtin on gfx12; operand-free, so no load waits).
+    // NOLINTNEXTLINE(portability-no-assembler): s_wait_dscnt, see the comment above
     asm volatile("s_wait_dscnt 0x0" ::: "memory");
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);

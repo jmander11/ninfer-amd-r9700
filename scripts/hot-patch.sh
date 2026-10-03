@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # This trusted checkout's .env also supplies paths to the child builder script.
 if [[ -f "$repo_root/.env" ]]; then
   set -a
+  # shellcheck source=/dev/null  # the trusted local .env is not part of the repository
   source "$repo_root/.env"
   set +a
 fi

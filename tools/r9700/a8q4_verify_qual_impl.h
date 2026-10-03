@@ -8,7 +8,8 @@
 #include <sys/file.h>
 #include <thread>
 
-namespace {
+// This header is the single-inclusion body of a8q4_small_batch_projection_qual.hip.
+namespace { // NOLINT(misc-anonymous-namespace-in-header): single-inclusion TU body
 constexpr unsigned Copies = 3;
 unsigned N = 0, K = 0, G = 0;
 
@@ -16,12 +17,14 @@ hipError_t owning_launch(const linear::A8Q4G64CandidateArgs& a, hipStream_t s) {
     return linear::a8q4_small_batch_projection(a, s);
 }
 
-constexpr std::size_t Guard     = 256;
-const std::filesystem::path Pci = "/sys/bus/pci/devices/0000:13:00.0";
+constexpr std::size_t Guard = 256;
+
+std::filesystem::path pci_path() { return "/sys/bus/pci/devices/0000:13:00.0"; }
 
 void power() {
-    if (read_text(Pci / "vendor") != "0x1002" || read_text(Pci / "device") != "0x7551" ||
-        read_text(Pci / "power_dpm_force_performance_level") != "auto")
+    if (read_text(pci_path() / "vendor") != "0x1002" ||
+        read_text(pci_path() / "device") != "0x7551" ||
+        read_text(pci_path() / "power_dpm_force_performance_level") != "auto")
         fail("R9700 auto required");
 }
 
@@ -96,6 +99,7 @@ void parallel_for(unsigned count, const std::function<void(unsigned)>& body) {
     const unsigned workers =
         std::max(1U, std::min({count, 8U, std::max(1U, std::thread::hardware_concurrency() / 2)}));
     std::vector<std::thread> threads;
+    threads.reserve(workers);
     for (unsigned w = 0; w < workers; ++w)
         threads.emplace_back([&, w] {
             for (unsigned i = w; i < count; i += workers) body(i);
@@ -105,7 +109,8 @@ void parallel_for(unsigned count, const std::function<void(unsigned)>& body) {
 
 template <class T>
 void exact(const std::vector<T>& a, const std::vector<T>& b, const char* why) {
-    if (a.size() != b.size() || std::memcmp(a.data(), b.data(), a.size() * sizeof(T))) fail(why);
+    if (a.size() != b.size() || std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) != 0)
+        fail(why);
 }
 
 struct Weights {
@@ -762,6 +767,7 @@ void timing_cell(unsigned t, hipStream_t s, std::ostream& out) {
         input.put(x, s);
         Output output(t, s);
         std::vector<std::unique_ptr<Weights>> weights;
+        weights.reserve(copies);
         for (unsigned i = 0; i < copies; ++i) weights.push_back(std::make_unique<Weights>(host, s));
         const auto w = workspace(t, output);
         HIP_CHECK(linear::a8g64_quantize_activation({input.data(), w}, s));

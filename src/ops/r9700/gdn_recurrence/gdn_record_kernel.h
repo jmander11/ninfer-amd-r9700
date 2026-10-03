@@ -118,6 +118,7 @@ __device__ __forceinline__ void stage_token_qk_wave(const hip_bfloat16* q, const
             qs[item] = __fmul_rn(qv[item], qv[item]);
             ks[item] = __fmul_rn(kv[item], kv[item]);
             // HIP rounded intrinsics alone still permit contraction here.
+            // NOLINTNEXTLINE(portability-no-assembler): register-only contraction barrier
             asm volatile("" : "+v"(qs[item]), "+v"(ks[item]));
         }
         float qsum = __fadd_rn(__fadd_rn(qs[0], qs[2]), __fadd_rn(qs[1], qs[3]));

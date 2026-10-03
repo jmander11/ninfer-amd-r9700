@@ -50,7 +50,9 @@ Package::LoadPlan Package::plan_load(artifact::Binder& binder, const EngineOptio
     return LoadPlan(std::make_unique<LoadPlan::Impl>(weights_profile, std::move(plan)));
 }
 
+// The plan is consumed (its impl_ reset) only on success; on failure the caller keeps it.
 std::unique_ptr<Package::LoadedModel>
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved): see above
 Package::construct_loaded_model(LoadPlan&& plan, artifact::MaterializedArtifact&& materialized) {
     if (plan.impl_ == nullptr) { throw std::invalid_argument("target load plan is empty"); }
     auto impl = std::make_unique<LoadedModel::Impl>(

@@ -34,7 +34,8 @@ inline void enqueue_host_copies(std::vector<HostCopy> copies, hipStream_t stream
         }
     };
     HIP_CHECK(hipLaunchHostFunc(stream, run, batch.get()));
-    (void)batch.release();
+    // The launched callback now owns the batch and deletes it after the copies.
+    [[maybe_unused]] std::vector<HostCopy>* const callback_owned = batch.release();
 }
 
 } // namespace ninfer

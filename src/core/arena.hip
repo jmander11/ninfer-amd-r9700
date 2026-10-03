@@ -280,7 +280,7 @@ DeviceSpan DeviceArena::alloc_bytes(std::size_t bytes, std::size_t align) {
     if (next > capacity_ || bytes > capacity_ - next) { throw std::bad_alloc(); }
     offset_ = next + bytes;
     peak_   = std::max(peak_, offset_);
-    return {reinterpret_cast<void*>(aligned), bytes};
+    return {static_cast<std::byte*>(base_) + next, bytes};
 }
 
 Tensor DeviceArena::alloc(DType dtype, std::initializer_list<std::int32_t> shape,
@@ -319,8 +319,9 @@ PinnedHostBuffer::PinnedHostBuffer(std::size_t size_bytes, std::size_t alignment
 
     const auto address = reinterpret_cast<std::uintptr_t>(ptr);
     allocation_        = ptr;
-    data_              = reinterpret_cast<void*>((address + alignment - 1) & ~(alignment - 1));
-    bytes_             = size_bytes;
+    data_ =
+        static_cast<std::byte*>(ptr) + (((address + alignment - 1) & ~(alignment - 1)) - address);
+    bytes_ = size_bytes;
 }
 
 PinnedHostBuffer::~PinnedHostBuffer() { free_pinned(allocation_); }

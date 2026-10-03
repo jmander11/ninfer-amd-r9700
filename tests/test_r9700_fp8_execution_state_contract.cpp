@@ -260,15 +260,15 @@ int main() {
     {                                                                                              \
         const auto endpoint = Profile::symbol;                                                     \
         require(detail::fp8_capped_base_profile(endpoint) == Profile::base &&                      \
-                    detail::fp8_capped_w8_embedding(endpoint) == (embed != 0) &&                   \
-                    detail::fp8_capped_w8_head(endpoint) == (head != 0),                           \
+                    detail::fp8_capped_w8_embedding(endpoint) == ((embed) != 0) &&                 \
+                    detail::fp8_capped_w8_head(endpoint) == ((head) != 0),                         \
                 "capped endpoint protection identity differs");                                    \
         const auto base_linear =                                                                   \
             Variant::linear_workspace_capacity_bytes(Profile::base, kPrefillTokens);               \
         const auto w8_linear = ninfer::ops::linear_workspace_capacity_bytes(                       \
             ninfer::QType::W8G32_F16S, kPrefillTokens, detail::TextConfig::hidden);                \
         require(Variant::linear_workspace_capacity_bytes(endpoint, kPrefillTokens) ==              \
-                    (head != 0 ? std::max(base_linear, w8_linear) : base_linear),                  \
+                    ((head) != 0 ? std::max(base_linear, w8_linear) : base_linear),                \
                 "capped W8 head activation workspace differs");                                    \
         require(Variant::execution_state_capacity_bytes(endpoint, kPrefillTokens, kGraphTokens) >= \
                     Variant::execution_state_capacity_bytes(Profile::base, kPrefillTokens,         \

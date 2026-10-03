@@ -38,6 +38,7 @@
 #include <vector>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 void copy_i32(const std::int32_t* source, Tensor& destination, hipStream_t stream) {
@@ -239,8 +240,6 @@ void TextContext::run_linear(const Tensor& input, const Weight& weight, Tensor& 
         ops::linear(input, weight, output, work_, stream);
     }
 }
-
-TextContext::~TextContext() = default;
 
 void TextContext::set_text_kv_transactions(
     std::span<qwen3::PagedKVTransaction* const> transactions) {
@@ -2001,6 +2000,7 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                               .finalized        = finalize_at_end && t0 == T};
 }
 
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 // Splits a mixed unit's layer captures: the owner's leading columns feed its prefill sink and

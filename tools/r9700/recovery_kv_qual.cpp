@@ -140,7 +140,7 @@ void exercise_decoded_retries(execution::ProgramImplCore& program, family::Front
         auto prepared_retry =
             frontend.splice_recovery_prompt(prompt.token_ids, input, insert, recovery);
         require(prepared_retry.has_value(), "decoded retry splice was rejected");
-        auto retry = family::PreparedPromptAccess::take(std::move(*prepared_retry));
+        auto retry = family::PreparedPromptAccess::take(std::move(prepared_retry.value()));
 
         // The control appends the same suffix to an unmodified prompt state. Both routes run
         // identical prefill chunks; only the second restores the checkpoint after speculative
@@ -297,7 +297,7 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
     const auto insert   = recovery->recovery_insert({}, 1);
     auto spliced_prompt = frontend.splice_recovery_prompt(prompt_ids, input, insert, recovery);
     require(spliced_prompt.has_value(), "live thinking prompt refused the recovery splice");
-    auto spliced = family::PreparedPromptAccess::take(std::move(*spliced_prompt));
+    auto spliced = family::PreparedPromptAccess::take(std::move(spliced_prompt.value()));
     const std::vector<ninfer::TokenId> spliced_ids = spliced.token_ids;
     const auto spliced_tokens                      = static_cast<std::uint32_t>(spliced_ids.size());
     require(spliced_tokens > prompt_tokens && prefix_equals(spliced_ids, prompt_ids),

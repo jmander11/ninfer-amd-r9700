@@ -27,8 +27,9 @@ inline constexpr int kCombinedBlock = 256;
 inline constexpr int kSplitHeads    = 4;
 inline constexpr int kSplitBlock    = kSplitHeads * 32;
 
-namespace {
 // Internal linkage: every translation unit carries its own constant copy.
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): per-TU __constant__ copy is intended
+namespace {
 __device__ __constant__ float kTextFrequency[32] = {
     1.000000000e+00F, 6.042963902e-01F, 3.651741273e-01F, 2.206734069e-01F, 1.333521432e-01F,
     8.058421878e-02F, 4.869675252e-02F, 2.942727176e-02F, 1.778279410e-02F, 1.074607828e-02F,

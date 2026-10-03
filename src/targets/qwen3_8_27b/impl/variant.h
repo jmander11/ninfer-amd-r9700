@@ -178,8 +178,8 @@ struct Variant {
         [[nodiscard]] bool gdn_q4_front(const Tensor& residual, const Tensor& norm, float eps,
                                         const GdnProjectionWeights& weights, Tensor& g,
                                         Tensor& beta, std::int32_t text_layer, hipStream_t stream,
-                                        ops::r9700::linear::A8G64ActivationWorkspace* planes,
-                                        std::size_t* required);
+                                        ops::r9700::linear::A8G64ActivationWorkspace* planes_out,
+                                        std::size_t* required_out);
         [[nodiscard]] bool
         gdn_q4_normalized_front_record(const Tensor& residual, const Tensor& norm, float eps,
                                        const GdnProjectionWeights& weights,
@@ -477,8 +477,8 @@ struct Variant {
         ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
     static void gdn_input_projection_snapshot(
         const Tensor& hidden, const GdnProjectionWeights& weights, const Tensor& conv_weight,
-        Tensor& conv_states, const Tensor& valid_columns, const Tensor& initial_slot,
-        const Tensor& snapshot_base_slot, Tensor& query, Tensor& key, Tensor& value,
+        Tensor& conv_states, const Tensor& valid_columns, const Tensor& initial_slots,
+        const Tensor& snapshot_base_slots, Tensor& query, Tensor& key, Tensor& value,
         Tensor& output_gate, qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
         ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
     static void gdn_input_projection_record(
@@ -571,47 +571,44 @@ struct Variant {
     [[nodiscard]] static std::size_t
     mtp_attention_output_workspace_capacity_bytes(std::int32_t first, std::int32_t last);
     [[nodiscard]] static std::size_t
-    attention_projection_workspace_capacity_bytes(WeightsProfile weights_profile,
-                                                  qwen3::TextPhase phase, std::int32_t first,
-                                                  std::int32_t last);
+    attention_projection_workspace_capacity_bytes(WeightsProfile profile, qwen3::TextPhase phase,
+                                                  std::int32_t first, std::int32_t last);
+    [[nodiscard]] static std::size_t attention_output_projection_workspace_capacity_bytes(
+        WeightsProfile profile, qwen3::TextPhase phase, std::int32_t first, std::int32_t last);
     [[nodiscard]] static std::size_t
-    attention_output_projection_workspace_capacity_bytes(WeightsProfile weights_profile,
-                                                         qwen3::TextPhase phase, std::int32_t first,
-                                                         std::int32_t last);
-    [[nodiscard]] static std::size_t
-    gdn_input_projection_workspace_capacity_bytes(WeightsProfile weights_profile,
-                                                  qwen3::TextPhase phase, std::int32_t first,
-                                                  std::int32_t last);
+    gdn_input_projection_workspace_capacity_bytes(WeightsProfile profile, qwen3::TextPhase phase,
+                                                  std::int32_t first, std::int32_t last);
     [[nodiscard]] static std::size_t gdn_input_projection_snapshot_workspace_capacity_bytes(
-        WeightsProfile weights_profile, qwen3::TextPhase phase, std::int32_t batch_size,
-        std::int32_t first, std::int32_t last);
-    [[nodiscard]] static std::size_t gdn_input_projection_record_workspace_capacity_bytes(
-        WeightsProfile weights_profile, qwen3::TextPhase phase, std::int32_t batch_size,
-        std::int32_t first, std::int32_t last);
+        WeightsProfile profile, qwen3::TextPhase phase, std::int32_t batch, std::int32_t first,
+        std::int32_t last);
     [[nodiscard]] static std::size_t
-    gdn_output_projection_workspace_capacity_bytes(WeightsProfile weights_profile,
-                                                   qwen3::TextPhase phase, std::int32_t first,
-                                                   std::int32_t last);
+    gdn_input_projection_record_workspace_capacity_bytes(WeightsProfile profile,
+                                                         qwen3::TextPhase phase, std::int32_t batch,
+                                                         std::int32_t first, std::int32_t last);
     [[nodiscard]] static std::size_t
-    post_mixer_workspace_capacity_bytes(WeightsProfile weights_profile, qwen3::TextPhase phase,
-                                        std::int32_t first, std::int32_t last);
+    gdn_output_projection_workspace_capacity_bytes(WeightsProfile profile, qwen3::TextPhase phase,
+                                                   std::int32_t first, std::int32_t last);
+    [[nodiscard]] static std::size_t post_mixer_workspace_capacity_bytes(WeightsProfile profile,
+                                                                         qwen3::TextPhase phase,
+                                                                         std::int32_t first,
+                                                                         std::int32_t last);
     [[nodiscard]] static std::size_t mtp_post_mixer_workspace_capacity_bytes(std::int32_t first,
                                                                              std::int32_t last);
     // Maximum caller-owned compile-selected activation scratch needed by any Q4 or W8 matrix in
     // the selected profile. The family schedule adds this reserve to every phase whose live
     // workspace may contain a candidate linear call.
-    [[nodiscard]] static QType dflash_matrix_qtype(WeightsProfile weights_profile);
+    [[nodiscard]] static QType dflash_matrix_qtype(WeightsProfile profile);
     // Encoding of the pinned-host token embedding the profile binds; sizes prompt staging.
-    [[nodiscard]] static QType token_embedding_qtype(WeightsProfile weights_profile);
-    [[nodiscard]] static std::size_t linear_workspace_capacity_bytes(WeightsProfile weights_profile,
+    [[nodiscard]] static QType token_embedding_qtype(WeightsProfile profile);
+    [[nodiscard]] static std::size_t linear_workspace_capacity_bytes(WeightsProfile profile,
                                                                      std::int32_t tokens);
-    [[nodiscard]] static std::size_t
-    vision_linear_workspace_capacity_bytes(WeightsProfile weights_profile, std::int32_t tokens);
+    [[nodiscard]] static std::size_t vision_linear_workspace_capacity_bytes(WeightsProfile profile,
+                                                                            std::int32_t tokens);
 
     // One serialized Program-owned activation region replaces the former per-call arena reserve.
     // The hybrid profile also uses its prefix for selected FP8 activation quantization.
     [[nodiscard]] static std::size_t
-    execution_state_capacity_bytes(WeightsProfile weights_profile, std::uint32_t prefill_tokens,
+    execution_state_capacity_bytes(WeightsProfile profile, std::uint32_t prefill_tokens,
                                    std::uint32_t maximum_graph_tokens);
 
     // gfx1201/ROCm hipMalloc rounds the two Program arenas to at most 2 MiB

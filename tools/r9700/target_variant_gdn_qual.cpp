@@ -128,9 +128,9 @@ struct SparseW8 {
         std::vector<std::uint16_t> host_scales(static_cast<std::size_t>(rows) * (columns / kGroup),
                                                0);
         for (std::int32_t row = 0; row < rows; ++row) {
-            const std::int32_t column =
-                static_cast<std::int32_t>((static_cast<std::uint64_t>(row) * 37U + seed * 19U) %
-                                          static_cast<std::uint32_t>(columns));
+            const std::int32_t column = static_cast<std::int32_t>(
+                (static_cast<std::uint64_t>(row) * 37U + static_cast<std::uint64_t>(seed) * 19U) %
+                static_cast<std::uint32_t>(columns));
             const std::int8_t code =
                 static_cast<std::int8_t>((row & 1) == 0 ? 1 + row % 7 : -(1 + row % 7));
             selected_column[static_cast<std::size_t>(row)]               = column;
@@ -276,7 +276,8 @@ OracleOutputs oracle_conv(const std::vector<hip_bfloat16>& input, const SparseW8
                 kChannels;
             const float checkpoint0 = bf16_float(state[state_base + channel]);
             const float checkpoint1 = bf16_float(state[state_base + kChannels + channel]);
-            const float checkpoint2 = bf16_float(state[state_base + 2U * kChannels + channel]);
+            const float checkpoint2 =
+                bf16_float(state[state_base + std::size_t{2} * kChannels + channel]);
             std::vector<float> saved0(static_cast<std::size_t>(width));
             std::vector<float> saved1(static_cast<std::size_t>(width));
             std::vector<float> saved2(static_cast<std::size_t>(width));
@@ -326,9 +327,10 @@ OracleOutputs oracle_conv(const std::vector<hip_bfloat16>& input, const SparseW8
                         (static_cast<std::size_t>((*snapshot_bases)[static_cast<std::size_t>(b)]) +
                          token) *
                         3U * kChannels;
-                    (*snapshots)[destination + channel]                  = bf16(h1);
-                    (*snapshots)[destination + kChannels + channel]      = bf16(h2);
-                    (*snapshots)[destination + 2U * kChannels + channel] = bf16(current);
+                    (*snapshots)[destination + channel]             = bf16(h1);
+                    (*snapshots)[destination + kChannels + channel] = bf16(h2);
+                    (*snapshots)[destination + std::size_t{2} * kChannels + channel] =
+                        bf16(current);
                 }
             }
         }

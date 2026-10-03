@@ -261,6 +261,7 @@ int main() {
         try {
             (void)ninfer::ops::vision_attention_workspace_capacity_bytes(1, 2, 3, 4);
             fail("vision_attention accepted an envelope without a legal segment pair");
+            // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
         } catch (const std::invalid_argument&) {}
         run_case({4}, false, false, false, 1, device.stream);
         run_case({4, 7}, false, true, true, 7, device.stream);

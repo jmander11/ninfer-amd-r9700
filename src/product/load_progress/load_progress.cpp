@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace ninfer::product {
 namespace {
@@ -89,7 +90,7 @@ LoadProgressRendererOptions stderr_load_progress_options() noexcept {
 
 LoadProgressRenderer::LoadProgressRenderer(std::ostream& output,
                                            LoadProgressRendererOptions options)
-    : output_(&output), options_(options) {}
+    : output_(&output), options_(std::move(options)) {}
 
 LoadProgressRenderer::~LoadProgressRenderer() { finish(); }
 
@@ -105,6 +106,7 @@ void LoadProgressRenderer::finish() noexcept {
     try {
         *output_ << '\n';
         output_->flush();
+        // NOLINTNEXTLINE(bugprone-empty-catch): noexcept finish; a failed newline is moot
     } catch (...) {}
     line_open_      = false;
     terminal_width_ = 0;

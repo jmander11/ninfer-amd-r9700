@@ -868,7 +868,7 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows, 
                     fail(os.str());
                 }
                 // Supplementary order-preservation evidence, not the FP64 mathematical oracle.
-                if (std::memcmp(&actual, &serial, sizeof(float)) != 0)
+                if (std::bit_cast<std::uint32_t>(actual) != std::bit_cast<std::uint32_t>(serial))
                     fail("A3 vector PV changed the serial FP32 FMA result");
             }
         }

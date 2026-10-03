@@ -205,8 +205,9 @@ hipError_t dispatch_layouts(const Fp8Int4KvAppendArgs& args, const AppendSequenc
         return launch<Group, false, true, true>(sequences, count, grid_items, stream);
     case 7:
         return launch<Group, true, true, true>(sequences, count, grid_items, stream);
+    default:
+        return hipErrorInvalidValue;
     }
-    return hipErrorInvalidValue;
 }
 
 [[nodiscard]] bool valid_append(const Fp8Int4KvAppendArgs& args) noexcept {

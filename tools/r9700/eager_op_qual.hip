@@ -938,12 +938,14 @@ void qualify_w8_embedding_product_shape(hipStream_t stream) {
     try {
         ninfer::ops::embedding(ids_tensor, malformed, output_tensor, stream);
         fail("product W8 embedding accepted a short payload");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     malformed = table;
     malformed.padded_shape[1] += 128;
     try {
         ninfer::ops::embedding(ids_tensor, malformed, output_tensor, stream);
         fail("product W8 embedding accepted incorrect K padding");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 
     const double resident_mib =
@@ -1611,12 +1613,14 @@ void qualify_public_extended_paths(hipStream_t stream) {
     try {
         ninfer::ops::embedding(embed_ids_tensor, malformed_q4, embed_output_tensor, stream);
         fail("public Q4 embedding accepted a short code plane");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     malformed_q4        = q4;
     malformed_q4.layout = QuantLayout::Q4N16K16;
     try {
         ninfer::ops::embedding(embed_ids_tensor, malformed_q4, embed_output_tensor, stream);
         fail("public Q4 embedding accepted the retired Q4N16K16 layout");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     Tensor aliased_q4_output(
         d_q4_codes.get(), DType::BF16,
@@ -1624,6 +1628,7 @@ void qualify_public_extended_paths(hipStream_t stream) {
     try {
         ninfer::ops::embedding(embed_ids_tensor, q4, aliased_q4_output, stream);
         fail("public Q4 embedding accepted output/code aliasing");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 
     Weight q6{};

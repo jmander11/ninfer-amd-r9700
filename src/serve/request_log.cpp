@@ -916,7 +916,7 @@ void JsonlRequestLog::write_throughput(const ThroughputReport& report) {
     append(format_throughput_json(server_instance_id_, unix_time_ms(), report));
 }
 
-void JsonlRequestLog::append(std::string record) {
+void JsonlRequestLog::append(const std::string& record) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (failed_) { return; }
     output_ << record << '\n';

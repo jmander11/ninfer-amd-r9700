@@ -42,7 +42,8 @@ DeviceBuffer upload(const std::vector<T>& values) {
 }
 
 float patterned(int first, int second, int modulus, float divisor) {
-    return static_cast<float>((first * 17 + second * 29) % modulus - modulus / 2) / divisor;
+    const int centered = (first * 17 + second * 29) % modulus - modulus / 2;
+    return static_cast<float>(centered) / divisor;
 }
 
 std::uint16_t half_bits(float value) {
@@ -321,6 +322,7 @@ Error run_prepare(ninfer::DeviceContext& device, WeightKind kind, int tokens, in
                                                       prepared_tensor, finish_tensor, workspace,
                                                       device.stream);
             fail("grouped_dynamic_conv accepted the retired Q4 RowSplit layout");
+            // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
         } catch (const std::invalid_argument&) {}
     }
     ninfer::ops::grouped_dynamic_conv_prepare(hidden_tensor, base_tensor, weight.view,

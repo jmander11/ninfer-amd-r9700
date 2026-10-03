@@ -169,7 +169,7 @@ public:
                 Tensor& prefill_hidden, std::uint32_t prefill_chunk, std::uint32_t text_kv_base,
                 qwen3::PagedKVCacheView mtp_kv          = qwen3::PagedKVCacheView(),
                 const qwen3::PagedKVCache* batch_mtp_kv = nullptr);
-    ~TextContext();
+    ~TextContext() = default;
 
     TextContext(const TextContext&)            = delete;
     TextContext& operator=(const TextContext&) = delete;
@@ -315,19 +315,16 @@ private:
 
     [[nodiscard]] const MtpW& mtp_weights() const;
     template <class Tap>
-    void attn_mix(const FullLayerW& weights, Tensor& x, int index, int text_layer, Phase phase,
-                  Tap& tap);
+    void attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_layer, Phase ph, Tap& tap);
     template <class Tap>
-    void gdn_mix(const GdnLayerW& weights, Tensor& x, int index, int text_layer, Phase phase,
-                 Tap& tap);
-    void gdn_mix_mixed(const GdnLayerW& weights, Tensor& x, int index, int text_layer);
+    void gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_layer, Phase ph, Tap& tap);
+    void gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int text_layer);
     // Layer `gidx`'s share of the bound deferred fold, if any.
     [[nodiscard]] std::optional<ops::GdnLayerFold> deferred_gdn_layer_fold(int gidx);
-    void mlp_tail(const Tensor* post_norm, const MlpW& weights, Tensor& x, int text_layer,
-                  Phase phase);
-    void run_layers(Tensor& x, Phase phase);
+    void mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x, int text_layer, Phase ph);
+    void run_layers(Tensor& x, Phase ph);
     template <class Tap>
-    void run_layers(Tensor& x, Phase phase, Tap& tap);
+    void run_layers(Tensor& x, Phase ph, Tap& tap);
     template <class Tap>
     void target_verify_batch_impl(const Tensor& ids, const Tensor& cache_positions,
                                   const Tensor& rope_positions, const Tensor& valid_columns,

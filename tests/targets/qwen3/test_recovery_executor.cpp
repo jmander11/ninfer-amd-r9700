@@ -578,7 +578,7 @@ public:
 
     void request_idle_spill() {}
 
-    void shutdown_kv_tiers(ninfer::LoadProgress = {}) {}
+    void shutdown_kv_tiers(const ninfer::LoadProgress& = {}) {}
 
     [[nodiscard]] RamSnapshot kv_ram_snapshot() const noexcept { return {}; }
 
@@ -1275,6 +1275,8 @@ int run_retry_lifecycle(Frontend& frontend) {
 // lane 1, evicts lane 2 as its victim, and captures both. It must wait without claiming or
 // capturing while the reclaim is pending, roll back the victim capture when the lane capture
 // defers, pass its earlier capture as the reclaim keep list, and finish once the spill lands.
+// The executor is instantiated on DeferProgram itself (DeferPackage::Program), so the methods
+// below replace ProbeProgram's statically; the hiding is the intended override mechanism.
 class DeferProgram : public ProbeProgram {
 public:
     struct Capture {
@@ -1306,42 +1308,52 @@ public:
         return closed_;
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] AdmissionResources admission_capacity() const noexcept {
         return AdmissionResources{3, 3, 0};
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] bool can_admit_lane(std::uint32_t lane, const ProbePlan&) const noexcept {
         return !has_retained_lane(lane);
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] bool can_admit_lane_after_retained_eviction(std::uint32_t,
                                                               const ProbePlan&) const noexcept {
         return true;
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] bool
     can_admit_lane_after_releasing(std::uint32_t, const ProbePlan&,
                                    std::span<const std::uint32_t> victims) const noexcept {
         return !victims.empty();
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] bool has_retained_lane(std::uint32_t lane) const noexcept {
         return lane < retained_.size() && retained_[lane].load();
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] std::uint64_t retained_use_tick(std::uint32_t lane) const noexcept {
         return has_retained_lane(lane) ? 5 + 4 * static_cast<std::uint64_t>(lane) : 0;
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     void evict_retained_lane(std::uint32_t lane) noexcept {
         if (lane < retained_.size()) { retained_[lane].store(false); }
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] bool kv_ram_reclaim_pending() const { return reclaim_pending.load(); }
 
     // The admission's captures complete at once, so its copy hold ends at the next boundary.
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] bool kv_copies_ready() const { return true; }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] bool capture_retained_lane(std::uint32_t lane, std::uint64_t* ram_entry_id,
                                              bool may_block, bool* deferred,
                                              std::span<const std::uint64_t> keep) {
@@ -1365,16 +1377,19 @@ public:
         return true;
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     void discard_ram_capture(std::uint64_t entry_id) {
         std::lock_guard lock(mu_);
         discards_.push_back(entry_id);
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     void mark_turn_closed(std::uint32_t lane) noexcept {
         std::lock_guard lock(mu_);
         closed_.push_back(lane);
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] PrefillStepResult start_prefill_lane(std::uint32_t lane, PreparedPrompt prompt,
                                                        ProbePlan, TransientRegion,
                                                        const OutputSession*, bool) {
@@ -1390,6 +1405,7 @@ public:
         return step;
     }
 
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): static override
     [[nodiscard]] BatchedGeneratedRound decode_batch(std::span<const std::uint32_t> lanes,
                                                      std::span<const RoundBudget>) {
         decode_calls.fetch_add(1);

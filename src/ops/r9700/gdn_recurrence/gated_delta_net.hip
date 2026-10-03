@@ -285,9 +285,9 @@ void require_selector(const Tensor& tensor, int batch, const char* label, bool a
 } // namespace
 
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk, Tensor& state, Tensor& out,
-                     hipStream_t stream) {
-    gated_delta_net(q, k, v, g, beta, scale, normalize_qk, state, state, out, stream);
+                     const Tensor& beta, float scale, bool normalize_qk, Tensor& ssm_state,
+                     Tensor& out, hipStream_t stream) {
+    gated_delta_net(q, k, v, g, beta, scale, normalize_qk, ssm_state, ssm_state, out, stream);
 }
 
 static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
@@ -349,38 +349,38 @@ static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor&
 }
 
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk, const Tensor& state_in,
-                     Tensor& state_out, Tensor& out, hipStream_t stream) {
-    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, state_in, state_out, out, nullptr,
-                         0, stream);
+                     const Tensor& beta, float scale, bool normalize_qk, const Tensor& ssm_state_in,
+                     Tensor& ssm_state_out, Tensor& out, hipStream_t stream) {
+    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, ssm_state_in, ssm_state_out, out,
+                         nullptr, 0, stream);
 }
 
 void gated_delta_net_trace_prefix_state(const Tensor& q, const Tensor& k, const Tensor& v,
                                         const Tensor& g, const Tensor& beta, float scale,
-                                        bool normalize_qk, Tensor& state, Tensor& out,
+                                        bool normalize_qk, Tensor& ssm_state, Tensor& out,
                                         Tensor& prefix_state, std::int32_t prefix_tokens,
                                         hipStream_t stream) {
-    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, state, state, out, &prefix_state,
-                         prefix_tokens, stream);
+    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, ssm_state, ssm_state, out,
+                         &prefix_state, prefix_tokens, stream);
 }
 
 void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                              const Tensor& beta, float scale, bool normalize_qk, Tensor& states,
-                              const Tensor& valid_columns, const Tensor& initial_slots,
-                              const Tensor& snapshot_bases, Tensor& out, hipStream_t stream,
-                              const CacheWarm& warm) {
+                              const Tensor& beta, float scale, bool normalize_qk,
+                              Tensor& ssm_states, const Tensor& valid_columns,
+                              const Tensor& initial_state_slots, const Tensor& snapshot_base_slots,
+                              Tensor& out, hipStream_t stream, const CacheWarm& warm) {
     const Geometry geometry =
         validate_inputs(q, k, v, g, beta, scale, out, q.ne[3], kMaximumVerifyWidth);
-    if (states.ne[3] < 1) { throw std::invalid_argument("gated_delta_net: empty state pool"); }
-    require_tensor(states, DType::FP32, {kDim, kDim, kValueHeads, states.ne[3]}, "states");
+    if (ssm_states.ne[3] < 1) { throw std::invalid_argument("gated_delta_net: empty state pool"); }
+    require_tensor(ssm_states, DType::FP32, {kDim, kDim, kValueHeads, ssm_states.ne[3]}, "states");
     require_selector(valid_columns, geometry.batch, "valid_columns", true);
-    require_selector(initial_slots, geometry.batch, "initial_slots", false);
-    require_selector(snapshot_bases, geometry.batch, "snapshot_bases", false);
+    require_selector(initial_state_slots, geometry.batch, "initial_slots", false);
+    require_selector(snapshot_base_slots, geometry.batch, "snapshot_bases", false);
     // Both selector vectors are read-only. The ordinary in-place verify path deliberately uses
     // one device slot vector for both the initial and destination base when width is one, so they
     // may alias each other while remaining disjoint from every tensor read or written by the Op.
-    disjoint({&q, &k, &v, &g, &beta, &out, &states, &valid_columns, &initial_slots});
-    disjoint({&q, &k, &v, &g, &beta, &out, &states, &valid_columns, &snapshot_bases});
+    disjoint({&q, &k, &v, &g, &beta, &out, &ssm_states, &valid_columns, &initial_state_slots});
+    disjoint({&q, &k, &v, &g, &beta, &out, &ssm_states, &valid_columns, &snapshot_base_slots});
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
     const unsigned snapshot_ctas = static_cast<unsigned>(geometry.batch * kValueHeads);
 #define NINFER_LAUNCH_SNAPSHOT(NORM)                                                               \
@@ -390,11 +390,11 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
         stream, static_cast<const hip_bfloat16*>(q.data),                                          \
         static_cast<const hip_bfloat16*>(k.data), static_cast<const hip_bfloat16*>(v.data),        \
         static_cast<const float*>(g.data), static_cast<const float*>(beta.data),                   \
-        static_cast<float*>(states.data),                                                          \
+        static_cast<float*>(ssm_states.data),                                                      \
         empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data),     \
-        static_cast<const std::int32_t*>(initial_slots.data),                                      \
-        static_cast<const std::int32_t*>(snapshot_bases.data),                                     \
-        static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale, warm,           \
+        static_cast<const std::int32_t*>(initial_state_slots.data),                                \
+        static_cast<const std::int32_t*>(snapshot_base_slots.data),                                \
+        static_cast<hip_bfloat16*>(out.data), geometry.width, ssm_states.ne[3], scale, warm,       \
         snapshot_ctas)
     if (normalize_qk) {
         NINFER_LAUNCH_SNAPSHOT(true);
@@ -422,19 +422,19 @@ std::size_t gated_delta_net_replay_record_workspace_capacity_bytes(std::int32_t 
 
 void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tensor& v,
                                    const Tensor& g, const Tensor& beta, float scale,
-                                   const Tensor& states, const Tensor& valid_columns,
-                                   const Tensor& initial_slots, Tensor& key_record,
+                                   const Tensor& ssm_states, const Tensor& valid_columns,
+                                   const Tensor& initial_state_slots, Tensor& key_record,
                                    Tensor& value_record, Tensor& gate_record, Tensor& out,
                                    hipStream_t stream, const Tensor* parent_index,
                                    WorkspaceArena* workspace, const CacheWarm& warm) {
     const Geometry geometry =
         validate_inputs(q, k, v, g, beta, scale, out, q.ne[3], kMaximumVerifyWidth);
-    if (geometry.width < 2 || states.ne[3] < 1) {
+    if (geometry.width < 2 || ssm_states.ne[3] < 1) {
         throw std::invalid_argument("gated_delta_net replay: unsupported width/state pool");
     }
-    require_tensor(states, DType::FP32, {kDim, kDim, kValueHeads, states.ne[3]}, "states");
+    require_tensor(ssm_states, DType::FP32, {kDim, kDim, kValueHeads, ssm_states.ne[3]}, "states");
     require_selector(valid_columns, geometry.batch, "valid_columns", true);
-    require_selector(initial_slots, geometry.batch, "initial_slots", false);
+    require_selector(initial_state_slots, geometry.batch, "initial_slots", false);
     require_tensor(key_record, DType::BF16, {kDim, kQHeads, geometry.width, geometry.batch},
                    "key_record");
     require_tensor(value_record, DType::BF16, {kDim, kValueHeads, geometry.width, geometry.batch},
@@ -453,9 +453,9 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                                        &v,
                                        &g,
                                        &beta,
-                                       &states,
+                                       &ssm_states,
                                        &valid_columns,
-                                       &initial_slots,
+                                       &initial_state_slots,
                                        &key_record,
                                        &value_record,
                                        &gate_record,
@@ -475,25 +475,25 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
             (record_kernel<true>), record_grid, dim3(kOrdinaryBlock), 0, stream,
             static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
             static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
-            static_cast<const float*>(beta.data), static_cast<const float*>(states.data),
+            static_cast<const float*>(beta.data), static_cast<const float*>(ssm_states.data),
             empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data),
-            static_cast<const std::int32_t*>(initial_slots.data),
+            static_cast<const std::int32_t*>(initial_state_slots.data),
             static_cast<const std::int32_t*>(parent_index->data), scratch,
             static_cast<hip_bfloat16*>(key_record.data),
             static_cast<hip_bfloat16*>(value_record.data), static_cast<float*>(gate_record.data),
-            static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale, warm,
+            static_cast<hip_bfloat16*>(out.data), geometry.width, ssm_states.ne[3], scale, warm,
             record_ctas);
     } else {
         hipLaunchKernelGGL(
             (record_kernel<false>), record_grid, dim3(kOrdinaryBlock), 0, stream,
             static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
             static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
-            static_cast<const float*>(beta.data), static_cast<const float*>(states.data),
+            static_cast<const float*>(beta.data), static_cast<const float*>(ssm_states.data),
             empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data),
-            static_cast<const std::int32_t*>(initial_slots.data), nullptr, nullptr,
+            static_cast<const std::int32_t*>(initial_state_slots.data), nullptr, nullptr,
             static_cast<hip_bfloat16*>(key_record.data),
             static_cast<hip_bfloat16*>(value_record.data), static_cast<float*>(gate_record.data),
-            static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale, warm,
+            static_cast<hip_bfloat16*>(out.data), geometry.width, ssm_states.ne[3], scale, warm,
             record_ctas);
     }
     HIP_CHECK(hipGetLastError());

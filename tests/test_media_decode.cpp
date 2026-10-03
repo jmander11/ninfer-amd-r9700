@@ -111,7 +111,8 @@ void expect_pixel(const ninfer::media::decode::Image& image, int x, int y,
 void test_issue_20_unaligned_jpeg() {
     const std::vector<std::uint8_t> encoded  = decode_base64(issue_20_jpeg_base64);
     const ninfer::media::decode::Image image = ninfer::media::decode::decode_image(encoded, {});
-    if (image.width != 300 || image.height != 200 || image.rgb.size() != 300U * 200U * 3U) {
+    if (image.width != 300 || image.height != 200 ||
+        image.rgb.size() != std::size_t{300} * 200U * 3U) {
         throw std::runtime_error("decoded JPEG dimensions mismatch");
     }
 

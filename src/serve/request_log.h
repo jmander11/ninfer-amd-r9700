@@ -189,32 +189,27 @@ std::string format_kv_disk_occupancy(const ninfer::MemorySummary& memory);
 
 // Pure JSON formatters are public to repository tests. Each return value is one complete JSON
 // object without a trailing newline.
-std::string format_server_start_json(const std::string& server_instance_id,
-                                     std::uint64_t timestamp_unix_ms, const ServeOptions& options,
-                                     const ninfer::ModelSamplingDefaults& sampling_defaults,
-                                     const std::string& public_model_id,
-                                     const ninfer::LoadSummary& load,
-                                     const ninfer::MemorySummary& memory,
-                                     const ServerLogEnvironment& environment,
-                                     std::optional<std::uint64_t> artifact_size_bytes);
+std::string format_server_start_json(
+    const std::string& server_instance_id, std::uint64_t timestamp, const ServeOptions& options,
+    const ninfer::ModelSamplingDefaults& sampling_defaults, const std::string& public_model_id,
+    const ninfer::LoadSummary& load, const ninfer::MemorySummary& memory,
+    const ServerLogEnvironment& environment, std::optional<std::uint64_t> artifact_size_bytes);
 std::string format_request_start_json(const std::string& server_instance_id,
-                                      std::uint64_t timestamp_unix_ms,
-                                      const RequestLogContext& context);
+                                      std::uint64_t timestamp, const RequestLogContext& context);
 std::string format_request_rejected_json(const std::string& server_instance_id,
-                                         std::uint64_t timestamp_unix_ms,
+                                         std::uint64_t timestamp,
                                          const RequestRejectionLogContext& context);
-std::string format_request_done_json(const std::string& server_instance_id,
-                                     std::uint64_t timestamp_unix_ms,
+std::string format_request_done_json(const std::string& server_instance_id, std::uint64_t timestamp,
                                      const RequestLogContext& context,
                                      const GenerationOutcome& outcome);
 std::string format_request_error_json(const std::string& server_instance_id,
-                                      std::uint64_t timestamp_unix_ms,
-                                      const RequestLogContext& context, const std::string& message);
+                                      std::uint64_t timestamp, const RequestLogContext& context,
+                                      const std::string& message);
 std::string format_recovery_event_json(const std::string& server_instance_id,
-                                       std::uint64_t timestamp_unix_ms, std::uint64_t request_id,
+                                       std::uint64_t timestamp, std::uint64_t request_id,
                                        const ninfer::RecoveryEvent& event);
-std::string format_throughput_json(const std::string& server_instance_id,
-                                   std::uint64_t timestamp_unix_ms, const ThroughputReport& report);
+std::string format_throughput_json(const std::string& server_instance_id, std::uint64_t timestamp,
+                                   const ThroughputReport& report);
 
 ServerLogEnvironment query_server_log_environment(int device);
 
@@ -246,7 +241,7 @@ public:
     void write_throughput(const ThroughputReport& report);
 
 private:
-    void append(std::string record);
+    void append(const std::string& record);
 
     std::string path_;
     std::string server_instance_id_;

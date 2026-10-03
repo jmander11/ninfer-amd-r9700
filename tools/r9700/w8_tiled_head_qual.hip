@@ -36,10 +36,11 @@ std::string read(const std::filesystem::path& path) {
     return value;
 }
 
-const std::filesystem::path Pci = "/sys/bus/pci/devices/0000:13:00.0";
+std::filesystem::path pci_path() { return "/sys/bus/pci/devices/0000:13:00.0"; }
 
 void power() {
-    require(read(Pci / "power_dpm_force_performance_level") == "auto", "auto power required");
+    require(read(pci_path() / "power_dpm_force_performance_level") == "auto",
+            "auto power required");
 }
 
 template <class T>
@@ -434,7 +435,7 @@ int main(int argc, char** argv) {
         const bool ordinary_only              = argc == 3;
         const std::filesystem::path directory = argv[1];
         require(std::filesystem::create_directory(directory), "output directory already exists");
-        require(read(Pci / "vendor") == "0x1002" && read(Pci / "device") == "0x7551",
+        require(read(pci_path() / "vendor") == "0x1002" && read(pci_path() / "device") == "0x7551",
                 "R9700 PCI identity required");
         power();
         check(hipSetDevice(0));

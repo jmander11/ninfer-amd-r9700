@@ -29,14 +29,14 @@ public:
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
     DeviceBuffer(DeviceBuffer&& other) noexcept;
     DeviceBuffer& operator=(DeviceBuffer&& other) noexcept;
-    void fill(int byte_value = 0);
-    void copy_from_host(const void* source, std::size_t count, std::size_t byte_offset = 0);
-    void copy_to_host(void* destination, std::size_t count, std::size_t byte_offset = 0) const;
-    void fill_async(int byte_value, hipStream_t stream);
+    void fill(int value = 0);
+    void copy_from_host(const void* source, std::size_t count, std::size_t offset = 0);
+    void copy_to_host(void* destination, std::size_t count, std::size_t offset = 0) const;
+    void fill_async(int value, hipStream_t stream);
     void copy_from_host_async(const void* source, std::size_t count, hipStream_t stream,
-                              std::size_t byte_offset = 0);
+                              std::size_t offset = 0);
     void copy_to_host_async(void* destination, std::size_t count, hipStream_t stream,
-                            std::size_t byte_offset = 0) const;
+                            std::size_t offset = 0) const;
 
     [[nodiscard]] void* data() const noexcept { return p; }
 
@@ -46,7 +46,7 @@ public:
     std::size_t bytes = 0;
 
 private:
-    void require_range(std::size_t byte_offset, std::size_t count, const char* operation) const;
+    void require_range(std::size_t offset, std::size_t count, const char* operation) const;
 };
 
 class DeviceArena {

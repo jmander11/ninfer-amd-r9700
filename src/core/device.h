@@ -6,7 +6,7 @@
 
 namespace ninfer {
 
-void hip_check(hipError_t err, const char* expr, const char* file, int line);
+void hip_check(hipError_t error, const char* expr, const char* file, int line);
 
 #define HIP_CHECK(expr) ::ninfer::hip_check((expr), #expr, __FILE__, __LINE__)
 
@@ -39,7 +39,7 @@ struct DeviceContext {
 
 class DeviceEventTimer {
 public:
-    explicit DeviceEventTimer(const DeviceContext& ctx);
+    explicit DeviceEventTimer(const DeviceContext& context);
     ~DeviceEventTimer();
     DeviceEventTimer(const DeviceEventTimer&)            = delete;
     DeviceEventTimer& operator=(const DeviceEventTimer&) = delete;

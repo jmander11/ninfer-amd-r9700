@@ -140,6 +140,8 @@ std::string_view unstreamed_content(const GenerationOutcome& outcome) {
 
 // Handler start per httplib worker thread, closed by the server logger after the response.
 struct HttpRequestClock {
+    HttpRequestClock() noexcept = default;
+
     std::chrono::steady_clock::time_point started{};
     bool active = false;
 };
@@ -418,7 +420,7 @@ void HttpServer::register_routes() {
     server_.set_exception_handler(
         [this](const httplib::Request&, httplib::Response& res, std::exception_ptr ep) {
             try {
-                std::rethrow_exception(ep);
+                std::rethrow_exception(std::move(ep));
             } catch (const ApiException& e) {
                 emit_openai_error(res, e.error());
             } catch (const std::exception& e) {

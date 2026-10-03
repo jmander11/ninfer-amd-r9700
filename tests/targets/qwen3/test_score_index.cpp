@@ -28,10 +28,12 @@ void test_skip() {
     try {
         (void)ninfer::resolve_score_skip(8, 7);
         expect(false, "skip n-1 must throw");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
     try {
         (void)ninfer::resolve_score_skip(1, std::nullopt);
         expect(false, "n<2 must throw");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 }
 
@@ -41,6 +43,7 @@ void test_decode_prefix() {
     try {
         (void)ninfer::resolve_decode_prefix(2, 0);
         expect(false, "decode n<3 must throw");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
     } catch (const std::invalid_argument&) {}
 }
 

@@ -30,6 +30,7 @@
 #include <utility>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 void require_dflash_state(const PrefillContext& state) {
@@ -157,10 +158,10 @@ void append_context_impl(Context& state, const Tensor& features, const Tensor& p
             workspace_recipe::dflash_context<Config>(state.execution.work, columns);
         Tensor projected = context_roots.projected;
         serialized_linear(state.execution, features.view({Config::feature_rows, columns}),
-                          state.execution.model.dflash->feature_projection, projected);
+                          state.execution.model.dflash.value().feature_projection, projected);
         Tensor context = context_roots.normalized;
-        ops::rmsnorm(projected, state.execution.model.dflash->context_norm, Config::rms_epsilon,
-                     false, context, state.execution.device.stream);
+        ops::rmsnorm(projected, state.execution.model.dflash.value().context_norm,
+                     Config::rms_epsilon, false, context, state.execution.device.stream);
 
         static_assert(Config::local_layers == Config::layers,
                       "the sole DFlash2 route stores every layer in the cyclic local cache");
@@ -170,7 +171,7 @@ void append_context_impl(Context& state, const Tensor& features, const Tensor& p
         for (int layer = 0; layer < Config::layers; ++layer) {
             auto layer_scope = state.execution.work.scope();
             const auto& weight =
-                state.execution.model.dflash->layers.at(static_cast<std::size_t>(layer));
+                state.execution.model.dflash.value().layers.at(static_cast<std::size_t>(layer));
             const int layer_width   = local_width;
             const int layer_columns = layer_width * batch;
             Tensor layer_context =
@@ -663,7 +664,7 @@ void propose_batch_impl(DFlashBatchContext& state, qwen3::DFlashDecodeState& fra
                 }
                 copy_selector_hops(sel_ids_view, sel_ids, 0, state.execution.device.stream);
                 copy_selector_hops(sel_q_view, sel_q, 0, state.execution.device.stream);
-            }(*state.execution.model.dflash);
+            }(state.execution.model.dflash.value());
         }
         qwen3::copy_i32_panel(ids_view, ids_full, state.execution.device.stream);
         qwen3::copy_i32_panel(pos_view, pos_full, state.execution.device.stream);

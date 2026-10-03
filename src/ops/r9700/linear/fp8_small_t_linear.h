@@ -42,7 +42,7 @@ struct Fp8SmallTPairSplitArgs {
     hip_bfloat16* second_trailing = nullptr;
 };
 
-[[nodiscard]] hipError_t fp8_small_t_pair_split(const Fp8SmallTPairSplitArgs& args,
+[[nodiscard]] hipError_t fp8_small_t_pair_split(const Fp8SmallTPairSplitArgs& pair,
                                                 const Fp8ActivationWorkspace& activation,
                                                 hipStream_t stream) noexcept;
 
