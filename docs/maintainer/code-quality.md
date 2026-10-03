@@ -115,8 +115,13 @@ Host sanitizers use a separate tree. HIP translation units instrument their host
 cmake -S . -B build-r9700-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DNINFER_SANITIZE=address,undefined
 cmake --build build-r9700-asan
-ASAN_OPTIONS=protect_shadow_gap=0 ctest --test-dir build-r9700-asan -LE r9700
+ASAN_OPTIONS=protect_shadow_gap=0 ASAN_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer \
+  ctest --test-dir build-r9700-asan -LE r9700
 ```
+
+Executables that link HIP code are linked by ROCm clang, whose ASan runtime lacks the UBSan
+`vptr` handlers that GCC's `-fsanitize=undefined` emits, so GCC host objects build with
+`-fno-sanitize=vptr`; every other UBSan check stays on.
 
 ## Current state
 
@@ -134,6 +139,7 @@ editing.
 | Compiler diagnostics | clean; warnings are errors (`NINFER_WARNINGS_AS_ERRORS=ON`) |
 | clang-tidy | clean over the whole tree |
 | pre-commit (clang-format 22, ruff lint and format, shellcheck, typos, file hygiene) | clean with `--all-files` |
+| Host sanitizers (ASan and UBSan over the host CTest set) | clean |
 | Device checks (`gpucheck`, 31 qualifiers) | clean under memcheck, initcheck, and racecheck |
 
 Byte-pinned candidate qualifiers under `tools/r9700/` whose source text static checkers compare

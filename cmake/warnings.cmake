@@ -69,4 +69,9 @@ if(NINFER_SANITIZE)
     "$<$<COMPILE_LANGUAGE:C,CXX>:${ninfer_sanitizers};-fno-omit-frame-pointer>"
     "$<$<COMPILE_LANGUAGE:HIP>:${ninfer_hip_sanitize_flags}>")
   add_link_options(${ninfer_sanitizers})
+  # GCC's -fsanitize=undefined adds vptr checks to host objects, whose handlers ROCm clang's
+  # ASan runtime does not provide; executables that link HIP code are linked by ROCm clang.
+  if("undefined" IN_LIST ninfer_sanitizers OR "-fsanitize=undefined" IN_LIST ninfer_sanitizers)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fno-sanitize=vptr>")
+  endif()
 endif()

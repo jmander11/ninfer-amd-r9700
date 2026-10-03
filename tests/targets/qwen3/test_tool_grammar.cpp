@@ -761,11 +761,12 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 6; ++i) { valid_call += pieces[i]; }
         auto relaxed            = Json::parse(tools[0]);
         auto& params            = relaxed["function"]["parameters"];
-        auto& file_path         = params["properties"]["filePath"];
         params["not"]           = Json{{"required", {"missing"}}};
         params["propertyNames"] = Json{{"maxLength", 32}};
-        file_path["format"]     = "uri-reference";
-        file_path               = Json{{"oneOf", {file_path, Json{{"type", "integer"}}}}};
+        // Taken after the insertions: growing an ordered_json object copies its members.
+        auto& file_path     = params["properties"]["filePath"];
+        file_path["format"] = "uri-reference";
+        file_path           = Json{{"oneOf", {file_path, Json{{"type", "integer"}}}}};
         params["properties"]["limit"] =
             Json{{"allOf", {Json{{"type", "integer"}, {"multipleOf", 2}}}}, {"description", "n"}};
         const auto relaxed_grammar =
