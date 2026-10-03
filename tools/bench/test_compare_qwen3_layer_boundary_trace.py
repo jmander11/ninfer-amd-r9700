@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from compare_qwen3_layer_boundary_trace import (
+from tools.bench.compare_qwen3_layer_boundary_trace import (
     ATTENTION_FIELDS,
     GDN_FIELDS,
     GDN_PAYLOAD_BYTES,

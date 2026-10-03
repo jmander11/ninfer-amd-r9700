@@ -1347,7 +1347,7 @@ class CompiledKvGroupTest(unittest.TestCase):
 
     def test_dflash_controls_require_exact_spec_none_ordinary_execution(self) -> None:
         for preset in ("dflash-shortlist", "dflash-pareto"):
-            cases = build_cases(preset, 7, 12)
+            cases = build_cases(preset, 7, 8)
             controls = [
                 case
                 for case in cases
@@ -1625,15 +1625,15 @@ class CompiledKvGroupTest(unittest.TestCase):
         )
         self.assertNotIn("--spec", effective_capacity[0].args)
         self.assertNotIn("--lm-head-draft", effective_capacity[0].args)
-        dflash_capacity = build_cases("dflash-feasibility", 7, 12)
+        dflash_capacity = build_cases("dflash-feasibility", 7, 8)
         self.assertEqual(len(dflash_capacity), 1)
         self.assertIn("--kv-capacity", dflash_capacity[0].args)
         self.assertIn("dflash", dflash_capacity[0].args)
         self.assertEqual(
             dflash_capacity[0].args[dflash_capacity[0].args.index("--max-ctx") + 1],
-            "33048",
+            "33040",
         )
-        dflash_effective_capacity = build_cases("dflash-capacity", 7, 12)
+        dflash_effective_capacity = build_cases("dflash-capacity", 7, 8)
         self.assertEqual(
             dflash_effective_capacity[0].args[
                 dflash_effective_capacity[0].args.index("--max-ctx") + 1
@@ -1649,7 +1649,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             cases = build_cases(
                 preset,
                 7 if preset != "dflash-shortlist" else None,
-                12 if preset != "dflash-shortlist" else 0,
+                8 if preset != "dflash-shortlist" else 0,
                 production_prefill_chunk=8192,
             )
             self.assertTrue(
@@ -1852,7 +1852,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 manifest_owned_path(campaign, "json/report.json", "report")
 
     def test_dflash_pareto_retains_matched_cells_parity_and_isolated_diagnostic(self) -> None:
-        cases = build_cases("dflash-pareto", 7, 12)
+        cases = build_cases("dflash-pareto", 7, 8)
         expected_repetitions = {
             "prefill_p8192_p32768_dflash": (3, 1),
             "context_p8192_p32768_g256_dflash_graph": (3, 1),
@@ -1996,7 +1996,7 @@ class CompiledKvGroupTest(unittest.TestCase):
 
     def test_dflash_production_widths_reject_crossed_pairs(self) -> None:
         for k, width in ((4, 6), (5, 5)):
-            with self.assertRaisesRegex(SystemExit, "exactly K4/W5 or K5/W6"):
+            with self.assertRaisesRegex(SystemExit, r"W=K\+1"):
                 main(
                     [
                         "--preset",
@@ -2308,7 +2308,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 **parity,
                 "comparisons": [
                     *comparisons,
-                    {"concurrency": 1, "draft_tokens": 7, "dflash_verify_width": 12, "exact": True},
+                    {"concurrency": 1, "draft_tokens": 7, "dflash_verify_width": 8, "exact": True},
                 ],
             }
             rejected, reasons = write_dflash_shortlist(
@@ -2366,14 +2366,14 @@ class CompiledKvGroupTest(unittest.TestCase):
                 "trace": [
                     {
                         "round_index": 0,
-                        "proposal_ids": list(range(12)),
-                        "parent_index": [-1, *([0] * 11)],
+                        "proposal_ids": list(range(8)),
+                        "parent_index": list(range(-1, 7)),
                         "target_licensed_tokens": [0, 1],
                     },
                     {
                         "round_index": 1,
-                        "proposal_ids": list(range(12)),
-                        "parent_index": [-1, *([0] * 11)],
+                        "proposal_ids": list(range(8)),
+                        "parent_index": list(range(-1, 7)),
                         "target_licensed_tokens": [0],
                     },
                 ],
@@ -2410,7 +2410,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                     "7",
                     "--lm-head-draft",
                     "--dflash-verify-width",
-                    "12",
+                    "8",
                     "--no-device-graph",
                 ),
                 1,
@@ -2430,7 +2430,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 concurrency=1,
             )
             self.assertFalse(evidence["timing_eligible"])
-            self.assertEqual(evidence["profile"]["dflash_verify_width"], 12)
+            self.assertEqual(evidence["profile"]["dflash_verify_width"], 8)
             self.assertEqual(
                 validate_bound_diagnostic(
                     evidence_path,
@@ -2457,7 +2457,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 return {
                     "config": {
                         "draft_tokens": 7 if dflash else 0,
-                        "dflash_verify_width": 12 if dflash else 0,
+                        "dflash_verify_width": 8 if dflash else 0,
                     },
                     "tests": [
                         {

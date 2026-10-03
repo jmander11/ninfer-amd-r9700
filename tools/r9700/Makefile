@@ -60,7 +60,8 @@ SERVE_ENV_TARGET := $(BUILD_DIR)/serve_environment_qual
 HBM_TARGET := $(BUILD_DIR)/hbm_bandwidth_probe
 Q4_HARDWARE_PEAK_TARGET := $(BUILD_DIR)/q4_hardware_peak_probe
 INT4_WMMA_TARGET := $(BUILD_DIR)/int4_wmma_qual
-W8A8_WMMA_TARGET := $(BUILD_DIR)/w8a8_wmma_linear_qual
+# The qualifier executable is the CMake target; Make only delegates to it.
+W8A8_WMMA_TARGET := ../../build-r9700/src/ninfer_r9700_w8a8_wmma_linear_qual
 Q4G64_LINEAR_TARGET := $(BUILD_DIR)/q4g64_linear_qual
 A8Q4_SHAPE_SWEEP_TARGET := $(BUILD_DIR)/a8q4_shape_sweep_qual
 A8Q4_DFLASH_SMALL_T_TARGET := $(BUILD_DIR)/a8q4_dflash_small_t_qual
@@ -96,7 +97,6 @@ HBM_SOURCE := hbm_bandwidth_probe.hip
 Q4_HARDWARE_PEAK_SOURCE := q4_hardware_peak_probe.hip
 Q4_HARDWARE_PEAK_STATIC_CHECK := check_q4_hardware_peak_static.py
 INT4_WMMA_SOURCE := int4_wmma_qual.hip
-W8A8_WMMA_SOURCE := w8a8_wmma_linear_qual.hip
 Q4G64_LINEAR_SOURCE := q4g64_linear_qual.hip
 A8Q4_SHAPE_SWEEP_SOURCE := a8q4_shape_sweep_qual.hip
 A8Q4_DFLASH_SMALL_T_SOURCE := a8q4_dflash_small_t_qual.hip
@@ -386,15 +386,9 @@ int4-wmma-isa: $(BUILD_DIR)/int4_wmma_qual.s
 int4-wmma-resources: $(BUILD_DIR)/int4_wmma_qual.s
 	awk '/-- Begin function/ { selected = ($$0 ~ /int4_wmma(16|32)_kernel|int4_vector_dot_kernel/) } selected && $$0 ~ /-- Begin function|v_wmma_i32_16x16x(16|32)_iu4|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|NumVgprs|ScratchSize|LDSByteSize|Occupancy/' $<
 
-$(W8A8_WMMA_TARGET): $(W8A8_WMMA_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) \
-	$(LINEAR_TENSOR_IMPL) $(LINEAR_PUBLIC_HEADER) $(W8_ACTIVATION_PROFILE) \
-	$(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) \
-	$(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -I../../include -DNINFER_R9700_W8_ACTIVATION_BITS=8 \
-		-DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
-		$(W8A8_WMMA_SOURCE) $(LINEAR_IMPL) $(LINEAR_TENSOR_IMPL) $(HIP_DEVICE_IMPL) \
-		$(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) $(LDFLAGS) -o $@
+.PHONY: $(W8A8_WMMA_TARGET)
+$(W8A8_WMMA_TARGET):
+	cmake --build ../../build-r9700 --target ninfer_r9700_w8a8_wmma_linear_qual
 
 w8a8-wmma: $(W8A8_WMMA_TARGET)
 	mkdir -p $(dir $(W8A8_WMMA_JSON))
@@ -521,6 +515,11 @@ $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_TARGET): $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_SOURCE) \
 		$(LINEAR_IMPL) $(LDFLAGS) -o $@
 
 a8q4-dflash-mlp-down-small-t-build: $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_TARGET)
+
+$(BUILD_DIR)/a8q4_group_major_activation_qual.s: a8q4_group_major_activation_qual.hip \
+		a8q4_group_major_activation_qual.h Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S $< -o $@
 
 $(BUILD_DIR)/a8q4_dflash_mlp_down_small_t.s: $(LINEAR_IMPL) $(LINEAR_HEADER) \
 		$(Q4_ACTIVATION_PROFILE) Makefile
@@ -889,7 +888,7 @@ rocm-tool-audit: $(ROCM_AUDIT)
 		--output $(ROCM_AUDIT_JSON)
 
 rocm-tool-audit-test: $(ROCM_AUDIT) $(ROCM_AUDIT_TEST)
-	$(PYTHON) $(ROCM_AUDIT_TEST)
+	cd ../.. && $(PYTHON) -m unittest tools.r9700.test_audit_rocm_tools
 
 # Dispatch/memory trace recipe for a named, reproducible small correctness workload. Counter
 # collection is intentionally separate because profiler queue interception invalidates latency
@@ -930,4 +929,4 @@ $(BUILD_DIR)/gdn_projection_control_grid_qualification.s: $(GDN_PROJECTION_CONTR
 	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S $< -o $@
 
 clean:
-	rm -f $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(HIP_DEVICE_SANITIZE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(RMSNORM_K256_PREFILL_TARGET) $(RMSNORM_DECODE_PRODUCTION_TARGET) $(RMSNORM_DECODE_ROUTING_TARGET) $(GATED_RMSNORM_PREFILL_TARGET) $(SILU_MUL_SPLIT_PREFILL_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(GDN_RECURRENCE_EXACT_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET) $(INT4_WMMA_TARGET) $(Q4_HARDWARE_PEAK_TARGET) $(W8A8_WMMA_TARGET) $(Q4G64_LINEAR_TARGET) $(BUILD_DIR)/r9700_qual.s $(BUILD_DIR)/kv_append.s $(BUILD_DIR)/linear_op_qual.s $(BUILD_DIR)/w8a8_wmma_linear_qual.s $(BUILD_DIR)/q4g64_linear.s $(BUILD_DIR)/q4_hardware_peak_probe.s $(BUILD_DIR)/eager_ops.s $(BUILD_DIR)/gdn_ops.s $(BUILD_DIR)/gdn_recurrence.s $(BUILD_DIR)/gdn_verify_wave_off.s $(BUILD_DIR)/gdn_verify_wave_on.s $(BUILD_DIR)/sampling_ops.s $(BUILD_DIR)/rope_ops.s $(BUILD_DIR)/int4_wmma_qual.s
+	rm -f $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(HIP_DEVICE_SANITIZE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(RMSNORM_K256_PREFILL_TARGET) $(RMSNORM_DECODE_PRODUCTION_TARGET) $(RMSNORM_DECODE_ROUTING_TARGET) $(GATED_RMSNORM_PREFILL_TARGET) $(SILU_MUL_SPLIT_PREFILL_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(GDN_RECURRENCE_EXACT_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET) $(INT4_WMMA_TARGET) $(Q4_HARDWARE_PEAK_TARGET) $(Q4G64_LINEAR_TARGET) $(BUILD_DIR)/r9700_qual.s $(BUILD_DIR)/kv_append.s $(BUILD_DIR)/linear_op_qual.s $(BUILD_DIR)/w8a8_wmma_linear_qual.s $(BUILD_DIR)/q4g64_linear.s $(BUILD_DIR)/q4_hardware_peak_probe.s $(BUILD_DIR)/eager_ops.s $(BUILD_DIR)/gdn_ops.s $(BUILD_DIR)/gdn_recurrence.s $(BUILD_DIR)/gdn_verify_wave_off.s $(BUILD_DIR)/gdn_verify_wave_on.s $(BUILD_DIR)/sampling_ops.s $(BUILD_DIR)/rope_ops.s $(BUILD_DIR)/int4_wmma_qual.s

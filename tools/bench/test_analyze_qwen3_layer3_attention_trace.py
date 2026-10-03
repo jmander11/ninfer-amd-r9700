@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from analyze_qwen3_layer3_attention_trace import (
+from tools.bench.analyze_qwen3_layer3_attention_trace import (
     CACHE_BYTES,
     FIELD_BY_NAME,
     FIELDS,

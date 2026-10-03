@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tools.bench.assemble_selected_p2048_evidence import _static_report
 from tools.bench.produce_operation_static_evidence import CTA_RECIPES, _publish, produce
+from tools.r9700 import test_check_prefill_cta_static as cta_static_test
 from tools.r9700.check_prefill_cta_static import PROFILES
 
 
@@ -184,6 +185,11 @@ class OperationStaticEvidenceProducerTest(unittest.TestCase):
                 produce(**args)
 
     def cta_files(self, root: Path, recipe: str, *, incumbent: bool = False):
+        if not incumbent:
+            # The exact challenger shape is owned by the checker's own fixture.
+            artifact, executable, source, _, _ = self.files(root, "unused", "v_nop", 1)
+            assembly, metadata = cta_static_test.PrefillCtaStaticTest().fixture(root, recipe)
+            return artifact, executable, source, assembly, metadata
         profile = PROFILES[recipe]
         symbol = profile.production_symbol
         opcodes = "\n".join(
@@ -218,8 +224,11 @@ class OperationStaticEvidenceProducerTest(unittest.TestCase):
 \t.set .Lselected.uses_flat_scratch, 0
 ; ScratchSize: 0
 ; Occupancy: {profile.occupancy or 16}
+  - .args:
     .max_flat_workgroup_size: {profile.maximum_workgroup_size}
     .name: {symbol}
+    .sgpr_spill_count: 0
+    .vgpr_spill_count: 0
 """
         artifact, executable, source, assembly, metadata = self.files(root, "unused", "v_nop", 1)
         assembly.write_text(body, encoding="utf-8")

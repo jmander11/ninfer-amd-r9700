@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from audit_rocm_tools import _supported_compute_architectures, summarize_database
+from tools.r9700.audit_rocm_tools import _supported_compute_architectures, summarize_database
 
 
 class RocprofEvidenceTest(unittest.TestCase):

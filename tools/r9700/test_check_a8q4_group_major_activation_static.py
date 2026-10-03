@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -6,6 +7,20 @@ from tools.r9700.check_a8q4_group_major_activation_static import check, source_g
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "tools/r9700/a8q4_group_major_activation_qual.hip"
 ASSEMBLY = ROOT / "tools/r9700/build/a8q4_group_major_activation_qual.s"
+
+
+def setUpModule() -> None:
+    # Check the assembly of the current source, never a stale build product.
+    subprocess.run(
+        [
+            "make",
+            "-s",
+            "-C",
+            str(Path(__file__).resolve().parent),
+            "build/a8q4_group_major_activation_qual.s",
+        ],
+        check=True,
+    )
 
 
 class SourceGateTest(unittest.TestCase):

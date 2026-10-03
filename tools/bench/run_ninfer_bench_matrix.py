@@ -3730,10 +3730,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         raise SystemExit(f"--preset {args.preset} requires --dflash-draft-tokens")
     if args.preset in DFLASH_CAMPAIGN_PRESETS and args.dflash_draft_tokens is not None:
-        pair = (
-            args.dflash_draft_tokens,
-            resolved_dflash_verify_width(args.dflash_draft_tokens, args.dflash_verify_width),
-        )
+        try:
+            pair = (
+                args.dflash_draft_tokens,
+                resolved_dflash_verify_width(args.dflash_draft_tokens, args.dflash_verify_width),
+            )
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
         if pair not in DFLASH_PRODUCTION_PROFILES:
             raise SystemExit("production DFlash campaigns require exactly K4/W5 or K5/W6")
     if args.preset not in ("dflash-pareto", "dflash-feasibility", "dflash-capacity") and (

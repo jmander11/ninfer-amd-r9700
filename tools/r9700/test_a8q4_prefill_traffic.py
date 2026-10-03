@@ -2,7 +2,7 @@
 
 import unittest
 
-from a8q4_prefill_traffic import (
+from tools.r9700.a8q4_prefill_traffic import (
     M32_N64,
     M64_N64,
     M64_N128,
