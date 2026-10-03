@@ -5,10 +5,10 @@ repository by custom AMD ports, not merged ancestry; `AGENTS.md` states the sync
 
 ## Baseline
 
-Reconciled through upstream `574a8d9167500be2717c0ce5e7d9f2e061a1f32e` (2026-10-02), advanced
-from `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
+Reconciled through upstream `593c2d0c95ce2e34ef137af70c94d0417b37a890` (2026-10-03), advanced
+from `574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
 `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`,
-`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `574a8d91`
+`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `593c2d0c`
 against current AMD behavior.
 
 ## Ported features (`c450798c..e04fad37`)
@@ -211,3 +211,33 @@ the `quality/clang-tidy-backlog` branch, so `4051ebf0..26ba4203` are not descend
   `8dba51cc` small-T reduce kernel (the split-KV merges here use separate scalars and barriers),
   and the `test_attn_input_proj` sanitizer cases (`ninfer_r9700_target_variant_attention_projection_qual`
   is an empty entry point).
+
+## `574a8d91..593c2d0c` (4 upstream commits, reconciled 2026-10-03)
+
+- Ported: `91371f42` block-cooperative p-less tile choice. `sampling_block_choose_tile` (wave32
+  `__shfl_up` chunk scan, lowest owning thread, last nonempty tile for a goal past every
+  interval) serves the ordinary p-less sampler and the speculative finalize kernel, whose
+  residual masses and admitted sum are now block-parallel; the per-thread auxiliary-mass buffer
+  is gone. Sampling and speculative-round qualifiers and racecheck pass. R9700 C1 DFlash K7
+  `--lm-head-draft`, seeded p-less T1.5, 512 tokens, 3 prompts x 2 seeds x 2 ABBA passes: decode
+  91.4 -> 102.1 tok/s mean, median round 32.15 -> 29.41 ms, identical round counts in every pair.
+- Already equivalent: `91371f42`'s BF16 residual and DFlash conv verify aggregation at every
+  width (`packed_route_tokens` makes every verify projection one aggregate launch). Excluded: its
+  CUDA bench and SmallT kernel removal.
+- Not applicable: `7eb0edcc` keeps a DFlash forced-K test off the 1-in-32 exploration rounds of
+  the hop-hazard picker, which the fork declined (above).
+- Ported with fork deltas: `4bf04efd` KV-tier rework, upstream's port of the fork's stall fixes
+  (`7885114c`, `5187be80`, `14b7ac49`) plus: RAM blocks retire on fence and last I/O pin, so a
+  RAM claim never waits for a spill of the same entry; a RAM restore waits for its entry's own
+  capture copies in copy-hold; chunked (4 MiB) host-copy callbacks on a tier-owned host-copy
+  stream; unlocked CRC, encode, compaction publication, reap, and tombstone I/O; two-phase
+  eviction; serialized MANIFEST publication; claims that cancel an idle Extend/Refresh instead of
+  waiting, with a stale generation becoming a `CacheRestoreFailure` cache miss; request-local
+  restore failures parked like cancelled copy-holds; per-lane cached prefix hashes; and the
+  startup-pinned checkpoint-image slab (`ckpt-pin=` / `ckpt-heads=`), which removes serving-time
+  pinned allocation. Kept fork code: `PagedKVPublication`, the FP8-K/INT4-V RAM/disk
+  fingerprints and intra-page order, mixed rounds and `decode_waiting`, `score_many`,
+  `poll_idle`, the deferred GDN fold, the closed-turn cut store, and
+  `synchronize_all_while_unwinding`. The disk-cache suite takes upstream's gate-held stall cases
+  in place of timing windows, and the sleep-based payload stall hook is removed.
+- `593c2d0c` records a 5090 A/B; the R9700 serve check is in `docs/performance.md`.

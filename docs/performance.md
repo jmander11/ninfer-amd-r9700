@@ -86,6 +86,33 @@ harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
 
+## Parallel p-less tile choice and KV-tier sync check (2026-10-03)
+
+Upstream `91371f42` made the p-less tile choice block-cooperative: a wave32 chunk scan gives each
+thread the prefix interval of its contiguous tile chunk, and the owning thread walks only its
+chunk, replacing thread 0's serial walks over the vocabulary tiles in the ordinary sampler and the
+speculative finalize kernel (residual masses and the admitted sum are block-parallel too). C1
+CLI, DFlash K7 `--lm-head-draft`, seeded p-less T1.5, 512 tokens, 3 prompts x 2 seeds x 2 ABBA
+passes; the baseline is the same tree with only the three sampling headers reverted:
+
+| | before | after |
+|---|---:|---:|
+| decode, mean of 12 runs | 91.4 tok/s | 102.1 tok/s |
+| round, median | 32.15 ms | 29.41 ms |
+
+Every prompt/seed pair runs the same number of rounds in both builds (same sampled
+trajectories), and the new build's run-to-run spread is much narrower.
+
+The `4bf04efd` KV-tier port (RAM claims no longer wait for a spill of the same entry, startup
+checkpoint slab, two-phase disk eviction, request-local restore failures) was checked with the
+2026-10-01 churn harness (C3 serve, Compose tiers, DFlash K7 adaptive, six ~12K-token
+conversations x three passes; `profiles/bench/r9700-upstream-sync-20261003/`), ABBA against the
+pre-sync build. All 18 greedy replies match in both builds and the 2026-10-01 run; cold 12K TTFT
+is about 4.0 s, RAM loads 125-507 ms, and the largest decode gap 0.89/1.51 s (sync) against
+2.36/0.91 s (pre-sync), each one outlier. The pre-sync build already carried the fork's stall fixes that upstream
+ported in the same commit, so this run is a no-regression check, not a speedup claim. A first sync run during a concurrent 8-job host build showed 5-7 s cold
+TTFT and one 5.6 s RAM restore; neither recurred on a quiet host.
+
 ## Adaptive draft picker and p-less draft temperature per K (2026-10-02)
 
 Upstream `fd16c8ba` replaced its picker with learned per-k hop hazards plus one exploration round
