@@ -163,7 +163,7 @@ void mtp_bridge_and_propose(PrefillContext& state, const Tensor& next_token,
                      state.execution.linear_execution, state.execution.work,
                      state.text_kv, state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
-                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+                     state.text_kv_base, state.mtp_kv, state.mtp_cache);
     configure_text_card(card, state.execution, state.sampling, state.current_state_slot,
                         state.mtp_proposal_extent);
 
@@ -237,7 +237,7 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
                          state.execution.linear_execution, state.execution.work, {},
                          state.execution.linear_attention, state.execution.io,
                          state.execution.prefill_hidden, state.execution.prefill_chunk, 0, {},
-                         &state.text_cache, &state.mtp_cache);
+                         &state.mtp_cache);
         if (!state.text_kv_transactions.empty()) {
             card.set_text_kv_transactions(state.text_kv_transactions);
         }

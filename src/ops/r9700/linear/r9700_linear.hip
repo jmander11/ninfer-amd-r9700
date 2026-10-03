@@ -2867,10 +2867,10 @@ void a4q4g64_linear_prefill_pingpong_kernel(
     for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
 #pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
-            const std::uint32_t token = token_base + lane_group * 8U + element;
+            const std::uint32_t output_token = token_base + lane_group * 8U + element;
             const std::uint32_t row = cta_row_base +
                 row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
-            output[static_cast<std::size_t>(token) * rows + row] =
+            output[static_cast<std::size_t>(output_token) * rows + row] =
                 static_cast<hip_bfloat16>(totals[row_half][element]);
         }
     }

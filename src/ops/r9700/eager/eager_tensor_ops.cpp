@@ -183,7 +183,7 @@ void require_norm(const Tensor& input, const Tensor& output, const Tensor* weigh
     }
     const auto features = u32_extent(input.ne[0], operation, "feature extent");
     (void)rows_for(input, elements, operation);
-    for (const auto item : {std::pair{weight, "weight"}, std::pair{bias, "bias"}}) {
+    for (const auto& item : {std::pair{weight, "weight"}, std::pair{bias, "bias"}}) {
         if (item.first == nullptr) { continue; }
         require_vector(*item.first, DType::BF16, operation, item.second);
         if (item.first->ne[0] != static_cast<std::int32_t>(features)) {

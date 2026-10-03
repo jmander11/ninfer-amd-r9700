@@ -80,7 +80,7 @@ PrefillChunkResult prefill_text_chunk(
                      state.execution.linear_execution, state.execution.work,
                      state.text_kv, state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
-                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+                     state.text_kv_base, state.mtp_kv, state.mtp_cache);
     attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
     const std::span<const int> prompt(ids.data(), ids.size());
     if (state.dflash != nullptr) {
@@ -98,7 +98,7 @@ PrefillChunkResult prefill_mrope_text_chunk(
                      state.execution.linear_execution, state.execution.work,
                      state.text_kv, state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
-                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+                     state.text_kv_base, state.mtp_kv, state.mtp_cache);
     attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
     if (state.dflash != nullptr) {
         DFlashFeatureSink sink = make_dflash_prefill_sink(state);
@@ -117,7 +117,7 @@ prefill_multimodal_chunk(PrefillContext& state, const PreparedPromptData& prompt
                      state.execution.linear_execution, state.execution.work,
                      state.text_kv, state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
-                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+                     state.text_kv_base, state.mtp_kv, state.mtp_cache);
     attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
     if (state.dflash != nullptr) {
         DFlashFeatureSink sink = make_dflash_prefill_sink(state);

@@ -1194,13 +1194,13 @@ class CompiledKvGroupTest(unittest.TestCase):
             main([*common, "--concurrency", "2"])
         with self.assertRaisesRegex(SystemExit, "fresh complete run"):
             main([*common, "--resume"])
-            with self.assertRaisesRegex(SystemExit, "accepts exactly one"):
-                main([
-                    "--preset", "pareto-whole",
-                    "--weights", str(root / "eventual-selected.ninfer"),
-                    "--prefill-chunk", "2048", "--prefill-chunk", "4096",
-                    "--dry-run",
-                ])
+        with self.assertRaisesRegex(SystemExit, "exactly one --prefill-chunk"):
+            main([
+                "--preset", "pareto-whole",
+                "--weights", "/eventual-selected.ninfer",
+                "--prefill-chunk", "2048", "--prefill-chunk", "4096",
+                "--dry-run",
+            ])
 
     def test_prefill_chunk_power_profile_is_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

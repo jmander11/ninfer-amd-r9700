@@ -236,6 +236,8 @@ find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(NINFER_ZSTD REQUIRED IMPORTED_TARGET libzstd)
 include(cmake/xgrammar.cmake)
+# After the third-party xgrammar target, so its sources keep their upstream diagnostics.
+include(cmake/warnings.cmake)
 
 add_subdirectory(src)
 if(NINFER_BUILD_APPS)

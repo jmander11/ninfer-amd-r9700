@@ -1,0 +1,59 @@
+# Spell checking for identifiers, comments, and documentation (https://github.com/crate-ci/typos).
+# The version is pinned in .pre-commit-config.yaml; see docs/maintainer/code-quality.md.
+
+[files]
+extend-exclude = [
+    "third_party/",
+    "cmake/*.patch",
+    ".gitattributes",
+    # Verbatim long-context prompt corpora and request fixtures: their text is data.
+    "examples/cli/messages/",
+    "plans/fixtures/",
+    "tests/fixtures/",
+]
+
+[default]
+extend-ignore-re = [
+    # Abbreviated git commit hashes.
+    "\\b[0-9a-f]{7,40}\\b",
+]
+
+[default.extend-words]
+# Model and format vocabulary.
+BA = "BA"      # GDN beta/alpha projection
+UE = "UE"      # UE4M3 / UE8M0 scale formats
+ue = "ue"
+thw = "thw"    # temporal/height/width vision grid
+dout = "dout"
+rin = "rin"
+ptd = "ptd"
+tpos = "tpos"
+relm = "relm"
+thr = "thr"
+pn = "pn"
+ofr = "ofr"
+ths = "ths"
+anc = "anc"
+nothink = "nothink"
+Subtiles = "Subtiles"
+mis = "mis"    # mis-dispatch, mis-sharded
+alog = "alog"      # GDN A_log parameter
+alow = "alow"      # low activation-code plane
+ALS = "ALS"        # alternating least squares weight search
+# gfx12 and ROCm vocabulary.
+VALU = "VALU"      # vector ALU
+valu = "valu"
+HSA = "HSA"        # Heterogeneous System Architecture runtime
+hsa = "hsa"
+# External API spellings.
+Iinclude = "Iinclude"  # -Iinclude
+Parms = "Parms"        # hipMemcpy3DParms
+optin = "optin"        # clang-analyzer-optin checks
+ND = "ND"          # UTF8PROC_CATEGORY_ND
+restat = "restat"  # ninja -t restat
+# Deliberately truncated token fragments in tokenizer and recovery tests.
+thi = "thi"
+clos = "clos"
+inser = "inser"
+functio = "functio"
+answe = "answe"

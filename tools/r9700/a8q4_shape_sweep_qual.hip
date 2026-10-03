@@ -421,7 +421,7 @@ constexpr std::array<std::uint32_t, 4> kDecodeBlockThreads{32U, 64U, 128U, 256U}
 
 void write_samples(std::ostream& out, const std::array<double, kTrials>& values);
 
-DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards,
+[[maybe_unused]] DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards,
                                       bool cold_disjoint) {
     constexpr std::uint32_t tokens = 1U;
     const std::uint32_t padded_columns = (shape.columns + 127U) / 128U * 128U;
@@ -665,7 +665,7 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards,
                             weight_bytes * (weight_copy_count - 1U)};
 }
 
-std::vector<Result> run_shape(Shape shape) {
+[[maybe_unused]] std::vector<Result> run_shape(Shape shape) {
     const std::uint32_t padded_columns = (shape.columns + 127U) / 128U * 128U;
     const std::uint32_t groups = padded_columns / kGroup;
     const std::size_t weight_elements =
@@ -801,7 +801,7 @@ std::vector<Result> run_shape(Shape shape) {
     return results;
 }
 
-PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
+[[maybe_unused]] PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
                                bool exhaustive_oracle, bool collect_timing,
                                bool compare_lds_scope = false,
                                LdsScopeTiming* lds_scope_timing = nullptr,
@@ -1147,7 +1147,7 @@ void write_samples(std::ostream& out, const std::array<double, kTrials>& values)
     out << ']';
 }
 
-void write_json(const std::filesystem::path& path, const std::vector<Result>& results,
+[[maybe_unused]] void write_json(const std::filesystem::path& path, const std::vector<Result>& results,
                 const hipDeviceProp_t& device, int runtime_version) {
     std::ofstream out(path);
     if (!out) fail("cannot open output JSON");
@@ -1216,7 +1216,7 @@ std::string shell_quote(std::string_view value) {
     return out;
 }
 
-std::string sha256_file(const std::filesystem::path& path) {
+[[maybe_unused]] std::string sha256_file(const std::filesystem::path& path) {
     const std::string command = "sha256sum -- " + shell_quote(path.string());
     FILE* pipe = popen(command.c_str(), "r");
     if (pipe == nullptr) fail("cannot launch sha256sum");
@@ -1259,7 +1259,7 @@ struct SourceIdentity {
     std::string sha256;
 };
 
-bool write_lds_scope_report(const std::filesystem::path& output,
+[[maybe_unused]] bool write_lds_scope_report(const std::filesystem::path& output,
                             const std::filesystem::path& executable,
                             std::string_view executable_sha256,
                             const std::filesystem::path& source_root,
@@ -1464,7 +1464,7 @@ bool write_lds_scope_report(const std::filesystem::path& output,
     return accepted;
 }
 
-void write_decode_cold_block_report(
+[[maybe_unused]] void write_decode_cold_block_report(
     const std::filesystem::path& output,
     const std::vector<DecodeDot8Result>& results,
     const std::filesystem::path& executable,

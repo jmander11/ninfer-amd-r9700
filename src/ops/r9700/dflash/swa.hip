@@ -53,7 +53,7 @@ __global__ __launch_bounds__(kBlock, 2) void swa_direct_kernel(
     const std::int32_t* __restrict__ valid_columns, const std::int32_t* __restrict__ lanes,
     const hip_bfloat16* __restrict__ context_k,
     const hip_bfloat16* __restrict__ context_v, hip_bfloat16* __restrict__ output, int tokens,
-    int batch_size, int padded_capacity, int window, int lane_capacity, int minimum_context,
+    int padded_capacity, int window, int lane_capacity, int minimum_context,
     int maximum_context, float scale) {
     const int kv_head = static_cast<int>(blockIdx.x);
     const int token = static_cast<int>(blockIdx.y);
@@ -385,7 +385,7 @@ void swa_launch(const Tensor& q, const Tensor& query_k, const Tensor& query_v,
             static_cast<const std::int32_t*>(lanes.data),
             static_cast<const hip_bfloat16*>(context.k.data),
             static_cast<const hip_bfloat16*>(context.v.data),
-            static_cast<hip_bfloat16*>(out.data), q.ne[2], q.ne[3],
+            static_cast<hip_bfloat16*>(out.data), q.ne[2],
             static_cast<int>(context.padded_capacity), static_cast<int>(context.capacity),
             context.lane_capacity, static_cast<int>(envelope.min_context),
             static_cast<int>(envelope.max_context), scale);

@@ -168,9 +168,8 @@ public:
                 qwen3::PagedKVCacheView kv, LinearAttentionStatePool& state,
                 qwen3::RoundState& io, Tensor& prefill_hidden, std::uint32_t prefill_chunk,
                 std::uint32_t text_kv_base,
-                qwen3::PagedKVCacheView mtp_kv           = qwen3::PagedKVCacheView(),
-                const qwen3::PagedKVCache* batch_text_kv = nullptr,
-                const qwen3::PagedKVCache* batch_mtp_kv  = nullptr);
+                qwen3::PagedKVCacheView mtp_kv          = qwen3::PagedKVCacheView(),
+                const qwen3::PagedKVCache* batch_mtp_kv = nullptr);
     ~TextContext();
 
     TextContext(const TextContext&)            = delete;
@@ -381,8 +380,7 @@ private:
     WorkspaceArena& work_;
     qwen3::PagedKVCacheView kv_;
     qwen3::PagedKVCacheView mtp_kv_;
-    const qwen3::PagedKVCache* batch_text_kv_ = nullptr;
-    const qwen3::PagedKVCache* batch_mtp_kv_  = nullptr;
+    const qwen3::PagedKVCache* batch_mtp_kv_ = nullptr;
     LinearAttentionStatePool& state_;
     qwen3::RoundState& io_;
     Tensor& prefill_hidden_;

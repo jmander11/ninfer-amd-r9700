@@ -102,12 +102,12 @@ int real_tokenizer_probe(const char* directory, const char* fixture_path) {
         std::vector<std::uint32_t> tree_mask(tree.size() * fi::ToolGrammarState::mask_words);
         state.fill_masks(tree, parents, tree_mask);
         for (std::size_t branch = 0; branch < branches.size(); ++branch) {
-            bool rejected = false;
+            bool branch_rejected = false;
             for (auto node = branches[branch].first; node < branches[branch].second; ++node) {
                 if (!(tree_mask[parents[node] * fi::ToolGrammarState::mask_words + tree[node] / 32] &
-                      (1u << (tree[node] % 32)))) { rejected = true; break; }
+                      (1u << (tree[node] % 32)))) { branch_rejected = true; break; }
             }
-            if (rejected != (branch != 0)) {
+            if (branch_rejected != (branch != 0)) {
                 std::cerr << "real speculative unordered branch mask incorrect\n";
                 ++failures;
             }
@@ -322,7 +322,7 @@ int main(int argc, char** argv) {
     // omissions, repetitions, unknown keys, all permutations and property bounds.
     // Integer values keep framing unambiguous; raw XML strings are tested below.
     std::size_t order_cases = 0;
-    for (const auto bounds : {std::pair{0, 3}, std::pair{2, 2}, std::pair{3, 3}}) {
+    for (const auto& bounds : {std::pair{0, 3}, std::pair{2, 2}, std::pair{3, 3}}) {
         Json schema{{"type", "object"}, {"properties", Json{
             {"a", Json{{"type", "integer"}, {"minimum", 1}, {"maximum", 2}}},
             {"b", Json{{"const", 3}}}, {"c", Json{{"enum", {4, 5}}}}}},

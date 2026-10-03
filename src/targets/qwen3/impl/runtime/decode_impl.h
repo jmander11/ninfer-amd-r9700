@@ -23,8 +23,7 @@ auto ordinary_batch_body(OrdinaryBatchContext& state, std::int32_t batch_size) {
         TextContext card(state.execution.device, state.execution.model,
                          state.execution.linear_execution, state.execution.work, {},
                          state.execution.linear_attention, state.execution.io,
-                         state.execution.prefill_hidden, state.execution.prefill_chunk, 0, {},
-                         &state.text_cache);
+                         state.execution.prefill_hidden, state.execution.prefill_chunk, 0);
         if (!state.text_kv_transactions.empty()) {
             card.set_text_kv_transactions(state.text_kv_transactions);
         }

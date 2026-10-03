@@ -184,7 +184,7 @@ void test_round_layout() {
     expect(!dflash.mtp.has_value() && !dflash.mtp_decode.has_value(),
            "DFlash layout does not allocate MTP storage");
 
-    for (const auto [drafts, width] :
+    for (const auto& [drafts, width] :
          std::array<std::pair<std::uint32_t, std::uint32_t>, 2>{{{4, 5}, {5, 6}}}) {
         ninfer::LayoutBuilder width_builder;
         q3::RoundStateLayout live = q3::begin_round_state_layout(

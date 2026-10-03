@@ -820,7 +820,7 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
                                  prefill.text_kv, state.execution.linear_attention,
                                  state.execution.io, state.execution.prefill_hidden,
                                  state.execution.prefill_chunk, prefill.text_kv_base,
-                                 prefill.mtp_kv, &state.text_cache, prefill.mtp_cache);
+                                 prefill.mtp_kv, prefill.mtp_cache);
             attach_prefill_state(*card_storage, prefill,
                                  owner->rewrite_checkpoint_capture_frontier);
         } else {
@@ -828,8 +828,7 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
                                  state.execution.linear_execution, state.execution.work,
                                  qwen3::PagedKVCacheView{}, state.execution.linear_attention,
                                  state.execution.io, state.execution.prefill_hidden,
-                                 state.execution.prefill_chunk, 0U, qwen3::PagedKVCacheView{},
-                                 &state.text_cache);
+                                 state.execution.prefill_chunk, 0U);
         }
         TextContext& card = *card_storage;
         if (!state.text_kv_transactions.empty()) {

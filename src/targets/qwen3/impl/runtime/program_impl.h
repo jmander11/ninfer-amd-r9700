@@ -4607,8 +4607,6 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         SegmentedKvTransactionBatch text_transactions(lanes.size(), kv_resolution_words(false));
         SegmentedKvTransactionBatch mtp_transactions(lanes.size(), kv_resolution_words(true));
         const std::uint32_t target_width = batch_k + 1U;
-        const auto* target_positions =
-            static_cast<const std::int32_t*>(io.mtp_decode->target_positions.data);
         const auto* base_frontiers =
             static_cast<const std::int32_t*>(io.mtp_decode->base_frontiers.data);
         const auto* text_table_rows =
@@ -4625,8 +4623,6 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
             capacity, transaction_maximum_frontier + std::min(target_width, capacity));
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             SequenceState& sequence = sequences[lanes[row]];
-            const std::uint32_t count = static_cast<std::uint32_t>(
-                mtp_host_ingress->target_valid_columns[row]);
             text_transactions.append(
                 decoder->text_kv.begin_device_segmented_append(
                     sequence.kv->text, sequence.text_kv_publication, base_frontiers + row, 0U,

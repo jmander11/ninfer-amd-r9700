@@ -58,6 +58,11 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
     case WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation:
     case WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation:
         return source_q4 ? NumericFormat::Q4G64_F16S : NumericFormat::W8G32_F16S;
+    case WeightsProfile::R9700Fp8Lut4:
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) case WeightsProfile::symbol:
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
+        break;  // fp8_capped_base_profile() mapped these to their base recipe
     }
     throw std::invalid_argument("qwen3_8_27b_r9700: invalid matrix profile");
 }

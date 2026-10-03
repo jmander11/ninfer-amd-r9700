@@ -153,8 +153,8 @@ Result run_case(ninfer::DeviceContext& device, int tokens, const std::vector<std
     const int iters = 200;
     device.synchronize();
     hipEvent_t ev0, ev1;
-    hipEventCreate(&ev0);
-    hipEventCreate(&ev1);
+    HIP_CHECK(hipEventCreate(&ev0));
+    HIP_CHECK(hipEventCreate(&ev1));
     for (int i = 0; i < 8; ++i) {
         ninfer::ops::bidirectional_gqa_attention(
             q_tensor, query_k_tensor, query_v_tensor, lengths_tensor, valid_tensor,
@@ -162,19 +162,19 @@ Result run_case(ninfer::DeviceContext& device, int tokens, const std::vector<std
             device.stream);
     }
     device.synchronize();
-    hipEventRecord(ev0, device.stream);
+    HIP_CHECK(hipEventRecord(ev0, device.stream));
     for (int i = 0; i < iters; ++i) {
         ninfer::ops::bidirectional_gqa_attention(
             q_tensor, query_k_tensor, query_v_tensor, lengths_tensor, valid_tensor,
             table_rows_tensor, kScale, context, envelope, workspace, output_tensor,
             device.stream);
     }
-    hipEventRecord(ev1, device.stream);
+    HIP_CHECK(hipEventRecord(ev1, device.stream));
     device.synchronize();
     float ms = 0.0F;
-    hipEventElapsedTime(&ms, ev0, ev1);
-    hipEventDestroy(ev0);
-    hipEventDestroy(ev1);
+    HIP_CHECK(hipEventElapsedTime(&ms, ev0, ev1));
+    HIP_CHECK(hipEventDestroy(ev0));
+    HIP_CHECK(hipEventDestroy(ev1));
     result.median_ms = ms / static_cast<double>(iters);
 
     std::vector<hip_bfloat16> output(q_elements);

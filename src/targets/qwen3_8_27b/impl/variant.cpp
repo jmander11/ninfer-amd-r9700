@@ -2899,6 +2899,15 @@ QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4W8Evaluation:
         return QType::W8G32_F16S;
+    case WeightsProfile::R9700Fp8Lut4:
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) case WeightsProfile::symbol:
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
+    case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
+    case WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation:
+        // fp8_capped_base_profile() mapped the FP8-capped profiles to their base recipe; the two
+        // N16K16 profiles carry no DFlash weights.
+        break;
     }
     throw std::invalid_argument("invalid R9700 target DFlash matrix profile");
 }
@@ -2996,6 +3005,11 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
         // The all-Q4 recipe also quantizes MLP down, whose K is the largest Text matrix input.
         return ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
                                                      TextConfig::intermediate);
+    case WeightsProfile::R9700Fp8Lut4:
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) case WeightsProfile::symbol:
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
+        break;  // returned through their base recipe above
     }
     throw std::invalid_argument("invalid R9700 target weight profile");
 }
@@ -3046,6 +3060,11 @@ std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profi
         // Vision K (4608, larger than backbone FC2's 4304).
         return ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
                                                      VisionConfig::merger_hidden);
+    case WeightsProfile::R9700Fp8Lut4:
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) case WeightsProfile::symbol:
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
+        break;  // fp8_capped_base_profile() mapped these to their base recipe
     }
     throw std::invalid_argument("invalid R9700 target weight profile");
 }

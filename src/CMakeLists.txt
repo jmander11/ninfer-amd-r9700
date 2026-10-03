@@ -115,7 +115,7 @@ add_library(ninfer_artifact STATIC
 ninfer_r9700_internal_includes(ninfer_artifact)
 target_link_libraries(ninfer_artifact PUBLIC ninfer_r9700_core hip::host)
 
-# The R9700 target binder is a closed compileable boundary over the registered evaluation
+# The R9700 target binder is a closed compilable boundary over the registered evaluation
 # inventories. It performs no runtime repacking: every matrix view points directly into artifact
 # storage.
 add_library(ninfer_r9700_target_bindings STATIC

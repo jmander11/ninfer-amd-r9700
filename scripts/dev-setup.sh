@@ -14,6 +14,17 @@ rocm_context="${NINFER_ROCM_CONTEXT:-/opt/rocm/core-10.0}"
 render_node="${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}"
 jobs="${NINFER_DEV_JOBS:-8}"
 [[ "$jobs" =~ ^[1-8]$ ]] || { echo 'NINFER_DEV_JOBS must be 1..8.' >&2; exit 2; }
+# Hard memory limit for everything run in the builder (builds, tests, device checks), with no swap
+# on top: a runaway process is OOM-killed inside the container instead of exhausting the host.
+# The default leaves a quarter of host RAM for the desktop, the page cache, and driver-pinned
+# memory, which the cgroup does not account. Override with NINFER_BUILDER_MEMORY_GIB.
+host_mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+memory_gib="${NINFER_BUILDER_MEMORY_GIB:-$((host_mem_kib * 3 / 4 / 1024 / 1024))}"
+if ! [[ "$memory_gib" =~ ^[1-9][0-9]*$ ]] || ((memory_gib * 1024 * 1024 >= host_mem_kib)); then
+  echo "NINFER_BUILDER_MEMORY_GIB=$memory_gib must be a whole number of GiB below host RAM" >&2
+  exit 1
+fi
+memory_args=(--memory "${memory_gib}g" --memory-swap "${memory_gib}g")
 command -v docker >/dev/null
 if [[ ${NINFER_REBUILD_BUILDER:-0} == 1 ]] || ! docker image inspect "$image" >/dev/null 2>&1; then
   docker buildx version >/dev/null 2>&1 || {
@@ -44,13 +55,23 @@ else
   docker volume create "$volume" >/dev/null
   args=(--name "$builder" --device /dev/kfd --device "$render_node"
     --group-add "$(stat -c %g /dev/kfd)" --group-add "$(stat -c %g "$render_node")"
-    --shm-size 1g -v "$repo_root:/src:rw" -v "$volume:/build" -w /src)
+    --shm-size 1g -v "$repo_root:/src:rw" -v "$volume:/build" -w /src "${memory_args[@]}"
+    # A crashing GPU process must not hand a multi-gigabyte core to the host crash handler.
+    --ulimit core=0)
   if [[ -n ${NINFER_MODELS_DIR:-} ]]; then
     models_dir="$(realpath "$NINFER_MODELS_DIR")"
     test -d "$models_dir"
     args+=(-v "$models_dir:/models:ro")
   fi
   docker create "${args[@]}" "$image" sleep infinity >/dev/null
+fi
+# Containers created before the limit existed, or with another value, take it here. A running
+# container is restarted after the update so its device cgroup rules are rebuilt.
+if [[ "$(docker inspect -f '{{.HostConfig.Memory}}' "$builder")" != "$((memory_gib * 1024 * 1024 * 1024))" ]]; then
+  docker update "${memory_args[@]}" "$builder" >/dev/null
+  if [[ $(docker inspect -f '{{.State.Running}}' "$builder") == true ]]; then
+    docker restart "$builder" >/dev/null
+  fi
 fi
 if [[ $(docker inspect -f '{{.State.Running}}' "$builder") != true ]]; then
   docker start "$builder" >/dev/null
@@ -61,4 +82,4 @@ docker exec "$builder" cmake -S /src -B /build -G Ninja \
   -DCMAKE_HIP_ARCHITECTURES=gfx1201 -DNINFER_BUILD_APPS=ON \
   -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/opt/python311/bin/python3.11 \
   -DNINFER_BUILD_BENCHMARKS="${NINFER_BUILD_BENCHMARKS:-OFF}"
-echo "Builder $builder ready: $repo_root at /src; volume $volume at /build."
+echo "Builder $builder ready: $repo_root at /src; volume $volume at /build; ${memory_gib} GiB memory limit, no swap."

@@ -217,7 +217,7 @@ int main() {
     resident.pages_fit                = true;
     resident.ram_reusable_tokens      = 5000;
     resident.disk_reusable_tokens     = 9000;
-    const auto route = [](RecoveryPrefillInput input) { return route_recovery_prefill(input); };
+    const auto route = [](RecoveryPrefillInput query) { return route_recovery_prefill(query); };
     auto refused = resident;
     refused.splice_accepted = false;
     const auto refused_decision = route(refused);

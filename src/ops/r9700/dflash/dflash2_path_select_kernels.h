@@ -55,7 +55,7 @@ __device__ __forceinline__ bool dflash2_logit_better(float value, int index, flo
     return value > best_value || (value == best_value && index < best_index);
 }
 
-__device__ __forceinline__ std::int64_t dflash2_column_index(int batch, int tokens, int t, int b) {
+__device__ __forceinline__ std::int64_t dflash2_column_index(int tokens, int t, int b) {
     return static_cast<std::int64_t>(b) * tokens + t;
 }
 
@@ -177,7 +177,7 @@ __launch_bounds__(kDflash2PathSelectBlock) __global__
     dflash2_topk_clear(list);
     if (v0 < v1) {
         const std::int64_t logit_col =
-            dflash2_column_index(batch, tokens, t, b) * static_cast<std::int64_t>(vocab);
+            dflash2_column_index(tokens, t, b) * static_cast<std::int64_t>(vocab);
         for (int v = v0 + tid; v < v1; v += kDflash2PathSelectBlock) {
             dflash2_topk_push(list, static_cast<float>(logits[logit_col + v]), v);
         }
@@ -187,7 +187,7 @@ __launch_bounds__(kDflash2PathSelectBlock) __global__
     dflash2_topk_block_merge(list, merged_val, merged_idx);
     if (tid == 0) {
         const std::int64_t out =
-            (dflash2_column_index(batch, tokens, t, b) * kDflash2PathSelectTopkSplits + split) *
+            (dflash2_column_index(tokens, t, b) * kDflash2PathSelectTopkSplits + split) *
             kDflash2PathSelectK;
 #pragma unroll
         for (int j = 0; j < kDflash2PathSelectK; ++j) {
@@ -207,7 +207,7 @@ __launch_bounds__(kDflash2PathSelectBlock) __global__
     const int tid = static_cast<int>(threadIdx.x);
     if (t >= tokens || b >= batch) { return; }
 
-    const std::int64_t column = dflash2_column_index(batch, tokens, t, b);
+    const std::int64_t column = dflash2_column_index(tokens, t, b);
     const std::int64_t src    = column * kDflash2PathSelectTopkSplits * kDflash2PathSelectK;
     Dflash2TopkList list;
     dflash2_topk_clear(list);
@@ -301,7 +301,7 @@ __launch_bounds__(kDflash2PathSelectBlock) __global__
     __syncthreads();
 
     for (std::int32_t t = 0; t < tokens; ++t) {
-        const std::int64_t col   = dflash2_column_index(batch, tokens, t, b);
+        const std::int64_t col   = dflash2_column_index(tokens, t, b);
         const std::int64_t h_col = col * kDflash2PathSelectRank;
         if (tid < kDflash2PathSelectK) {
             sm_val[tid] = cand_val[col * kDflash2PathSelectK + tid];
@@ -438,7 +438,7 @@ __launch_bounds__(kDflash2PathSelectBlock) __global__
     __syncthreads();
 
     for (std::int32_t t = 0; t < tokens; ++t) {
-        const std::int64_t col   = dflash2_column_index(batch, tokens, t, b);
+        const std::int64_t col   = dflash2_column_index(tokens, t, b);
         const std::int64_t h_col = col * kDflash2PathSelectRank;
         if (tid < kDflash2PathSelectK) {
             sm_val[tid] = cand_val[col * kDflash2PathSelectK + tid];

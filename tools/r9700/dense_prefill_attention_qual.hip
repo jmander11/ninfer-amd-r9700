@@ -587,23 +587,23 @@ int main(int argc, char** argv) {
         const bool timed = argc == 6 && std::string(argv[1]) == "--time";
         if (argc != 1 && argc != 4 && !timed)
             fail("usage: dense_prefill_attention_qual [rows context value-group | --time rows context value-group iterations]");
-        std::uint32_t rows = 0, context = 0, group = 0, iterations = 0;
+        std::uint32_t cli_rows = 0, cli_context = 0, cli_group = 0, iterations = 0;
         if (argc != 1) {
             const int first = timed ? 2 : 1;
-            rows = static_cast<std::uint32_t>(std::stoul(argv[first]));
-            context = static_cast<std::uint32_t>(std::stoul(argv[first + 1]));
-            group = static_cast<std::uint32_t>(std::stoul(argv[first + 2]));
+            cli_rows = static_cast<std::uint32_t>(std::stoul(argv[first]));
+            cli_context = static_cast<std::uint32_t>(std::stoul(argv[first + 1]));
+            cli_group = static_cast<std::uint32_t>(std::stoul(argv[first + 2]));
             if (timed) iterations = static_cast<std::uint32_t>(std::stoul(argv[5]));
-            if ((!kv::use_dense_prefill_attention(rows, context) &&
-                 !kv::use_mid_rows_attention(rows, context, false)) ||
-                (group != 16U && group != 32U) || (timed && iterations == 0U))
+            if ((!kv::use_dense_prefill_attention(cli_rows, cli_context) &&
+                 !kv::use_mid_rows_attention(cli_rows, cli_context, false)) ||
+                (cli_group != 16U && cli_group != 32U) || (timed && iterations == 0U))
                 fail("invalid dense attention qualification/timing shape");
         }
         host_predicate_regression();
         ninfer::r9700_qualification::device_guard().select();
         std::cerr << "dense-prefill key-block=32 production\n";
         if (argc != 1) {
-            run_case(rows, group, context, 0U, iterations);
+            run_case(cli_rows, cli_group, cli_context, 0U, iterations);
             return 0;
         }
         for (const std::uint32_t group : {16U, 32U}) {

@@ -1193,8 +1193,6 @@ int main() {
         ninfer::DeviceBuffer d_transaction_table_row(sizeof(std::int32_t));
         d_appended_keys.copy_from_host(appended_keys.data(), d_appended_keys.size());
         d_appended_values.copy_from_host(appended_values.data(), d_appended_values.size());
-        const std::array<std::uint32_t, 1> appended_position{
-            static_cast<std::uint32_t>(kContext)};
         const std::int32_t appended_position_i32 = static_cast<std::int32_t>(kContext);
         const std::int32_t appended_table_row = allocation.bound_row();
         d_transaction_positions.copy_from_host(&appended_position_i32,

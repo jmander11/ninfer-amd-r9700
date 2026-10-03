@@ -47,7 +47,7 @@ int main() {
         {4096U, 5120U}, {5120U, 6144U}, {5120U, 17408U}, {7168U, 5120U},
         {12288U, 5120U}, {34816U, 5120U}, {248320U, 5120U},
     }};
-    for (const auto [rows, columns] : decode_shapes) {
+    for (const auto& [rows, columns] : decode_shapes) {
         require(use_a8q4_decode_dot8_t1(1U, rows, columns, columns),
                 "decode dot8 predicate omits a selected T1 shape");
         require(!use_a8q4_decode_dot8_t1(2U, rows, columns, columns),
@@ -66,7 +66,7 @@ int main() {
     }};
     constexpr std::array<std::uint32_t, 4> extents{1024U, 2048U, 4096U, 8192U};
     LastBytes maxima{};
-    for (const auto [rows, columns] : shapes) {
+    for (const auto& [rows, columns] : shapes) {
         for (const std::uint32_t tokens : extents) {
             require(use_a8q4_prefill_cta(tokens, rows, columns),
                     "active dispatch predicate omits a qualified tuple");

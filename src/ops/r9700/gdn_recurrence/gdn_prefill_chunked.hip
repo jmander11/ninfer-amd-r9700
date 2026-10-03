@@ -137,10 +137,10 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
             // Feature-major rows: eight consecutive tokens of each of this lane's features.
 #pragma unroll
             for (int it = 0; it < 4; ++it) {
-                F16x8 row;
+                F16x8 features;
 #pragma unroll
-                for (int r = 0; r < 8; ++r) row[r] = transposed[it][r];
-                *reinterpret_cast<F16x8*>(&sh.k_transposed[(4 * lane + it) * kTPitch + wave * 8]) = row;
+                for (int r = 0; r < 8; ++r) features[r] = transposed[it][r];
+                *reinterpret_cast<F16x8*>(&sh.k_transposed[(4 * lane + it) * kTPitch + wave * 8]) = features;
             }
         }
         if (wave == kWaves - 1) {
