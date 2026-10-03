@@ -16,7 +16,9 @@ struct NinferRcState {
     unsigned enabled;
     unsigned words; // LDS words of this launch's group segment (static plus dynamic)
 };
-static_assert(sizeof(NinferRcState) <= ninfer::gpu_check::kStateBytes && alignof(NinferRcState) <= 8);
+
+static_assert(sizeof(NinferRcState) <= ninfer::gpu_check::kStateBytes &&
+              alignof(NinferRcState) <= 8);
 
 namespace {
 

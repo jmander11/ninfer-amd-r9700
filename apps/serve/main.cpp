@@ -64,7 +64,8 @@ int main(int argc, char** argv) {
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, "loading model...");
         if (!options.generation_recovery) {
             ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Warning,
-                "generation recovery disabled: no cycle exclusions or internal retries; tool grammar remains enabled");
+                                             "generation recovery disabled: no cycle exclusions or "
+                                             "internal retries; tool grammar remains enabled");
         }
         auto load_progress_options        = ninfer::product::stderr_load_progress_options();
         load_progress_options.line_prefix = [] {
@@ -99,11 +100,11 @@ int main(int argc, char** argv) {
                  << " kv-disk=" << ninfer::serve::format_kv_disk_occupancy(memory);
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, capacity.str());
         const std::uint32_t forward = service.options().mixed_forward.value_or(0);
-        ninfer::serve::write_console_log(
-            ninfer::serve::ConsoleLogLevel::Info,
-            "Mixed forward " + (forward == 0 ? std::string("off (prefill-first)")
-                                             : std::to_string(forward) + " columns") +
-                (options.mixed_forward ? " (explicit)" : " (auto)"));
+        ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info,
+                                         "Mixed forward " +
+                                             (forward == 0 ? std::string("off (prefill-first)")
+                                                           : std::to_string(forward) + " columns") +
+                                             (options.mixed_forward ? " (explicit)" : " (auto)"));
 
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, "warming up...");
         service.warmup();

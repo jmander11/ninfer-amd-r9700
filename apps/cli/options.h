@@ -17,18 +17,18 @@ struct Options {
     std::string prompt;
     std::filesystem::path messages_path;
 
-    std::uint32_t max_new        = 128;
-    std::uint32_t max_context    = 2048;
-    KvCapacityPolicy kv_capacity = KvCapacityPolicy::explicit_capacity(2048);
-    std::size_t kv_ram_capacity_bytes = 0;
+    std::uint32_t max_new              = 128;
+    std::uint32_t max_context          = 2048;
+    KvCapacityPolicy kv_capacity       = KvCapacityPolicy::explicit_capacity(2048);
+    std::size_t kv_ram_capacity_bytes  = 0;
     std::size_t kv_disk_capacity_bytes = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
-    std::uint32_t prefill_chunk  = kDefaultPrefillChunk;
-    int device                   = 0;
+    std::uint32_t prefill_chunk     = kDefaultPrefillChunk;
+    int device                      = 0;
 
     SpeculativeOptions speculative;
-    bool enable_vision  = false;
+    bool enable_vision    = false;
     bool use_device_graph = true;
 
     bool capture_context_checkpoint = false;

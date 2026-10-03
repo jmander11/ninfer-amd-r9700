@@ -17,10 +17,9 @@ template <bool Prepare>
 __global__ void grouped_dynamic_conv_kernel(const hip_bfloat16* hidden,
                                             const hip_bfloat16* base_kernel,
                                             const hip_bfloat16* dynamic_source,
-                                            hip_bfloat16* output,
-                                            hip_bfloat16* finish_dynamic,
+                                            hip_bfloat16* output, hip_bfloat16* finish_dynamic,
                                             std::int32_t tokens, std::int32_t columns) {
-    const std::int32_t d = static_cast<std::int32_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::int32_t d      = static_cast<std::int32_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     const std::int32_t column = static_cast<std::int32_t>(blockIdx.y);
     if (d >= kGroupedDynamicConvHidden || column >= columns) return;
 
@@ -29,9 +28,8 @@ __global__ void grouped_dynamic_conv_kernel(const hip_bfloat16* hidden,
     const std::int64_t hidden_index =
         static_cast<std::int64_t>(column) * kGroupedDynamicConvHidden + d;
     const float current = static_cast<float>(hidden[hidden_index]);
-    const float previous = token == 0
-                               ? 0.0F
-                               : static_cast<float>(hidden[hidden_index - kGroupedDynamicConvHidden]);
+    const float previous =
+        token == 0 ? 0.0F : static_cast<float>(hidden[hidden_index - kGroupedDynamicConvHidden]);
     constexpr std::int32_t phase = Prepare ? 0 : 1;
     const std::int64_t phase_base =
         static_cast<std::int64_t>(phase) * 2 * kGroupedDynamicConvHidden;
@@ -45,8 +43,8 @@ __global__ void grouped_dynamic_conv_kernel(const hip_bfloat16* hidden,
         const std::int64_t projection_base =
             static_cast<std::int64_t>(column) * kGroupedDynamicConvProjRows;
         dynamic_current = static_cast<float>(dynamic_source[projection_base + group]);
-        dynamic_previous = static_cast<float>(
-            dynamic_source[projection_base + kGroupedDynamicConvGroups + group]);
+        dynamic_previous =
+            static_cast<float>(dynamic_source[projection_base + kGroupedDynamicConvGroups + group]);
         if ((d % kGroupedDynamicConvGroupSize) == 0) {
             const std::int64_t stash_base =
                 static_cast<std::int64_t>(column) * 2 * kGroupedDynamicConvGroups;
@@ -85,8 +83,8 @@ void grouped_dynamic_conv_prepare_launch(const Tensor& hidden, const Tensor& bas
         static_cast<const hip_bfloat16*>(hidden.data),
         static_cast<const hip_bfloat16*>(base_kernel.data),
         static_cast<const hip_bfloat16*>(projection.data),
-        static_cast<hip_bfloat16*>(prepared.data),
-        static_cast<hip_bfloat16*>(finish_dynamic.data), hidden.ne[1], columns);
+        static_cast<hip_bfloat16*>(prepared.data), static_cast<hip_bfloat16*>(finish_dynamic.data),
+        hidden.ne[1], columns);
     HIP_CHECK(hipGetLastError());
 }
 

@@ -41,9 +41,7 @@ from . import (
 from .e4m3_rowwise import encode_e4m3_rowwise_chunks
 
 
-_SOURCE_SHARDS = tuple(
-    f"model-{index:05d}-of-00018.safetensors" for index in range(1, 19)
-)
+_SOURCE_SHARDS = tuple(f"model-{index:05d}-of-00018.safetensors" for index in range(1, 19))
 _EXPECTED_SOURCE_TENSORS = 1199
 _DISK_HEADROOM_BYTES = 1 << 30
 
@@ -113,9 +111,7 @@ def _source_shard_manifest(model: Path) -> SourceShardManifest:
 
 
 def _projected_file_bytes(preflight: Fp8HybridConversionPreflight) -> int:
-    identity = ArtifactIdentity(
-        fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID
-    )
+    identity = ArtifactIdentity(fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID)
     directory = encode_directory(identity, preflight.object_plan.objects)
     payload_offset = align_up(PREFIX_BYTES + len(directory), PAYLOAD_ALIGNMENT)
     last = preflight.object_plan.objects[-1]
@@ -181,9 +177,7 @@ def preflight_conversion(
 ) -> Fp8HybridConversionPreflight:
     model = Path(model_dir)
     fp8_hybrid_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     if (
         source_preflight.source_tensor_count != _EXPECTED_SOURCE_TENSORS
@@ -426,9 +420,7 @@ def convert(
                 )
 
     report = family_conversion.build_conversion_report(
-        identity=ArtifactIdentity(
-            fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID
-        ),
+        identity=ArtifactIdentity(fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID),
         target_key=fp8_hybrid_inventory.TARGET_KEY,
         recipe_id=fp8_hybrid_inventory.RECIPE_ID,
         repo_root=_repo_root(),

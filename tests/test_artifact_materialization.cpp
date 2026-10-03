@@ -122,7 +122,7 @@ int main() {
                                   ninfer::artifact::StorageLayout::ContiguousLeV1, tensor_shape);
         binder.materialize_on_device(tensor);
         constexpr std::array<std::uint64_t, 2> fp8_shape = {1, 1};
-        const auto fp8 = binder.require_tensor(
+        const auto fp8                                   = binder.require_tensor(
             "weights/fp8-row", ninfer::artifact::NumericFormat::F8E4M3_ROW_F32S,
             ninfer::artifact::StorageLayout::RowScaledK128V1, fp8_shape);
         binder.materialize_on_device(fp8);
@@ -154,10 +154,9 @@ int main() {
                     fp8_weight.qdata == fp8_payload && fp8_weight.qdata_bytes == 128 &&
                     fp8_weight.qhigh == nullptr && fp8_weight.high_plane_bytes == 0 &&
                     fp8_weight.scales == fp8_payload + 256 && fp8_weight.scale_bytes == 4 &&
-                    fp8_weight.scale_dtype == ninfer::DType::FP32 &&
-                    fp8_weight.group == 0 && fp8_weight.group_size == 0 &&
-                    fp8_weight.n == 1 && fp8_weight.k == 1 && fp8_weight.ndim == 2 &&
-                    fp8_weight.shape[0] == 1 && fp8_weight.shape[1] == 1 &&
+                    fp8_weight.scale_dtype == ninfer::DType::FP32 && fp8_weight.group == 0 &&
+                    fp8_weight.group_size == 0 && fp8_weight.n == 1 && fp8_weight.k == 1 &&
+                    fp8_weight.ndim == 2 && fp8_weight.shape[0] == 1 && fp8_weight.shape[1] == 1 &&
                     fp8_weight.padded_shape[0] == 1 && fp8_weight.padded_shape[1] == 128 &&
                     fp8_weight.scale_ne[0] == 1 && fp8_weight.scale_nb[0] == 4,
                 "materialized FP8 row-scaled Weight view is malformed");
@@ -170,8 +169,8 @@ int main() {
         require(stats.tensor_count == 3 && stats.resource_count == 1 &&
                     stats.h2d_bytes == kTensor.size() + kSecondTensor.size() + kFp8PayloadBytes &&
                     stats.retained_resource_bytes == kResource.size() &&
-                    stats.file_bytes == kResource.size() +
-                                            ninfer::artifact::Reader::direct_io_alignment + 516,
+                    stats.file_bytes ==
+                        kResource.size() + ninfer::artifact::Reader::direct_io_alignment + 516,
                 "materialization statistics are incomplete");
         require(materialized.device_arena().capacity() == plan.device_capacity_bytes &&
                     materialized.device_arena().used() == plan.device_capacity_bytes,
@@ -181,15 +180,13 @@ int main() {
         ninfer::artifact::Binder mapped_binder(reader);
         mapped_binder.retain_on_host(mapped_binder.require_resource(
             "frontend/test.json", ninfer::artifact::ResourceEncoding::RawBytesV1));
-        const auto mapped =
-            mapped_binder.require_tensor("weights/test", ninfer::artifact::NumericFormat::BF16,
-                                         ninfer::artifact::StorageLayout::ContiguousLeV1,
-                                         tensor_shape);
+        const auto mapped = mapped_binder.require_tensor(
+            "weights/test", ninfer::artifact::NumericFormat::BF16,
+            ninfer::artifact::StorageLayout::ContiguousLeV1, tensor_shape);
         mapped_binder.materialize_on_mapped_host(mapped);
-        const auto mapped_device =
-            mapped_binder.require_tensor("weights/second", ninfer::artifact::NumericFormat::BF16,
-                                         ninfer::artifact::StorageLayout::ContiguousLeV1,
-                                         second_shape);
+        const auto mapped_device = mapped_binder.require_tensor(
+            "weights/second", ninfer::artifact::NumericFormat::BF16,
+            ninfer::artifact::StorageLayout::ContiguousLeV1, second_shape);
         mapped_binder.materialize_on_device(mapped_device);
         mapped_binder.validate_only(mapped_binder.require_tensor(
             "weights/fp8-row", ninfer::artifact::NumericFormat::F8E4M3_ROW_F32S,
@@ -201,21 +198,22 @@ int main() {
                     mapped_plan.mapped_host_objects.size() == 1,
                 "mapped host tensor was charged to the device backing");
         auto mapped_materialized = ninfer::artifact::materialize(reader, mapped_plan, device);
-        void* mapped_data = mapped_materialized.device_data(mapped);
+        void* mapped_data        = mapped_materialized.device_data(mapped);
         hipPointerAttribute_t attributes{};
         HIP_CHECK(hipPointerGetAttributes(&attributes, mapped_data));
         require(attributes.type == hipMemoryTypeHost && attributes.devicePointer == mapped_data &&
                     attributes.hostPointer == mapped_data,
                 "mapped host tensor is not pinned at its unified device address");
-        require(std::equal(kTensor.begin(), kTensor.end(),
-                           static_cast<const std::byte*>(mapped_data)),
-                "mapped host tensor payload differs from the artifact");
+        require(
+            std::equal(kTensor.begin(), kTensor.end(), static_cast<const std::byte*>(mapped_data)),
+            "mapped host tensor payload differs from the artifact");
         std::array<std::byte, kSecondTensor.size()> mapped_second{};
         HIP_CHECK(hipMemcpy(mapped_second.data(), mapped_materialized.device_data(mapped_device),
                             mapped_second.size(), hipMemcpyDeviceToHost));
         require(mapped_second == kSecondTensor, "device tensor beside a mapped one differs");
         const auto& mapped_stats = mapped_materialized.stats();
-        require(mapped_stats.tensor_count == 2 && mapped_stats.mapped_host_bytes == kTensor.size() &&
+        require(mapped_stats.tensor_count == 2 &&
+                    mapped_stats.mapped_host_bytes == kTensor.size() &&
                     mapped_stats.h2d_bytes == kSecondTensor.size(),
                 "mapped host materialization statistics are incomplete");
         std::cout << "artifact_materialization: PASS h2d_bytes=" << stats.h2d_bytes

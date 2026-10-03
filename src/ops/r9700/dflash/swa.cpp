@@ -15,12 +15,12 @@
 namespace ninfer::ops {
 namespace {
 
-constexpr std::int32_t kHeadDim = 128;
-constexpr std::int32_t kQHeads = 32;
-constexpr std::int32_t kKvHeads = 8;
-constexpr float kExpectedScale = 0.08838834764831844055F;
+constexpr std::int32_t kHeadDim             = 128;
+constexpr std::int32_t kQHeads              = 32;
+constexpr std::int32_t kKvHeads             = 8;
+constexpr float kExpectedScale              = 0.08838834764831844055F;
 constexpr std::uint32_t kDirectContextLimit = 96;
-constexpr std::int32_t kMaximumSplits = 32;
+constexpr std::int32_t kMaximumSplits       = 32;
 
 void require_shape(const Tensor& tensor, std::int32_t n0, std::int32_t n1, std::int32_t n2,
                    std::int32_t n3, const char* name) {
@@ -66,10 +66,8 @@ detail::SwaLaunchPlan resolve_plan(SwaContextExecutionEnvelope envelope, std::in
     // Long windows always split, at every compact-batch width: at 56-64 columns (C8 K6/K7) the
     // direct kernel took 3.2-3.3 ms against 0.36 ms split (4096-token windows, swa_qual).
     const std::int32_t columns = tokens * batch;
-    if (envelope.max_context <= kDirectContextLimit) {
-        return {.direct = true, .splits = 1};
-    }
-    std::int32_t splits = 1;
+    if (envelope.max_context <= kDirectContextLimit) { return {.direct = true, .splits = 1}; }
+    std::int32_t splits       = 1;
     const std::int32_t target = (96 + columns - 1) / columns;
     while (splits < target && splits < kMaximumSplits) splits *= 2;
     return {.direct = false, .splits = splits};
@@ -82,8 +80,8 @@ struct PartialWorkspace {
 };
 
 template <class Allocator>
-PartialWorkspace allocate_workspace(Allocator& workspace, std::int32_t tokens,
-                                    std::int32_t batch, detail::SwaLaunchPlan plan) {
+PartialWorkspace allocate_workspace(Allocator& workspace, std::int32_t tokens, std::int32_t batch,
+                                    detail::SwaLaunchPlan plan) {
     if (plan.direct) return {};
     return {
         workspace.alloc(DType::BF16, {kHeadDim, kQHeads, tokens, plan.splits * batch}),
@@ -113,7 +111,7 @@ void swa(const Tensor& q, const Tensor& query_k, const Tensor& query_v, const Te
          const CyclicKVCacheLayerView& context, SwaContextExecutionEnvelope envelope,
          WorkspaceArena& workspace, Tensor& out, hipStream_t stream) {
     const std::int32_t tokens = q.ne[2];
-    const std::int32_t batch = q.ne[3];
+    const std::int32_t batch  = q.ne[3];
     validate_profile(envelope, tokens, tokens, batch);
     require_tensor(q, DType::BF16, "q");
     require_tensor(query_k, DType::BF16, "query K");
@@ -140,8 +138,8 @@ void swa(const Tensor& q, const Tensor& query_k, const Tensor& query_v, const Te
     }
 
     const detail::SwaLaunchPlan plan = resolve_plan(envelope, tokens, batch);
-    auto scope = workspace.scope();
-    const PartialWorkspace partial = allocate_workspace(workspace, tokens, batch, plan);
+    auto scope                       = workspace.scope();
+    const PartialWorkspace partial   = allocate_workspace(workspace, tokens, batch, plan);
     detail::swa_launch(q, query_k, query_v, positions, valid_columns, lanes, scale, context,
                        envelope, plan, partial.acc, partial.m, partial.l, out, stream);
 }

@@ -16,9 +16,9 @@ namespace {
 void qualify_affine(int width, std::uint32_t chunk, bool in_place, hipStream_t stream) {
     const Inputs in = inputs(width, 1, 701 + width + static_cast<int>(chunk));
     DeviceInputs device(in);
-    const std::size_t state_count = static_cast<std::size_t>(kValueHeads) * kDim * kDim;
+    const std::size_t state_count    = static_cast<std::size_t>(kValueHeads) * kDim * kDim;
     const std::vector<float> initial = fp32_fixture(state_count, 709, 8192.0F);
-    ninfer::DeviceBuffer state_in = uploaded(initial);
+    ninfer::DeviceBuffer state_in    = uploaded(initial);
     ninfer::DeviceBuffer state_out(in_place ? 1 : state_in.size());
     ninfer::DeviceBuffer output(in.v.size() * sizeof(hip_bfloat16));
     const std::size_t workspace_bytes =
@@ -40,7 +40,7 @@ void qualify_affine(int width, std::uint32_t chunk, bool in_place, hipStream_t s
     expected_output.reserve(in.v.size());
     for (int token = 0; token < width; ++token) {
         OracleStep next = step(in, token, state, true);
-        state = std::move(next.state);
+        state           = std::move(next.state);
         expected_output.insert(expected_output.end(), next.output.begin(), next.output.end());
     }
     require_output(copied<hip_bfloat16>(output, in.v.size()), expected_output,
@@ -63,7 +63,7 @@ TimingSamples timing_samples(hipStream_t stream, Launch&& launch) {
     HIP_CHECK(hipStreamSynchronize(stream));
     TimingSamples result;
     hipEvent_t begin = nullptr;
-    hipEvent_t end = nullptr;
+    hipEvent_t end   = nullptr;
     HIP_CHECK(hipEventCreate(&begin));
     HIP_CHECK(hipEventCreate(&end));
     for (float& sample : result.raw) {
@@ -111,9 +111,10 @@ TimingRow timing_row(int width, std::uint32_t chunk, hipStream_t stream) {
             static_cast<const hip_bfloat16*>(device.k.data()),
             static_cast<const hip_bfloat16*>(device.v.data()),
             static_cast<const float*>(device.g.data()),
-            static_cast<const float*>(device.beta.data()), static_cast<const float*>(state_in.data()),
-            static_cast<float*>(state_out.data()), static_cast<hip_bfloat16*>(output.data()),
-            workspace.data(), workspace.size(), width, chunk, kScale, stream));
+            static_cast<const float*>(device.beta.data()),
+            static_cast<const float*>(state_in.data()), static_cast<float*>(state_out.data()),
+            static_cast<hip_bfloat16*>(output.data()), workspace.data(), workspace.size(), width,
+            chunk, kScale, stream));
     });
     return {width, chunk, incumbent, candidate};
 }
@@ -134,8 +135,7 @@ void write_report(const std::filesystem::path& path, const std::vector<TimingRow
         << "{\n  \"schema\": \"ninfer.r9700.gdn_affine_chunk_qualification.v2\",\n"
         << "  \"architecture\": \"gfx1201\",\n"
         << "  \"disposition\": \""
-        << (admitted ? "admitted_qualification_only_unpromoted"
-                     : "rejected_performance_gate")
+        << (admitted ? "admitted_qualification_only_unpromoted" : "rejected_performance_gate")
         << "\",\n"
         << "  \"production_dispatch\": false,\n"
         << "  \"numerical\": {\"complete_fp64_oracle\": true},\n"
@@ -147,17 +147,15 @@ void write_report(const std::filesystem::path& path, const std::vector<TimingRow
         out << "    {\"tokens\":" << row.width << ",\"chunk\":" << row.chunk
             << ",\"incumbent_raw_ms\":";
         append_samples(out, row.incumbent.raw);
-        out << ",\"incumbent_median_ms\":" << row.incumbent.median_ms
-            << ",\"candidate_raw_ms\":";
+        out << ",\"incumbent_median_ms\":" << row.incumbent.median_ms << ",\"candidate_raw_ms\":";
         append_samples(out, row.candidate.raw);
         out << ",\"candidate_median_ms\":" << row.candidate.median_ms
-            << ",\"median_speedup\":"
-            << row.incumbent.median_ms / row.candidate.median_ms << "}"
+            << ",\"median_speedup\":" << row.incumbent.median_ms / row.candidate.median_ms << "}"
             << (index + 1U == rows.size() ? "\n" : ",\n");
     }
     out << "  ]\n}\n";
     const std::string payload = out.str();
-    const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    const int descriptor      = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
     if (descriptor < 0) fail("refusing to overwrite or could not create affine timing report");
     std::size_t offset = 0U;
     while (offset < payload.size()) {
@@ -185,7 +183,7 @@ int main(int argc, char** argv) {
         if (argc == 4 && std::string_view(argv[1]) == "--benchmark" &&
             std::string_view(argv[2]) == "--out-json") {
             benchmark = true;
-            output = argv[3];
+            output    = argv[3];
         } else if (argc != 1) {
             fail("usage: gdn_affine_chunk_qual [--benchmark --out-json PATH]");
         }
@@ -212,9 +210,7 @@ int main(int argc, char** argv) {
                 selected != rows.end() && selected->candidate.median_ms <= 1.247F &&
                 selected->incumbent.median_ms / selected->candidate.median_ms >= 2.25F;
             write_report(output, rows, admitted);
-            if (!admitted) {
-                fail("C64 misses the >=75 ms aggregate P2048 admission gate");
-            }
+            if (!admitted) { fail("C64 misses the >=75 ms aggregate P2048 admission gate"); }
         }
         HIP_CHECK(hipStreamDestroy(stream));
         std::cout << "GDN affine chunk qualification: PASS max_output_abs=" << g_max_output_abs

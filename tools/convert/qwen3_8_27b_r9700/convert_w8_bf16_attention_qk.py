@@ -46,9 +46,7 @@ def preflight_conversion(
 ) -> W8Bf16AttentionQueryKeyConversionPreflight:
     model = Path(model_dir)
     w8_bf16_attention_qk_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
@@ -121,9 +119,7 @@ def convert(
                 raise RuntimeError(
                     "W8/BF16-attention-QK writer plan differs from completed preflight"
                 )
-            for index, spec in enumerate(
-                w8_bf16_attention_qk_inventory.OBJECT_SPECS, start=1
-            ):
+            for index, spec in enumerate(w8_bf16_attention_qk_inventory.OBJECT_SPECS, start=1):
                 if isinstance(spec, w8_bf16_attention_qk_inventory.ResourceSpec):
                     payload = resource_payloads[spec.name]
                 else:
@@ -133,8 +129,7 @@ def convert(
                 writer.write(spec.name, payload)
                 del payload
                 print(
-                    f"[{index}/{len(w8_bf16_attention_qk_inventory.OBJECT_SPECS)}] "
-                    f"{spec.name}",
+                    f"[{index}/{len(w8_bf16_attention_qk_inventory.OBJECT_SPECS)}] {spec.name}",
                     flush=True,
                 )
 

@@ -6,7 +6,11 @@
 
 namespace ninfer::targets::qwen3_8_27b::detail::fp8_capped {
 
-struct Matrix { WeightsProfile profile; std::string_view name; };
+struct Matrix {
+    WeightsProfile profile;
+    std::string_view name;
+};
+
 inline constexpr Matrix matrices[] = {
 #define NINFER_QWEN38_FP8_CAP_RECIPE(symbol, id)
 #define NINFER_QWEN38_FP8_CAP_MATRIX(symbol, name) {WeightsProfile::symbol, name},

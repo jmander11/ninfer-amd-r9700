@@ -22,26 +22,28 @@ using Global = __attribute__((address_space(1))) T;
 
 template <class T>
 __device__ __forceinline__ Global<T>* global(T* pointer) {
-    return (Global<T>*)(pointer);  // generic to global address space
+    return (Global<T>*)(pointer); // generic to global address space
 }
 
 // 16-byte load through a global pointer.
 template <class T>
 __device__ __forceinline__ uint4 load16(const Global<T>* pointer) {
-    using Vector = unsigned __attribute__((ext_vector_type(4)));
+    using Vector       = unsigned __attribute__((ext_vector_type(4)));
     const Vector value = *reinterpret_cast<const Global<const Vector>*>(pointer);
     return uint4{value.x, value.y, value.z, value.w};
 }
 
 struct LaunchCta {
     __device__ __forceinline__ std::uint32_t thread() const { return threadIdx.x; }
+
     __device__ __forceinline__ std::uint32_t threads() const { return blockDim.x; }
+
     __device__ __forceinline__ uint3 block() const {
         return uint3{blockIdx.x, blockIdx.y, blockIdx.z};
     }
-    __device__ __forceinline__ uint3 grid() const {
-        return uint3{gridDim.x, gridDim.y, gridDim.z};
-    }
+
+    __device__ __forceinline__ uint3 grid() const { return uint3{gridDim.x, gridDim.y, gridDim.z}; }
+
     __device__ __forceinline__ void sync() const { __syncthreads(); }
 };
 
@@ -85,9 +87,13 @@ struct PhaseCta {
     std::uint32_t waves_;
 
     __device__ __forceinline__ std::uint32_t thread() const { return thread_; }
+
     __device__ __forceinline__ std::uint32_t threads() const { return threads_; }
+
     __device__ __forceinline__ uint3 block() const { return block_; }
+
     __device__ __forceinline__ uint3 grid() const { return grid_; }
+
     __device__ __forceinline__ void sync() const {
         if constexpr (kWholeBlock) {
             __syncthreads();

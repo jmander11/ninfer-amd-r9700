@@ -20,15 +20,15 @@
 namespace {
 
 constexpr int kCodebookRows = ninfer::ops::kDflash2PathSelectCodebookRows;
-int kV = kCodebookRows;
-int kT = 2;
-int kB = 2;
-constexpr int kH = ninfer::ops::kDflash2PathSelectHidden;
-constexpr int kR = ninfer::ops::kDflash2PathSelectRank;
-constexpr int kTop = ninfer::ops::kDflash2PathSelectTopK;
-constexpr int kW = 5;
-constexpr int kW8Group = 32;
-constexpr int kQ4Group = 64;
+int kV                      = kCodebookRows;
+int kT                      = 2;
+int kB                      = 2;
+constexpr int kH            = ninfer::ops::kDflash2PathSelectHidden;
+constexpr int kR            = ninfer::ops::kDflash2PathSelectRank;
+constexpr int kTop          = ninfer::ops::kDflash2PathSelectTopK;
+constexpr int kW            = 5;
+constexpr int kW8Group      = 32;
+constexpr int kQ4Group      = 64;
 
 enum class ProjectionKind : std::uint8_t { BF16, W8, Q4 };
 
@@ -52,9 +52,7 @@ std::uint16_t half_bits(float value) {
     return std::bit_cast<std::uint16_t>(static_cast<_Float16>(value));
 }
 
-double half_value(std::uint16_t bits) {
-    return static_cast<double>(std::bit_cast<_Float16>(bits));
-}
+double half_value(std::uint16_t bits) { return static_cast<double>(std::bit_cast<_Float16>(bits)); }
 
 double bf16_value(hip_bfloat16 value) { return static_cast<double>(static_cast<float>(value)); }
 
@@ -85,26 +83,23 @@ struct ProjectionFixture {
 
     [[nodiscard]] double w8_at(int row, int column) const {
         const auto code = codes[static_cast<std::size_t>(row) * kH + column];
-        const auto scale = scales[static_cast<std::size_t>(row) * (kH / kW8Group) +
-                                  column / kW8Group];
+        const auto scale =
+            scales[static_cast<std::size_t>(row) * (kH / kW8Group) + column / kW8Group];
         return static_cast<double>(code) * half_value(scale);
     }
 
     [[nodiscard]] double q4_at(int row, int column) const {
         const std::size_t index = static_cast<std::size_t>(row) * kH + column;
-        const unsigned nibble =
-            (q4_codes_row[index >> 1U] >> ((index & 1U) * 4U)) & 0x0fU;
-        const int code = nibble >= 8U ? static_cast<int>(nibble) - 16
-                                      : static_cast<int>(nibble);
-        const auto scale = q4_scales_row[static_cast<std::size_t>(row) * (kH / kQ4Group) +
-                                         column / kQ4Group];
+        const unsigned nibble   = (q4_codes_row[index >> 1U] >> ((index & 1U) * 4U)) & 0x0fU;
+        const int code = nibble >= 8U ? static_cast<int>(nibble) - 16 : static_cast<int>(nibble);
+        const auto scale =
+            q4_scales_row[static_cast<std::size_t>(row) * (kH / kQ4Group) + column / kQ4Group];
         return static_cast<double>(code) * half_value(scale);
     }
 };
 
 void set_nibble(std::vector<std::uint8_t>& packed, std::size_t index, int code) {
-    packed[index >> 1U] |=
-        static_cast<std::uint8_t>((code & 0x0f) << ((index & 1U) * 4U));
+    packed[index >> 1U] |= static_cast<std::uint8_t>((code & 0x0f) << ((index & 1U) * 4U));
 }
 
 ProjectionFixture make_projection() {
@@ -123,7 +118,7 @@ ProjectionFixture make_projection() {
                 half_bits(scale);
             for (int lane = 0; lane < kW8Group; ++lane) {
                 const int column = group * kW8Group + lane;
-                const int code = (row * 13 + group * 7 + lane * 5) % 31 - 15;
+                const int code   = (row * 13 + group * 7 + lane * 5) % 31 - 15;
                 result.codes[static_cast<std::size_t>(row) * kH + column] =
                     static_cast<std::int8_t>(code);
                 result.bf16[static_cast<std::size_t>(row) * kH + column] =
@@ -133,80 +128,79 @@ ProjectionFixture make_projection() {
     }
     for (int row = 0; row < kR; ++row) {
         for (int group = 0; group < kH / kQ4Group; ++group) {
-            const float scale = static_cast<float>(1 + (row + 3 * group) % 5) / 1024.0F;
+            const float scale            = static_cast<float>(1 + (row + 3 * group) % 5) / 1024.0F;
             constexpr std::size_t groups = kH / kQ4Group;
             const std::size_t logical_scale = static_cast<std::size_t>(row) * groups + group;
             const std::size_t n16_scale =
                 ((static_cast<std::size_t>(row) >> 4U) * groups + group) * 16U +
                 (static_cast<std::size_t>(row) & 15U);
             result.q4_scales_row[logical_scale] = half_bits(scale);
-            result.q4_scales[n16_scale] = half_bits(scale);
+            result.q4_scales[n16_scale]         = half_bits(scale);
             for (int lane = 0; lane < kQ4Group; ++lane) {
                 const int code = (row * 13 + group * 7 + lane * 5) % 15 - 7;
                 const std::size_t logical =
                     static_cast<std::size_t>(row) * kH + group * kQ4Group + lane;
                 set_nibble(result.q4_codes_row, logical, code);
-                const std::size_t pair = static_cast<std::size_t>(lane) / 16U;
+                const std::size_t pair   = static_cast<std::size_t>(lane) / 16U;
                 const std::size_t within = static_cast<std::size_t>(lane) % 16U;
                 const std::size_t word =
-                    (((static_cast<std::size_t>(row) >> 4U) * groups + group) * 4U + pair) *
-                        16U +
+                    (((static_cast<std::size_t>(row) >> 4U) * groups + group) * 4U + pair) * 16U +
                     (static_cast<std::size_t>(row) & 15U);
                 set_nibble(result.q4_codes, word * 16U + within, code);
             }
         }
     }
-    result.d_bf16 = upload(result.bf16);
-    result.d_codes = upload(result.codes);
-    result.d_scales = upload(result.scales);
-    result.d_q4_codes = upload(result.q4_codes);
+    result.d_bf16      = upload(result.bf16);
+    result.d_codes     = upload(result.codes);
+    result.d_scales    = upload(result.scales);
+    result.d_q4_codes  = upload(result.q4_codes);
     result.d_q4_scales = upload(result.q4_scales);
 
-    result.bf16_view.payload = result.d_bf16.data();
+    result.bf16_view.payload       = result.d_bf16.data();
     result.bf16_view.payload_bytes = result.d_bf16.size();
-    result.bf16_view.qdata = result.d_bf16.data();
-    result.bf16_view.qdata_bytes = result.d_bf16.size();
-    result.bf16_view.qtype = ninfer::QType::BF16_CTRL;
-    result.bf16_view.layout = ninfer::QuantLayout::Contiguous;
+    result.bf16_view.qdata         = result.d_bf16.data();
+    result.bf16_view.qdata_bytes   = result.d_bf16.size();
+    result.bf16_view.qtype         = ninfer::QType::BF16_CTRL;
+    result.bf16_view.layout        = ninfer::QuantLayout::Contiguous;
 
-    result.w8_view.payload = result.d_codes.data();
+    result.w8_view.payload       = result.d_codes.data();
     result.w8_view.payload_bytes = result.d_codes.size() + result.d_scales.size();
-    result.w8_view.qdata = result.d_codes.data();
-    result.w8_view.qdata_bytes = result.d_codes.size();
-    result.w8_view.scales = result.d_scales.data();
-    result.w8_view.scale_bytes = result.d_scales.size();
-    result.w8_view.qtype = ninfer::QType::W8G32_F16S;
-    result.w8_view.group_size = kW8Group;
-    result.w8_view.group = kW8Group;
-    result.w8_view.layout = ninfer::QuantLayout::RowSplit;
-    result.w8_view.scale_dtype = ninfer::DType::FP16;
-    result.w8_view.scale_ne[0] = kH / kW8Group;
-    result.w8_view.scale_ne[1] = kR;
-    result.w8_view.scale_nb[0] = sizeof(std::uint16_t);
-    result.w8_view.scale_nb[1] = (kH / kW8Group) * sizeof(std::uint16_t);
+    result.w8_view.qdata         = result.d_codes.data();
+    result.w8_view.qdata_bytes   = result.d_codes.size();
+    result.w8_view.scales        = result.d_scales.data();
+    result.w8_view.scale_bytes   = result.d_scales.size();
+    result.w8_view.qtype         = ninfer::QType::W8G32_F16S;
+    result.w8_view.group_size    = kW8Group;
+    result.w8_view.group         = kW8Group;
+    result.w8_view.layout        = ninfer::QuantLayout::RowSplit;
+    result.w8_view.scale_dtype   = ninfer::DType::FP16;
+    result.w8_view.scale_ne[0]   = kH / kW8Group;
+    result.w8_view.scale_ne[1]   = kR;
+    result.w8_view.scale_nb[0]   = sizeof(std::uint16_t);
+    result.w8_view.scale_nb[1]   = (kH / kW8Group) * sizeof(std::uint16_t);
 
-    result.q4_view.payload = result.d_q4_codes.data();
+    result.q4_view.payload       = result.d_q4_codes.data();
     result.q4_view.payload_bytes = result.d_q4_codes.size() + result.d_q4_scales.size();
-    result.q4_view.qdata = result.d_q4_codes.data();
-    result.q4_view.qdata_bytes = result.d_q4_codes.size();
-    result.q4_view.scales = result.d_q4_scales.data();
-    result.q4_view.scale_bytes = result.d_q4_scales.size();
-    result.q4_view.qtype = ninfer::QType::Q4G64_F16S;
-    result.q4_view.group_size = kQ4Group;
-    result.q4_view.group = kQ4Group;
-    result.q4_view.layout = ninfer::QuantLayout::Q4N16K16;
-    result.q4_view.scale_dtype = ninfer::DType::FP16;
-    result.q4_view.scale_ne[0] = kH / kQ4Group;
-    result.q4_view.scale_ne[1] = kR;
-    result.q4_view.scale_nb[0] = sizeof(std::uint16_t);
-    result.q4_view.scale_nb[1] = (kH / kQ4Group) * sizeof(std::uint16_t);
+    result.q4_view.qdata         = result.d_q4_codes.data();
+    result.q4_view.qdata_bytes   = result.d_q4_codes.size();
+    result.q4_view.scales        = result.d_q4_scales.data();
+    result.q4_view.scale_bytes   = result.d_q4_scales.size();
+    result.q4_view.qtype         = ninfer::QType::Q4G64_F16S;
+    result.q4_view.group_size    = kQ4Group;
+    result.q4_view.group         = kQ4Group;
+    result.q4_view.layout        = ninfer::QuantLayout::Q4N16K16;
+    result.q4_view.scale_dtype   = ninfer::DType::FP16;
+    result.q4_view.scale_ne[0]   = kH / kQ4Group;
+    result.q4_view.scale_ne[1]   = kR;
+    result.q4_view.scale_nb[0]   = sizeof(std::uint16_t);
+    result.q4_view.scale_nb[1]   = (kH / kQ4Group) * sizeof(std::uint16_t);
 
     for (ninfer::Weight* weight : {&result.bf16_view, &result.w8_view, &result.q4_view}) {
-        weight->ndim = 2;
-        weight->n = kR;
-        weight->k = kH;
-        weight->shape[0] = kR;
-        weight->shape[1] = kH;
+        weight->ndim            = 2;
+        weight->n               = kR;
+        weight->k               = kH;
+        weight->shape[0]        = kR;
+        weight->shape[1]        = kH;
         weight->padded_shape[0] = kR;
         weight->padded_shape[1] = kH;
     }
@@ -221,9 +215,9 @@ struct Corpus {
     std::vector<std::int32_t> anchors{17, 29};
     std::vector<std::int32_t> positions{101, 4093};
     std::vector<std::int32_t> mapped_ids;
-    std::array<int, 18> special_rows{
-        7, 8192, 31, 65537, 1024, 131071, 16384, 248319, 4097,
-        98303, 2, 196607, 32768, 77, 225279, 123457, 2048, 147455};
+    std::array<int, 18> special_rows{7,     8192,   31,     65537,  1024, 131071,
+                                     16384, 248319, 4097,   98303,  2,    196607,
+                                     32768, 77,     225279, 123457, 2048, 147455};
 };
 
 void fill_code(std::vector<hip_bfloat16>& book, int token, int salt) {
@@ -239,7 +233,7 @@ Corpus make_corpus() {
     result.anchors.resize(kB);
     result.positions.resize(kB);
     for (int batch = 0; batch < kB; ++batch) {
-        result.anchors[batch] = 17 + 12 * batch;
+        result.anchors[batch]   = 17 + 12 * batch;
         result.positions[batch] = 101 + 3992 * batch;
     }
     result.logits.assign(static_cast<std::size_t>(kV) * kT * kB, hip_bfloat16(-6.0F));
@@ -264,16 +258,15 @@ Corpus make_corpus() {
                 if (candidate == 11) level = 10;
                 const float value = 4.0F - static_cast<float>(level) * 0.25F +
                                     static_cast<float>(token + 2 * batch) / 64.0F;
-                result.logits[column * kV + result.special_rows[candidate]] =
-                    hip_bfloat16(value);
+                result.logits[column * kV + result.special_rows[candidate]] = hip_bfloat16(value);
             }
         }
     }
 
     std::vector<int> code_tokens(result.anchors.begin(), result.anchors.end());
     for (int index = 0; index < 18; ++index) {
-        const int row = result.special_rows[index];
-        const int mapped = (kV == 131072 ? 200000 : 2000) + (index * 7) % 19;
+        const int row          = result.special_rows[index];
+        const int mapped       = (kV == 131072 ? 200000 : 2000) + (index * 7) % 19;
         result.mapped_ids[row] = mapped;
         code_tokens.push_back(row);
         code_tokens.push_back(mapped);
@@ -287,7 +280,11 @@ Corpus make_corpus() {
     return result;
 }
 
-struct Candidate { double unary; int row; int token; };
+struct Candidate {
+    double unary;
+    int row;
+    int token;
+};
 
 bool topk_better(const Candidate& lhs, const Candidate& rhs) {
     return lhs.unary > rhs.unary || (lhs.unary == rhs.unary && lhs.row < rhs.row);
@@ -307,9 +304,8 @@ std::vector<Candidate> topk(const Corpus& corpus, int token, int batch, bool map
     return values;
 }
 
-std::vector<double> project_hidden(const Corpus& corpus,
-                                         const ProjectionFixture& projection,
-                                         ProjectionKind kind) {
+std::vector<double> project_hidden(const Corpus& corpus, const ProjectionFixture& projection,
+                                   ProjectionKind kind) {
     std::vector<double> result(static_cast<std::size_t>(kR) * kT * kB);
     for (int batch = 0; batch < kB; ++batch) {
         for (int token = 0; token < kT; ++token) {
@@ -318,11 +314,10 @@ std::vector<double> project_hidden(const Corpus& corpus,
                 double sum = 0.0;
                 for (int feature = 0; feature < kH; ++feature) {
                     const double input = bf16_value(corpus.hidden[column * kH + feature]);
-                    const double weight = kind == ProjectionKind::W8
-                                              ? projection.w8_at(row, feature)
-                                              : kind == ProjectionKind::Q4
-                                                    ? projection.q4_at(row, feature)
-                                                    : projection.bf16_at(row, feature);
+                    const double weight =
+                        kind == ProjectionKind::W8   ? projection.w8_at(row, feature)
+                        : kind == ProjectionKind::Q4 ? projection.q4_at(row, feature)
+                                                     : projection.bf16_at(row, feature);
                     sum = std::fma(input, weight, sum);
                 }
                 result[column * kR + row] = sum;
@@ -335,13 +330,13 @@ std::vector<double> project_hidden(const Corpus& corpus,
 double markov_score(const Corpus& corpus, const std::vector<double>& projected,
                     const Candidate& candidate, int previous, int token, int batch) {
     const std::size_t column = column_index(token, batch);
-    double score = candidate.unary;
+    double score             = candidate.unary;
     for (int rank = 0; rank < kR; ++rank) {
         const double h = projected[column * kR + rank];
-        const double pred = bf16_value(
-            corpus.predecessor[static_cast<std::size_t>(previous) * kR + rank]);
-        const double succ = bf16_value(
-            corpus.successor[static_cast<std::size_t>(candidate.token) * kR + rank]);
+        const double pred =
+            bf16_value(corpus.predecessor[static_cast<std::size_t>(previous) * kR + rank]);
+        const double succ =
+            bf16_value(corpus.successor[static_cast<std::size_t>(candidate.token) * kR + rank]);
         score = std::fma(pred * h, succ, score);
     }
     return score;
@@ -353,8 +348,7 @@ struct ChainOracle {
     std::vector<float> selector_q;
 };
 
-ChainOracle chain_oracle(const Corpus& corpus, const std::vector<double>& projected,
-                         bool mapped) {
+ChainOracle chain_oracle(const Corpus& corpus, const std::vector<double>& projected, bool mapped) {
     ChainOracle out;
     out.path.resize(kT * kB);
     out.selector_ids.resize(kTop * kT * kB);
@@ -363,11 +357,11 @@ ChainOracle chain_oracle(const Corpus& corpus, const std::vector<double>& projec
         int previous = corpus.anchors[batch];
         for (int token = 0; token < kT; ++token) {
             const auto candidates = topk(corpus, token, batch, mapped);
-            int pick = 0;
+            int pick              = 0;
             double best = markov_score(corpus, projected, candidates[0], previous, token, batch);
             for (int index = 1; index < kTop; ++index) {
-                const double score = markov_score(
-                    corpus, projected, candidates[index], previous, token, batch);
+                const double score =
+                    markov_score(corpus, projected, candidates[index], previous, token, batch);
                 if (score > best ||
                     (score == best && candidates[index].token < candidates[pick].token)) {
                     best = score;
@@ -375,12 +369,12 @@ ChainOracle chain_oracle(const Corpus& corpus, const std::vector<double>& projec
                 }
             }
             const std::size_t column = column_index(token, batch);
-            out.path[column] = candidates[pick].token;
+            out.path[column]         = candidates[pick].token;
             for (int index = 0; index < kTop; ++index) {
                 out.selector_ids[column * kTop + index] = candidates[index].token;
             }
             out.selector_q[column * kTop + pick] = 1.0F;
-            previous = candidates[pick].token;
+            previous                             = candidates[pick].token;
         }
     }
     return out;
@@ -390,8 +384,7 @@ struct TreeOracle {
     std::vector<std::int32_t> verify, parent, cache, rope, mask, live;
 };
 
-TreeOracle tree_oracle(const Corpus& corpus, const std::vector<double>& projected,
-                       bool mapped) {
+TreeOracle tree_oracle(const Corpus& corpus, const std::vector<double>& projected, bool mapped) {
     TreeOracle out;
     out.verify.resize(kW * kB);
     out.parent.resize(kW * kB);
@@ -400,27 +393,39 @@ TreeOracle tree_oracle(const Corpus& corpus, const std::vector<double>& projecte
     out.mask.resize(kW * kB);
     out.live.resize(kB);
     for (int batch = 0; batch < kB; ++batch) {
-        struct Node { int id; int parent; int depth; double score; };
+        struct Node {
+            int id;
+            int parent;
+            int depth;
+            double score;
+        };
+
         std::vector<Node> nodes{{corpus.anchors[batch], -1, 0, 0.0}};
         std::vector<int> frontier{0};
         for (int token = 0; token < kT; ++token) {
             const auto candidates = topk(corpus, token, batch, mapped);
-            struct Expansion { double score; int parent; int candidate; };
+
+            struct Expansion {
+                double score;
+                int parent;
+                int candidate;
+            };
+
             std::vector<Expansion> expansions;
             for (int parent : frontier) {
                 for (const Candidate& candidate : candidates) {
-                    expansions.push_back({nodes[parent].score + markov_score(
-                                              corpus, projected, candidate, nodes[parent].id,
-                                              token, batch),
-                                          parent, candidate.token});
+                    expansions.push_back(
+                        {nodes[parent].score + markov_score(corpus, projected, candidate,
+                                                            nodes[parent].id, token, batch),
+                         parent, candidate.token});
                 }
             }
-            std::sort(expansions.begin(), expansions.end(), [](const Expansion& lhs,
-                                                               const Expansion& rhs) {
-                if (lhs.score != rhs.score) return lhs.score > rhs.score;
-                if (lhs.candidate != rhs.candidate) return lhs.candidate < rhs.candidate;
-                return lhs.parent < rhs.parent;
-            });
+            std::sort(expansions.begin(), expansions.end(),
+                      [](const Expansion& lhs, const Expansion& rhs) {
+                          if (lhs.score != rhs.score) return lhs.score > rhs.score;
+                          if (lhs.candidate != rhs.candidate) return lhs.candidate < rhs.candidate;
+                          return lhs.parent < rhs.parent;
+                      });
             frontier.clear();
             for (int beam = 0; beam < 2 && beam < static_cast<int>(expansions.size()); ++beam) {
                 const Expansion& item = expansions[beam];
@@ -432,24 +437,24 @@ TreeOracle tree_oracle(const Corpus& corpus, const std::vector<double>& projecte
         out.live[batch] = count;
         for (int index = 0; index < count; ++index) {
             const std::size_t dst = static_cast<std::size_t>(batch) * kW + index;
-            out.verify[dst] = nodes[index].id;
-            out.parent[dst] = index == 0 ? -1 : nodes[index].parent;
-            out.cache[dst] = corpus.positions[batch] + index;
-            out.rope[dst] = corpus.positions[batch] + nodes[index].depth;
-            int mask = 0;
+            out.verify[dst]       = nodes[index].id;
+            out.parent[dst]       = index == 0 ? -1 : nodes[index].parent;
+            out.cache[dst]        = corpus.positions[batch] + index;
+            out.rope[dst]         = corpus.positions[batch] + nodes[index].depth;
+            int mask              = 0;
             for (int current = index; current >= 0; current = nodes[current].parent) {
                 mask |= 1 << current;
             }
             out.mask[dst] = mask;
         }
         for (int index = count; index < kW; ++index) {
-            const std::size_t dst = static_cast<std::size_t>(batch) * kW + index;
+            const std::size_t dst  = static_cast<std::size_t>(batch) * kW + index;
             const std::size_t last = static_cast<std::size_t>(batch) * kW + count - 1;
-            out.verify[dst] = out.verify[last];
-            out.parent[dst] = out.parent[last];
-            out.cache[dst] = corpus.positions[batch] + index;
-            out.rope[dst] = out.rope[last];
-            out.mask[dst] = out.mask[last];
+            out.verify[dst]        = out.verify[last];
+            out.parent[dst]        = out.parent[last];
+            out.cache[dst]         = corpus.positions[batch] + index;
+            out.rope[dst]          = out.rope[last];
+            out.mask[dst]          = out.mask[last];
         }
     }
     return out;
@@ -459,8 +464,8 @@ struct DeviceFixture {
     ninfer::DeviceBuffer logits, hidden, predecessor, successor, anchors, positions, mapped_ids,
         configs;
     ninfer::DeviceBuffer path{static_cast<std::size_t>(kT * kB) * sizeof(std::int32_t)};
-    ninfer::DeviceBuffer selector_ids{
-        static_cast<std::size_t>(kTop * kT * kB) * sizeof(std::int32_t)};
+    ninfer::DeviceBuffer selector_ids{static_cast<std::size_t>(kTop * kT * kB) *
+                                      sizeof(std::int32_t)};
     ninfer::DeviceBuffer selector_q{static_cast<std::size_t>(kTop * kT * kB) * sizeof(float)};
 
     explicit DeviceFixture(const Corpus& corpus)
@@ -484,19 +489,17 @@ void require_equal(const std::vector<T>& actual, const std::vector<T>& expected,
 
 void require_workspace_peak(const ninfer::WorkspaceArena& workspace, ninfer::QType qtype,
                             const char* label) {
-    const std::size_t columns = static_cast<std::size_t>(kT * kB);
-    const std::size_t split = columns * 32U * kTop;
-    const std::size_t merged = columns * kTop;
-    const std::size_t topk_bytes =
-        (split + merged) * (sizeof(float) + sizeof(std::int32_t));
-    const std::size_t expected = static_cast<std::size_t>(kR) * kT * kB * sizeof(std::uint16_t) +
-        std::max(topk_bytes,
-                 ninfer::ops::linear_workspace_capacity_bytes(qtype, kT, kH));
+    const std::size_t columns    = static_cast<std::size_t>(kT * kB);
+    const std::size_t split      = columns * 32U * kTop;
+    const std::size_t merged     = columns * kTop;
+    const std::size_t topk_bytes = (split + merged) * (sizeof(float) + sizeof(std::int32_t));
+    const std::size_t expected =
+        static_cast<std::size_t>(kR) * kT * kB * sizeof(std::uint16_t) +
+        std::max(topk_bytes, ninfer::ops::linear_workspace_capacity_bytes(qtype, kT, kH));
     if (workspace.peak_used() != expected || workspace.peak_used() > workspace.capacity()) {
         fail(std::string(label) + " workspace query/execution mismatch: peak=" +
-             std::to_string(workspace.peak_used()) + " expected=" +
-             std::to_string(expected) + " capacity=" +
-             std::to_string(workspace.capacity()));
+             std::to_string(workspace.peak_used()) + " expected=" + std::to_string(expected) +
+             " capacity=" + std::to_string(workspace.capacity()));
     }
 }
 
@@ -506,8 +509,8 @@ void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
     std::vector<ninfer::ops::SamplingConfig> configs(kB);
     for (int row = 0; row < kB; ++row) {
         configs[row].temperature = p_less ? 2.0F : 0.0F;
-        configs[row].p_less = p_less ? 1 : 0;
-        configs[row].seed = 97 + row;
+        configs[row].p_less      = p_less ? 1 : 0;
+        configs[row].seed        = 97 + row;
     }
     data.configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
     ninfer::Tensor logits(data.logits.data(), ninfer::DType::BF16, {kV, kT, kB});
@@ -520,18 +523,19 @@ void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
     ninfer::Tensor path(data.path.data(), ninfer::DType::I32, {kT, kB});
     ninfer::Tensor selector_ids(data.selector_ids.data(), ninfer::DType::I32, {kTop, kT, kB});
     ninfer::Tensor selector_q(data.selector_q.data(), ninfer::DType::FP32, {kTop, kT, kB});
-    const ninfer::Weight& weight = kind == ProjectionKind::BF16
-                                       ? projection.bf16_view
-                                       : kind == ProjectionKind::W8 ? projection.w8_view
-                                                                    : projection.q4_view;
-    const auto projected = project_hidden(corpus, projection, kind);
-    const ChainOracle expected = chain_oracle(corpus, projected, mapped);
-    ninfer::WorkspaceArena workspace(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
-        weight.qtype, kT, kT, kB));
-    const auto invoke = [&] { ninfer::ops::dflash2_path_select(
-        logits, hidden, weight, pred, succ, anchors, positions,
-        static_cast<const ninfer::ops::SamplingConfig*>(data.configs.data()), path, workspace,
-        device.stream, mapped ? &mapped_ids : nullptr, &selector_ids, &selector_q); };
+    const ninfer::Weight& weight = kind == ProjectionKind::BF16 ? projection.bf16_view
+                                   : kind == ProjectionKind::W8 ? projection.w8_view
+                                                                : projection.q4_view;
+    const auto projected         = project_hidden(corpus, projection, kind);
+    const ChainOracle expected   = chain_oracle(corpus, projected, mapped);
+    ninfer::WorkspaceArena workspace(
+        ninfer::ops::dflash2_path_select_workspace_capacity_bytes(weight.qtype, kT, kT, kB));
+    const auto invoke = [&] {
+        ninfer::ops::dflash2_path_select(
+            logits, hidden, weight, pred, succ, anchors, positions,
+            static_cast<const ninfer::ops::SamplingConfig*>(data.configs.data()), path, workspace,
+            device.stream, mapped ? &mapped_ids : nullptr, &selector_ids, &selector_q);
+    };
     const auto check = [&] {
         device.synchronize();
         require_equal(download<std::int32_t>(data.path, expected.path.size()), expected.path,
@@ -547,20 +551,20 @@ void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
     check();
     const auto packed_path = download<std::int32_t>(data.path, expected.path.size());
     const auto packed_ids = download<std::int32_t>(data.selector_ids, expected.selector_ids.size());
-    const auto packed_q = download<float>(data.selector_q, expected.selector_q.size());
+    const auto packed_q   = download<float>(data.selector_q, expected.selector_q.size());
     data.path.fill_async(0xff, device.stream);
     data.selector_ids.fill_async(0xff, device.stream);
     data.selector_q.fill_async(0xff, device.stream);
     for (int sequence = 0; sequence < kB; ++sequence) {
         auto sequence_path = path.slice(1, sequence, 1);
-        auto sequence_ids = selector_ids.slice(2, sequence, 1);
-        auto sequence_q = selector_q.slice(2, sequence, 1);
+        auto sequence_ids  = selector_ids.slice(2, sequence, 1);
+        auto sequence_q    = selector_q.slice(2, sequence, 1);
         ninfer::ops::dflash2_path_select(
             logits.slice(2, sequence, 1), hidden.slice(2, sequence, 1), weight, pred, succ,
             anchors.slice(0, sequence, 1), positions.slice(0, sequence, 1),
             static_cast<const ninfer::ops::SamplingConfig*>(data.configs.data()) + sequence,
-            sequence_path, workspace, device.stream, mapped ? &mapped_ids : nullptr,
-            &sequence_ids, &sequence_q);
+            sequence_path, workspace, device.stream, mapped ? &mapped_ids : nullptr, &sequence_ids,
+            &sequence_q);
     }
     device.synchronize();
     require_equal(download<std::int32_t>(data.path, packed_path.size()), packed_path,
@@ -600,13 +604,13 @@ void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
 void run_sampled_chain(ninfer::DeviceContext& device, const Corpus& corpus,
                        const ProjectionFixture& projection, DeviceFixture& data) {
     constexpr float kDraftTemperature = 0.4F;
-    constexpr int kSeeds = 4000;
+    constexpr int kSeeds              = 4000;
     std::vector<ninfer::ops::SamplingConfig> configs(kB);
     for (int row = 0; row < kB; ++row) {
-        configs[row].temperature = 2.0F;
-        configs[row].p_less = 1;
+        configs[row].temperature       = 2.0F;
+        configs[row].p_less            = 1;
         configs[row].draft_temperature = kDraftTemperature;
-        configs[row].seed = 197 + row;
+        configs[row].seed              = 197 + row;
     }
     ninfer::Tensor logits(data.logits.data(), ninfer::DType::BF16, {kV, kT, kB});
     ninfer::Tensor hidden(data.hidden.data(), ninfer::DType::BF16, {kH, kT, kB});
@@ -624,8 +628,8 @@ void run_sampled_chain(ninfer::DeviceContext& device, const Corpus& corpus,
         data.configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
         ninfer::ops::dflash2_path_select(
             logits, hidden, projection.bf16_view, pred, succ, anchors, positions,
-            static_cast<const ninfer::ops::SamplingConfig*>(data.configs.data()), path,
-            workspace, device.stream, nullptr, &selector_ids, &selector_q);
+            static_cast<const ninfer::ops::SamplingConfig*>(data.configs.data()), path, workspace,
+            device.stream, nullptr, &selector_ids, &selector_q);
         device.synchronize();
     };
     const auto oracle_q = [&](int token, int batch, int previous) {
@@ -633,8 +637,8 @@ void run_sampled_chain(ninfer::DeviceContext& device, const Corpus& corpus,
         std::vector<double> scores(kTop);
         double best = -std::numeric_limits<double>::infinity();
         for (int index = 0; index < kTop; ++index) {
-            scores[index] = markov_score(corpus, projected, candidates[index], previous, token,
-                                         batch);
+            scores[index] =
+                markov_score(corpus, projected, candidates[index], previous, token, batch);
             best = std::max(best, scores[index]);
         }
         double sum = 0.0;
@@ -648,14 +652,14 @@ void run_sampled_chain(ninfer::DeviceContext& device, const Corpus& corpus,
 
     invoke();
     const auto picks = download<std::int32_t>(data.path, kT * kB);
-    const auto ids = download<std::int32_t>(data.selector_ids, kTop * kT * kB);
-    const auto q = download<float>(data.selector_q, kTop * kT * kB);
+    const auto ids   = download<std::int32_t>(data.selector_ids, kTop * kT * kB);
+    const auto q     = download<float>(data.selector_q, kTop * kT * kB);
     for (int batch = 0; batch < kB; ++batch) {
         int previous = corpus.anchors[batch];
         for (int token = 0; token < kT; ++token) {
-            const std::size_t column = column_index(token, batch);
+            const std::size_t column     = column_index(token, batch);
             const auto [candidates, law] = oracle_q(token, batch, previous);
-            bool picked_in_support = false;
+            bool picked_in_support       = false;
             for (int index = 0; index < kTop; ++index) {
                 if (ids[column * kTop + index] != candidates[index].token) {
                     fail("sampled chain top-k support differs from the FP64 oracle");
@@ -663,8 +667,8 @@ void run_sampled_chain(ninfer::DeviceContext& device, const Corpus& corpus,
                 if (std::abs(static_cast<double>(q[column * kTop + index]) - law[index]) > 5e-3) {
                     fail("sampled chain q differs from the FP64 draft-temperature softmax");
                 }
-                picked_in_support |= picks[column] == candidates[index].token &&
-                                     q[column * kTop + index] > 0.0F;
+                picked_in_support |=
+                    picks[column] == candidates[index].token && q[column * kTop + index] > 0.0F;
             }
             if (!picked_in_support) fail("sampled chain draft lies outside its q support");
             previous = picks[column];
@@ -681,8 +685,8 @@ void run_sampled_chain(ninfer::DeviceContext& device, const Corpus& corpus,
             if (first_candidates[index].token == pick) ++counts[index];
         }
     }
-    double chi_square = 0.0;
-    int bins = 0;
+    double chi_square      = 0.0;
+    int bins               = 0;
     double pooled_expected = 0.0;
     double pooled_observed = 0.0;
     for (int index = 0; index < kTop; ++index) {
@@ -732,15 +736,15 @@ void run_tree(ninfer::DeviceContext& device, const Corpus& corpus,
     ninfer::Tensor rope(d_rope.data(), ninfer::DType::I32, {kW, kB});
     ninfer::Tensor mask(d_mask.data(), ninfer::DType::I32, {kW, kB});
     ninfer::Tensor live(d_live.data(), ninfer::DType::I32, {kB});
-    const ninfer::Weight& weight = kind == ProjectionKind::W8 ? projection.w8_view
-                                                              : projection.q4_view;
-    const auto projected = project_hidden(corpus, projection, kind);
+    const ninfer::Weight& weight =
+        kind == ProjectionKind::W8 ? projection.w8_view : projection.q4_view;
+    const auto projected      = project_hidden(corpus, projection, kind);
     const TreeOracle expected = tree_oracle(corpus, projected, true);
-    ninfer::WorkspaceArena workspace(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
-        weight.qtype, kT, kT, kB));
-    ninfer::ops::dflash2_tree_select(logits, hidden, weight, pred, succ, anchors, frontiers,
-                                     verify, parent, cache, rope, mask, live, workspace,
-                                     device.stream, &mapped_ids);
+    ninfer::WorkspaceArena workspace(
+        ninfer::ops::dflash2_path_select_workspace_capacity_bytes(weight.qtype, kT, kT, kB));
+    ninfer::ops::dflash2_tree_select(logits, hidden, weight, pred, succ, anchors, frontiers, verify,
+                                     parent, cache, rope, mask, live, workspace, device.stream,
+                                     &mapped_ids);
     device.synchronize();
     require_equal(download<std::int32_t>(d_verify, expected.verify.size()), expected.verify,
                   "tree verify ids");
@@ -757,25 +761,25 @@ void run_tree(ninfer::DeviceContext& device, const Corpus& corpus,
     require_workspace_peak(workspace, weight.qtype, "tree");
     const auto packed_verify = download<std::int32_t>(d_verify, expected.verify.size());
     const auto packed_parent = download<std::int32_t>(d_parent, expected.parent.size());
-    const auto packed_cache = download<std::int32_t>(d_cache, expected.cache.size());
-    const auto packed_rope = download<std::int32_t>(d_rope, expected.rope.size());
-    const auto packed_mask = download<std::int32_t>(d_mask, expected.mask.size());
-    const auto packed_live = download<std::int32_t>(d_live, expected.live.size());
+    const auto packed_cache  = download<std::int32_t>(d_cache, expected.cache.size());
+    const auto packed_rope   = download<std::int32_t>(d_rope, expected.rope.size());
+    const auto packed_mask   = download<std::int32_t>(d_mask, expected.mask.size());
+    const auto packed_live   = download<std::int32_t>(d_live, expected.live.size());
     for (auto* buffer : {&d_verify, &d_parent, &d_cache, &d_rope, &d_mask, &d_live}) {
         buffer->fill_async(0xff, device.stream);
     }
     for (int sequence = 0; sequence < kB; ++sequence) {
         auto sequence_verify = verify.slice(1, sequence, 1);
         auto sequence_parent = parent.slice(1, sequence, 1);
-        auto sequence_cache = cache.slice(1, sequence, 1);
-        auto sequence_rope = rope.slice(1, sequence, 1);
-        auto sequence_mask = mask.slice(1, sequence, 1);
-        auto sequence_live = live.slice(0, sequence, 1);
+        auto sequence_cache  = cache.slice(1, sequence, 1);
+        auto sequence_rope   = rope.slice(1, sequence, 1);
+        auto sequence_mask   = mask.slice(1, sequence, 1);
+        auto sequence_live   = live.slice(0, sequence, 1);
         ninfer::ops::dflash2_tree_select(
             logits.slice(2, sequence, 1), hidden.slice(2, sequence, 1), weight, pred, succ,
-            anchors.slice(0, sequence, 1), frontiers.slice(0, sequence, 1),
-            sequence_verify, sequence_parent, sequence_cache, sequence_rope, sequence_mask,
-            sequence_live, workspace, device.stream, &mapped_ids);
+            anchors.slice(0, sequence, 1), frontiers.slice(0, sequence, 1), sequence_verify,
+            sequence_parent, sequence_cache, sequence_rope, sequence_mask, sequence_live, workspace,
+            device.stream, &mapped_ids);
     }
     device.synchronize();
     require_equal(download<std::int32_t>(d_verify, packed_verify.size()), packed_verify,
@@ -797,8 +801,7 @@ void expect_invalid(Function&& function, const char* label) {
     try {
         function();
         fail(std::string(label) + ": malformed weight was accepted");
-    } catch (const std::invalid_argument&) {
-    }
+    } catch (const std::invalid_argument&) {}
 }
 
 void run_malformed_planes(ninfer::DeviceContext& device, const ProjectionFixture& projection,
@@ -826,16 +829,15 @@ void run_malformed_planes(ninfer::DeviceContext& device, const ProjectionFixture
     short_scales.scale_bytes -= sizeof(std::uint16_t);
     expect_invalid([&] { invoke(short_scales); }, "short W8 scale plane");
     ninfer::Weight overlap = projection.w8_view;
-    overlap.scales = overlap.qdata;
+    overlap.scales         = overlap.qdata;
     expect_invalid([&] { invoke(overlap); }, "overlapping W8 planes");
-    ninfer::Weight high_plane = projection.w8_view;
-    high_plane.qhigh = high_plane.qdata;
+    ninfer::Weight high_plane   = projection.w8_view;
+    high_plane.qhigh            = high_plane.qdata;
     high_plane.high_plane_bytes = 1;
     expect_invalid([&] { invoke(high_plane); }, "unexpected W8 high plane");
 
-    ninfer::WorkspaceArena q4_workspace(
-        ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
-            projection.q4_view.qtype, kT, kT, kB));
+    ninfer::WorkspaceArena q4_workspace(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
+        projection.q4_view.qtype, kT, kT, kB));
     auto invoke_q4 = [&](const ninfer::Weight& weight) {
         q4_workspace.reset();
         ninfer::ops::dflash2_path_select(
@@ -850,10 +852,10 @@ void run_malformed_planes(ninfer::DeviceContext& device, const ProjectionFixture
     short_q4_scales.scale_bytes -= sizeof(std::uint16_t);
     expect_invalid([&] { invoke_q4(short_q4_scales); }, "short Q4 scale plane");
     ninfer::Weight overlap_q4 = projection.q4_view;
-    overlap_q4.scales = overlap_q4.qdata;
+    overlap_q4.scales         = overlap_q4.qdata;
     expect_invalid([&] { invoke_q4(overlap_q4); }, "overlapping Q4 planes");
     ninfer::Weight retired_q4_layout = projection.q4_view;
-    retired_q4_layout.layout = ninfer::QuantLayout::RowSplit;
+    retired_q4_layout.layout         = ninfer::QuantLayout::RowSplit;
     expect_invalid([&] { invoke_q4(retired_q4_layout); }, "retired Q4 RowSplit layout");
 }
 
@@ -871,7 +873,7 @@ int main(int argc, char** argv) {
             fail("usage: dflash2_select_qual [--dflash-companion K C]");
         }
         ninfer::DeviceContext device;
-        const Corpus corpus = make_corpus();
+        const Corpus corpus                = make_corpus();
         const ProjectionFixture projection = make_projection();
         DeviceFixture data(corpus);
         if (companion) {

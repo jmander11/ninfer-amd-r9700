@@ -1,11 +1,12 @@
 // Persistent decode kernel (ops::persistent_decode_lower): one resident grid of
-// kBlockThreads-thread blocks, two per WGP, executes a run of captured launches as phases separated by grid barriers.
-// A phase's virtual CTAs run the launch's kernel body (persistent_cta.h; or an entry's re-tiled
-// body of the same Op) on a group of whole waves: kBlockThreads / Threads groups per block for a
-// Threads-wide body, the whole block for a kBlockThreads-wide one; group g of block b runs
-// virtual CTAs g * gridDim.x + b, ... (a partial last round spreads over all blocks). Each hosted kernel is an Entry: its kernel, launch width, body width,
-// LDS, body and the weight bytes its virtual CTAs stream. While a block waits at a grid barrier
-// it prefetches the next phase's instructions and its own first virtual CTAs' weight lines.
+// kBlockThreads-thread blocks, two per WGP, executes a run of captured launches as phases separated
+// by grid barriers. A phase's virtual CTAs run the launch's kernel body (persistent_cta.h; or an
+// entry's re-tiled body of the same Op) on a group of whole waves: kBlockThreads / Threads groups
+// per block for a Threads-wide body, the whole block for a kBlockThreads-wide one; group g of block
+// b runs virtual CTAs g * gridDim.x + b, ... (a partial last round spreads over all blocks). Each
+// hosted kernel is an Entry: its kernel, launch width, body width, LDS, body and the weight bytes
+// its virtual CTAs stream. While a block waits at a grid barrier it prefetches the next phase's
+// instructions and its own first virtual CTAs' weight lines.
 #include "ninfer/ops/persistent_decode.h"
 
 #include "core/device.h"
@@ -36,8 +37,8 @@ namespace ninfer::ops {
 namespace {
 
 namespace persistent = r9700::persistent;
-namespace linear = r9700::linear;
-namespace gdn_front = r9700::gdn::front_kernels;
+namespace linear     = r9700::linear;
+namespace gdn_front  = r9700::gdn::front_kernels;
 namespace recurrence = detail::gated_delta_net::recurrence;
 
 // Two 384-thread blocks per WGP: a 128-thread FP8LUT4 GEMM phase ran as fast as 128-thread
@@ -46,9 +47,10 @@ constexpr std::uint32_t kBlockThreads = 384U;
 constexpr std::uint32_t kBlocksPerWgp = 2U;
 // LDS of one block: its share of the WGP's 64 KiB in 512-byte allocation granules.
 constexpr std::size_t kBlockLds = 64U * 1024U / kBlocksPerWgp / 512U * 512U;
-// Waves per SIMD of the resident blocks (the register budget: 1536 / waves, in 24-register granules).
+// Waves per SIMD of the resident blocks (the register budget: 1536 / waves, in 24-register
+// granules).
 constexpr std::uint32_t kWavesPerSimd = kBlocksPerWgp * kBlockThreads / 32U / 4U;
-constexpr std::uint32_t kWaveSize = 32U;
+constexpr std::uint32_t kWaveSize     = 32U;
 
 struct NoShared {};
 
@@ -59,6 +61,7 @@ struct Slot {
 };
 template <class Indices, class... A>
 struct PackImpl;
+
 template <std::size_t... I, class... A>
 struct PackImpl<std::index_sequence<I...>, A...> : Slot<I, A>... {
     static constexpr std::size_t size = sizeof...(A);
@@ -72,6 +75,7 @@ template <std::size_t J, class P>
 __host__ __device__ constexpr const auto& slot_value(const P& pack) {
     return static_cast<const Slot<J, typename P::template Type<J>>&>(pack).value;
 }
+
 template <std::size_t J, class P>
 constexpr auto& slot_value(P& pack) {
     return static_cast<Slot<J, typename P::template Type<J>>&>(pack).value;
@@ -88,13 +92,13 @@ __device__ __forceinline__ decltype(auto) body_arg(const T& value) {
         // Rebuilt from its block-uniform address words as a global pointer, so the conversion
         // back to the body's generic type is not folded away and the address stays scalar.
         const auto address = reinterpret_cast<std::uintptr_t>(value);
-        const auto word = [](std::uintptr_t bits) {
+        const auto word    = [](std::uintptr_t bits) {
             return static_cast<std::uint64_t>(static_cast<std::uint32_t>(
                 __builtin_amdgcn_readfirstlane(static_cast<std::uint32_t>(bits))));
         };
         const std::uint64_t words = word(address) | word(address >> 32U) << 32U;
-        using Pointee = std::remove_pointer_t<T>;
-        return (T)((persistent::Global<Pointee>*)(words));  // global to generic
+        using Pointee             = std::remove_pointer_t<T>;
+        return (T)((persistent::Global<Pointee>*)(words)); // global to generic
     } else {
         return (value);
     }
@@ -103,6 +107,7 @@ __device__ __forceinline__ decltype(auto) body_arg(const T& value) {
 
 template <class Kernel>
 struct KernelParams;
+
 template <class... A>
 struct KernelParams<void (*)(A...)> {
     using type = Pack<A...>;
@@ -113,6 +118,7 @@ struct KernelParams<void (*)(A...)> {
 // where its previous CTA no longer reads after its last one, so no barrier is needed).
 struct CapturedGrid {
     static constexpr bool lds_reuse_safe = false;
+
     template <class Params>
     static uint3 grid(uint3 captured, const Params&) {
         return captured;
@@ -125,13 +131,14 @@ struct CapturedGrid {
 // (Trivial: staged in __shared__ phase slots; value-initialize on the host.)
 struct StreamRange {
     std::uint64_t base;
-    std::uint64_t bytes;  // per CTA; 0: none
+    std::uint64_t bytes; // per CTA; 0: none
 };
+
 struct PhaseStreams {
     StreamRange parts[2][2];
     std::uint32_t split;
-    std::uint32_t groups;  // virtual CTAs per block; 0: the phase streams nothing
-    std::uint32_t total;   // virtual CTAs of the phase
+    std::uint32_t groups; // virtual CTAs per block; 0: the phase streams nothing
+    std::uint32_t total;  // virtual CTAs of the phase
     std::uint32_t reserved;
 };
 
@@ -147,11 +154,11 @@ inline PhaseStreams fp8lut4_streams(const linear::Fp8Lut4Weight& first,
                         static_cast<std::uint64_t>(weight.columns) / 2U}};
     };
     PhaseStreams streams{};
-    const auto a = part(first);
+    const auto a        = part(first);
     streams.parts[0][0] = a[0];
     streams.parts[0][1] = a[1];
     if (second.codes != nullptr) {
-        const auto b = part(second);
+        const auto b        = part(second);
         streams.parts[1][0] = b[0];
         streams.parts[1][1] = b[1];
     }
@@ -166,29 +173,32 @@ struct Fp8Lut4SmallT {
     // Before its first barrier the body writes only the codebook, which the previous CTA reads
     // only before its K-split barrier.
     static constexpr bool lds_reuse_safe = true;
-    static constexpr auto kernel = &linear::fp8lut4_kernels::fp8lut4_small_t_kernel<
-        kAccumulate, kSiluPair, linear::fp8lut4::kVerifySplit, linear::fp8lut4::kVerifySteps,
-        kTiles>;
+    static constexpr auto kernel =
+        &linear::fp8lut4_kernels::fp8lut4_small_t_kernel<kAccumulate, kSiluPair,
+                                                         linear::fp8lut4::kVerifySplit,
+                                                         linear::fp8lut4::kVerifySteps, kTiles>;
     static constexpr std::uint32_t launch_threads = 32U * linear::fp8lut4::kVerifySplit;
-    static constexpr std::uint32_t threads = launch_threads;
+    static constexpr std::uint32_t threads        = launch_threads;
     using Shared =
         linear::fp8lut4_kernels::SmallTShared<kSiluPair, linear::fp8lut4::kVerifySplit, kTiles>;
+
     template <class Params>
     static uint3 grid(uint3 captured, const Params&) {
         return captured;
     }
+
     template <class Params>
     static PhaseStreams streams(const Params& params) {
         const linear::fp8lut4_kernels::KernelArgs& a = slot_value<0>(params);
         return fp8lut4_streams(a.weight, a.second);
     }
+
     template <class Cta>
     __device__ static void run(const Cta& cta, Shared& shared,
                                const linear::fp8lut4_kernels::KernelArgs& a) {
-        linear::fp8lut4_kernels::small_t_body<kAccumulate, kSiluPair,
-                                              linear::fp8lut4::kVerifySplit,
-                                              linear::fp8lut4::kVerifySteps, kTiles>(
-            cta, shared, a);
+        linear::fp8lut4_kernels::small_t_body<kAccumulate, kSiluPair, linear::fp8lut4::kVerifySplit,
+                                              linear::fp8lut4::kVerifySteps, kTiles>(cta, shared,
+                                                                                     a);
     }
 };
 
@@ -197,20 +207,22 @@ struct Fp8SmallT : CapturedGrid {
     static constexpr std::uint32_t kTiles = 1U;
     static constexpr auto kernel = &linear::fp8_small_t_kernels::fp8_small_t_kernel<Kind, kTiles>;
     static constexpr std::uint32_t launch_threads = 32U * linear::fp8_small_t_kernels::kSplit;
-    static constexpr std::uint32_t threads = launch_threads;
+    static constexpr std::uint32_t threads        = launch_threads;
     using Shared = linear::fp8_small_t_kernels::SmallTShared<kTiles>;
+
     template <class Params>
     static PhaseStreams streams(const Params& params) {
         const linear::fp8_small_t_kernels::KernelArgs& a = slot_value<0>(params);
         // Row block c: sixteen contiguous E4M3 rows.
         PhaseStreams streams{};
         const std::uint64_t bytes = 16U * static_cast<std::uint64_t>(a.columns);
-        streams.parts[0][0] = {reinterpret_cast<std::uint64_t>(a.first.codes), bytes};
+        streams.parts[0][0]       = {reinterpret_cast<std::uint64_t>(a.first.codes), bytes};
         if (Kind == linear::fp8_small_t_kernels::Epilogue::PairSplit)
             streams.parts[1][0] = {reinterpret_cast<std::uint64_t>(a.second.codes), bytes};
         streams.split = a.first.rows / 16U;
         return streams;
     }
+
     template <class Cta>
     __device__ static void run(const Cta& cta, Shared& shared,
                                const linear::fp8_small_t_kernels::KernelArgs& a) {
@@ -224,6 +236,7 @@ struct Fp8SmallT : CapturedGrid {
 template <std::size_t WorkSlot>
 struct WorkGrid {
     static constexpr bool lds_reuse_safe = false;
+
     template <class Params>
     static uint3 grid(uint3, const Params& params) {
         return uint3{static_cast<std::uint32_t>(slot_value<WorkSlot>(params)), 1U, 1U};
@@ -233,8 +246,9 @@ struct WorkGrid {
 struct QuantizeActivation : WorkGrid<8> {
     static constexpr auto kernel = &linear::fp8_activation_kernels::fp8_quantize_activation_kernel;
     static constexpr std::uint32_t launch_threads = linear::fp8_activation_kernels::kBlockSize;
-    static constexpr std::uint32_t threads = kBlockThreads;
-    using Shared = linear::fp8_activation_kernels::QuantizeShared;
+    static constexpr std::uint32_t threads        = kBlockThreads;
+    using Shared                                  = linear::fp8_activation_kernels::QuantizeShared;
+
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
         linear::fp8_activation_kernels::quantize_activation_body(cta, shared, a...);
@@ -244,8 +258,9 @@ struct QuantizeActivation : WorkGrid<8> {
 struct QuantizeNormalized : WorkGrid<9> {
     static constexpr auto kernel = &linear::fp8_activation_kernels::fp8_quantize_normalized_kernel;
     static constexpr std::uint32_t launch_threads = linear::fp8_activation_kernels::kNormThreads;
-    static constexpr std::uint32_t threads = kBlockThreads;
+    static constexpr std::uint32_t threads        = kBlockThreads;
     using Shared = linear::fp8_activation_kernels::NormalizedShared<threads>;
+
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
         linear::fp8_activation_kernels::quantize_normalized_body<threads>(cta, shared, a...);
@@ -257,8 +272,9 @@ struct QuantizeGated : WorkGrid<6> {
     static constexpr auto kernel =
         &linear::fp8_activation_kernels::fp8_quantize_gated_kernel<kVectors>;
     static constexpr std::uint32_t launch_threads = kVectors;
-    static constexpr std::uint32_t threads = kBlockThreads;
-    using Shared = linear::fp8_encode::EncodeShared<threads>;
+    static constexpr std::uint32_t threads        = kBlockThreads;
+    using Shared                                  = linear::fp8_encode::EncodeShared<threads>;
+
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
         linear::fp8_activation_kernels::quantize_gated_body<kVectors, threads>(cta, shared, a...);
@@ -271,7 +287,8 @@ struct QuantizeGatedRmsNorm : WorkGrid<8> {
     static constexpr std::uint32_t launch_threads =
         linear::fp8_activation_kernels::kGatedNormThreads;
     static constexpr std::uint32_t threads = kBlockThreads;
-    using Shared = linear::fp8_encode::EncodeShared<threads>;
+    using Shared                           = linear::fp8_encode::EncodeShared<threads>;
+
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
         linear::fp8_activation_kernels::quantize_gated_rmsnorm_body<threads>(cta, shared, a...);
@@ -283,18 +300,21 @@ struct QuantizeGatedRmsNorm : WorkGrid<8> {
 // Whole-head fold items (8 tiles) fold a row in 16 CTAs, so the 48 head CTAs and a single
 // sequence's fold fit one round of the grid.
 struct GdnNormalizedFront {
-    static constexpr int kFoldTiles = 8;
-    static constexpr bool lds_reuse_safe = false;
-    static constexpr auto kernel = &gdn_front::gdn_normalized_front_kernel<true>;
+    static constexpr int kFoldTiles               = 8;
+    static constexpr bool lds_reuse_safe          = false;
+    static constexpr auto kernel                  = &gdn_front::gdn_normalized_front_kernel<true>;
     static constexpr std::uint32_t launch_threads = gdn_front::kControlT1Threads;
-    static constexpr std::uint32_t threads = kBlockThreads;
-    using Shared = gdn_front::FrontShared<threads>;
+    static constexpr std::uint32_t threads        = kBlockThreads;
+    using Shared                                  = gdn_front::FrontShared<threads>;
+
     template <class Params>
     static uint3 grid(uint3, const Params& params) {
         const gdn_front::FrontFold& fold = slot_value<19>(params);
-        return uint3{gdn_front::kControlHeads + gdn_front::front_fold_ctas<threads, kFoldTiles>(fold),
+        return uint3{gdn_front::kControlHeads +
+                         gdn_front::front_fold_ctas<threads, kFoldTiles>(fold),
                      1U, 1U};
     }
+
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
         gdn_front::normalized_front_body<true, threads, 8U, kFoldTiles>(cta, shared, a...);
@@ -305,18 +325,21 @@ template <unsigned T>
 struct GdnPairConvRecord {
     // As Fp8Lut4SmallT; the previous CTA's convolution reads only its staged rows.
     static constexpr bool lds_reuse_safe = true;
-    static constexpr auto kernel = &gdn_front::gdn_fp8lut4_pair_conv_record_kernel<T>;
+    static constexpr auto kernel         = &gdn_front::gdn_fp8lut4_pair_conv_record_kernel<T>;
     static constexpr std::uint32_t launch_threads = 32U * gdn_front::kFp8Lut4PairSplit;
-    static constexpr std::uint32_t threads = launch_threads;
-    using Shared = gdn_front::PairConvShared<T>;
+    static constexpr std::uint32_t threads        = launch_threads;
+    using Shared                                  = gdn_front::PairConvShared<T>;
+
     template <class Params>
     static uint3 grid(uint3 captured, const Params&) {
         return captured;
     }
+
     template <class Params>
     static PhaseStreams streams(const Params& params) {
         return fp8lut4_streams(slot_value<3>(params), slot_value<4>(params));
     }
+
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
         gdn_front::fp8lut4_pair_conv_record_body<T>(cta, shared, a...);
@@ -327,20 +350,23 @@ struct GdnPairConvRecord {
 // three value rows per row slot (the launch's four 256-thread row tiles per head each stage
 // every token and fit one per block). Hosted up to a verification width of 8.
 struct GdnRecord {
-    static constexpr int kMaxWidth = 8;
-    static constexpr bool lds_reuse_safe = false;
-    static constexpr auto kernel = &recurrence::record_kernel<false>;
+    static constexpr int kMaxWidth                = 8;
+    static constexpr bool lds_reuse_safe          = false;
+    static constexpr auto kernel                  = &recurrence::record_kernel<false>;
     static constexpr std::uint32_t launch_threads = recurrence::kOrdinaryBlock;
-    static constexpr std::uint32_t threads = kBlockThreads;
+    static constexpr std::uint32_t threads        = kBlockThreads;
     using Shared = recurrence::RecordHeadShared<threads, kMaxWidth>;
+
     template <class Params>
     static uint3 grid(uint3, const Params& params) {
         return uint3{slot_value<18>(params) / recurrence::kOrdinaryRowTiles, 1U, 1U};
     }
+
     template <class Params>
     static bool admits(const Params& params) {
-        return slot_value<14>(params) <= kMaxWidth;  // width
+        return slot_value<14>(params) <= kMaxWidth; // width
     }
+
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
         recurrence::record_head_body<threads, kMaxWidth>(cta, shared, a...);
@@ -349,11 +375,12 @@ struct GdnRecord {
 
 template <rope_kernels::Profile P>
 struct QkNormRope : CapturedGrid {
-    static constexpr bool lds_reuse_safe = true;  // no LDS
-    static constexpr auto kernel = &rope_kernels::qk_norm_rope_kernel<P>;
+    static constexpr bool lds_reuse_safe          = true; // no LDS
+    static constexpr auto kernel                  = &rope_kernels::qk_norm_rope_kernel<P>;
     static constexpr std::uint32_t launch_threads = rope_kernels::kQkNormRopeWaves * kWaveSize;
-    static constexpr std::uint32_t threads = launch_threads;
-    using Shared = NoShared;
+    static constexpr std::uint32_t threads        = launch_threads;
+    using Shared                                  = NoShared;
+
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared&, const A&... a) {
         rope_kernels::qk_norm_rope_body<P>(cta, a...);
@@ -362,19 +389,22 @@ struct QkNormRope : CapturedGrid {
 
 using linear::fp8_small_t_kernels::Epilogue;
 // The kernels of a single-sequence decode graph (verification width at most 8).
-using Entries = std::tuple<
-    Fp8Lut4SmallT<false, false>, Fp8Lut4SmallT<true, false>, Fp8Lut4SmallT<false, true>,
-    Fp8SmallT<Epilogue::Store>, Fp8SmallT<Epilogue::PairSplit>, Fp8SmallT<Epilogue::Residual>,
-    QuantizeActivation, QuantizeNormalized, QuantizeGated, QuantizeGatedRmsNorm,
-    GdnNormalizedFront, GdnPairConvRecord<4U>, GdnPairConvRecord<5U>, GdnPairConvRecord<6U>,
-    GdnPairConvRecord<7U>, GdnPairConvRecord<8U>, GdnRecord,
-    QkNormRope<rope_kernels::Profile::Text1D>, QkNormRope<rope_kernels::Profile::TextMrope>>;
+using Entries =
+    std::tuple<Fp8Lut4SmallT<false, false>, Fp8Lut4SmallT<true, false>, Fp8Lut4SmallT<false, true>,
+               Fp8SmallT<Epilogue::Store>, Fp8SmallT<Epilogue::PairSplit>,
+               Fp8SmallT<Epilogue::Residual>, QuantizeActivation, QuantizeNormalized, QuantizeGated,
+               QuantizeGatedRmsNorm, GdnNormalizedFront, GdnPairConvRecord<4U>,
+               GdnPairConvRecord<5U>, GdnPairConvRecord<6U>, GdnPairConvRecord<7U>,
+               GdnPairConvRecord<8U>, GdnRecord, QkNormRope<rope_kernels::Profile::Text1D>,
+               QkNormRope<rope_kernels::Profile::TextMrope>>;
 constexpr std::size_t kEntryCount = std::tuple_size_v<Entries>;
 
 template <class E, std::size_t I = 0>
 constexpr std::size_t entry_index() {
-    if constexpr (std::is_same_v<E, std::tuple_element_t<I, Entries>>) return I;
-    else return entry_index<E, I + 1U>();
+    if constexpr (std::is_same_v<E, std::tuple_element_t<I, Entries>>)
+        return I;
+    else
+        return entry_index<E, I + 1U>();
 }
 
 template <class E>
@@ -384,7 +414,7 @@ constexpr std::size_t align16(std::size_t bytes) { return (bytes + 15U) / 16U * 
 
 // Each block gets kBlockLds of the WGP's 64 KiB (less the group barriers and phase slots).
 constexpr std::uint32_t kMaximumGroups = kBlockThreads / 128U;
-constexpr std::size_t kLdsBudget = kBlockLds - 64U - 2U * 512U;  // group barriers, phase slots
+constexpr std::size_t kLdsBudget       = kBlockLds - 64U - 2U * 512U; // group barriers, phase slots
 
 // Groups per block: as many body-wide groups as the block's waves and LDS budget hold.
 template <class E>
@@ -411,6 +441,7 @@ template <std::size_t... I>
 constexpr std::size_t max_lds(std::index_sequence<I...>) {
     return std::max({std::size_t{16}, entry_lds<std::tuple_element_t<I, Entries>>()...});
 }
+
 constexpr std::size_t kLdsBytes = max_lds(std::make_index_sequence<kEntryCount>{});
 static_assert(kLdsBytes <= kLdsBudget);
 
@@ -426,31 +457,32 @@ struct Phase {
 // order: line `line` addresses one kCacheWarmStride line (0: past them).
 struct BlockStreams {
     const PhaseStreams* streams;
-    std::uint64_t lines[kMaximumGroups];  // per first-round virtual CTA
+    std::uint64_t lines[kMaximumGroups]; // per first-round virtual CTA
     std::uint32_t groups;
 
     __device__ __forceinline__ static std::uint64_t range_lines(const StreamRange& range) {
         return range.base == 0U ? 0U : range.bytes / kCacheWarmStride;
     }
+
     __device__ __forceinline__ explicit BlockStreams(const PhaseStreams& next) : streams(&next) {
         groups = next.groups;
         for (std::uint32_t g = 0; g < kMaximumGroups; ++g) {
-            const std::uint32_t c = g * gridDim.x + blockIdx.x;
+            const std::uint32_t c   = g * gridDim.x + blockIdx.x;
             const StreamRange* part = next.parts[c < next.split ? 0U : 1U];
-            lines[g] = g < groups && c < next.total
-                ? range_lines(part[0]) + range_lines(part[1])
-                : 0U;
+            lines[g] =
+                g < groups && c < next.total ? range_lines(part[0]) + range_lines(part[1]) : 0U;
         }
     }
+
     __device__ __forceinline__ std::uint64_t address(std::uint64_t line) const {
         for (std::uint32_t g = 0; g < kMaximumGroups; ++g) {
             if (line < lines[g]) {
-                const std::uint32_t c = g * gridDim.x + blockIdx.x;
-                const bool second = c >= streams->split;
+                const std::uint32_t c     = g * gridDim.x + blockIdx.x;
+                const bool second         = c >= streams->split;
                 const StreamRange* ranges = streams->parts[second ? 1U : 0U];
-                const std::uint64_t cta = second ? c - streams->split : c;
-                const std::uint64_t head = range_lines(ranges[0]);
-                const StreamRange& range = line < head ? ranges[0] : ranges[1];
+                const std::uint64_t cta   = second ? c - streams->split : c;
+                const std::uint64_t head  = range_lines(ranges[0]);
+                const StreamRange& range  = line < head ? ranges[0] : ranges[1];
                 return range.base + cta * range.bytes +
                        (line < head ? line : line - head) * kCacheWarmStride;
             }
@@ -480,7 +512,7 @@ constexpr std::uint64_t kCodePrefetch = 128U * 1024U;
 // The recorded code address of entry `entry` (0: not yet run), in scalar registers.
 __device__ __forceinline__ std::uint64_t next_code(std::uint32_t entry, std::uint32_t bound) {
     const std::uint64_t pc = entry_code[entry][bound];
-    const auto word = [](std::uint64_t bits) {
+    const auto word        = [](std::uint64_t bits) {
         return static_cast<std::uint64_t>(static_cast<std::uint32_t>(
             __builtin_amdgcn_readfirstlane(static_cast<std::uint32_t>(bits))));
     };
@@ -514,8 +546,8 @@ __device__ __forceinline__ void grid_barrier(std::uint64_t* arrivals, const Phas
         const std::uint64_t ticket =
             __hip_atomic_fetch_add(arrivals, 1ULL, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
         const std::uint64_t end = (ticket / gridDim.x + 1U) * gridDim.x;
-        target = end;
-        open = ticket + 1U == end ? 1U : 0U;
+        target                  = end;
+        open                    = ticket + 1U == end ? 1U : 0U;
     }
     // The next phase's instructions.
     if (threadIdx.x < kWaveSize) prefetch_code(next_entry, kCodePrefetch);
@@ -550,6 +582,7 @@ template <std::size_t... I>
 constexpr std::size_t max_args(std::index_sequence<I...>) {
     return std::max({align16(sizeof(EntryParams<std::tuple_element_t<I, Entries>>))...});
 }
+
 constexpr std::size_t kArgsBytes = max_args(std::make_index_sequence<kEntryCount>{});
 
 // A phase's descriptor and captured arguments: the program's record of the phase, staged in LDS
@@ -560,16 +593,17 @@ struct PhaseSlot {
     PhaseStreams streams;
     __attribute__((aligned(16))) std::uint8_t args[kArgsBytes];
 };
+
 constexpr std::uint32_t kSlotWords = sizeof(PhaseSlot) / 4U;
 static_assert(sizeof(PhaseSlot) % 4U == 0U && kSlotWords <= kBlockThreads);
 static_assert(kLdsBytes + 2U * sizeof(PhaseSlot) + 64U <= kBlockLds,
               "kBlocksPerWgp persistent blocks must fit the WGP's 64 KiB of LDS");
 
 struct Program {
-    const PhaseSlot* phases = nullptr;
-    std::uint64_t* arrivals = nullptr;  // grid barrier arrival count
+    const PhaseSlot* phases   = nullptr;
+    std::uint64_t* arrivals   = nullptr; // grid barrier arrival count
     std::uint32_t phase_count = 0;
-    std::uint32_t first_entry = 0;  // entry of phase 0
+    std::uint32_t first_entry = 0; // entry of phase 0
 };
 
 // Namespace-scope LDS: the inlined bodies address it as LDS, not through generic pointers.
@@ -580,10 +614,9 @@ __shared__ PhaseSlot phase_slots[2];
 // Thread t's word of phase `index`'s record (threads past the record read nothing).
 __device__ __forceinline__ std::uint32_t fetch_phase_word(const Program& program,
                                                           std::uint32_t index) {
-    return threadIdx.x < kSlotWords
-        ? persistent::global(reinterpret_cast<const std::uint32_t*>(program.phases + index))
-              [threadIdx.x]
-        : 0U;
+    return threadIdx.x < kSlotWords ? persistent::global(reinterpret_cast<const std::uint32_t*>(
+                                          program.phases + index))[threadIdx.x]
+                                    : 0U;
 }
 
 __device__ __forceinline__ void store_phase_word(std::uint32_t slot, std::uint32_t word) {
@@ -603,9 +636,9 @@ __device__ __forceinline__ std::uint64_t program_counter() {
 template <class E>
 __device__ __forceinline__ void run_phase(std::uint32_t slot) {
     constexpr std::uint32_t kGroups = entry_groups<E>();
-    constexpr bool kWholeBlock = kGroups == 1U && E::threads == kBlockThreads;
-    const PhaseSlot& staged = phase_slots[slot];
-    const auto& params = *reinterpret_cast<const EntryParams<E>*>(staged.args);
+    constexpr bool kWholeBlock      = kGroups == 1U && E::threads == kBlockThreads;
+    const PhaseSlot& staged         = phase_slots[slot];
+    const auto& params              = *reinterpret_cast<const EntryParams<E>*>(staged.args);
     const uint3 grid{staged.phase.grid_x, staged.phase.grid_y, staged.phase.grid_z};
     const std::uint32_t plane = grid.x * grid.y;
     const std::uint32_t total = plane * grid.z;
@@ -615,15 +648,14 @@ __device__ __forceinline__ void run_phase(std::uint32_t slot) {
     }
     const std::uint32_t group = threadIdx.x / E::threads;
     if (group >= kGroups) return;
-    using Shared = typename E::Shared;
+    using Shared   = typename E::Shared;
     Shared& shared = *reinterpret_cast<Shared*>(phase_lds + group * align16(sizeof(Shared)));
     // Opaque per phase: thread-derived address arithmetic of the inlined bodies must not be
     // hoisted out of the phase loop, where it would stay live across every phase.
     std::uint32_t thread = threadIdx.x - group * E::threads;
     asm volatile("" : "+v"(thread));
-    const persistent::PhaseCta<kWholeBlock> first{thread, E::threads,
-                                                  uint3{}, grid, &group_barriers[group],
-                                                  E::threads / kWaveSize};
+    const persistent::PhaseCta<kWholeBlock> first{
+        thread, E::threads, uint3{}, grid, &group_barriers[group], E::threads / kWaveSize};
     for (std::uint32_t index = group * gridDim.x + blockIdx.x; index < total;
          index += gridDim.x * kGroups) {
         persistent::PhaseCta<kWholeBlock> cta = first;
@@ -649,8 +681,8 @@ __device__ __forceinline__ void dispatch(std::uint32_t entry, std::uint32_t slot
 }
 
 // Six waves per SIMD (VGPRs in granules of 24, at most 240) keep two blocks resident per WGP.
-__global__ __launch_bounds__(kBlockThreads) __attribute__((amdgpu_waves_per_eu(kWavesPerSimd)))
-void persistent_decode_kernel(Program program) {
+__global__ __launch_bounds__(kBlockThreads) __attribute__((
+    amdgpu_waves_per_eu(kWavesPerSimd))) void persistent_decode_kernel(Program program) {
     if (threadIdx.x < kMaximumGroups)
         group_barriers[threadIdx.x] = persistent::GroupBarrier{0U, 0U};
     // The first phase's instructions, while its record loads.
@@ -659,7 +691,7 @@ void persistent_decode_kernel(Program program) {
     __syncthreads();
     for (std::uint32_t index = 0; index < program.phase_count; ++index) {
         const std::uint32_t slot = index & 1U;
-        const bool next = index + 1U < program.phase_count;
+        const bool next          = index + 1U < program.phase_count;
         // The next record is fetched while this phase runs and staged before the barrier.
         const std::uint32_t next_word = next ? fetch_phase_word(program, index + 1U) : 0U;
         dispatch(phase_slots[slot].phase.entry, slot, std::make_index_sequence<kEntryCount>{});
@@ -673,13 +705,13 @@ void persistent_decode_kernel(Program program) {
 
 // ---- Host lowering.
 struct HostEntry {
-    const void* kernel = nullptr;
-    std::uint32_t launch_threads = 0;
-    std::size_t args_bytes = 0;
-    void (*pack)(void* const* params, void* out) = nullptr;
+    const void* kernel                              = nullptr;
+    std::uint32_t launch_threads                    = 0;
+    std::size_t args_bytes                          = 0;
+    void (*pack)(void* const* params, void* out)    = nullptr;
     uint3 (*grid)(uint3 captured, const void* args) = nullptr;
-    PhaseStreams (*streams)(const void* args) = nullptr;
-    bool (*admits)(const void* args) = nullptr;
+    PhaseStreams (*streams)(const void* args)       = nullptr;
+    bool (*admits)(const void* args)                = nullptr;
 };
 
 template <class P, std::size_t... I>
@@ -691,29 +723,30 @@ template <class E>
 HostEntry host_entry() {
     using Params = EntryParams<E>;
     static_assert(std::is_trivially_copyable_v<Params>);
-    return HostEntry{
-        reinterpret_cast<const void*>(E::kernel), E::launch_threads, sizeof(Params),
-        [](void* const* params, void* out) {
-            auto* tuple = new (out) Params{};
-            pack_params(params, *tuple, std::make_index_sequence<Params::size>{});
-        },
-        [](uint3 captured, const void* args) {
-            return E::grid(captured, *static_cast<const Params*>(args));
-        },
-        [](const void* args) {
-            PhaseStreams streams{};
-            if constexpr (requires(const Params& params) { E::streams(params); }) {
-                streams = E::streams(*static_cast<const Params*>(args));
-                streams.groups = entry_groups<E>();
-            }
-            return streams;
-        },
-        [](const void* args) {
-            if constexpr (requires(const Params& params) { E::admits(params); })
-                return E::admits(*static_cast<const Params*>(args));
-            else
-                return true;
-        }};
+    return HostEntry{reinterpret_cast<const void*>(E::kernel),
+                     E::launch_threads,
+                     sizeof(Params),
+                     [](void* const* params, void* out) {
+                         auto* tuple = new (out) Params{};
+                         pack_params(params, *tuple, std::make_index_sequence<Params::size>{});
+                     },
+                     [](uint3 captured, const void* args) {
+                         return E::grid(captured, *static_cast<const Params*>(args));
+                     },
+                     [](const void* args) {
+                         PhaseStreams streams{};
+                         if constexpr (requires(const Params& params) { E::streams(params); }) {
+                             streams        = E::streams(*static_cast<const Params*>(args));
+                             streams.groups = entry_groups<E>();
+                         }
+                         return streams;
+                     },
+                     [](const void* args) {
+                         if constexpr (requires(const Params& params) { E::admits(params); })
+                             return E::admits(*static_cast<const Params*>(args));
+                         else
+                             return true;
+                     }};
 }
 
 template <std::size_t... I>
@@ -740,7 +773,8 @@ std::vector<hipGraphNode_t> chain_nodes(hipGraph_t graph) {
         std::size_t dependents = 0;
         HIP_CHECK(hipGraphNodeGetDependentNodes(node, nullptr, &dependents));
         if (dependents > 1U)
-            throw std::logic_error("persistent_decode_lower: the Device Graph is not a single chain");
+            throw std::logic_error(
+                "persistent_decode_lower: the Device Graph is not a single chain");
         hipGraphNode_t next = nullptr;
         if (dependents == 1U) HIP_CHECK(hipGraphNodeGetDependentNodes(node, &next, &dependents));
         node = next;
@@ -791,6 +825,7 @@ DeviceBuffer persistent_decode_lower(hipGraph_t graph) {
         std::size_t first = 0;
         std::size_t count = 0;
     };
+
     std::vector<Hosted> launches(chain.size());
     std::vector<bool> is_hosted(chain.size(), false);
     for (std::size_t index = 0; index < chain.size(); ++index)
@@ -809,25 +844,25 @@ DeviceBuffer persistent_decode_lower(hipGraph_t graph) {
     if (runs.empty()) return DeviceBuffer{};
 
     // Device image: the barrier words, then one PhaseSlot record per phase.
-    const auto& table = entries();
+    const auto& table       = entries();
     std::size_t phase_count = 0;
     for (const Run& run : runs) phase_count += run.count;
     constexpr std::size_t kPhaseOffset = 256U;
     static_assert(alignof(PhaseSlot) <= kPhaseOffset);
     std::vector<std::uint8_t> image(kPhaseOffset + phase_count * sizeof(PhaseSlot), 0U);
-    auto* records = reinterpret_cast<PhaseSlot*>(image.data() + kPhaseOffset);
+    auto* records      = reinterpret_cast<PhaseSlot*>(image.data() + kPhaseOffset);
     std::size_t record = 0;
     for (const Run& run : runs) {
         for (std::size_t index = run.first; index < run.first + run.count; ++index, ++record) {
-            const Hosted& launch = launches[index];
+            const Hosted& launch   = launches[index];
             const HostEntry& entry = table[launch.entry];
             entry.pack(launch.params.kernelParams, records[record].args);
             const dim3 captured = launch.params.gridDim;
-            const uint3 grid = entry.grid(uint3{captured.x, captured.y, captured.z},
-                                          records[record].args);
-            records[record].phase = Phase{static_cast<std::uint32_t>(launch.entry), grid.x,
-                                          grid.y, grid.z};
-            records[record].streams = entry.streams(records[record].args);
+            const uint3 grid =
+                entry.grid(uint3{captured.x, captured.y, captured.z}, records[record].args);
+            records[record].phase =
+                Phase{static_cast<std::uint32_t>(launch.entry), grid.x, grid.y, grid.z};
+            records[record].streams       = entry.streams(records[record].args);
             records[record].streams.total = grid.x * grid.y * grid.z;
         }
         // A phase that streams no weights takes the streams of the next phase of its run that
@@ -853,7 +888,7 @@ DeviceBuffer persistent_decode_lower(hipGraph_t graph) {
                                " persistent blocks per WGP are resident, expected " +
                                std::to_string(kBlocksPerWgp));
 
-    auto* base = static_cast<std::uint8_t*>(storage.data());
+    auto* base              = static_cast<std::uint8_t*>(storage.data());
     std::size_t first_phase = 0;
     for (const Run& run : runs) {
         Program program{reinterpret_cast<const PhaseSlot*>(base + kPhaseOffset) + first_phase,
@@ -863,25 +898,25 @@ DeviceBuffer persistent_decode_lower(hipGraph_t graph) {
         first_phase += run.count;
         void* kernel_args[] = {&program};
         hipKernelNodeParams params{};
-        params.func = reinterpret_cast<void*>(&persistent_decode_kernel);
-        params.gridDim = dim3(static_cast<std::uint32_t>(wgps) * kBlocksPerWgp);
-        params.blockDim = dim3(kBlockThreads);
+        params.func           = reinterpret_cast<void*>(&persistent_decode_kernel);
+        params.gridDim        = dim3(static_cast<std::uint32_t>(wgps) * kBlocksPerWgp);
+        params.blockDim       = dim3(kBlockThreads);
         params.sharedMemBytes = 0U;
-        params.kernelParams = kernel_args;
-        params.extra = nullptr;
+        params.kernelParams   = kernel_args;
+        params.extra          = nullptr;
 
         std::vector<hipGraphNode_t> predecessors;
         std::size_t dependencies = 0;
         HIP_CHECK(hipGraphNodeGetDependencies(chain[run.first], nullptr, &dependencies));
         predecessors.resize(dependencies);
         if (dependencies != 0U)
-            HIP_CHECK(hipGraphNodeGetDependencies(chain[run.first], predecessors.data(),
-                                                  &dependencies));
-        const std::size_t last = run.first + run.count - 1U;
+            HIP_CHECK(
+                hipGraphNodeGetDependencies(chain[run.first], predecessors.data(), &dependencies));
+        const std::size_t last   = run.first + run.count - 1U;
         hipGraphNode_t successor = last + 1U < chain.size() ? chain[last + 1U] : nullptr;
-        hipGraphNode_t node = nullptr;
-        HIP_CHECK(hipGraphAddKernelNode(&node, graph, predecessors.data(), predecessors.size(),
-                                        &params));
+        hipGraphNode_t node      = nullptr;
+        HIP_CHECK(
+            hipGraphAddKernelNode(&node, graph, predecessors.data(), predecessors.size(), &params));
         for (std::size_t index = run.first; index <= last; ++index)
             HIP_CHECK(hipGraphDestroyNode(chain[index]));
         if (successor != nullptr) HIP_CHECK(hipGraphAddDependencies(graph, &node, &successor, 1U));

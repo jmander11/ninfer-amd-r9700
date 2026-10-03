@@ -11,9 +11,7 @@ namespace ninfer::targets::qwen3::detail {
 inline void check_cache_hip_event_allocation(hipError_t result) {
     if (result == hipErrorMemoryAllocation) {
         const hipError_t pending = hipGetLastError();
-        if (pending != hipSuccess && pending != hipErrorMemoryAllocation) {
-            HIP_CHECK(pending);
-        }
+        if (pending != hipSuccess && pending != hipErrorMemoryAllocation) { HIP_CHECK(pending); }
         throw std::bad_alloc();
     }
     HIP_CHECK(result);

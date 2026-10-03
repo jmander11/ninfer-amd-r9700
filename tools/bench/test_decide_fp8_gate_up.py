@@ -34,8 +34,11 @@ def _qualifier(fp8: float = 4.0, q4: float = 8.0) -> dict[str, object]:
         "fp8_profile": "E4M3-outer-vec32f-hipBLASLt-top-supported",
         "q4_control": "A8Q4G64-m64n128-pingpong-production",
         "hardware": {
-            "device": "AMD Radeon AI PRO R9700", "architecture": "gfx1201",
-            "wave_size": 32, "vendor_id": "0x1002", "device_id": "0x7551",
+            "device": "AMD Radeon AI PRO R9700",
+            "architecture": "gfx1201",
+            "wave_size": 32,
+            "vendor_id": "0x1002",
+            "device_id": "0x7551",
         },
         "power_profile": {"required": "auto", "before": "auto", "after": "auto"},
         "direct_weight_binding": True,
@@ -81,10 +84,12 @@ def _inputs(budget: int = 6_000_000_000):
             name: provenance[name]
             for name in ("capacity", "benchmark", "kernel_trace", "marker_trace")
         },
-        "ranked_role_candidates": [{
-            **inventory,
-            "q4_measured_service_ns": 400_000_000,
-        }],
+        "ranked_role_candidates": [
+            {
+                **inventory,
+                "q4_measured_service_ns": 400_000_000,
+            }
+        ],
         "scenarios": [
             {
                 "prefill_chunk": chunk,
@@ -106,8 +111,11 @@ def _inputs(budget: int = 6_000_000_000):
     capacity = {
         "schema": "ninfer.r9700.e4m3-capacity-analysis.v1",
         "planner_contract": {
-            "speculative_backend": "mtp", "draft_tokens": 3, "device_graph": True,
-            "max_context": 262144, "automatic_headroom_bytes": 1 << 30,
+            "speculative_backend": "mtp",
+            "draft_tokens": 3,
+            "device_graph": True,
+            "max_context": 262144,
+            "automatic_headroom_bytes": 1 << 30,
             "device_capacity_bytes": device,
         },
         "scenarios": [
@@ -137,10 +145,14 @@ def _inputs(budget: int = 6_000_000_000):
             "concurrency": 1,
             "spec": "none",
         },
-        "tests": [{
-            "n_prompt": 2048, "n_gen": 0,
-            "prefill_seconds_mean": 1.5, "total_seconds_mean": 1.51,
-        }],
+        "tests": [
+            {
+                "n_prompt": 2048,
+                "n_gen": 0,
+                "prefill_seconds_mean": 1.5,
+                "total_seconds_mean": 1.51,
+            }
+        ],
     }
     return hybrid, capacity, benchmark, provenance
 
@@ -152,9 +164,12 @@ class GateUpDecisionTest(unittest.TestCase):
         self.assertEqual(inventory["added_resident_bytes"], 5_356_650_496)
         hybrid, capacity, benchmark, provenance = _inputs()
         report = decide(
-            qualifier=_qualifier(), hybrid=hybrid, capacity=capacity,
-            benchmark=benchmark, trace_gate_up_service_ns=400_000_000,
-            provenance=provenance
+            qualifier=_qualifier(),
+            hybrid=hybrid,
+            capacity=capacity,
+            benchmark=benchmark,
+            trace_gate_up_service_ns=400_000_000,
+            provenance=provenance,
         )
         self.assertEqual(report["decision"]["verdict"], "proceed")
         self.assertEqual(len(report["capacity"]["cells"]), 16)
@@ -167,9 +182,12 @@ class GateUpDecisionTest(unittest.TestCase):
     def test_slower_measurement_rejects_and_shape_drift_fails_closed(self) -> None:
         hybrid, capacity, benchmark, provenance = _inputs()
         report = decide(
-            qualifier=_qualifier(9.0, 8.0), hybrid=hybrid,
-            capacity=capacity, benchmark=benchmark,
-            trace_gate_up_service_ns=400_000_000, provenance=provenance
+            qualifier=_qualifier(9.0, 8.0),
+            hybrid=hybrid,
+            capacity=capacity,
+            benchmark=benchmark,
+            trace_gate_up_service_ns=400_000_000,
+            provenance=provenance,
         )
         self.assertEqual(report["decision"]["verdict"], "reject")
         malformed = copy.deepcopy(_qualifier())
@@ -180,9 +198,12 @@ class GateUpDecisionTest(unittest.TestCase):
     def test_capacity_shortfall_rejects(self) -> None:
         hybrid, capacity, benchmark, provenance = _inputs(budget=5_000_000_000)
         report = decide(
-            qualifier=_qualifier(), hybrid=hybrid, capacity=capacity,
-            benchmark=benchmark, trace_gate_up_service_ns=400_000_000,
-            provenance=provenance
+            qualifier=_qualifier(),
+            hybrid=hybrid,
+            capacity=capacity,
+            benchmark=benchmark,
+            trace_gate_up_service_ns=400_000_000,
+            provenance=provenance,
         )
         self.assertEqual(report["decision"]["verdict"], "reject")
         self.assertFalse(report["capacity"]["all_cells_preserve_minimum_startup"])

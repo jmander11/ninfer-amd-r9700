@@ -43,8 +43,11 @@ def _snapshot(path: Path, label: str) -> dict[str, Any]:
     resolved = path.expanduser().resolve(strict=True)
     if not resolved.is_file():
         raise ValueError(f"{label} is not a regular file")
-    return {"path": str(resolved), "file_size_bytes": resolved.stat().st_size,
-            "sha256": _sha256(resolved)}
+    return {
+        "path": str(resolved),
+        "file_size_bytes": resolved.stat().st_size,
+        "sha256": _sha256(resolved),
+    }
 
 
 def _positive(value: int, label: str) -> int:
@@ -67,9 +70,9 @@ def _embedded_code_object(executable: Path, code_object: Path) -> dict[str, int]
     first = executable_bytes.find(code_bytes)
     if first < 0 or executable_bytes.find(code_bytes, first + 1) >= 0:
         raise ValueError(
-            "selected code object must occur exactly once byte-for-byte in the selected executable")
-    return {"offset_bytes": first, "file_size_bytes": len(code_bytes),
-            "occurrence_count": 1}
+            "selected code object must occur exactly once byte-for-byte in the selected executable"
+        )
+    return {"offset_bytes": first, "file_size_bytes": len(code_bytes), "occurrence_count": 1}
 
 
 def _opcode_spec(value: str) -> tuple[str, int]:
@@ -88,43 +91,77 @@ def _opcode_spec(value: str) -> tuple[str, int]:
 def _resources(metadata_body: str) -> dict[str, int]:
     return {
         "lds_bytes": _one_integer(
-            metadata_body, r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS size"),
+            metadata_body, r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS size"
+        ),
         "private_bytes": _one_integer(
-            metadata_body, r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)",
-            "private segment size"),
+            metadata_body,
+            r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)",
+            "private segment size",
+        ),
         "vgpr_count": _one_integer(
-            metadata_body, r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)", "VGPR count"),
+            metadata_body, r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)", "VGPR count"
+        ),
         "flat_scratch": _one_integer(
-            metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)",
-            "flat-scratch use"),
-        "scratch_bytes": _one_integer(
-            metadata_body, r"^;\s*ScratchSize:\s*(\d+)", "scratch size"),
+            metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)", "flat-scratch use"
+        ),
+        "scratch_bytes": _one_integer(metadata_body, r"^;\s*ScratchSize:\s*(\d+)", "scratch size"),
     }
 
 
 def produce(
-    *, artifact: Path, executable: Path, code_object: Path, assembly: Path, metadata: Path,
-    sources: list[Path], stage: str | list[str] | None, dispatch_symbol: str, code_symbol: str,
+    *,
+    artifact: Path,
+    executable: Path,
+    code_object: Path,
+    assembly: Path,
+    metadata: Path,
+    sources: list[Path],
+    stage: str | list[str] | None,
+    dispatch_symbol: str,
+    code_symbol: str,
     operation_family: str,
-    specialization: str, hardware_classification: str, arithmetic: str,
-    opcodes: list[tuple[str, int]], max_lds_bytes: int, max_vgpr_count: int,
-    memory_residency: str, memory_access: str, overlap: str, memory_evidence: str,
-    overlap_evidence: Path | None, prefill_chunk: int, kv_value_group: int,
-    xattention_profile: str, cta_recipe: str | None = None,
+    specialization: str,
+    hardware_classification: str,
+    arithmetic: str,
+    opcodes: list[tuple[str, int]],
+    max_lds_bytes: int,
+    max_vgpr_count: int,
+    memory_residency: str,
+    memory_access: str,
+    overlap: str,
+    memory_evidence: str,
+    overlap_evidence: Path | None,
+    prefill_chunk: int,
+    kv_value_group: int,
+    xattention_profile: str,
+    cta_recipe: str | None = None,
 ) -> dict[str, Any]:
     if hardware_classification not in CLASSIFICATIONS:
         raise ValueError("invalid intended-hardware classification")
     if memory_residency not in RESIDENCY or overlap not in OVERLAP:
         raise ValueError("invalid memory residency or overlap classification")
-    if not all(isinstance(value, str) and value for value in
-               (dispatch_symbol, code_symbol, operation_family, specialization, arithmetic, memory_access,
-                memory_evidence)):
-        raise ValueError("symbol, operation, specialization, arithmetic, and memory rationale are required")
+    if not all(
+        isinstance(value, str) and value
+        for value in (
+            dispatch_symbol,
+            code_symbol,
+            operation_family,
+            specialization,
+            arithmetic,
+            memory_access,
+            memory_evidence,
+        )
+    ):
+        raise ValueError(
+            "symbol, operation, specialization, arithmetic, and memory rationale are required"
+        )
     stages = stage if isinstance(stage, list) else [stage]
-    if (not stages or any(item is not None and (not isinstance(item, str) or not item)
-                          for item in stages)
-            or len(set(stages)) != len(stages)
-            or (len(stages) > 1 and None in stages)):
+    if (
+        not stages
+        or any(item is not None and (not isinstance(item, str) or not item) for item in stages)
+        or len(set(stages)) != len(stages)
+        or (len(stages) > 1 and None in stages)
+    ):
         raise ValueError("stages must be unique nonempty strings or one explicitly unmarked stage")
     if overlap == "proven_dependency_safe" and overlap_evidence is None:
         raise ValueError("proven dependency-safe overlap requires an explicit evidence file")
@@ -133,10 +170,10 @@ def produce(
     if not opcodes or len({name for name, _ in opcodes}) != len(opcodes):
         raise ValueError("expected opcodes must be nonempty and unique")
     if hardware_classification == "matrix" and not any(
-            "wmma" in name.lower() for name, _ in opcodes):
+        "wmma" in name.lower() for name, _ in opcodes
+    ):
         raise ValueError("matrix classification requires an exact WMMA opcode")
-    if hardware_classification != "matrix" and any(
-            "wmma" in name.lower() for name, _ in opcodes):
+    if hardware_classification != "matrix" and any("wmma" in name.lower() for name, _ in opcodes):
         raise ValueError("scalar/VALU or memory/control classification cannot claim WMMA")
     _positive(prefill_chunk, "prefill_chunk")
     if kv_value_group not in (16, 32):
@@ -147,7 +184,8 @@ def produce(
         if cta_recipe != "q4":
             raise ValueError(
                 "proven dependency-safe overlap is currently supported only by the exact "
-                "Q4 CTA checker")
+                "Q4 CTA checker"
+            )
         if overlap_evidence.resolve(strict=True) != assembly.resolve(strict=True):
             raise ValueError("Q4 CTA overlap evidence must be the exact checked assembly")
     _nonnegative(max_lds_bytes, "max_lds_bytes")
@@ -165,35 +203,41 @@ def produce(
         "assembly": _snapshot(assembly, "assembly"),
         "metadata": _snapshot(metadata, "metadata"),
         "checker": _snapshot(Path(__file__), "static evidence producer"),
-        "sources": [_snapshot(path, f"source {index}")
-                    for index, path in enumerate(source_paths)],
+        "sources": [_snapshot(path, f"source {index}") for index, path in enumerate(source_paths)],
     }
     if not inputs["sources"]:
         raise ValueError("at least one explicit implementation source is required")
-    overlap_snapshot = (_snapshot(overlap_evidence, "dependency-safe overlap evidence")
-                        if overlap_evidence is not None else None)
+    overlap_snapshot = (
+        _snapshot(overlap_evidence, "dependency-safe overlap evidence")
+        if overlap_evidence is not None
+        else None
+    )
     executable_embedding = _embedded_code_object(executable, code_object)
     assembly_text = assembly.read_text(encoding="utf-8")
     metadata_text = metadata.read_text(encoding="utf-8")
     assembly_body = _function(assembly_text, code_symbol, "assembly")
     metadata_body = _function(metadata_text, code_symbol, "metadata")
     observed = {
-        opcode: len(re.findall(rf"^\s*{re.escape(opcode)}(?:\s|$)", assembly_body,
-                               flags=re.MULTILINE))
+        opcode: len(
+            re.findall(rf"^\s*{re.escape(opcode)}(?:\s|$)", assembly_body, flags=re.MULTILINE)
+        )
         for opcode, _ in opcodes
     }
     expected = dict(opcodes)
     if observed != expected:
-        raise ValueError(f"selected symbol opcode counts differ: observed={observed} expected={expected}")
-    if (hardware_classification != "matrix"
-            and re.search(r"^\s*v_wmma_", assembly_body,
-                          flags=re.MULTILINE | re.IGNORECASE)):
+        raise ValueError(
+            f"selected symbol opcode counts differ: observed={observed} expected={expected}"
+        )
+    if hardware_classification != "matrix" and re.search(
+        r"^\s*v_wmma_", assembly_body, flags=re.MULTILINE | re.IGNORECASE
+    ):
         raise ValueError("non-matrix classification selected a symbol containing WMMA instructions")
     resources = _resources(metadata_body)
     if resources["lds_bytes"] > max_lds_bytes or resources["vgpr_count"] > max_vgpr_count:
         raise ValueError(
             f"selected resources exceed ceilings: LDS {resources['lds_bytes']}/{max_lds_bytes}, "
-            f"VGPR {resources['vgpr_count']}/{max_vgpr_count}")
+            f"VGPR {resources['vgpr_count']}/{max_vgpr_count}"
+        )
     if any(resources[name] != 0 for name in ("private_bytes", "scratch_bytes", "flat_scratch")):
         raise ValueError("selected specialization must have zero private/scratch/flat-scratch")
 
@@ -201,15 +245,20 @@ def produce(
         if cta_recipe not in CTA_RECIPES:
             raise ValueError("CTA recipe must be q4 or w8")
         profile = CTA_PROFILES[cta_recipe]
-        if (code_symbol != profile.production_symbol or hardware_classification != "matrix"
-                or expected != {profile.opcode: profile.opcode_count}
-                or max_lds_bytes != profile.lds_ceiling
-                or max_vgpr_count != profile.vgpr_ceiling):
+        if (
+            code_symbol != profile.production_symbol
+            or hardware_classification != "matrix"
+            or expected != {profile.opcode: profile.opcode_count}
+            or max_lds_bytes != profile.lds_ceiling
+            or max_vgpr_count != profile.vgpr_ceiling
+        ):
             raise ValueError("CTA declaration differs from the exact challenger profile")
         delegated = check_cta(cta_recipe, "lds-scope", assembly, metadata)
-        if (delegated["opcode_count"] != observed[profile.opcode]
-                or delegated["lds_bytes"] != resources["lds_bytes"]
-                or delegated["vgpr_count"] != resources["vgpr_count"]):
+        if (
+            delegated["opcode_count"] != observed[profile.opcode]
+            or delegated["lds_bytes"] != resources["lds_bytes"]
+            or delegated["vgpr_count"] != resources["vgpr_count"]
+        ):
             raise ValueError("CTA checker and producer observations differ")
 
     # Rehash every explicit input after all parsing and delegated validation.
@@ -219,37 +268,55 @@ def produce(
     for index, snapshot in enumerate(inputs["sources"]):
         if _snapshot(Path(snapshot["path"]), f"source {index}") != snapshot:
             raise ValueError(f"source {index} changed while producing static evidence")
-    if (overlap_snapshot is not None
-            and _snapshot(Path(overlap_snapshot["path"]), "dependency-safe overlap evidence")
-            != overlap_snapshot):
+    if (
+        overlap_snapshot is not None
+        and _snapshot(Path(overlap_snapshot["path"]), "dependency-safe overlap evidence")
+        != overlap_snapshot
+    ):
         raise ValueError("dependency-safe overlap evidence changed while producing static evidence")
 
     selected_route = {
-        "prompt_tokens": 2048, "concurrency": 1, "prefill_chunk": prefill_chunk,
-        "kv_value_group": kv_value_group, "xattention_profile": xattention_profile,
+        "prompt_tokens": 2048,
+        "concurrency": 1,
+        "prefill_chunk": prefill_chunk,
+        "kv_value_group": kv_value_group,
+        "xattention_profile": xattention_profile,
         "artifact_sha256": inputs["artifact"]["sha256"],
         "executable_sha256": inputs["executable"]["sha256"],
     }
-    proof_inputs = {name: inputs[name] for name in
-                    ("code_object", "assembly", "metadata", "checker", "sources")}
-    memory_path = {"residency": memory_residency, "access_pattern": memory_access,
-                   "overlap": overlap, "evidence": memory_evidence}
+    proof_inputs = {
+        name: inputs[name] for name in ("code_object", "assembly", "metadata", "checker", "sources")
+    }
+    memory_path = {
+        "residency": memory_residency,
+        "access_pattern": memory_access,
+        "overlap": overlap,
+        "evidence": memory_evidence,
+    }
     if overlap_evidence is not None:
         memory_path["overlap_evidence"] = overlap_snapshot
     return {
-        "artifact_type": ARTIFACT_TYPE, "schema_version": SCHEMA_VERSION,
-        "evidence_id": specialization, "selected_route": selected_route,
-        "operation_family": operation_family, "specialization": specialization,
-        "dispatch_signatures": [{"stage": item, "symbol": dispatch_symbol}
-                                for item in stages],
-        "intended_hardware": {"classification": hardware_classification,
-                              "arithmetic": arithmetic,
-                              "expected_opcodes": [name for name, _ in opcodes]},
-        "static_proof": {"status": "passed", "code_symbol": code_symbol,
-                         "executable_embedding": executable_embedding,
-                         "opcode_counts": observed,
-                         "resources": resources, "zero_scratch": True,
-                         "inputs": proof_inputs},
+        "artifact_type": ARTIFACT_TYPE,
+        "schema_version": SCHEMA_VERSION,
+        "evidence_id": specialization,
+        "selected_route": selected_route,
+        "operation_family": operation_family,
+        "specialization": specialization,
+        "dispatch_signatures": [{"stage": item, "symbol": dispatch_symbol} for item in stages],
+        "intended_hardware": {
+            "classification": hardware_classification,
+            "arithmetic": arithmetic,
+            "expected_opcodes": [name for name, _ in opcodes],
+        },
+        "static_proof": {
+            "status": "passed",
+            "code_symbol": code_symbol,
+            "executable_embedding": executable_embedding,
+            "opcode_counts": observed,
+            "resources": resources,
+            "zero_scratch": True,
+            "inputs": proof_inputs,
+        },
         "memory_path": memory_path,
     }
 
@@ -262,7 +329,8 @@ def _publish(path: Path, value: dict[str, Any]) -> None:
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:
             output.write(json.dumps(value, indent=2) + "\n")
-            output.flush(); os.fsync(output.fileno())
+            output.flush()
+            os.fsync(output.fileno())
         os.link(temporary, path)
     finally:
         try:
@@ -307,19 +375,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"refusing to overwrite existing output: {args.out}")
     try:
         result = produce(
-            artifact=args.artifact, executable=args.executable, code_object=args.code_object,
+            artifact=args.artifact,
+            executable=args.executable,
+            code_object=args.code_object,
             assembly=args.assembly,
-            metadata=args.metadata, sources=args.source,
+            metadata=args.metadata,
+            sources=args.source,
             stage=None if args.unmarked else args.stage,
-            dispatch_symbol=args.dispatch_symbol, code_symbol=args.code_symbol,
-            operation_family=args.operation_family, specialization=args.specialization,
-            hardware_classification=args.hardware_class, arithmetic=args.arithmetic,
-            opcodes=args.opcode, max_lds_bytes=args.max_lds_bytes,
-            max_vgpr_count=args.max_vgpr_count, memory_residency=args.memory_residency,
-            memory_access=args.memory_access, overlap=args.overlap,
-            memory_evidence=args.memory_evidence, overlap_evidence=args.overlap_evidence,
-            prefill_chunk=args.prefill_chunk, kv_value_group=args.kv_value_group,
-            xattention_profile=args.xattention_profile, cta_recipe=args.cta_recipe)
+            dispatch_symbol=args.dispatch_symbol,
+            code_symbol=args.code_symbol,
+            operation_family=args.operation_family,
+            specialization=args.specialization,
+            hardware_classification=args.hardware_class,
+            arithmetic=args.arithmetic,
+            opcodes=args.opcode,
+            max_lds_bytes=args.max_lds_bytes,
+            max_vgpr_count=args.max_vgpr_count,
+            memory_residency=args.memory_residency,
+            memory_access=args.memory_access,
+            overlap=args.overlap,
+            memory_evidence=args.memory_evidence,
+            overlap_evidence=args.overlap_evidence,
+            prefill_chunk=args.prefill_chunk,
+            kv_value_group=args.kv_value_group,
+            xattention_profile=args.xattention_profile,
+            cta_recipe=args.cta_recipe,
+        )
         _publish(args.out, result)
     except (OSError, UnicodeError, TypeError, ValueError) as error:
         raise SystemExit(str(error)) from error

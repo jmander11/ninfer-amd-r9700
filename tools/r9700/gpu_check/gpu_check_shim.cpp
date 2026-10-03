@@ -288,8 +288,9 @@ extern "C" hipError_t hipMalloc(void** ptr, size_t size) {
     static std::once_flag banner;
     std::call_once(banner, [] {
         // One line per checked process, so a log shows which tests ran under the check.
-        std::fprintf(stderr, "ninfer gpu_check: %s%s%s active\n", config().memcheck ? "memcheck " : "",
-                     config().initcheck ? "initcheck " : "", config().racecheck ? "racecheck" : "");
+        std::fprintf(stderr, "ninfer gpu_check: %s%s%s active\n",
+                     config().memcheck ? "memcheck " : "", config().initcheck ? "initcheck " : "",
+                     config().racecheck ? "racecheck" : "");
     });
     ensure_racecheck();
     const hipError_t e = config().memcheck ? guarded_malloc(ptr, size) : next(ptr, size);

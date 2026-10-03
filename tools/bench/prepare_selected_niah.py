@@ -17,9 +17,7 @@ from pathlib import Path
 from tools.bench.run_niah_check import DEFAULT_NEEDLE, file_identity, matrix_cases, resolve_fixture
 
 REPO = Path(__file__).resolve().parents[2]
-ROUTE_RESOLVER = (
-    REPO / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"
-)
+ROUTE_RESOLVER = REPO / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"
 RUN_NIAH = REPO / "tools/bench/run_niah_check.py"
 VALIDATOR = REPO / "tools/bench/validate_selected_niah.py"
 POSITIONS = ("start", "q25", "mid", "q75", "end")
@@ -79,18 +77,25 @@ def prepare(selection: Path, output: Path) -> dict:
             "status": "command_only_not_executed",
             "terminal_route": route,
             "workload": {
-                "model": "qwen3.8-27b", "length": "64k",
-                "positions": list(POSITIONS), "runs_per_cell": 1,
-                "max_tokens": 64, "thinking": False, "needle": DEFAULT_NEEDLE,
+                "model": "qwen3.8-27b",
+                "length": "64k",
+                "positions": list(POSITIONS),
+                "runs_per_cell": 1,
+                "max_tokens": 64,
+                "thinking": False,
+                "needle": DEFAULT_NEEDLE,
                 "answer_match": "exact",
                 "maximum_concurrency": 1,
             },
             "fixtures": fixtures,
             "server": {
                 **file_identity(serve),
-                "host": "127.0.0.1", "port": 18081,
-                "max_context": 262144, "kv_capacity": 262144,
-                "max_concurrency": 1, "prefix_reuse": False,
+                "host": "127.0.0.1",
+                "port": 18081,
+                "max_context": 262144,
+                "kv_capacity": 262144,
+                "max_concurrency": 1,
+                "prefix_reuse": False,
             },
             "outputs": {
                 "server_log": str(output / "server.requests.jsonl"),
@@ -114,17 +119,17 @@ def prepare(selection: Path, output: Path) -> dict:
             'for path in "$root/server.requests.jsonl" "$root/server.stdout.log" '
             '"$root/server.stderr.log" "$root/niah.evidence.json" "$root/admission.json"; do\n'
             '  test ! -e "$path" && test ! -L "$path"\n'
-            'done\n'
+            "done\n"
             'test -x "$serve"\n'
             '"$serve" "$artifact" --host 127.0.0.1 --port 18081 '
-            '--model-id qwen3.8-27b --max-context 262144 --kv-capacity 262144 '
-            '--max-concurrency 1 --prefill-chunk ' + str(route["selected_prefill_chunk"]) + ' '
+            "--model-id qwen3.8-27b --max-context 262144 --kv-capacity 262144 "
+            "--max-concurrency 1 --prefill-chunk " + str(route["selected_prefill_chunk"]) + " "
             '--no-prefix-reuse --no-thinking --request-log-jsonl "$root/server.requests.jsonl" '
             '>"$root/server.stdout.log" 2>"$root/server.stderr.log" &\n'
-            'readonly server_pid=$!\n'
+            "readonly server_pid=$!\n"
             'cleanup() { kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; }\n'
-            'trap cleanup EXIT\n'
-            "NINFER_SERVER_PID=\"$server_pid\" \"$python\" - <<'PY'\n"
+            "trap cleanup EXIT\n"
+            'NINFER_SERVER_PID="$server_pid" "$python" - <<\'PY\'\n'
             "import json, os, time, urllib.request\n"
             "pid = int(os.environ['NINFER_SERVER_PID'])\n"
             "deadline = time.monotonic() + 300\n"
@@ -144,35 +149,44 @@ def prepare(selection: Path, output: Path) -> dict:
             "else:\n"
             "    raise SystemExit(f'server health timeout: {last}')\n"
             "PY\n"
-            "\"$python\" -m tools.bench.run_niah_check --base http://127.0.0.1:18081 "
+            '"$python" -m tools.bench.run_niah_check --base http://127.0.0.1:18081 '
             "--model qwen3.8-27b --key local-niah-gate --lengths 64k "
             "--positions start,q25,mid,q75,end --runs 1 --max-tokens 64 --exact-answer "
             '--server-log "$root/server.requests.jsonl" --artifact "$artifact" '
-            f"--serve-bin \"$serve\" --selection {shlex.quote(str(selection))} "
+            f'--serve-bin "$serve" --selection {shlex.quote(str(selection))} '
             '--out "$root/niah.evidence.json"\n'
-            'cleanup\ntrap - EXIT\n'
-            "\"$python\" -m tools.bench.validate_selected_niah --plan \"$root/plan.json\" "
+            "cleanup\ntrap - EXIT\n"
+            '"$python" -m tools.bench.validate_selected_niah --plan "$root/plan.json" '
             '--root "$root" --out "$root/admission.json"\n',
             encoding="utf-8",
         )
         closure = [
             (Path(__file__).resolve(), Path(__file__).resolve()),
-            (VALIDATOR, VALIDATOR), (RUN_NIAH, RUN_NIAH),
-            (ROUTE_RESOLVER, ROUTE_RESOLVER), (selection, selection),
-            (artifact, artifact), (bench, bench), (serve, serve),
+            (VALIDATOR, VALIDATOR),
+            (RUN_NIAH, RUN_NIAH),
+            (ROUTE_RESOLVER, ROUTE_RESOLVER),
+            (selection, selection),
+            (artifact, artifact),
+            (bench, bench),
+            (serve, serve),
             (plan_path, output / "plan.json"),
             (commands_path, output / "commands.sh"),
             *((Path(row["path"]), Path(row["path"])) for row in fixtures),
-            *((Path(row["path"]), Path(row["path"]))
-              for row in route["source_matrices"].values()),
-            *([(Path(route["hybrid_width_tool"]["path"]),
-                Path(route["hybrid_width_tool"]["path"]))]
-              if route["hybrid_width_tool"] else []),
+            *((Path(row["path"]), Path(row["path"])) for row in route["source_matrices"].values()),
+            *(
+                [
+                    (
+                        Path(route["hybrid_width_tool"]["path"]),
+                        Path(route["hybrid_width_tool"]["path"]),
+                    )
+                ]
+                if route["hybrid_width_tool"]
+                else []
+            ),
         ]
         (staged / "prepared.sha256").write_text(
             "".join(
-                f"{sha(source)}  {published.relative_to(REPO)}\n"
-                for source, published in closure
+                f"{sha(source)}  {published.relative_to(REPO)}\n" for source, published in closure
             ),
             encoding="utf-8",
         )

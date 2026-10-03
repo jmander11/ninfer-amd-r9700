@@ -28,20 +28,26 @@ void check(hipError_t error, const char* what) {
     if (error != hipSuccess)
         throw std::runtime_error(std::string(what) + ": " + hipGetErrorString(error));
 }
+
 void require(bool condition, const std::string& what) {
     if (!condition) throw std::runtime_error(what);
 }
 
 template <class T>
 struct Device {
-    T* data = nullptr;
+    T* data           = nullptr;
     std::size_t count = 0;
+
     explicit Device(std::size_t n) : count(n) { check(hipMalloc(&data, n * sizeof(T)), "malloc"); }
+
     ~Device() { (void)hipFree(data); }
+
     Device(const Device&) = delete;
+
     void upload(const std::vector<T>& host) {
         check(hipMemcpy(data, host.data(), count * sizeof(T), hipMemcpyHostToDevice), "upload");
     }
+
     std::vector<T> download() const {
         std::vector<T> host(count);
         check(hipMemcpy(host.data(), data, count * sizeof(T), hipMemcpyDeviceToHost), "download");
@@ -51,11 +57,14 @@ struct Device {
 
 struct Rng {
     std::uint64_t state;
+
     std::uint32_t next() {
         state = state * 6364136223846793005ULL + 1442695040888963407ULL;
         return static_cast<std::uint32_t>(state >> 32U);
     }
+
     double uniform() { return (next() + 0.5) / 4294967296.0; }
+
     double normal() {
         return std::sqrt(-2.0 * std::log(uniform())) * std::cos(6.283185307 * uniform());
     }
@@ -73,24 +82,24 @@ void run(int tokens, bool with_query, Rng& rng, hipStream_t stream) {
     for (auto& v : k_norm) v = bf16_bits(static_cast<float>(1.0 + rng.normal() * 0.2));
     std::vector<std::int32_t> positions(tokens);
     for (auto& p : positions) p = static_cast<std::int32_t>(rng.next() % 262144U);
-    Device<std::uint16_t> device_fused(fused_elements), device_q_norm(kHead),
-        device_k_norm(kHead);
+    Device<std::uint16_t> device_fused(fused_elements), device_q_norm(kHead), device_k_norm(kHead);
     Device<std::int32_t> device_positions(tokens);
     device_fused.upload(fused);
     device_q_norm.upload(q_norm);
     device_k_norm.upload(k_norm);
     device_positions.upload(positions);
-    const std::size_t q_elements = static_cast<std::size_t>(tokens) * kQ * kHead;
+    const std::size_t q_elements  = static_cast<std::size_t>(tokens) * kQ * kHead;
     const std::size_t kv_elements = static_cast<std::size_t>(tokens) * kK * kHead;
     Device<std::uint16_t> raw_q(q_elements), raw_k(kv_elements), ref_q(q_elements),
         ref_k(kv_elements), ref_v(kv_elements), got_q(q_elements), got_k(kv_elements),
         got_v(kv_elements);
     // Reference chain: row copies, eager RMSNorm, RoPE.
     const std::size_t pitch = kRows * sizeof(std::uint16_t);
-    const auto copy_rows = [&](int first, int rows, std::uint16_t* out) {
+    const auto copy_rows    = [&](int first, int rows, std::uint16_t* out) {
         check(hipMemcpy2DAsync(out, rows * sizeof(std::uint16_t), device_fused.data + first, pitch,
                                rows * sizeof(std::uint16_t), tokens, hipMemcpyDeviceToDevice,
-                               stream), "copy rows");
+                               stream),
+              "copy rows");
     };
     copy_rows(0, kQ * kHead, raw_q.data);
     copy_rows(kQ * kHead, kK * kHead, raw_k.data);
@@ -98,12 +107,14 @@ void run(int tokens, bool with_query, Rng& rng, hipStream_t stream) {
     const float eps = 1.0e-6F;
     check(eager::rmsnorm_bf16(reinterpret_cast<const hip_bfloat16*>(raw_q.data),
                               reinterpret_cast<const hip_bfloat16*>(device_q_norm.data),
-                              reinterpret_cast<hip_bfloat16*>(ref_q.data), kHead, kQ * tokens,
-                              eps, false, stream), "q rmsnorm");
+                              reinterpret_cast<hip_bfloat16*>(ref_q.data), kHead, kQ * tokens, eps,
+                              false, stream),
+          "q rmsnorm");
     check(eager::rmsnorm_bf16(reinterpret_cast<const hip_bfloat16*>(raw_k.data),
                               reinterpret_cast<const hip_bfloat16*>(device_k_norm.data),
-                              reinterpret_cast<hip_bfloat16*>(ref_k.data), kHead, kK * tokens,
-                              eps, false, stream), "k rmsnorm");
+                              reinterpret_cast<hip_bfloat16*>(ref_k.data), kHead, kK * tokens, eps,
+                              false, stream),
+          "k rmsnorm");
     Tensor position_tensor(device_positions.data, DType::I32, {tokens});
     Tensor q_tensor(ref_q.data, DType::BF16, {kHead, kQ, tokens});
     Tensor k_tensor(ref_k.data, DType::BF16, {kHead, kK, tokens});

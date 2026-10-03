@@ -19,7 +19,7 @@ class DeviceGuard {
 public:
     DeviceGuard() {
         const char* requested = std::getenv("NINFER_R9700_PCI_BUS_ID");
-        pci_ = requested == nullptr ? "0000:13:00.0" : requested;
+        pci_                  = requested == nullptr ? "0000:13:00.0" : requested;
         if (pci_.size() != 12U || pci_[4] != ':' || pci_[7] != ':' || pci_[10] != '.')
             throw std::runtime_error("NINFER_R9700_PCI_BUS_ID must be domain:bus:device.function");
         for (std::size_t i = 0; i < pci_.size(); ++i) {
@@ -57,8 +57,8 @@ public:
             !(architecture == "gfx1201" || architecture.starts_with("gfx1201:")))
             throw std::runtime_error("qualification requires bound PCI gfx1201 wave32 device");
         std::cerr << "r9700-qualification phase=" << phase << " ordinal=" << selected
-                  << " pci=" << reported << " arch=" << architecture
-                  << " wave=" << props.warpSize << " name=" << props.name << '\n';
+                  << " pci=" << reported << " arch=" << architecture << " wave=" << props.warpSize
+                  << " name=" << props.name << '\n';
     }
 
 private:
@@ -66,23 +66,28 @@ private:
         if (error != hipSuccess)
             throw std::runtime_error(std::string(operation) + ": " + hipGetErrorString(error));
     }
+
     std::string read(const char* name) const {
         std::ifstream file(directory_ + name);
         std::string value;
         if (!(file >> value))
-            throw std::runtime_error("cannot read R9700 qualification attribute " + directory_ + name);
+            throw std::runtime_error("cannot read R9700 qualification attribute " + directory_ +
+                                     name);
         return value;
     }
+
     void check_sysfs(std::string_view phase) const {
         const auto vendor = read("vendor"), device = read("device");
         const auto power = read("power_dpm_force_performance_level");
         if (vendor != "0x1002" || device != "0x7551")
             throw std::runtime_error("bound PCI device is not AMD 1002:7551");
         if (power != "auto")
-            throw std::runtime_error("R9700 qualification requires auto power before and after timing; got " + power);
+            throw std::runtime_error(
+                "R9700 qualification requires auto power before and after timing; got " + power);
         std::cerr << "r9700-qualification phase=" << phase << " pci=" << pci_
                   << " vendor=" << vendor << " device=" << device << " power=" << power << '\n';
     }
+
     std::string pci_, directory_;
     int ordinal_ = -1;
 };

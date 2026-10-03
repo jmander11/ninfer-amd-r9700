@@ -33,7 +33,7 @@ std::uint64_t align(std::uint64_t value, std::uint64_t alignment) {
 int q4_code(const std::uint8_t* codes, std::uint32_t groups, std::size_t row,
             std::uint32_t feature) {
     const std::uint8_t byte = codes[row * groups * 32U + feature / 2U];
-    const int nibble = (feature % 2U) == 0U ? (byte & 0x0f) : (byte >> 4U);
+    const int nibble        = (feature % 2U) == 0U ? (byte & 0x0f) : (byte >> 4U);
     return nibble >= 8 ? nibble - 16 : nibble;
 }
 
@@ -48,11 +48,12 @@ struct Table {
 };
 
 Table make_q4(std::int32_t vocabulary, std::int32_t features) {
-    const auto padded = static_cast<std::uint32_t>(align(static_cast<std::uint64_t>(features), 128));
-    const std::uint32_t groups = padded / 64U;
-    const std::uint64_t code_bytes = static_cast<std::uint64_t>(vocabulary) * padded / 2U;
+    const auto padded =
+        static_cast<std::uint32_t>(align(static_cast<std::uint64_t>(features), 128));
+    const std::uint32_t groups       = padded / 64U;
+    const std::uint64_t code_bytes   = static_cast<std::uint64_t>(vocabulary) * padded / 2U;
     const std::uint64_t scale_offset = align(code_bytes, 256);
-    const std::uint64_t scale_bytes = static_cast<std::uint64_t>(vocabulary) * groups * 2U;
+    const std::uint64_t scale_bytes  = static_cast<std::uint64_t>(vocabulary) * groups * 2U;
     Table table;
     table.payload.resize(scale_offset + scale_bytes);
     for (std::size_t i = 0; i < code_bytes; ++i) {
@@ -64,28 +65,29 @@ Table make_q4(std::int32_t vocabulary, std::int32_t features) {
     }
     Weight& w = table.weight;
     w.payload = w.qdata = table.payload.data();
-    w.payload_bytes = table.payload.size();
-    w.qdata_bytes = code_bytes;
-    w.scales = table.payload.data() + scale_offset;
-    w.scale_bytes = scale_bytes;
-    w.qtype = QType::Q4G64_F16S;
-    w.layout = QuantLayout::RowSplit;
-    w.group_size = 64;
-    w.group = 64;
-    w.scale_dtype = DType::FP16;
-    w.ndim = 2;
+    w.payload_bytes     = table.payload.size();
+    w.qdata_bytes       = code_bytes;
+    w.scales            = table.payload.data() + scale_offset;
+    w.scale_bytes       = scale_bytes;
+    w.qtype             = QType::Q4G64_F16S;
+    w.layout            = QuantLayout::RowSplit;
+    w.group_size        = 64;
+    w.group             = 64;
+    w.scale_dtype       = DType::FP16;
+    w.ndim              = 2;
     w.n = w.shape[0] = w.padded_shape[0] = vocabulary;
-    w.k = w.shape[1] = features;
+    w.k = w.shape[1]  = features;
     w.padded_shape[1] = static_cast<std::int32_t>(padded);
     return table;
 }
 
 Table make_w8(std::int32_t vocabulary, std::int32_t features) {
-    const auto padded = static_cast<std::uint32_t>(align(static_cast<std::uint64_t>(features), 128));
-    const std::uint32_t groups = padded / 32U;
-    const std::uint64_t code_bytes = static_cast<std::uint64_t>(vocabulary) * padded;
+    const auto padded =
+        static_cast<std::uint32_t>(align(static_cast<std::uint64_t>(features), 128));
+    const std::uint32_t groups       = padded / 32U;
+    const std::uint64_t code_bytes   = static_cast<std::uint64_t>(vocabulary) * padded;
     const std::uint64_t scale_offset = align(code_bytes, 256);
-    const std::uint64_t scale_bytes = static_cast<std::uint64_t>(vocabulary) * groups * 2U;
+    const std::uint64_t scale_bytes  = static_cast<std::uint64_t>(vocabulary) * groups * 2U;
     Table table;
     table.payload.resize(scale_offset + scale_bytes);
     for (std::size_t i = 0; i < table.payload.size(); ++i) {
@@ -93,18 +95,18 @@ Table make_w8(std::int32_t vocabulary, std::int32_t features) {
     }
     Weight& w = table.weight;
     w.payload = w.qdata = table.payload.data();
-    w.payload_bytes = table.payload.size();
-    w.qdata_bytes = code_bytes;
-    w.scales = table.payload.data() + scale_offset;
-    w.scale_bytes = scale_bytes;
-    w.qtype = QType::W8G32_F16S;
-    w.layout = QuantLayout::RowSplit;
-    w.group_size = 32;
-    w.group = 32;
-    w.scale_dtype = DType::FP16;
-    w.ndim = 2;
+    w.payload_bytes     = table.payload.size();
+    w.qdata_bytes       = code_bytes;
+    w.scales            = table.payload.data() + scale_offset;
+    w.scale_bytes       = scale_bytes;
+    w.qtype             = QType::W8G32_F16S;
+    w.layout            = QuantLayout::RowSplit;
+    w.group_size        = 32;
+    w.group             = 32;
+    w.scale_dtype       = DType::FP16;
+    w.ndim              = 2;
     w.n = w.shape[0] = w.padded_shape[0] = vocabulary;
-    w.k = w.shape[1] = features;
+    w.k = w.shape[1]  = features;
     w.padded_shape[1] = static_cast<std::int32_t>(padded);
     return table;
 }
@@ -118,9 +120,9 @@ Table make_bf16(std::int32_t vocabulary, std::int32_t features) {
     Weight& w = table.weight;
     w.payload = w.qdata = table.payload.data();
     w.payload_bytes = w.qdata_bytes = table.payload.size();
-    w.qtype = QType::BF16_CTRL;
-    w.layout = QuantLayout::Contiguous;
-    w.ndim = 2;
+    w.qtype                         = QType::BF16_CTRL;
+    w.layout                        = QuantLayout::Contiguous;
+    w.ndim                          = 2;
     w.n = w.shape[0] = w.padded_shape[0] = vocabulary;
     w.k = w.shape[1] = w.padded_shape[1] = features;
     return table;
@@ -129,10 +131,10 @@ Table make_bf16(std::int32_t vocabulary, std::int32_t features) {
 // Compares every staged slot with its source row through the logical decode of each layout.
 void require_rows(const Weight& source, const ninfer::ops::StagedEmbedding& staged,
                   const std::vector<std::int32_t>& ids, const std::string& label) {
-    const auto* slots = static_cast<const std::int32_t*>(staged.slots.data);
+    const auto* slots     = static_cast<const std::int32_t*>(staged.slots.data);
     const Weight& compact = staged.table;
-    const auto features = static_cast<std::uint32_t>(source.shape[1]);
-    const auto padded = static_cast<std::uint32_t>(source.padded_shape[1]);
+    const auto features   = static_cast<std::uint32_t>(source.shape[1]);
+    const auto padded     = static_cast<std::uint32_t>(source.padded_shape[1]);
     for (std::size_t i = 0; i < ids.size(); ++i) {
         const auto slot = static_cast<std::size_t>(slots[i]);
         const auto row  = static_cast<std::size_t>(ids[i]);
@@ -140,17 +142,16 @@ void require_rows(const Weight& source, const ninfer::ops::StagedEmbedding& stag
         switch (source.qtype) {
         case QType::Q4G64_F16S:
             for (std::uint32_t f = 0; f < features; ++f) {
-                require(q4_code(static_cast<const std::uint8_t*>(compact.qdata), padded / 64U,
-                                slot, f) ==
-                            q4_code(static_cast<const std::uint8_t*>(source.qdata), padded / 64U,
-                                    row, f),
+                require(q4_code(static_cast<const std::uint8_t*>(compact.qdata), padded / 64U, slot,
+                                f) == q4_code(static_cast<const std::uint8_t*>(source.qdata),
+                                              padded / 64U, row, f),
                         label + ": Q4 code differs");
             }
             for (std::uint32_t g = 0; g < padded / 64U; ++g) {
                 require(q4_scale(static_cast<const std::uint16_t*>(compact.scales), padded / 64U,
-                                 slot, g) ==
-                            q4_scale(static_cast<const std::uint16_t*>(source.scales),
-                                     padded / 64U, row, g),
+                                 slot,
+                                 g) == q4_scale(static_cast<const std::uint16_t*>(source.scales),
+                                                padded / 64U, row, g),
                         label + ": Q4 scale differs");
             }
             break;
@@ -161,9 +162,10 @@ void require_rows(const Weight& source, const ninfer::ops::StagedEmbedding& stag
                         label + ": W8 code differs");
             }
             for (std::uint32_t g = 0; g < padded / 32U; ++g) {
-                require(static_cast<const std::uint16_t*>(compact.scales)[slot * (padded / 32U) + g] ==
-                            static_cast<const std::uint16_t*>(source.scales)[row * (padded / 32U) + g],
-                        label + ": W8 scale differs");
+                require(
+                    static_cast<const std::uint16_t*>(compact.scales)[slot * (padded / 32U) + g] ==
+                        static_cast<const std::uint16_t*>(source.scales)[row * (padded / 32U) + g],
+                    label + ": W8 scale differs");
             }
             break;
         case QType::BF16_CTRL:
@@ -180,7 +182,7 @@ void require_rows(const Weight& source, const ninfer::ops::StagedEmbedding& stag
 }
 
 void check_table(const Table& table, const std::string& label) {
-    const Weight& source = table.weight;
+    const Weight& source          = table.weight;
     const std::int32_t vocabulary = source.shape[0];
     std::vector<std::int32_t> ids;
     for (std::int32_t i = 0; i < 3 * vocabulary; ++i) {
@@ -196,7 +198,7 @@ void check_table(const Table& table, const std::string& label) {
         const ninfer::ops::EmbeddingStage stage =
             ninfer::ops::stage_embedding_rows(window, source, image);
         const std::size_t distinct = std::set<std::int32_t>(window.begin(), window.end()).size();
-        const std::size_t rows = distinct;
+        const std::size_t rows     = distinct;
         require(stage.ids == static_cast<std::int32_t>(window.size()) &&
                     stage.rows == static_cast<std::int32_t>(rows) && stage.bytes <= capacity,
                 label + ": stage extent");
@@ -219,8 +221,8 @@ void check_table(const Table& table, const std::string& label) {
     bool rejected = false;
     try {
         const std::vector<std::int32_t> outside{0, vocabulary};
-        std::vector<std::byte> image(ninfer::ops::embedding_stage_capacity_bytes(
-            source.qtype, source.shape[1], 2));
+        std::vector<std::byte> image(
+            ninfer::ops::embedding_stage_capacity_bytes(source.qtype, source.shape[1], 2));
         (void)ninfer::ops::stage_embedding_rows(outside, source, image);
     } catch (const std::out_of_range&) { rejected = true; }
     require(rejected, label + ": out-of-range id accepted");

@@ -73,11 +73,12 @@ class VectorizedW8G32CodecTest(unittest.TestCase):
 @unittest.skipIf(torch is None, "requires the project Torch environment")
 class VectorizedQ4G64CodecTest(unittest.TestCase):
     def assert_logical_q4_equal(self, actual, expected_payload, rows, columns) -> None:
-        expected_codes, expected_scales = decode_q4g64_reference(
-            expected_payload, rows, columns)
+        expected_codes, expected_scales = decode_q4g64_reference(expected_payload, rows, columns)
         self.assertEqual(actual.codes.cpu().reshape(-1).tolist(), expected_codes)
-        self.assertEqual(actual.scales.cpu().contiguous().view(torch.uint16).reshape(-1).tolist(),
-                         expected_scales)
+        self.assertEqual(
+            actual.scales.cpu().contiguous().view(torch.uint16).reshape(-1).tolist(),
+            expected_scales,
+        )
 
     def test_canonical_q4_path_matches_independent_scalar_packing(self) -> None:
         values = [-7.0, -6.5, -1.5, -0.5, 0.5, 1.5, 6.5, 7.0]
@@ -155,14 +156,11 @@ class R9700Q4G64CodecTest(unittest.TestCase):
         for case, (rows, columns, values) in enumerate(cases):
             matrix = torch.tensor(values, dtype=torch.bfloat16).reshape(rows, columns)
             represented = matrix.to(dtype=torch.float32).reshape(-1).tolist()
-            expected = encode_q4g64_n16k16_reference(
-                represented, rows, columns, refined=True)
+            expected = encode_q4g64_n16k16_reference(represented, rows, columns, refined=True)
             cpu = quantize_and_encode_q4g64_mse(matrix, device="cpu")
             rocm = quantize_and_encode_q4g64_mse(matrix, device="cuda")
             self.assertEqual(cpu, expected, f"CPU case {case}, shape {(rows, columns)}")
-            self.assertEqual(
-                rocm, expected, f"ROCm case {case}, shape {(rows, columns)}"
-            )
+            self.assertEqual(rocm, expected, f"ROCm case {case}, shape {(rows, columns)}")
 
 
 if __name__ == "__main__":

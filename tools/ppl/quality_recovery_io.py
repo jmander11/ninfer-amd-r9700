@@ -23,13 +23,16 @@ EXPECTED_AUTHORITIES = {
     "ALL_Q4_XATTENTION_QUALITY": ("r9700-q4g64-n16k16-eval", "b128-s16-tau900"),
     "MIXED_DENSE_QUALITY": ("r9700-q4-w8-mse-n16k16-eval", "dense"),
     "MIXED_XATTENTION_QUALITY": (
-        "r9700-q4-w8-mse-n16k16-eval", "b128-s16-tau900",
+        "r9700-q4-w8-mse-n16k16-eval",
+        "b128-s16-tau900",
     ),
     "FOUR_ROLE_DENSE_QUALITY": (
-        "r9700-q4g64-f8e4m3-four-role-n16k16-eval", "dense",
+        "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+        "dense",
     ),
     "FOUR_ROLE_XATTENTION_QUALITY": (
-        "r9700-q4g64-f8e4m3-four-role-n16k16-eval", "b128-s16-tau900",
+        "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+        "b128-s16-tau900",
     ),
 }
 
@@ -50,9 +53,14 @@ def validate_authority_map(path: Path) -> dict[str, Any]:
         raise ValueError("quality authority map is not valid JSON") from error
     if (
         not isinstance(value, dict)
-        or set(value) != {
-            "artifact_type", "schema_version", "selected_prefill_chunk",
-            "selected_prefill_chunk_authority", "concurrency", "authorities",
+        or set(value)
+        != {
+            "artifact_type",
+            "schema_version",
+            "selected_prefill_chunk",
+            "selected_prefill_chunk_authority",
+            "concurrency",
+            "authorities",
         }
         or value.get("artifact_type") != "ninfer_r9700_terminal_quality_authority_map"
         or value.get("schema_version") != 2
@@ -64,6 +72,7 @@ def validate_authority_map(path: Path) -> dict[str, Any]:
         raise ValueError("quality authority map schema is invalid")
 
     from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
+
     chunk = value["selected_prefill_chunk"]
     selected = value.get("selected_prefill_chunk_authority")
     if not isinstance(selected, dict) or set(selected) != {"path", "sha256"}:
@@ -74,14 +83,22 @@ def validate_authority_map(path: Path) -> dict[str, Any]:
         raise ValueError("quality authority map chunk binding changed")
 
     from tools.ppl.assemble_pareto import _campaign_quality_candidate
+
     for name, (weights_id, profile) in EXPECTED_AUTHORITIES.items():
         entry = value["authorities"][name]
-        if not isinstance(entry, dict) or set(entry) != {"path", "sha256", "artifact", "eligibility_by_group"}:
+        if not isinstance(entry, dict) or set(entry) != {
+            "path",
+            "sha256",
+            "artifact",
+            "eligibility_by_group",
+        }:
             raise ValueError(f"quality authority {name} schema is invalid")
         campaign_path = Path(entry.get("path", ""))
         if (
-            not campaign_path.is_absolute() or campaign_path.is_symlink()
-            or not campaign_path.is_file() or str(campaign_path.resolve()) != str(campaign_path)
+            not campaign_path.is_absolute()
+            or campaign_path.is_symlink()
+            or not campaign_path.is_file()
+            or str(campaign_path.resolve()) != str(campaign_path)
             or entry.get("sha256") != _sha256(campaign_path)
         ):
             raise ValueError(f"quality authority {name} campaign changed")
@@ -96,16 +113,22 @@ def validate_authority_map(path: Path) -> dict[str, Any]:
             eligibility[str(group)] = all(cells[label]["eligible"] for label in ("8k", "32k"))
             sources.append(source)
         declared = entry["eligibility_by_group"]
-        if (not isinstance(declared, dict) or set(declared) != {"16", "32"}
-                or any(type(value) is not bool for value in declared.values())
-                or declared != eligibility):
+        if (
+            not isinstance(declared, dict)
+            or set(declared) != {"16", "32"}
+            or any(type(value) is not bool for value in declared.values())
+            or declared != eligibility
+        ):
             raise ValueError(f"quality authority {name} eligibility differs from replayed gates")
-        identities = [{
-            "weights_id": source.get("weights_id"),
-            "sha256": source.get("sha256"),
-            "file_size_bytes": source.get("file_size_bytes"),
-            "conversion_receipt": source.get("conversion_receipt"),
-        } for source in sources]
+        identities = [
+            {
+                "weights_id": source.get("weights_id"),
+                "sha256": source.get("sha256"),
+                "file_size_bytes": source.get("file_size_bytes"),
+                "conversion_receipt": source.get("conversion_receipt"),
+            }
+            for source in sources
+        ]
         identity = identities[0]
         if (
             identities[0] != identities[1]

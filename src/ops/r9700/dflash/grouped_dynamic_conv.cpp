@@ -76,8 +76,7 @@ void require_projection_weight(const Weight& weight) {
             "grouped_dynamic_conv: W8G32_F16S projection must use RowSplit");
     }
     if (weight.qtype == QType::BF16_CTRL && weight.layout != QuantLayout::Contiguous) {
-        throw std::invalid_argument(
-            "grouped_dynamic_conv: BF16 projection must be contiguous");
+        throw std::invalid_argument("grouped_dynamic_conv: BF16 projection must be contiguous");
     }
 }
 
@@ -93,15 +92,16 @@ std::size_t projection_bytes(std::int32_t tokens, std::int32_t batch) {
 
 } // namespace
 
-std::size_t grouped_dynamic_conv_prepare_workspace_capacity_bytes(
-    QType qtype, std::int32_t min_tokens, std::int32_t max_tokens, std::int32_t batch) {
+std::size_t grouped_dynamic_conv_prepare_workspace_capacity_bytes(QType qtype,
+                                                                  std::int32_t min_tokens,
+                                                                  std::int32_t max_tokens,
+                                                                  std::int32_t batch) {
     if (min_tokens <= 0 || max_tokens < min_tokens || batch <= 0 ||
         batch > kGroupedDynamicConvMaxBatch ||
         (batch > 1 && max_tokens > kGroupedDynamicConvMaxWidthWhenBatched)) {
         throw std::invalid_argument("grouped_dynamic_conv workspace: invalid token/batch interval");
     }
-    if (qtype != QType::BF16_CTRL && qtype != QType::W8G32_F16S &&
-        qtype != QType::Q4G64_F16S) {
+    if (qtype != QType::BF16_CTRL && qtype != QType::W8G32_F16S && qtype != QType::Q4G64_F16S) {
         throw std::invalid_argument("grouped_dynamic_conv workspace: unsupported projection qtype");
     }
     const std::int32_t columns = max_tokens * batch;
@@ -119,16 +119,14 @@ void grouped_dynamic_conv_prepare(const Tensor& hidden, const Tensor& base_kerne
     require_finish_dynamic(hidden, finish_dynamic);
     require_projection_weight(kernel_projection);
     require_disjoint(hidden, prepared, "grouped_dynamic_conv: prepared aliases hidden");
-    require_disjoint(hidden, finish_dynamic,
-                     "grouped_dynamic_conv: finish_dynamic aliases hidden");
+    require_disjoint(hidden, finish_dynamic, "grouped_dynamic_conv: finish_dynamic aliases hidden");
     require_disjoint(prepared, finish_dynamic,
                      "grouped_dynamic_conv: prepared aliases finish_dynamic");
-    require_disjoint(prepared, base_kernel,
-                     "grouped_dynamic_conv: prepared aliases base_kernel");
+    require_disjoint(prepared, base_kernel, "grouped_dynamic_conv: prepared aliases base_kernel");
 
-    const std::int32_t tokens = hidden.ne[1];
-    const std::int32_t batch = hidden.ne[2];
-    auto scope = workspace.scope();
+    const std::int32_t tokens           = hidden.ne[1];
+    const std::int32_t batch            = hidden.ne[2];
+    auto scope                          = workspace.scope();
     const DeviceSpan projection_storage = workspace.alloc_bytes(projection_bytes(tokens, batch));
     Tensor projection(projection_storage.data, DType::BF16,
                       {kGroupedDynamicConvProjRows, tokens * batch});

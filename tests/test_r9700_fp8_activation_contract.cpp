@@ -9,7 +9,7 @@
 #include <stdexcept>
 
 namespace linear = ninfer::ops::r9700::linear;
-namespace ops = ninfer::ops;
+namespace ops    = ninfer::ops;
 
 namespace {
 
@@ -40,7 +40,7 @@ int main() {
         alignas(256) std::array<std::byte, kBytes> storage{};
         linear::Fp8ActivationWorkspace workspace{};
         require(linear::fp8_bind_activation_workspace(storage.data(), storage.size(), 3, 129,
-                                                       &workspace) == hipSuccess,
+                                                      &workspace) == hipSuccess,
                 "valid FP8 activation workspace did not bind");
         auto* base = reinterpret_cast<std::uint8_t*>(storage.data());
         require(workspace.codes == base && workspace.code_bytes == 768 &&
@@ -51,10 +51,9 @@ int main() {
                     workspace.padded_columns == 256,
                 "bound FP8 activation planes differ from the contract");
         require(linear::fp8_bind_activation_workspace(storage.data(), storage.size() - 1, 3, 129,
-                                                       &workspace) == hipErrorInvalidValue &&
-                    linear::fp8_bind_activation_workspace(storage.data() + 1, storage.size() - 1,
-                                                          3, 129,
-                                                          &workspace) == hipErrorInvalidValue,
+                                                      &workspace) == hipErrorInvalidValue &&
+                    linear::fp8_bind_activation_workspace(storage.data() + 1, storage.size() - 1, 3,
+                                                          129, &workspace) == hipErrorInvalidValue,
                 "malformed FP8 activation storage was accepted");
         std::cout << "R9700 FP8 activation workspace contract passed\n";
         return 0;

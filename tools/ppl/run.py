@@ -32,7 +32,10 @@ if str(REPO) not in sys.path:
 
 from tools.ppl.schemes import BASELINE, ORDER, PROFILES
 from tools.convert.qwen3_8_27b_r9700 import (
-    fp8_hybrid_decision, fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory,
+    fp8_hybrid_decision,
+    fp8_hybrid_inventory,
+    q4_inventory,
+    q4_w8_mse_inventory,
 )
 from tools.reference.qwen3_8_27b_bf16.protocol import (
     ATTENTION_PV_EXECUTION as BF16_ATTENTION_PV_EXECUTION,
@@ -44,6 +47,7 @@ from tools.reference.qwen3_8_27b_bf16.protocol import (
     MATMUL_REDUCTION_EXECUTION as BF16_MATMUL_REDUCTION_EXECUTION,
     TRITON_CODEGEN_EXECUTION as BF16_TRITON_CODEGEN_EXECUTION,
 )
+
 DEFAULT_TOKENS = 8192
 LONG_TOKENS = 32768
 PAGE = 64
@@ -65,6 +69,8 @@ def prepare_output_directory(out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     if out_dir.is_symlink() or not out_dir.is_dir():
         raise SystemExit(f"PPL output path is not a real directory: {out_dir}")
+
+
 BF16_REPEAT_ARTIFACT_TYPE = "ninfer_qwen3_8_bf16_repeat_comparison"
 BF16_REPEAT_SCHEMA_VERSION = 1
 BF16_EXECUTION_ENVIRONMENT_KEYS = set(BF16_EXECUTION_ENVIRONMENT_KEY_ORDER)
@@ -126,9 +132,7 @@ def preflight_python_scorer(ppl_bin: Path) -> None:
     if ppl_bin.suffix.lower() != ".py":
         return
     probe = (
-        "import torch; "
-        "assert getattr(torch.version, 'hip', None), "
-        "'PyTorch is not a ROCm build'"
+        "import torch; assert getattr(torch.version, 'hip', None), 'PyTorch is not a ROCm build'"
     )
     completed = subprocess.run(
         [sys.executable, "-c", probe],
@@ -193,9 +197,7 @@ def validate_weights_input(profile_name: str, path: Path) -> None:
     """Require source-directory authority for BF16 and one file for candidates."""
     if profile_name == BASELINE:
         if not path.is_dir():
-            raise SystemExit(
-                f"complete BF16 source directory not found for {profile_name}: {path}"
-            )
+            raise SystemExit(f"complete BF16 source directory not found for {profile_name}: {path}")
         return
     if not path.is_file():
         raise SystemExit(f"candidate artifact not found for {profile_name}: {path}")
@@ -211,7 +213,8 @@ def file_sha256(path: Path) -> str:
 
 def _require_sha256(value: object, label: str) -> str:
     if (
-        not isinstance(value, str) or len(value) != 64
+        not isinstance(value, str)
+        or len(value) != 64
         or any(character not in "0123456789abcdef" for character in value)
     ):
         raise SystemExit(f"conversion receipt {label} is not SHA-256")
@@ -235,8 +238,11 @@ def _read_regular_bytes(path: Path, label: str) -> tuple[bytes, str]:
                 chunks.append(block)
             final_fd = os.fstat(descriptor)
             final_path = os.lstat(lexical)
-            if ((final_fd.st_dev, final_fd.st_ino, final_fd.st_uid) != expected
-                    or (final_path.st_dev, final_path.st_ino, final_path.st_uid) != expected):
+            if (final_fd.st_dev, final_fd.st_ino, final_fd.st_uid) != expected or (
+                final_path.st_dev,
+                final_path.st_ino,
+                final_path.st_uid,
+            ) != expected:
                 raise SystemExit(f"{label} identity changed during readback")
         finally:
             os.close(descriptor)
@@ -248,21 +254,25 @@ def _read_regular_bytes(path: Path, label: str) -> tuple[bytes, str]:
 
 N16_MIGRATION_PROFILES = {
     q4_inventory.WEIGHTS_ID: (
-        "r9700-q4g64-eval", q4_inventory, 439,
+        "r9700-q4g64-eval",
+        q4_inventory,
+        439,
     ),
     q4_w8_mse_inventory.WEIGHTS_ID: (
-        "r9700-q4-w8-mse-eval", q4_w8_mse_inventory, 183,
+        "r9700-q4-w8-mse-eval",
+        q4_w8_mse_inventory,
+        183,
     ),
     fp8_hybrid_inventory.WEIGHTS_ID: (
-        "r9700-q4g64-f8e4m3-four-role-eval", fp8_hybrid_inventory, 295,
+        "r9700-q4g64-f8e4m3-four-role-eval",
+        fp8_hybrid_inventory,
+        295,
     ),
 }
 
 
 def _validate_n16_migration_ancestry(receipt: dict) -> None:
-    if receipt.get("artifact_type") != (
-        "ninfer_qwen3_8_27b_r9700_q4_n16k16_migration_receipt"
-    ):
+    if receipt.get("artifact_type") != ("ninfer_qwen3_8_27b_r9700_q4_n16k16_migration_receipt"):
         return
     migration = receipt.get("migration")
     if receipt.get("schema_version") != 1 or not isinstance(migration, dict):
@@ -270,9 +280,14 @@ def _validate_n16_migration_ancestry(receipt: dict) -> None:
     source_artifact = migration.get("source_artifact")
     source_receipt = migration.get("source_conversion_receipt")
     transcoder = migration.get("transcoder")
-    if not all(isinstance(value, dict) for value in (
-        source_artifact, source_receipt, transcoder,
-    )):
+    if not all(
+        isinstance(value, dict)
+        for value in (
+            source_artifact,
+            source_receipt,
+            transcoder,
+        )
+    ):
         raise SystemExit("N16 migration receipt ancestry is incomplete")
     source_path_raw = source_artifact.get("path")
     source_receipt_raw = source_receipt.get("path")
@@ -281,9 +296,7 @@ def _validate_n16_migration_ancestry(receipt: dict) -> None:
     source_path = Path(source_path_raw)
     upstream_path = Path(source_receipt_raw)
     transcoder_path_raw = transcoder.get("path")
-    expected_transcoder = (
-        REPO / "tools/convert/qwen3_8_27b_r9700/transcode_q4_n16k16.py"
-    )
+    expected_transcoder = REPO / "tools/convert/qwen3_8_27b_r9700/transcode_q4_n16k16.py"
     if not isinstance(transcoder_path_raw, str):
         raise SystemExit("N16 migration receipt transcoder path is invalid")
     transcoder_path = Path(transcoder_path_raw)
@@ -313,8 +326,10 @@ def _validate_n16_migration_ancestry(receipt: dict) -> None:
         or source_artifact["bytes"] != source_path.stat().st_size
         or _require_sha256(source_artifact.get("sha256"), "migration source artifact")
         != file_sha256(source_path)
-        or ((upstream_artifact or {}).get("sha256") is not None
-            and source_artifact["sha256"] != upstream_artifact.get("sha256"))
+        or (
+            (upstream_artifact or {}).get("sha256") is not None
+            and source_artifact["sha256"] != upstream_artifact.get("sha256")
+        )
         or upstream.get("identity") != old_identity
         or not isinstance(upstream_artifact, dict)
         or Path(str(upstream_artifact.get("path"))).resolve(strict=True) != source_path
@@ -325,8 +340,10 @@ def _validate_n16_migration_ancestry(receipt: dict) -> None:
         or transcoder_path != expected_transcoder.resolve(strict=True)
         or _require_sha256(transcoder.get("sha256"), "migration transcoder")
         != file_sha256(transcoder_path)
-        or migration.get("storage_transform") != {
-            "from": "row-split-k128-v1", "to": "r9700-q4g64-n16-k16-v1",
+        or migration.get("storage_transform")
+        != {
+            "from": "row-split-k128-v1",
+            "to": "r9700-q4g64-n16-k16-v1",
         }
         or migration.get("verification")
         != "exact logical Q4 code/scale hashes and exact non-Q4 payload hashes"
@@ -337,8 +354,7 @@ def _validate_n16_migration_ancestry(receipt: dict) -> None:
         != inventory.FORMAT_ENCODED_BYTES
         or receipt.get("candidate", {}).get("tensor_encoded_bytes")
         != inventory.TENSOR_ENCODED_BYTES
-        or receipt.get("candidate", {}).get("device_arena_bytes")
-        != inventory.DEVICE_ARENA_BYTES
+        or receipt.get("candidate", {}).get("device_arena_bytes") != inventory.DEVICE_ARENA_BYTES
         or migration.get("objects") != 1124
         or migration.get("q4_objects") != q4_objects
     ):
@@ -359,17 +375,15 @@ def validate_n16_conversion_receipt(path: Path, artifact: dict) -> dict | None:
         from tools.convert.qwen3_8_27b_r9700.publish_n16_migration_receipt import (
             validate_receipt,
         )
+
         try:
-            return validate_receipt(
-                Path(str(path.resolve()) + ".conversion.json"), artifact
-            )
+            return validate_receipt(Path(str(path.resolve()) + ".conversion.json"), artifact)
         except ValueError as error:
             raise SystemExit(str(error)) from error
     _, inventory, _ = profile
     receipt_path = Path(str(path.resolve()) + ".conversion.json")
     try:
-        receipt_bytes, receipt_sha256 = _read_regular_bytes(
-            receipt_path, "N16 migration receipt")
+        receipt_bytes, receipt_sha256 = _read_regular_bytes(receipt_path, "N16 migration receipt")
         receipt = json.loads(receipt_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise SystemExit(f"N16 migration receipt is invalid: {receipt_path}: {error}") from error
@@ -389,17 +403,12 @@ def validate_n16_conversion_receipt(path: Path, artifact: dict) -> dict | None:
         or candidate.get("status") != "registered-evaluation-only"
         or candidate.get("weight_recipe_selected") is not False
         or candidate.get("format_counts") != inventory.FORMAT_COUNTS
-        or candidate.get("format_encoded_bytes")
-        != inventory.FORMAT_ENCODED_BYTES
-        or candidate.get("tensor_encoded_bytes")
-        != inventory.TENSOR_ENCODED_BYTES
-        or candidate.get("device_arena_bytes")
-        != inventory.DEVICE_ARENA_BYTES
+        or candidate.get("format_encoded_bytes") != inventory.FORMAT_ENCODED_BYTES
+        or candidate.get("tensor_encoded_bytes") != inventory.TENSOR_ENCODED_BYTES
+        or candidate.get("device_arena_bytes") != inventory.DEVICE_ARENA_BYTES
     ):
         raise SystemExit("N16 migration receipt candidate record differs")
-    object_plan_sha256 = _require_sha256(
-        candidate.get("object_plan_sha256"), "object_plan_sha256"
-    )
+    object_plan_sha256 = _require_sha256(candidate.get("object_plan_sha256"), "object_plan_sha256")
     _validate_n16_migration_ancestry(receipt)
     artifact_record = receipt.get("artifact")
     if (
@@ -425,20 +434,29 @@ def validate_n16_conversion_receipt(path: Path, artifact: dict) -> dict | None:
         decision = fp8_hybrid_decision.DECISION
         if candidate.get("selection_sha256") != decision.selection_sha256:
             raise SystemExit("N16 hybrid selection authority differs")
-        result.update({
-            "selection_sha256": decision.selection_sha256,
-            "source_index_sha256": _require_sha256(
-                source.get("index_sha256"), "source index_sha256"),
-            "source_ranking_sha256": _require_sha256(
-                source.get("ranking_sha256"), "source ranking_sha256"),
-        })
+        result.update(
+            {
+                "selection_sha256": decision.selection_sha256,
+                "source_index_sha256": _require_sha256(
+                    source.get("index_sha256"), "source index_sha256"
+                ),
+                "source_ranking_sha256": _require_sha256(
+                    source.get("ranking_sha256"), "source ranking_sha256"
+                ),
+            }
+        )
     return result
 
 
 def validate_n16_receipt_summary(value: object, weights_id: str) -> dict:
     common = {
-        "path", "sha256", "recipe_id", "object_plan_sha256",
-        "source_artifact_sha256", "source_receipt_sha256", "transcoder_sha256",
+        "path",
+        "sha256",
+        "recipe_id",
+        "object_plan_sha256",
+        "source_artifact_sha256",
+        "source_receipt_sha256",
+        "transcoder_sha256",
     }
     expected = set(common)
     if weights_id == fp8_hybrid_inventory.WEIGHTS_ID:
@@ -447,15 +465,24 @@ def validate_n16_receipt_summary(value: object, weights_id: str) -> dict:
         expected.add("receipt_producer_sha256")
     else:
         raise ValueError("unsupported N16 receipt identity")
-    if (not isinstance(value, dict) or set(value) != expected
-            or not isinstance(value.get("path"), str) or not value["path"]
-            or value.get("recipe_id") != N16_MIGRATION_PROFILES[weights_id][1].RECIPE_ID
-            or any(not isinstance(value.get(key), str) or len(value[key]) != 64
-                   or any(character not in "0123456789abcdef" for character in value[key])
-                   for key in expected - {"path", "recipe_id"})):
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or not isinstance(value.get("path"), str)
+        or not value["path"]
+        or value.get("recipe_id") != N16_MIGRATION_PROFILES[weights_id][1].RECIPE_ID
+        or any(
+            not isinstance(value.get(key), str)
+            or len(value[key]) != 64
+            or any(character not in "0123456789abcdef" for character in value[key])
+            for key in expected - {"path", "recipe_id"}
+        )
+    ):
         raise ValueError("N16 migration receipt summary is incomplete")
-    if (weights_id == fp8_hybrid_inventory.WEIGHTS_ID
-            and value.get("selection_sha256") != fp8_hybrid_decision.DECISION.selection_sha256):
+    if (
+        weights_id == fp8_hybrid_inventory.WEIGHTS_ID
+        and value.get("selection_sha256") != fp8_hybrid_decision.DECISION.selection_sha256
+    ):
         raise ValueError("N16 hybrid receipt summary has the wrong selection authority")
     return value
 
@@ -589,9 +616,7 @@ def validate_corpus(path: Path, required_tokens: int) -> dict:
     if manifest.get("ids_sha256") != digest:
         raise SystemExit("PPL corpus SHA-256 does not match its sibling manifest")
     if len(ids) < required_tokens:
-        raise SystemExit(
-            f"PPL corpus has {len(ids)} tokens, fewer than required {required_tokens}"
-        )
+        raise SystemExit(f"PPL corpus has {len(ids)} tokens, fewer than required {required_tokens}")
     return {
         "path": str(path.resolve()),
         "manifest_path": str(manifest_path.resolve()),
@@ -780,9 +805,7 @@ def sidecar_parity(
         "max_abs_nll_gate": max_abs_nll,
         "argmax_identity_is_gate": True,
     }
-    result["pass"] = (
-        result["argmax_exact"] and result["max_abs_delta_nll"] <= max_abs_nll
-    )
+    result["pass"] = result["argmax_exact"] and result["max_abs_delta_nll"] <= max_abs_nll
     return result
 
 
@@ -948,9 +971,7 @@ def validate_cell_report(
     }
     for key, value in expected.items():
         if cell.get(key) != value:
-            raise SystemExit(
-                f"{profile_name} report {key}={cell.get(key)!r}; expected {value!r}"
-            )
+            raise SystemExit(f"{profile_name} report {key}={cell.get(key)!r}; expected {value!r}")
     if not profile.reference and cell.get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS:
         raise SystemExit(
             f"{profile_name} report kv_plane_layouts={cell.get('kv_plane_layouts')!r}; "
@@ -1157,37 +1178,86 @@ def run_cell(
 def _command_output_path(cell: dict, *, evidence: str = "BF16") -> Path:
     command = cell.get("command")
     if not isinstance(command, list) or command.count("--out-json") != 1:
-        raise SystemExit(
-            f"reused {evidence} cell must retain one --out-json command argument"
-        )
+        raise SystemExit(f"reused {evidence} cell must retain one --out-json command argument")
     index = command.index("--out-json")
     if index + 1 >= len(command) or not isinstance(command[index + 1], str):
-        raise SystemExit(
-            f"reused {evidence} cell has a malformed --out-json command argument"
-        )
+        raise SystemExit(f"reused {evidence} cell has a malformed --out-json command argument")
     path = Path(command[index + 1])
     return path if path.is_absolute() else REPO / path
 
 
 BF16_SCORER_REPORT_FIELDS = (
-    "scheme", "model_id", "weights_id", "weight_format", "formula_profile",
-    "source_config_sha256", "source_index_sha256", "source_shards_sha256",
-    "corpus_ids_sha256", "source_tensor_count", "source_text_tensor_count",
-    "source_shard_count", "execution_provenance", "kv_format", "kv_value_group",
-    "cache_only_diagnostic", "cache_diagnostic_scope", "cache_key_codec",
-    "cache_value_codec", "cache_append_boundary", "cache_use_boundary", "schedule",
-    "spec", "draft_tokens", "speculative_execution", "device_graph", "prefill_chunk",
-    "prompt_tokens", "skip_tokens", "tokens_scored", "argmax_tokens", "non_finite",
-    "terrible_tokens", "terrible_nll", "sum_nll", "mean_nll", "max_nll", "ppl",
+    "scheme",
+    "model_id",
+    "weights_id",
+    "weight_format",
+    "formula_profile",
+    "source_config_sha256",
+    "source_index_sha256",
+    "source_shards_sha256",
+    "corpus_ids_sha256",
+    "source_tensor_count",
+    "source_text_tensor_count",
+    "source_shard_count",
+    "execution_provenance",
+    "kv_format",
+    "kv_value_group",
+    "cache_only_diagnostic",
+    "cache_diagnostic_scope",
+    "cache_key_codec",
+    "cache_value_codec",
+    "cache_append_boundary",
+    "cache_use_boundary",
+    "schedule",
+    "spec",
+    "draft_tokens",
+    "speculative_execution",
+    "device_graph",
+    "prefill_chunk",
+    "prompt_tokens",
+    "skip_tokens",
+    "tokens_scored",
+    "argmax_tokens",
+    "non_finite",
+    "terrible_tokens",
+    "terrible_nll",
+    "sum_nll",
+    "mean_nll",
+    "max_nll",
+    "ppl",
 )
 CANDIDATE_SCORER_REPORT_FIELDS = (
-    "scheme", "model_id", "weights_id", "weights", "kv_format", "kv_value_group",
-    "kv_plane_layouts", "schedule", "spec", "draft_tokens", "device_graph",
-    "prefill_chunk", "prompt_tokens", "skip_tokens", "terrible_nll", "tokens_scored",
-    "argmax_tokens", "non_finite", "terrible_tokens", "sum_nll", "mean_nll",
-    "max_nll", "ppl", "score_seconds", "q4_activation_bits", "w8_activation_bits",
-    "split512_enabled", "decode_attention_profile", "packed_decode_min_context",
-    "split512_min_context", "xattention_qualification",
+    "scheme",
+    "model_id",
+    "weights_id",
+    "weights",
+    "kv_format",
+    "kv_value_group",
+    "kv_plane_layouts",
+    "schedule",
+    "spec",
+    "draft_tokens",
+    "device_graph",
+    "prefill_chunk",
+    "prompt_tokens",
+    "skip_tokens",
+    "terrible_nll",
+    "tokens_scored",
+    "argmax_tokens",
+    "non_finite",
+    "terrible_tokens",
+    "sum_nll",
+    "mean_nll",
+    "max_nll",
+    "ppl",
+    "score_seconds",
+    "q4_activation_bits",
+    "w8_activation_bits",
+    "split512_enabled",
+    "decode_attention_profile",
+    "packed_decode_min_context",
+    "split512_min_context",
+    "xattention_qualification",
 )
 
 
@@ -1213,15 +1283,24 @@ def validate_bf16_execution_provenance(value: object) -> str:
     environment = value.get("environment")
     if not isinstance(environment, dict) or set(environment) != BF16_EXECUTION_ENVIRONMENT_KEYS:
         raise SystemExit("BF16 report execution_provenance environment inventory differs")
-    if any(environment.get(key) != wanted
-           for key, wanted in BF16_DETERMINISTIC_ENVIRONMENT.items()):
-        raise SystemExit("BF16 report does not bind the required deterministic execution environment")
-    if any(environment.get(key) is not None
-           for key in BF16_FORBIDDEN_EXECUTION_ENVIRONMENT):
+    if any(
+        environment.get(key) != wanted for key, wanted in BF16_DETERMINISTIC_ENVIRONMENT.items()
+    ):
+        raise SystemExit(
+            "BF16 report does not bind the required deterministic execution environment"
+        )
+    if any(environment.get(key) is not None for key in BF16_FORBIDDEN_EXECUTION_ENVIRONMENT):
         raise SystemExit("BF16 report contains a forbidden execution override")
     required_values = (
-        "python", "python_executable", "platform", "torch", "torch_git", "hip",
-        "device_name", "device_arch", "matmul_precision",
+        "python",
+        "python_executable",
+        "platform",
+        "torch",
+        "torch_git",
+        "hip",
+        "device_name",
+        "device_arch",
+        "matmul_precision",
     )
     if any(not isinstance(value.get(key), str) or not value[key] for key in required_values):
         raise SystemExit("BF16 report execution_provenance lacks a runtime/device identity")
@@ -1231,12 +1310,11 @@ def validate_bf16_execution_provenance(value: object) -> str:
         raise SystemExit("BF16 report execution_provenance has an invalid device index")
     if value.get("matmul_precision") != "highest":
         raise SystemExit("BF16 report execution_provenance requires highest matmul precision")
-    for key in (
-        "python_executable_sha256", "scorer_python_tree_sha256", "fla_python_tree_sha256"
-    ):
+    for key in ("python_executable_sha256", "scorer_python_tree_sha256", "fla_python_tree_sha256"):
         digest = value.get(key)
         if (
-            not isinstance(digest, str) or len(digest) != 64
+            not isinstance(digest, str)
+            or len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)
         ):
             raise SystemExit(f"BF16 report execution_provenance {key} is not SHA-256")
@@ -1245,12 +1323,17 @@ def validate_bf16_execution_provenance(value: object) -> str:
         raise SystemExit("BF16 report execution_provenance has noncanonical matmul reductions")
     distributions = value.get("distributions")
     if not isinstance(distributions, dict) or set(distributions) != {
-        "torch", "triton", "flash-linear-attention", "safetensors"
+        "torch",
+        "triton",
+        "flash-linear-attention",
+        "safetensors",
     }:
         raise SystemExit("BF16 report execution_provenance lacks exact package records")
     for name, record in distributions.items():
         if not isinstance(record, dict) or set(record) != {
-            "version", "record_sha256", "direct_url_sha256"
+            "version",
+            "record_sha256",
+            "direct_url_sha256",
         }:
             raise SystemExit(f"BF16 report package record {name!r} is malformed")
         if record["version"] is not None and not isinstance(record["version"], str):
@@ -1258,17 +1341,17 @@ def validate_bf16_execution_provenance(value: object) -> str:
         for hash_key in ("record_sha256", "direct_url_sha256"):
             digest = record[hash_key]
             if digest is not None and (
-                not isinstance(digest, str) or len(digest) != 64
+                not isinstance(digest, str)
+                or len(digest) != 64
                 or any(character not in "0123456789abcdef" for character in digest)
             ):
-                raise SystemExit(
-                    f"BF16 report package record {name!r} has an invalid {hash_key}"
-                )
+                raise SystemExit(f"BF16 report package record {name!r} has an invalid {hash_key}")
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def validate_bf16_repeat_comparison(
-    comparison_path: Path, authority_campaign_path: Path,
+    comparison_path: Path,
+    authority_campaign_path: Path,
 ) -> dict[str, object]:
     """Bind one exact A/B comparison proving the reused BF16 campaign is an authority input."""
 
@@ -1323,12 +1406,14 @@ def validate_bf16_repeat_comparison(
         if isinstance(row, dict):
             for key in ("nll_sha256", "argmax_sha256"):
                 hashes = row.get(key)
-                hashes_valid = hashes_valid and isinstance(hashes, dict) and set(hashes) == {
-                    "first", "second"
-                } and hashes["first"] == hashes["second"] and isinstance(
-                    hashes["first"], str
-                ) and len(hashes["first"]) == 64 and all(
-                    character in "0123456789abcdef" for character in hashes["first"]
+                hashes_valid = (
+                    hashes_valid
+                    and isinstance(hashes, dict)
+                    and set(hashes) == {"first", "second"}
+                    and hashes["first"] == hashes["second"]
+                    and isinstance(hashes["first"], str)
+                    and len(hashes["first"]) == 64
+                    and all(character in "0123456789abcdef" for character in hashes["first"])
                 )
         if (
             not isinstance(row, dict)
@@ -1345,6 +1430,7 @@ def validate_bf16_repeat_comparison(
     # Do not trust retained pass booleans: reopen both schema-v6 campaigns and recompute the
     # semantic/sidecar comparison through the same strict owner that created this report.
     from tools.ppl import compare_bf16_repeats as repeat_comparator
+
     try:
         first_payload, first_cells = repeat_comparator.load_campaign(resolved_inputs["first"])
         second_payload, second_cells = repeat_comparator.load_campaign(resolved_inputs["second"])
@@ -1408,7 +1494,10 @@ def load_reused_bf16_cells(
     ):
         raise SystemExit("reused BF16 campaign does not contain every requested length")
     source_weights = campaign.get("weights_inputs", {}).get(BASELINE)
-    if not isinstance(source_weights, str) or Path(source_weights).resolve() != bf16_weights.resolve():
+    if (
+        not isinstance(source_weights, str)
+        or Path(source_weights).resolve() != bf16_weights.resolve()
+    ):
         raise SystemExit("reused BF16 campaign source path differs from the requested source")
     scorers = campaign.get("scorers")
     if not isinstance(scorers, dict) or scorers.get(BASELINE) != scorer_identity:
@@ -1449,10 +1538,24 @@ def load_reused_bf16_cells(
         cell_path = _command_output_path(cell)
         command = cell.get("command")
         expected_arguments = [
-            "--weights", str(bf16_weights), "--ids", str(ids),
-            "--scheme", BASELINE, "--schedule", "prefill", "--skip", skip,
-            "--tokens", str(tokens), "--prefill-chunk", str(prefill_chunk),
-            "--device", str(device), "--out-json", str(cell_path),
+            "--weights",
+            str(bf16_weights),
+            "--ids",
+            str(ids),
+            "--scheme",
+            BASELINE,
+            "--schedule",
+            "prefill",
+            "--skip",
+            skip,
+            "--tokens",
+            str(tokens),
+            "--prefill-chunk",
+            str(prefill_chunk),
+            "--device",
+            str(device),
+            "--out-json",
+            str(cell_path),
         ]
         if not isinstance(command, list) or any(not isinstance(value, str) for value in command):
             raise SystemExit(f"reused BF16 cell command differs from the exact gate: {cell_path}")
@@ -1492,9 +1595,7 @@ def load_reused_bf16_cells(
             or any(key not in raw for key in BF16_SCORER_REPORT_FIELDS)
             or any(raw[key] != cell.get(key) for key in BF16_SCORER_REPORT_FIELDS)
         ):
-            raise SystemExit(
-                f"reused BF16 raw scorer fields differ from its campaign: {cell_path}"
-            )
+            raise SystemExit(f"reused BF16 raw scorer fields differ from its campaign: {cell_path}")
         nll_path = cell_path.with_suffix(".nllf32")
         argmax_path = cell_path.with_suffix(".argmaxi32")
         if (
@@ -1508,18 +1609,21 @@ def load_reused_bf16_cells(
         argmax = load_argmax(cell_path)
         if not cell_ok(cell, nlls, argmax):
             raise SystemExit(f"reused BF16 cell is not complete, finite, and aligned: {cell_path}")
-        source_identities.add((
-            cell.get("source_config_sha256"),
-            cell.get("source_index_sha256"),
-            json.dumps(cell.get("source_shards_sha256"), sort_keys=True),
-            cell.get("source_tensor_count"),
-            cell.get("source_text_tensor_count"),
-            cell.get("source_shard_count"),
-            execution_json,
-        ))
+        source_identities.add(
+            (
+                cell.get("source_config_sha256"),
+                cell.get("source_index_sha256"),
+                json.dumps(cell.get("source_shards_sha256"), sort_keys=True),
+                cell.get("source_tensor_count"),
+                cell.get("source_text_tensor_count"),
+                cell.get("source_shard_count"),
+                execution_json,
+            )
+        )
         reused = copy.deepcopy(cell)
         reused["reused_bf16_campaign"] = {
-            "path": str(campaign_path), "sha256": file_sha256(campaign_path)
+            "path": str(campaign_path),
+            "sha256": file_sha256(campaign_path),
         }
         selected[tokens] = reused, cell_path
     if set(selected) != set(lengths):
@@ -1552,7 +1656,9 @@ def require_bf16_decode_reuse_alignment(lengths: list[int], skip: str) -> None:
     from tools.reference.qwen3_8_27b_bf16.protocol import resolve_score_begin
 
     for tokens in lengths:
-        if resolve_score_begin(tokens, "prefill", skip) != resolve_score_begin(tokens, "decode", skip):
+        if resolve_score_begin(tokens, "prefill", skip) != resolve_score_begin(
+            tokens, "decode", skip
+        ):
             raise SystemExit("BF16 prefill/decode reuse requires identical scored positions")
 
 
@@ -1626,13 +1732,11 @@ def load_reused_candidate_cells(
             )
     source_artifact = campaign.get("candidate_artifact")
     if allow_partial:
+
         def portable_artifact(value: object) -> object:
             if not isinstance(value, dict):
                 return value
-            return {
-                key: item for key, item in value.items()
-                if key not in {"g16_path", "g32_path"}
-            }
+            return {key: item for key, item in value.items() if key not in {"g16_path", "g32_path"}}
 
         if portable_artifact(source_artifact) != portable_artifact(candidate_artifact):
             raise SystemExit("partial reused candidate campaign artifact identity differs")
@@ -1644,8 +1748,7 @@ def load_reused_candidate_cells(
     if not isinstance(weights_inputs, dict) or not isinstance(scorers, dict):
         raise SystemExit("reused candidate campaign lacks weights/scorer identities")
     source_candidates = [
-        name for name in selected_candidates
-        if name in weights_inputs or name in scorers
+        name for name in selected_candidates if name in weights_inputs or name in scorers
     ]
     if not source_candidates:
         raise SystemExit("reused candidate campaign has no requested candidate profile")
@@ -1696,15 +1799,31 @@ def load_reused_candidate_cells(
         )
         cell_path = _command_output_path(cell, evidence="candidate")
         expected_command = [
-            str(profile_bins[name]), "--weights", str(profile_weights[name]),
-            "--ids", str(ids), "--scheme", name, "--schedule", "prefill",
-            "--skip", skip, "--tokens", str(tokens), "--prefill-chunk",
-            str(prefill_chunk), "--device", str(device), "--out-json",
+            str(profile_bins[name]),
+            "--weights",
+            str(profile_weights[name]),
+            "--ids",
+            str(ids),
+            "--scheme",
+            name,
+            "--schedule",
+            "prefill",
+            "--skip",
+            skip,
+            "--tokens",
+            str(tokens),
+            "--prefill-chunk",
+            str(prefill_chunk),
+            "--device",
+            str(device),
+            "--out-json",
             cell["command"][cell["command"].index("--out-json") + 1],
         ]
         command = cell.get("command")
         if command != expected_command:
-            raise SystemExit(f"reused candidate cell command differs from the exact gate: {cell_path}")
+            raise SystemExit(
+                f"reused candidate cell command differs from the exact gate: {cell_path}"
+            )
         if not cell_path.is_file():
             raise SystemExit(f"reused candidate cell report is missing: {cell_path}")
         raw = json.loads(cell_path.read_text(encoding="utf-8"))
@@ -1735,27 +1854,46 @@ def load_reused_candidate_cells(
         # Remove every BF16-derived field. The main assembly path recomputes them against the
         # newly selected deterministic authority from the retained raw candidate sidecars.
         for field in (
-            "argmax_compared", "argmax_exact", "argmax_first_mismatch",
-            "argmax_flip_rate", "argmax_identity_is_gate", "argmax_mismatches",
-            "delta_abs_max", "delta_abs_p50", "delta_abs_p95", "delta_abs_p99",
-            "delta_mean_nll", "delta_nll_se", "gate", "in_noise",
-            "maximum_new_severe_rate", "minimum_new_severe_budget",
-            "new_severe_position_budget", "new_severe_position_indices",
-            "new_severe_position_rate", "new_severe_positions",
-            "new_severe_positions_pass", "pass", "persistent_severe_positions",
-            "quality_eligible", "quality_tier", "repaired_severe_position_indices",
-            "repaired_severe_positions", "severe_positions_compared",
-            "severe_threshold_nll", "terrible_baseline", "terrible_delta",
+            "argmax_compared",
+            "argmax_exact",
+            "argmax_first_mismatch",
+            "argmax_flip_rate",
+            "argmax_identity_is_gate",
+            "argmax_mismatches",
+            "delta_abs_max",
+            "delta_abs_p50",
+            "delta_abs_p95",
+            "delta_abs_p99",
+            "delta_mean_nll",
+            "delta_nll_se",
+            "gate",
+            "in_noise",
+            "maximum_new_severe_rate",
+            "minimum_new_severe_budget",
+            "new_severe_position_budget",
+            "new_severe_position_indices",
+            "new_severe_position_rate",
+            "new_severe_positions",
+            "new_severe_positions_pass",
+            "pass",
+            "persistent_severe_positions",
+            "quality_eligible",
+            "quality_tier",
+            "repaired_severe_position_indices",
+            "repaired_severe_positions",
+            "severe_positions_compared",
+            "severe_threshold_nll",
+            "terrible_baseline",
+            "terrible_delta",
             "worst_delta_tokens",
         ):
             reused.pop(field, None)
         reused["reused_candidate_campaign"] = {
-            "path": str(campaign_path), "sha256": file_sha256(campaign_path)
+            "path": str(campaign_path),
+            "sha256": file_sha256(campaign_path),
         }
         selected[key] = reused, cell_path
-    expected_keys = {
-        (name, tokens) for name in source_candidates for tokens in source_lengths
-    }
+    expected_keys = {(name, tokens) for name in source_candidates for tokens in source_lengths}
     if set(selected) != expected_keys:
         raise SystemExit("reused candidate campaign lacks the complete requested profile matrix")
     return selected
@@ -1783,14 +1921,19 @@ def cell_ok(cell: dict, cell_nlls: list[float], cell_argmax: list[int]) -> bool:
     )
 
 
-def apply_baseline(cell: dict, cell_nlls: list[float], baseline_nll: float | None,
-                   gates: dict[str, float], name: str,
-                   base_nlls: list[float] | None, cell_argmax: list[int],
-                   base_argmax: list[int] | None,
-                   baseline_terrible_tokens: int | None,
-                   maximum_new_severe_rate: float = DEFAULT_MAX_NEW_SEVERE_RATE,
-                   minimum_new_severe_budget: int = DEFAULT_MIN_NEW_SEVERE_BUDGET,
-                   ) -> tuple[float | None, bool]:
+def apply_baseline(
+    cell: dict,
+    cell_nlls: list[float],
+    baseline_nll: float | None,
+    gates: dict[str, float],
+    name: str,
+    base_nlls: list[float] | None,
+    cell_argmax: list[int],
+    base_argmax: list[int] | None,
+    baseline_terrible_tokens: int | None,
+    maximum_new_severe_rate: float = DEFAULT_MAX_NEW_SEVERE_RATE,
+    minimum_new_severe_budget: int = DEFAULT_MIN_NEW_SEVERE_BUDGET,
+) -> tuple[float | None, bool]:
     failed = False
     if name == BASELINE and baseline_nll is None:
         baseline_nll = cell["mean_nll"]
@@ -1822,9 +1965,7 @@ def apply_baseline(cell: dict, cell_nlls: list[float], baseline_nll: float | Non
         delta_summary = paired_delta_summary(cell_nlls, base_nlls)
         if delta_summary:
             cell.update(delta_summary)
-        cell["in_noise"] = (
-            delta_se is not None and abs(cell["delta_mean_nll"]) <= 2.0 * delta_se
-        )
+        cell["in_noise"] = delta_se is not None and abs(cell["delta_mean_nll"]) <= 2.0 * delta_se
         cell.update(
             severe_position_stats(
                 cell_nlls,
@@ -1847,10 +1988,7 @@ def apply_baseline(cell: dict, cell_nlls: list[float], baseline_nll: float | Non
         cell["quality_eligible"] = cell["pass"]
     else:
         cell["gate"] = None
-        cell["pass"] = (
-            cell["complete_finite_aligned"]
-            and cell["new_severe_positions_pass"]
-        )
+        cell["pass"] = cell["complete_finite_aligned"] and cell["new_severe_positions_pass"]
         cell["quality_eligible"] = False
     failed = not cell["pass"]
     return baseline_nll, failed
@@ -1938,34 +2076,65 @@ def write_markdown(path: Path, payload: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bf16-reference-weights", type=Path, required=True,
-                        help="complete original BF16 source-checkpoint directory")
-    parser.add_argument("--g16-weights", type=Path,
-                        help="explicit FP8-K/INT4-V candidate artifact for the G16 build")
-    parser.add_argument("--g32-weights", type=Path,
-                        help="explicit FP8-K/INT4-V candidate artifact for the G32 build")
-    parser.add_argument("--bf16-reference-ppl-bin", type=Path,
-                        default=default_reference_ppl_bin(),
-                        help="independent BF16 reference scorer (or NINFER_BF16_REFERENCE_PPL)")
-    parser.add_argument("--g16-ppl-bin", type=Path, default=default_group_ppl_bin(16),
-                        help="G16 candidate scorer (or NINFER_R9700_G16_PPL)")
-    parser.add_argument("--g32-ppl-bin", type=Path, default=default_group_ppl_bin(32),
-                        help="G32 candidate scorer (or NINFER_R9700_G32_PPL)")
+    parser.add_argument(
+        "--bf16-reference-weights",
+        type=Path,
+        required=True,
+        help="complete original BF16 source-checkpoint directory",
+    )
+    parser.add_argument(
+        "--g16-weights",
+        type=Path,
+        help="explicit FP8-K/INT4-V candidate artifact for the G16 build",
+    )
+    parser.add_argument(
+        "--g32-weights",
+        type=Path,
+        help="explicit FP8-K/INT4-V candidate artifact for the G32 build",
+    )
+    parser.add_argument(
+        "--bf16-reference-ppl-bin",
+        type=Path,
+        default=default_reference_ppl_bin(),
+        help="independent BF16 reference scorer (or NINFER_BF16_REFERENCE_PPL)",
+    )
+    parser.add_argument(
+        "--g16-ppl-bin",
+        type=Path,
+        default=default_group_ppl_bin(16),
+        help="G16 candidate scorer (or NINFER_R9700_G16_PPL)",
+    )
+    parser.add_argument(
+        "--g32-ppl-bin",
+        type=Path,
+        default=default_group_ppl_bin(32),
+        help="G32 candidate scorer (or NINFER_R9700_G32_PPL)",
+    )
     parser.add_argument("--ids", type=Path, default=Path(__file__).resolve().parent / "corpus.ids")
-    parser.add_argument("--tokens", type=int, default=None, help="single length (default: 8k then 32k)")
+    parser.add_argument(
+        "--tokens", type=int, default=None, help="single length (default: 8k then 32k)"
+    )
     parser.add_argument("--long", action="store_true", help=f"only {LONG_TOKENS} tokens")
-    parser.add_argument("--profiles", default=None,
-                        help="comma-separated profiles; default: bf16-reference,r9700-g16,r9700-g32")
+    parser.add_argument(
+        "--profiles",
+        default=None,
+        help="comma-separated profiles; default: bf16-reference,r9700-g16,r9700-g32",
+    )
     parser.add_argument(
         "--schedule",
         default="prefill,decode",
         help="prefill, decode, or comma-separated list",
     )
-    parser.add_argument("--skip", default="half", help="warmup tokens not scored: half (default) or an integer")
-    parser.add_argument("--gate", action="append", default=[],
-                        help="candidate-profile=max_delta_mean_nll")
     parser.add_argument(
-        "--quality-tier", choices=tuple(QUALITY_TIERS), required=True,
+        "--skip", default="half", help="warmup tokens not scored: half (default) or an integer"
+    )
+    parser.add_argument(
+        "--gate", action="append", default=[], help="candidate-profile=max_delta_mean_nll"
+    )
+    parser.add_argument(
+        "--quality-tier",
+        choices=tuple(QUALITY_TIERS),
+        required=True,
         help="explicit quality guardrail profile; recorded in every candidate result",
     )
     parser.add_argument(
@@ -1988,52 +2157,82 @@ def main() -> int:
     parser.add_argument("--prefill-chunk", type=int, default=4096)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument(
-        "--expected-q4-activation-bits", type=int, choices=(4, 8), default=8,
+        "--expected-q4-activation-bits",
+        type=int,
+        choices=(4, 8),
+        default=8,
         help="reject candidate scorers not compiled for this Q4 activation width (default: 8)",
     )
     parser.add_argument(
-        "--expected-w8-activation-bits", type=int, choices=(8, 16), default=8,
+        "--expected-w8-activation-bits",
+        type=int,
+        choices=(8, 16),
+        default=8,
         help="reject candidate scorers not compiled for this W8 activation width (default: 8)",
     )
     parser.add_argument(
-        "--expected-fp8-qk-wmma", type=int, choices=(0, 1), default=1,
+        "--expected-fp8-qk-wmma",
+        type=int,
+        choices=(0, 1),
+        default=1,
         help="require the selected T1/T2 FP8-Q/K attention profile (default: 1)",
     )
     parser.add_argument(
-        "--expected-xattention-profile", choices=XATTENTION_PROFILES, default="dense",
+        "--expected-xattention-profile",
+        choices=XATTENTION_PROFILES,
+        default="dense",
         help="require dense Text prefill or the private compile-bound B128/S16/tau=.9 route",
     )
     parser.add_argument(
-        "--reuse-bf16-campaign", type=Path,
+        "--reuse-bf16-campaign",
+        type=Path,
         help="import provenance-matched BF16 cells from a schema-v6 prefill campaign",
     )
     parser.add_argument(
-        "--bf16-repeat-comparison", type=Path,
-        help=("exact schema-v1 fresh-process A/B proof for --reuse-bf16-campaign; "
-              "required when candidate quality is derived from reused BF16 cells"),
+        "--bf16-repeat-comparison",
+        type=Path,
+        help=(
+            "exact schema-v1 fresh-process A/B proof for --reuse-bf16-campaign; "
+            "required when candidate quality is derived from reused BF16 cells"
+        ),
     )
     parser.add_argument(
-        "--reuse-candidate-campaign", type=Path, action="append", default=[],
-        help=("import provenance-matched primary candidate cells from a schema-v6 "
-              "prefill campaign and recompute their BF16-relative metrics; repeat to "
-              "combine disjoint profile/length subsets"),
+        "--reuse-candidate-campaign",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "import provenance-matched primary candidate cells from a schema-v6 "
+            "prefill campaign and recompute their BF16-relative metrics; repeat to "
+            "combine disjoint profile/length subsets"
+        ),
     )
     parser.add_argument(
-        "--require-fp8-hybrid", action="store_true",
+        "--require-fp8-hybrid",
+        action="store_true",
         help="require the target-authority hybrid identity and validated conversion receipt",
     )
-    parser.add_argument("--no-extras", action="store_true", help="skip mid-page, short-context, graphs-off, mtp")
+    parser.add_argument(
+        "--no-extras", action="store_true", help="skip mid-page, short-context, graphs-off, mtp"
+    )
     parser.add_argument(
         "--no-position-extras",
         action="store_true",
         help="skip only the paired mid-page and short-context probes",
     )
-    parser.add_argument("--spec", default="mtp", choices=("mtp", "none"),
-                        help="speculative backend for decode-lane cells (default: mtp, "
-                             "matching production serve; prefill-lane cells are spec-free)")
-    parser.add_argument("--draft-tokens", type=int, default=DEFAULT_DRAFT_TOKENS,
-                        help=f"MTP draft tokens for decode-lane cells (default: "
-                             f"{DEFAULT_DRAFT_TOKENS})")
+    parser.add_argument(
+        "--spec",
+        default="mtp",
+        choices=("mtp", "none"),
+        help="speculative backend for decode-lane cells (default: mtp, "
+        "matching production serve; prefill-lane cells are spec-free)",
+    )
+    parser.add_argument(
+        "--draft-tokens",
+        type=int,
+        default=DEFAULT_DRAFT_TOKENS,
+        help=f"MTP draft tokens for decode-lane cells (default: {DEFAULT_DRAFT_TOKENS})",
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
     if args.long:
@@ -2073,7 +2272,8 @@ def main() -> int:
     quality_tier = QUALITY_TIERS[args.quality_tier]
     tier_mean_limit = quality_tier["maximum_mean_nll_delta"]
     mismatched_gates = [
-        name for name, value in gates.items()
+        name
+        for name, value in gates.items()
         if not math.isclose(value, tier_mean_limit, rel_tol=0.0, abs_tol=1e-9)
     ]
     if mismatched_gates:
@@ -2110,8 +2310,10 @@ def main() -> int:
             validate_weights_input(name, weights_input)
         scorer = profile_bins[name]
         if scorer is None or not scorer.is_file():
-            option = "--bf16-reference-ppl-bin" if name == BASELINE else (
-                "--g16-ppl-bin" if name == "r9700-g16" else "--g32-ppl-bin"
+            option = (
+                "--bf16-reference-ppl-bin"
+                if name == BASELINE
+                else ("--g16-ppl-bin" if name == "r9700-g16" else "--g32-ppl-bin")
             )
             raise SystemExit(f"scorer not found for {name}; pass {option}")
         # Reuse validates every requested BF16 cell below; it never executes the
@@ -2156,8 +2358,9 @@ def main() -> int:
     }
 
     corpus_profile = next((name for name in profiles if name != BASELINE), BASELINE)
-    ensure_corpus(args.ids, max(lengths), profile_weights[corpus_profile],
-                  profile_bins[corpus_profile])
+    ensure_corpus(
+        args.ids, max(lengths), profile_weights[corpus_profile], profile_bins[corpus_profile]
+    )
     corpus_provenance = validate_corpus(args.ids, max(lengths))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
     out_dir = args.out or (REPO / "profiles" / "ppl" / stamp)
@@ -2165,13 +2368,8 @@ def main() -> int:
     reused_bf16: dict[int, tuple[dict, Path]] = {}
     bf16_repeat_comparison = None
     if args.reuse_candidate_campaign:
-        if (
-            schedules != ["prefill"]
-            or spec != "none"
-        ):
-            raise SystemExit(
-                "campaign reuse requires a prefill-only non-speculative campaign"
-            )
+        if schedules != ["prefill"] or spec != "none":
+            raise SystemExit("campaign reuse requires a prefill-only non-speculative campaign")
     if args.reuse_bf16_campaign is not None:
         if spec != "none" or schedules not in (["prefill"], ["decode"]):
             raise SystemExit("BF16 reuse requires one non-speculative schedule")
@@ -2180,9 +2378,7 @@ def main() -> int:
                 raise SystemExit("BF16 decode reuse requires --no-position-extras")
             require_bf16_decode_reuse_alignment(lengths, args.skip)
     if (args.reuse_bf16_campaign is None) != (args.bf16_repeat_comparison is None):
-        raise SystemExit(
-            "--reuse-bf16-campaign and --bf16-repeat-comparison are required together"
-        )
+        raise SystemExit("--reuse-bf16-campaign and --bf16-repeat-comparison are required together")
     if args.reuse_bf16_campaign is not None:
         bf16_repeat_comparison = validate_bf16_repeat_comparison(
             args.bf16_repeat_comparison, args.reuse_bf16_campaign
@@ -2250,7 +2446,8 @@ def main() -> int:
             # spec-free (MTP is not consulted by chunked prompt scoring).
             spec_extra = (
                 ["--spec", "mtp", "--draft-tokens", str(draft_tokens)]
-                if spec == "mtp" and schedule == "decode" else []
+                if spec == "mtp" and schedule == "decode"
+                else []
             )
             for name in profiles:
                 cell_path = out_dir / f"{tokens}.{schedule}.{name}.json"
@@ -2261,11 +2458,22 @@ def main() -> int:
                     cell, evidence_path = reused_candidates[(name, tokens)]
                 else:
                     cell = run_cell(
-                        profile_bins[name], profile_weights[name], args.ids, name, schedule,
-                        args.skip, tokens, args.prefill_chunk, args.device, cell_path,
-                        list(spec_extra), expected_weights_ids[name],
-                        args.expected_q4_activation_bits, args.expected_w8_activation_bits,
-                        bool(args.expected_fp8_qk_wmma), args.expected_xattention_profile,
+                        profile_bins[name],
+                        profile_weights[name],
+                        args.ids,
+                        name,
+                        schedule,
+                        args.skip,
+                        tokens,
+                        args.prefill_chunk,
+                        args.device,
+                        cell_path,
+                        list(spec_extra),
+                        expected_weights_ids[name],
+                        args.expected_q4_activation_bits,
+                        args.expected_w8_activation_bits,
+                        bool(args.expected_fp8_qk_wmma),
+                        args.expected_xattention_profile,
                     )
                 cell["profile_value_group"] = PROFILES[name].value_group
                 cell["quality_tier"] = args.quality_tier
@@ -2277,11 +2485,18 @@ def main() -> int:
                     base_argmax = argmax
                     base_terrible_tokens = int(cell.get("terrible_tokens", 0))
                 baseline_nll, cell_failed = apply_baseline(
-                    cell, nlls, baseline_nll, gates, name,
-                    base_nlls if name != BASELINE else None, argmax,
+                    cell,
+                    nlls,
+                    baseline_nll,
+                    gates,
+                    name,
+                    base_nlls if name != BASELINE else None,
+                    argmax,
                     base_argmax if name != BASELINE else None,
-                    base_terrible_tokens, quality_tier["maximum_new_severe_rate"],
-                    quality_tier["minimum_new_severe_budget"])
+                    base_terrible_tokens,
+                    quality_tier["maximum_new_severe_rate"],
+                    quality_tier["minimum_new_severe_budget"],
+                )
                 failed = failed or cell_failed
                 cells.append(cell)
 
@@ -2294,8 +2509,17 @@ def main() -> int:
         for name in profiles:
             cell_path = out_dir / f"{tokens}.decode.{name}.{label}.json"
             cell = run_cell(
-                profile_bins[name], profile_weights[name], args.ids, name, "decode", skip,
-                tokens, args.prefill_chunk, args.device, cell_path, list(extra),
+                profile_bins[name],
+                profile_weights[name],
+                args.ids,
+                name,
+                "decode",
+                skip,
+                tokens,
+                args.prefill_chunk,
+                args.device,
+                cell_path,
+                list(extra),
                 expected_weights_ids[name],
                 args.expected_q4_activation_bits,
                 args.expected_w8_activation_bits,
@@ -2312,11 +2536,18 @@ def main() -> int:
                 base_argmax = argmax
                 base_terrible_tokens = int(cell.get("terrible_tokens", 0))
             baseline_nll, cell_failed = apply_baseline(
-                cell, nlls, baseline_nll, gates, name,
-                base_nlls if name != BASELINE else None, argmax,
+                cell,
+                nlls,
+                baseline_nll,
+                gates,
+                name,
+                base_nlls if name != BASELINE else None,
+                argmax,
                 base_argmax if name != BASELINE else None,
-                base_terrible_tokens, quality_tier["maximum_new_severe_rate"],
-                quality_tier["minimum_new_severe_budget"])
+                base_terrible_tokens,
+                quality_tier["maximum_new_severe_rate"],
+                quality_tier["minimum_new_severe_budget"],
+            )
             failed = failed or cell_failed
             cells.append(cell)
 
@@ -2330,7 +2561,8 @@ def main() -> int:
 
         nonlocal failed
         reference_path = (
-            reused_bf16[tokens][1] if tokens in reused_bf16
+            reused_bf16[tokens][1]
+            if tokens in reused_bf16
             else out_dir / f"{tokens}.decode.{BASELINE}.json"
         )
         reference_cell = json.loads(reference_path.read_text(encoding="utf-8"))
@@ -2340,8 +2572,17 @@ def main() -> int:
         for name in selected_candidates:
             cell_path = out_dir / f"{tokens}.decode.{name}.{label}.json"
             cell = run_cell(
-                profile_bins[name], profile_weights[name], args.ids, name, "decode", args.skip,
-                tokens, args.prefill_chunk, args.device, cell_path, list(extra),
+                profile_bins[name],
+                profile_weights[name],
+                args.ids,
+                name,
+                "decode",
+                args.skip,
+                tokens,
+                args.prefill_chunk,
+                args.device,
+                cell_path,
+                list(extra),
                 expected_weights_ids[name],
                 args.expected_q4_activation_bits,
                 args.expected_w8_activation_bits,
@@ -2355,8 +2596,15 @@ def main() -> int:
             argmax = load_argmax(cell_path)
             attach_nll_stats(cell, nlls)
             _, cell_failed = apply_baseline(
-                cell, nlls, float(reference_cell["mean_nll"]), gates, name,
-                reference_nlls, argmax, reference_argmax, reference_terrible,
+                cell,
+                nlls,
+                float(reference_cell["mean_nll"]),
+                gates,
+                name,
+                reference_nlls,
+                argmax,
+                reference_argmax,
+                reference_terrible,
                 quality_tier["maximum_new_severe_rate"],
                 quality_tier["minimum_new_severe_budget"],
             )
@@ -2478,9 +2726,7 @@ def main() -> int:
         "draft_tokens": draft_tokens,
         "q4_activation_bits": args.expected_q4_activation_bits,
         "w8_activation_bits": args.expected_w8_activation_bits,
-        "candidate_kv_plane_layouts": (
-            R9700_KV_PLANE_LAYOUTS if selected_candidates else None
-        ),
+        "candidate_kv_plane_layouts": (R9700_KV_PLANE_LAYOUTS if selected_candidates else None),
         "split512_enabled": bool(args.expected_fp8_qk_wmma),
         "decode_attention_profile": DECODE_ATTENTION_PROFILE,
         "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
@@ -2491,7 +2737,8 @@ def main() -> int:
                 "path": str(args.reuse_bf16_campaign),
                 "sha256": file_sha256(args.reuse_bf16_campaign),
             }
-            if args.reuse_bf16_campaign is not None else None
+            if args.reuse_bf16_campaign is not None
+            else None
         ),
         "bf16_repeat_comparison": bf16_repeat_comparison,
         "reused_candidate_campaign": (
@@ -2499,7 +2746,8 @@ def main() -> int:
                 "path": str(args.reuse_candidate_campaign[0]),
                 "sha256": file_sha256(args.reuse_candidate_campaign[0]),
             }
-            if len(args.reuse_candidate_campaign) == 1 else None
+            if len(args.reuse_candidate_campaign) == 1
+            else None
         ),
         "reused_candidate_campaigns": [
             {"path": str(path), "sha256": file_sha256(path)}

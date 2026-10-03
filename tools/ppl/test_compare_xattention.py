@@ -23,8 +23,16 @@ class CompareXAttentionTest(unittest.TestCase):
         return {"profile": "deterministic-fixture", "implementation": "a" * 64}
 
     def _cell(
-        self, root: Path, campaign: str, scheme: str, tokens: int,
-        nll: list[float], argmax: list[int], *, sparse: bool, seconds: float,
+        self,
+        root: Path,
+        campaign: str,
+        scheme: str,
+        tokens: int,
+        nll: list[float],
+        argmax: list[int],
+        *,
+        sparse: bool,
+        seconds: float,
     ) -> dict:
         path = root / campaign / f"{tokens}.prefill.{scheme}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,39 +60,43 @@ class CompareXAttentionTest(unittest.TestCase):
             "score_seconds": seconds,
         }
         if group is not None:
-            raw.update({
-                "kv_value_group": group,
-                "kv_plane_layouts": {"key": "k", "value": "v", "value_scale": "s"},
-                "q4_activation_bits": 8,
-                "w8_activation_bits": 8,
-                "split512_enabled": True,
-                "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
-                "packed_decode_min_context": 64,
-                "split512_min_context": 8192,
-                "xattention_qualification": sparse,
-            })
+            raw.update(
+                {
+                    "kv_value_group": group,
+                    "kv_plane_layouts": {"key": "k", "value": "v", "value_scale": "s"},
+                    "q4_activation_bits": 8,
+                    "w8_activation_bits": 8,
+                    "split512_enabled": True,
+                    "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                    "packed_decode_min_context": 64,
+                    "split512_min_context": 8192,
+                    "xattention_qualification": sparse,
+                }
+            )
             if sparse:
-                raw.update({
-                    "xattention_profile": "b128-s16-tau900",
-                    "xattention_find_block": 128,
-                    "xattention_stride": 16,
-                    "xattention_tau_permille": 900,
-                })
+                raw.update(
+                    {
+                        "xattention_profile": "b128-s16-tau900",
+                        "xattention_find_block": 128,
+                        "xattention_stride": 16,
+                        "xattention_tau_permille": 900,
+                    }
+                )
         else:
-            raw.update({
-                "source_config_sha256": "c" * 64,
-                "source_index_sha256": "i" * 64,
-                "source_shards_sha256": {"model-00001": "s" * 64},
-                "source_tensor_count": 4,
-                "source_text_tensor_count": 3,
-                "source_shard_count": 1,
-                "execution_provenance": self._reference_execution(),
-            })
+            raw.update(
+                {
+                    "source_config_sha256": "c" * 64,
+                    "source_index_sha256": "i" * 64,
+                    "source_shards_sha256": {"model-00001": "s" * 64},
+                    "source_tensor_count": 4,
+                    "source_text_tensor_count": 3,
+                    "source_shard_count": 1,
+                    "execution_provenance": self._reference_execution(),
+                }
+            )
         path.write_text(json.dumps(raw), encoding="utf-8")
         path.with_suffix(".nllf32").write_bytes(struct.pack("<" + "f" * len(nll), *nll))
-        path.with_suffix(".argmaxi32").write_bytes(
-            struct.pack("<" + "i" * len(argmax), *argmax)
-        )
+        path.with_suffix(".argmaxi32").write_bytes(struct.pack("<" + "i" * len(argmax), *argmax))
         return {
             **raw,
             "command": ["scorer", "--out-json", str(path)],
@@ -96,79 +108,113 @@ class CompareXAttentionTest(unittest.TestCase):
     def _campaign(self, root: Path, name: str, sparse: bool) -> Path:
         cells = []
         for tokens in (8192, 32768):
-            cells.append(self._cell(
-                root, name, "bf16-reference", tokens, [1.0, 2.0, 3.0], [10, 11, 12],
-                sparse=sparse, seconds=3.0,
-            ))
+            cells.append(
+                self._cell(
+                    root,
+                    name,
+                    "bf16-reference",
+                    tokens,
+                    [1.0, 2.0, 3.0],
+                    [10, 11, 12],
+                    sparse=sparse,
+                    seconds=3.0,
+                )
+            )
             for scheme in ("r9700-g16", "r9700-g32"):
                 nll = [1.5, 9.0, 13.0] if sparse else [1.0, 11.0, 3.0]
                 argmax = [10, 99, 12] if sparse else [10, 11, 12]
-                cells.append(self._cell(
-                    root, name, scheme, tokens, nll, argmax, sparse=sparse,
-                    seconds=5.0 if sparse else 10.0,
-                ))
+                cells.append(
+                    self._cell(
+                        root,
+                        name,
+                        scheme,
+                        tokens,
+                        nll,
+                        argmax,
+                        sparse=sparse,
+                        seconds=5.0 if sparse else 10.0,
+                    )
+                )
         profile = "b128-s16-tau900" if sparse else "dense"
         path = root / name / "results.json"
-        path.write_text(json.dumps({
-            "artifact_type": "ninfer_r9700_ppl_campaign",
-            "schema_version": 6,
-            "xattention_profile": profile,
-            "model_id": "qwen3.8-27b",
-            "reference_weights_id": "bf16-source",
-            "reference_source": {
-                "config_sha256": "c" * 64,
-                "index_sha256": "i" * 64,
-                "shards_sha256": {"model-00001": "s" * 64},
-                "tensor_count": 4,
-                "text_tensor_count": 3,
-                "shard_count": 1,
-            },
-            "reference_execution": self._reference_execution(),
-            "candidate_artifact": {
-                "model_id": "qwen3.8-27b", "weights_id": "r9700-q4g64-n16k16-eval",
-                "sha256": "a" * 64, "file_size_bytes": 123,
-            },
-            "weights_inputs": {
-                "bf16-reference": "/bf16", "r9700-g16": "/model.ninfer",
-                "r9700-g32": "/model.ninfer",
-            },
-            "corpus": {"ids_sha256": "b" * 64, "tokens": 32768},
-            "lengths": [8192, 32768],
-            "skip": "half",
-            "prefill_chunk": 4096,
-            "schedules": ["prefill"],
-            "spec": "none",
-            "draft_tokens": 0,
-            "q4_activation_bits": 8,
-            "w8_activation_bits": 8,
-            "candidate_kv_plane_layouts": {"key": "k", "value": "v", "value_scale": "s"},
-            "split512_enabled": True,
-            "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
-            "packed_decode_min_context": 64,
-            "split512_min_context": 8192,
-            "baseline": "bf16-reference",
-            "gates": {
-                "r9700-g16": math.log(1.05), "r9700-g32": math.log(1.05),
-            },
-            "quality_tier": "capacity-speed",
-            "quality_gate_contract": {
-                "tier": "capacity-speed",
-                "tier_maximum_mean_nll_delta": math.log(1.05),
-                "maximum_mean_nll_delta_by_profile": {
-                    "r9700-g16": math.log(1.05), "r9700-g32": math.log(1.05),
-                },
-            },
-            "schedule_parity_max_abs_nll": None,
-            "execution_parity_max_abs_nll": 0.0,
-            "terrible_nll": 10.0,
-            "scorers": {
-                "bf16-reference": {"path": "/bf16.py", "sha256": "d" * 64, "bytes": 1},
-                "r9700-g16": {"path": f"/{name}-g16", "sha256": ("e" if sparse else "f") * 64, "bytes": 2},
-                "r9700-g32": {"path": f"/{name}-g32", "sha256": ("1" if sparse else "2") * 64, "bytes": 2},
-            },
-            "cells": cells,
-            "pass": True,
-        }), encoding="utf-8")
+        path.write_text(
+            json.dumps(
+                {
+                    "artifact_type": "ninfer_r9700_ppl_campaign",
+                    "schema_version": 6,
+                    "xattention_profile": profile,
+                    "model_id": "qwen3.8-27b",
+                    "reference_weights_id": "bf16-source",
+                    "reference_source": {
+                        "config_sha256": "c" * 64,
+                        "index_sha256": "i" * 64,
+                        "shards_sha256": {"model-00001": "s" * 64},
+                        "tensor_count": 4,
+                        "text_tensor_count": 3,
+                        "shard_count": 1,
+                    },
+                    "reference_execution": self._reference_execution(),
+                    "candidate_artifact": {
+                        "model_id": "qwen3.8-27b",
+                        "weights_id": "r9700-q4g64-n16k16-eval",
+                        "sha256": "a" * 64,
+                        "file_size_bytes": 123,
+                    },
+                    "weights_inputs": {
+                        "bf16-reference": "/bf16",
+                        "r9700-g16": "/model.ninfer",
+                        "r9700-g32": "/model.ninfer",
+                    },
+                    "corpus": {"ids_sha256": "b" * 64, "tokens": 32768},
+                    "lengths": [8192, 32768],
+                    "skip": "half",
+                    "prefill_chunk": 4096,
+                    "schedules": ["prefill"],
+                    "spec": "none",
+                    "draft_tokens": 0,
+                    "q4_activation_bits": 8,
+                    "w8_activation_bits": 8,
+                    "candidate_kv_plane_layouts": {"key": "k", "value": "v", "value_scale": "s"},
+                    "split512_enabled": True,
+                    "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                    "packed_decode_min_context": 64,
+                    "split512_min_context": 8192,
+                    "baseline": "bf16-reference",
+                    "gates": {
+                        "r9700-g16": math.log(1.05),
+                        "r9700-g32": math.log(1.05),
+                    },
+                    "quality_tier": "capacity-speed",
+                    "quality_gate_contract": {
+                        "tier": "capacity-speed",
+                        "tier_maximum_mean_nll_delta": math.log(1.05),
+                        "maximum_mean_nll_delta_by_profile": {
+                            "r9700-g16": math.log(1.05),
+                            "r9700-g32": math.log(1.05),
+                        },
+                    },
+                    "schedule_parity_max_abs_nll": None,
+                    "execution_parity_max_abs_nll": 0.0,
+                    "terrible_nll": 10.0,
+                    "scorers": {
+                        "bf16-reference": {"path": "/bf16.py", "sha256": "d" * 64, "bytes": 1},
+                        "r9700-g16": {
+                            "path": f"/{name}-g16",
+                            "sha256": ("e" if sparse else "f") * 64,
+                            "bytes": 2,
+                        },
+                        "r9700-g32": {
+                            "path": f"/{name}-g32",
+                            "sha256": ("1" if sparse else "2") * 64,
+                            "bytes": 2,
+                        },
+                    },
+                    "cells": cells,
+                    "pass": True,
+                }
+            ),
+            encoding="utf-8",
+        )
         return path
 
     def test_assembles_direct_quality_severe_flip_and_timing_comparison(self) -> None:
@@ -266,7 +312,9 @@ class CompareXAttentionTest(unittest.TestCase):
             dense = self._campaign(root, "dense", False)
             sparse = self._campaign(root, "sparse", True)
             payload = json.loads(sparse.read_text(encoding="utf-8"))
-            reference = next(cell for cell in payload["cells"] if cell["scheme"] == "bf16-reference")
+            reference = next(
+                cell for cell in payload["cells"] if cell["scheme"] == "bf16-reference"
+            )
             path = Path(reference["command"][2])
             sidecar = path.with_suffix(".nllf32")
             count = len(sidecar.read_bytes()) // 4

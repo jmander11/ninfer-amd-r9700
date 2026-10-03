@@ -15,6 +15,7 @@ resources) is copied byte-exact from the base artifact.
 `r9700-fp8lut4` artifact of the same calibration and damping whose receipt records the same
 rounding (GPTQ or independent) for it; the others are re-encoded.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,8 +25,12 @@ import json
 from pathlib import Path
 
 from tools.artifact.container import (
-    Artifact, ArtifactIdentity, ArtifactWriter, TensorObject,
-    TensorSpec as StoredTensor, ResourceSpec as StoredResource,
+    Artifact,
+    ArtifactIdentity,
+    ArtifactWriter,
+    TensorObject,
+    TensorSpec as StoredTensor,
+    ResourceSpec as StoredResource,
 )
 from tools.artifact.layouts import transcode_q4_n16k16
 from .convert_fp8_capped import selections
@@ -76,7 +81,7 @@ def recorded(chunks, record):
 def copied(artifact, name):
     with artifact.payload(name) as payload:
         for begin in range(0, len(payload), 8 << 20):
-            yield bytes(payload[begin:begin + (8 << 20)])
+            yield bytes(payload[begin : begin + (8 << 20)])
 
 
 def row_split(artifact, obj):
@@ -105,11 +110,16 @@ def convert(args) -> None:
     reuse = None
     if args.reuse_layers is not None:
         prior = json.loads(Path(str(args.reuse_layers) + ".conversion.json").read_text())
-        layer_damping = {k: v for k, v in prior["calibration"]["damping"].items() if k != "output_head"}
-        if (prior["recipe"] != WEIGHTS_ID or prior["calibration"]["sha256"] != calibration_sha or
-                layer_damping != dict(DAMPING, default=DEFAULT_DAMPING) or
-                prior["base"] != str(args.base.resolve()) or
-                prior["source_model"] != str(args.model.resolve())):
+        layer_damping = {
+            k: v for k, v in prior["calibration"]["damping"].items() if k != "output_head"
+        }
+        if (
+            prior["recipe"] != WEIGHTS_ID
+            or prior["calibration"]["sha256"] != calibration_sha
+            or layer_damping != dict(DAMPING, default=DEFAULT_DAMPING)
+            or prior["base"] != str(args.base.resolve())
+            or prior["source_model"] != str(args.model.resolve())
+        ):
             raise ValueError("--reuse-layers needs an r9700-fp8lut4 artifact of this calibration")
         prior_digests = {row["name"]: row["sha256"] for row in prior["objects"]}
         prior_origins = {row["name"]: row["origin"] for row in prior["objects"]}
@@ -117,25 +127,38 @@ def convert(args) -> None:
         if reuse.identity.weights_id != WEIGHTS_ID:
             reuse.close()
             raise ValueError("--reuse-layers artifact identity is not r9700-fp8lut4")
-    report = dict(recipe=WEIGHTS_ID, base=str(args.base.resolve()),
-                  source_model=str(args.model.resolve()),
-                  calibration=dict(ids=str(args.calibration.resolve()),
-                                   sha256=calibration_sha, tokens=moments.tokens,
-                                   rounding="gptq-block128",
-                                   damping=dict(DAMPING, default=DEFAULT_DAMPING,
-                                                output_head=HEAD_DAMPING),
-                                   independent_roles=list(INDEPENDENT_ROLES)),
-                  fp8_protections=sorted(PROTECTED), objects=[])
-    with Artifact(args.base) as base, ShardReader(args.model) as reader, \
-            (reuse if reuse is not None else contextlib.nullcontext()):
+    report = dict(
+        recipe=WEIGHTS_ID,
+        base=str(args.base.resolve()),
+        source_model=str(args.model.resolve()),
+        calibration=dict(
+            ids=str(args.calibration.resolve()),
+            sha256=calibration_sha,
+            tokens=moments.tokens,
+            rounding="gptq-block128",
+            damping=dict(DAMPING, default=DEFAULT_DAMPING, output_head=HEAD_DAMPING),
+            independent_roles=list(INDEPENDENT_ROLES),
+        ),
+        fp8_protections=sorted(PROTECTED),
+        objects=[],
+    )
+    with (
+        Artifact(args.base) as base,
+        ShardReader(args.model) as reader,
+        reuse if reuse is not None else contextlib.nullcontext(),
+    ):
         if base.identity.weights_id != BASE_WEIGHTS_ID:
             raise ValueError(f"base must be {BASE_WEIGHTS_ID}, got {base.identity.weights_id}")
         stored = tuple(
-            StoredTensor(o.name, o.shape, FP8LUT4, FP8LUT4_LAYOUT) if selected(o)
-            else StoredTensor(o.name, o.shape, o.format, ROW_SPLIT) if o.name == EMBEDDING
-            else StoredTensor(o.name, o.shape, o.format, o.layout) if isinstance(o, TensorObject)
+            StoredTensor(o.name, o.shape, FP8LUT4, FP8LUT4_LAYOUT)
+            if selected(o)
+            else StoredTensor(o.name, o.shape, o.format, ROW_SPLIT)
+            if o.name == EMBEDDING
+            else StoredTensor(o.name, o.shape, o.format, o.layout)
+            if isinstance(o, TensorObject)
             else StoredResource(o.name, o.encoding, o.bytes)
-            for o in base.objects)
+            for o in base.objects
+        )
         identity = ArtifactIdentity(base.identity.model_id, WEIGHTS_ID)
         layer_moments: dict[str, torch.Tensor] = {}
         with ArtifactWriter(args.out, identity, stored) as writer:
@@ -146,11 +169,18 @@ def convert(args) -> None:
                         moments.layer(moments.next_layer)
                     calibration = fp8lut4_codec.Calibration(moments.final(), HEAD_DAMPING)
                     tensor = source_recipe.materialize_recipe(
-                        source_recipe.RECIPES_BY_NAME[obj.name], reader)
+                        source_recipe.RECIPES_BY_NAME[obj.name], reader
+                    )
                     record["origin"] = "original-bf16-source-fp8lut4-gptq"
-                    writer.write(obj.name, recorded(fp8lut4_codec.encode_chunks(
-                        tensor, device=device, rows_per_chunk=16384,
-                        calibration=calibration), record))
+                    writer.write(
+                        obj.name,
+                        recorded(
+                            fp8lut4_codec.encode_chunks(
+                                tensor, device=device, rows_per_chunk=16384, calibration=calibration
+                            ),
+                            record,
+                        ),
+                    )
                     del tensor, calibration
                     print(obj.name, flush=True)
                 elif selected(obj):
@@ -172,15 +202,30 @@ def convert(args) -> None:
                             raise ValueError(f"reused {obj.name} differs from its receipt")
                     else:
                         tensor = source_recipe.materialize_recipe(
-                            source_recipe.RECIPES_BY_NAME[obj.name], reader)
+                            source_recipe.RECIPES_BY_NAME[obj.name], reader
+                        )
                         if obj.name.endswith("/mlp/gate_up"):
                             tensor = fp8lut4_codec.interleave_gate_up(tensor)
-                        calibration = fp8lut4_codec.Calibration(
-                            layer_moments[role], DAMPING.get(role, DEFAULT_DAMPING)) if gptq else None
+                        calibration = (
+                            fp8lut4_codec.Calibration(
+                                layer_moments[role], DAMPING.get(role, DEFAULT_DAMPING)
+                            )
+                            if gptq
+                            else None
+                        )
                         record["origin"] = "original-bf16-source-" + rounding
-                        writer.write(obj.name, recorded(fp8lut4_codec.encode_chunks(
-                            tensor, device=device, rows_per_chunk=tensor.shape[0],
-                            calibration=calibration), record))
+                        writer.write(
+                            obj.name,
+                            recorded(
+                                fp8lut4_codec.encode_chunks(
+                                    tensor,
+                                    device=device,
+                                    rows_per_chunk=tensor.shape[0],
+                                    calibration=calibration,
+                                ),
+                                record,
+                            ),
+                        )
                         del tensor, calibration
                         print(obj.name, flush=True)
                 elif obj.name == EMBEDDING:
@@ -223,12 +268,17 @@ def main() -> None:
     parser.add_argument("--base", type=Path)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--out", type=Path)
-    parser.add_argument("--calibration", type=Path,
-                        help="calibration token ids, one equal-length sequence per line")
-    parser.add_argument("--device", default="cuda:0",
-                        help="torch device for the BF16 calibration pass and GPTQ")
-    parser.add_argument("--reuse-layers", type=Path,
-                        help="copy the Text-layer FP8LUT4 objects from this r9700-fp8lut4 artifact")
+    parser.add_argument(
+        "--calibration", type=Path, help="calibration token ids, one equal-length sequence per line"
+    )
+    parser.add_argument(
+        "--device", default="cuda:0", help="torch device for the BF16 calibration pass and GPTQ"
+    )
+    parser.add_argument(
+        "--reuse-layers",
+        type=Path,
+        help="copy the Text-layer FP8LUT4 objects from this r9700-fp8lut4 artifact",
+    )
     parser.add_argument("--validate", type=Path)
     args = parser.parse_args()
     if args.validate:

@@ -19,7 +19,8 @@ import pareto
 
 WORKLOADS = ["prefill_8k_c1", "decode_8k_c1", "decode_8k_c4"]
 CHUNK_SELECTION = {
-    "path": "/chunk-selection.json", "sha256": "9" * 64,
+    "path": "/chunk-selection.json",
+    "sha256": "9" * 64,
     "selection_rule": "global_maximin_normalized_prefill_then_workspace_then_smaller_chunk_v2",
     "selected_prefill_chunk": 4096,
 }
@@ -30,10 +31,19 @@ def capacity_failure(concurrency: int) -> dict:
     stdout = f"/campaign/logs/c{concurrency}.stdout.txt"
     stderr_path = f"/campaign/logs/c{concurrency}.stderr.txt"
     command = [
-        "bench", "--weights", "/model.ninfer", "--max-ctx", "262144",
-        "--concurrency", str(concurrency), "--kv-capacity", "auto",
-        "--draft-tokens", "0",
-        "--output-file", report,
+        "bench",
+        "--weights",
+        "/model.ninfer",
+        "--max-ctx",
+        "262144",
+        "--concurrency",
+        str(concurrency),
+        "--kv-capacity",
+        "auto",
+        "--draft-tokens",
+        "0",
+        "--output-file",
+        report,
     ]
     stderr = (
         f"[ninfer_bench] loading /model.ninfer (max_context=262144, "
@@ -43,13 +53,19 @@ def capacity_failure(concurrency: int) -> dict:
         "11477728256 bytes are available after weights\n"
     )
     campaign_failure = {
-        "suite": "pareto_effective_capacity", "case": "effective_capacity_ordinary",
-        "concurrency": concurrency, "returncode": 1, "stdout": stdout,
-        "stderr": stderr_path, "command": command,
+        "suite": "pareto_effective_capacity",
+        "case": "effective_capacity_ordinary",
+        "concurrency": concurrency,
+        "returncode": 1,
+        "stdout": stdout,
+        "stderr": stderr_path,
+        "command": command,
     }
     return {
-        "status": "memory_admission_ineligible", "concurrency": concurrency,
-        "command": command, "missing_report": report,
+        "status": "memory_admission_ineligible",
+        "concurrency": concurrency,
+        "command": command,
+        "missing_report": report,
         "memory_admission": {
             "kind": "minimum_runtime_reservation",
             "minimum_runtime_reservation_bytes": 10663212291,
@@ -65,7 +81,8 @@ def capacity_failure(concurrency: int) -> dict:
             "text": stderr,
         },
         "stdout": {
-            "path": stdout, "sha256": hashlib.sha256(b"").hexdigest(),
+            "path": stdout,
+            "sha256": hashlib.sha256(b"").hexdigest(),
         },
     }
 
@@ -73,17 +90,26 @@ def capacity_failure(concurrency: int) -> dict:
 def migration_receipt(weights_id: str) -> dict:
     recipe_id = {
         "r9700-q4g64-n16k16-eval": "r9700-all-q4g64-n16k16-eval-v1",
-        "r9700-q4-w8-mse-n16k16-eval":
-            "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
-        "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-            "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+        "r9700-q4-w8-mse-n16k16-eval": "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
+        "r9700-q4g64-f8e4m3-four-role-n16k16-eval": "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
     }[weights_id]
-    value = {"path": "/receipt.json", "sha256": "f" * 64, "recipe_id": recipe_id,
-             "object_plan_sha256": "e" * 64, "source_artifact_sha256": "d" * 64,
-             "source_receipt_sha256": "c" * 64, "transcoder_sha256": "b" * 64}
+    value = {
+        "path": "/receipt.json",
+        "sha256": "f" * 64,
+        "recipe_id": recipe_id,
+        "object_plan_sha256": "e" * 64,
+        "source_artifact_sha256": "d" * 64,
+        "source_receipt_sha256": "c" * 64,
+        "transcoder_sha256": "b" * 64,
+    }
     if weights_id == "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-        value.update({"selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8", "source_index_sha256": "9" * 64,
-                      "source_ranking_sha256": "8" * 64})
+        value.update(
+            {
+                "selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+                "source_index_sha256": "9" * 64,
+                "source_ranking_sha256": "8" * 64,
+            }
+        )
     else:
         value["receipt_producer_sha256"] = "7" * 64
     return value
@@ -148,12 +174,16 @@ def candidate(
 class ParetoTest(unittest.TestCase):
     def test_required_mode_rejects_missing_base_profile_markers(self) -> None:
         row = candidate(
-            "candidate", mean_nll_delta=0.0, severe_rate=0.0,
-            speed=(1.0, 1.0, 1.0), capacity=1,
+            "candidate",
+            mean_nll_delta=0.0,
+            severe_rate=0.0,
+            speed=(1.0, 1.0, 1.0),
+            capacity=1,
         )
         for missing in ("base_ranking_profile", "base_capacity_profile"):
             payload = {
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
                 "base_ranking_profile": "spec-none-ordinary",
@@ -162,27 +192,37 @@ class ParetoTest(unittest.TestCase):
                 "candidates": [row],
             }
             del payload[missing]
-            with self.subTest(missing=missing), self.assertRaisesRegex(
-                ValueError, "ordinary ranking and capacity profiles"
+            with (
+                self.subTest(missing=missing),
+                self.assertRaisesRegex(ValueError, "ordinary ranking and capacity profiles"),
             ):
                 pareto.classify(payload)
 
     def test_rejects_non_product_concurrency_cells(self) -> None:
         row = candidate(
-            "candidate", mean_nll_delta=0.0, severe_rate=0.0,
-            speed=(1.0, 1.0, 1.0), capacity=1,
+            "candidate",
+            mean_nll_delta=0.0,
+            severe_rate=0.0,
+            speed=(1.0, 1.0, 1.0),
+            capacity=1,
         )
         with self.assertRaisesRegex(ValueError, "C=1..4"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_speed_workloads": ["prefill_8k_c1", "decode_8k_c5"],
-                "candidates": [row],
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": ["prefill_8k_c1", "decode_8k_c5"],
+                    "candidates": [row],
+                }
+            )
 
     def test_rejects_unrequested_non_product_candidate_cells(self) -> None:
         row = candidate(
-            "candidate", mean_nll_delta=0.0, severe_rate=0.0,
-            speed=(1.0, 1.0, 1.0), capacity=1,
+            "candidate",
+            mean_nll_delta=0.0,
+            severe_rate=0.0,
+            speed=(1.0, 1.0, 1.0),
+            capacity=1,
         )
         row["whole_inference_tokens_per_second"]["whole_8k_c5"] = 1.0
         with self.assertRaisesRegex(ValueError, r"non-product C5\+"):
@@ -194,30 +234,40 @@ class ParetoTest(unittest.TestCase):
             self.classify([row])
 
     def classify(self, candidates: list[dict]) -> dict:
-        return pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input",
-            "schema_version": 4,
-            "required_speed_workloads": WORKLOADS,
-            "candidates": candidates,
-        })
+        return pareto.classify(
+            {
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
+                "required_speed_workloads": WORKLOADS,
+                "candidates": candidates,
+            }
+        )
 
     def test_input_schema_is_explicit(self) -> None:
         with self.assertRaisesRegex(ValueError, "schema v4"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input",
-                "schema_version": 2,
-                "required_speed_workloads": WORKLOADS,
-                "candidates": [],
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 2,
+                    "required_speed_workloads": WORKLOADS,
+                    "candidates": [],
+                }
+            )
 
     def test_dominated_requires_no_worse_on_every_objective(self) -> None:
         better = candidate(
-            "better", mean_nll_delta=0.01, severe_rate=0.0005,
-            speed=(100.0, 80.0, 300.0), capacity=32768,
+            "better",
+            mean_nll_delta=0.01,
+            severe_rate=0.0005,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
         )
         worse = candidate(
-            "worse", mean_nll_delta=0.02, severe_rate=0.0007,
-            speed=(90.0, 70.0, 250.0), capacity=16384,
+            "worse",
+            mean_nll_delta=0.02,
+            severe_rate=0.0007,
+            speed=(90.0, 70.0, 250.0),
+            capacity=16384,
         )
         result = self.classify([worse, better])
         rows = {row["name"]: row for row in result["candidates"]}
@@ -226,23 +276,37 @@ class ParetoTest(unittest.TestCase):
 
     def test_quality_speed_tradeoff_keeps_both_candidates(self) -> None:
         quality = candidate(
-            "quality", mean_nll_delta=0.005, severe_rate=0.0,
-            speed=(80.0, 70.0, 250.0), capacity=32768,
+            "quality",
+            mean_nll_delta=0.005,
+            severe_rate=0.0,
+            speed=(80.0, 70.0, 250.0),
+            capacity=32768,
         )
         speed = candidate(
-            "speed", mean_nll_delta=0.015, severe_rate=0.0005,
-            speed=(120.0, 100.0, 350.0), capacity=32768,
+            "speed",
+            mean_nll_delta=0.015,
+            severe_rate=0.0005,
+            speed=(120.0, 100.0, 350.0),
+            capacity=32768,
         )
         self.assertEqual(self.classify([quality, speed])["frontier"], ["quality", "speed"])
 
     def test_score_seconds_cannot_select_or_dominate(self) -> None:
         first = candidate(
-            "first", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768, score_seconds=1.0,
+            "first",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
+            score_seconds=1.0,
         )
         second = candidate(
-            "second", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768, score_seconds=100.0,
+            "second",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
+            score_seconds=100.0,
         )
         result = self.classify([first, second])
         self.assertFalse(result["score_seconds_is_objective"])
@@ -250,13 +314,20 @@ class ParetoTest(unittest.TestCase):
 
     def test_missing_whole_inference_or_failed_quality_is_not_comparable(self) -> None:
         missing = candidate(
-            "missing", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768,
+            "missing",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
         )
         del missing["whole_inference_tokens_per_second"]["decode_8k_c4"]
         failed = candidate(
-            "failed", mean_nll_delta=0.03, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768, eligible=False,
+            "failed",
+            mean_nll_delta=0.03,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
+            eligible=False,
         )
         result = self.classify([missing, failed])
         self.assertEqual(result["frontier"], [])
@@ -269,8 +340,12 @@ class ParetoTest(unittest.TestCase):
 
     def test_declared_eligibility_is_recomputed(self) -> None:
         dishonest = candidate(
-            "dishonest", mean_nll_delta=0.03, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768, eligible=True,
+            "dishonest",
+            mean_nll_delta=0.03,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
+            eligible=True,
         )
         result = self.classify([dishonest])
         row = result["candidates"][0]
@@ -280,9 +355,14 @@ class ParetoTest(unittest.TestCase):
 
     def test_measured_all_q4_a8_is_capacity_speed_eligible(self) -> None:
         all_q4 = candidate(
-            "all-q4-a8", mean_nll_delta=0.03950884100572821,
-            severe_rate=9 / 4095, speed=(100.0, 80.0, 300.0), capacity=65536,
-            tier="capacity-speed", scored_positions=4095, new_severe_positions=9,
+            "all-q4-a8",
+            mean_nll_delta=0.03950884100572821,
+            severe_rate=9 / 4095,
+            speed=(100.0, 80.0, 300.0),
+            capacity=65536,
+            tier="capacity-speed",
+            scored_positions=4095,
+            new_severe_positions=9,
         )
         result = self.classify([all_q4])
         row = result["candidates"][0]
@@ -293,12 +373,18 @@ class ParetoTest(unittest.TestCase):
 
     def test_quality_and_capacity_cells_are_compared_independently(self) -> None:
         first = candidate(
-            "first", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768,
+            "first",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
         )
         second = candidate(
-            "second", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768,
+            "second",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
         )
         for row, q8, q32, c1, c4 in (
             (first, 0.005, 0.015, 40000, 30000),
@@ -311,24 +397,36 @@ class ParetoTest(unittest.TestCase):
                 "32k": {**base, "mean_nll_delta": q32},
             }
             row["capacity_by_cell"] = {
-                "c1": {"measurement_kind": "resolved_effective_maximum",
-                       "binding_constraint": "model_context", "tokens": c1},
-                "c4": {"measurement_kind": "resolved_effective_maximum",
-                       "binding_constraint": "device_memory", "tokens": c4},
+                "c1": {
+                    "measurement_kind": "resolved_effective_maximum",
+                    "binding_constraint": "model_context",
+                    "tokens": c1,
+                },
+                "c4": {
+                    "measurement_kind": "resolved_effective_maximum",
+                    "binding_constraint": "device_memory",
+                    "tokens": c4,
+                },
             }
-        result = pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_quality_cells": ["8k", "32k"],
-            "required_capacity_cells": ["c1", "c4"],
-            "required_speed_workloads": WORKLOADS,
-            "candidates": [first, second],
-        })
+        result = pareto.classify(
+            {
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
+                "required_quality_cells": ["8k", "32k"],
+                "required_capacity_cells": ["c1", "c4"],
+                "required_speed_workloads": WORKLOADS,
+                "candidates": [first, second],
+            }
+        )
         self.assertEqual(result["frontier"], ["first", "second"])
 
     def test_workload_feasibility_cannot_populate_capacity_objective(self) -> None:
         row = candidate(
-            "censored", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768,
+            "censored",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
         )
         row["capacity"]["measurement_kind"] = "required_workload_feasibility"
         result = self.classify([row])
@@ -340,12 +438,20 @@ class ParetoTest(unittest.TestCase):
 
     def test_same_recipe_selection_maximizes_worst_throughput_ratio(self) -> None:
         balanced = candidate(
-            "balanced", mean_nll_delta=0.010, severe_rate=0.0005,
-            speed=(100.0, 90.0, 90.0), capacity=32768, group=16,
+            "balanced",
+            mean_nll_delta=0.010,
+            severe_rate=0.0005,
+            speed=(100.0, 90.0, 90.0),
+            capacity=32768,
+            group=16,
         )
         spiky = candidate(
-            "spiky", mean_nll_delta=0.005, severe_rate=0.0004,
-            speed=(80.0, 100.0, 100.0), capacity=65536, group=32,
+            "spiky",
+            mean_nll_delta=0.005,
+            severe_rate=0.0004,
+            speed=(80.0, 100.0, 100.0),
+            capacity=65536,
+            group=32,
         )
         selection = self.classify([spiky, balanced])["same_recipe_static_profile_selection"]
         self.assertEqual(selection["selections"][0]["winner"], "balanced")
@@ -354,77 +460,112 @@ class ParetoTest(unittest.TestCase):
             "maximin_whole_inference_throughput",
         )
         self.assertEqual(
-            selection["selections"][0]["normalized_objectives"]["balanced"]
-            ["minimum_throughput_ratio"],
+            selection["selections"][0]["normalized_objectives"]["balanced"][
+                "minimum_throughput_ratio"
+            ],
             0.9,
         )
 
     def test_same_recipe_selection_uses_capacity_tie_break(self) -> None:
         first = candidate(
-            "first", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=1, group=16,
+            "first",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=1,
+            group=16,
         )
         second = candidate(
-            "second", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=1, group=32,
+            "second",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=1,
+            group=32,
         )
         for row, c1, c4 in ((first, 100, 90), (second, 80, 100)):
             row.pop("capacity")
             row["capacity_by_cell"] = {
-                "c1": {"measurement_kind": "resolved_effective_maximum",
-                       "binding_constraint": "device_memory", "tokens": c1},
-                "c4": {"measurement_kind": "resolved_effective_maximum",
-                       "binding_constraint": "device_memory", "tokens": c4},
+                "c1": {
+                    "measurement_kind": "resolved_effective_maximum",
+                    "binding_constraint": "device_memory",
+                    "tokens": c1,
+                },
+                "c4": {
+                    "measurement_kind": "resolved_effective_maximum",
+                    "binding_constraint": "device_memory",
+                    "tokens": c4,
+                },
             }
-        result = pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_capacity_cells": ["c1", "c4"],
-            "required_speed_workloads": WORKLOADS,
-            "candidates": [first, second],
-        })
+        result = pareto.classify(
+            {
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
+                "required_capacity_cells": ["c1", "c4"],
+                "required_speed_workloads": WORKLOADS,
+                "candidates": [first, second],
+            }
+        )
         selected = result["same_recipe_static_profile_selection"]["selections"][0]
         self.assertEqual(selected["winner"], "first")
         self.assertEqual(selected["decisive_stage"], "maximin_resolved_capacity")
 
     def test_same_recipe_selection_uses_quality_budget_tie_break(self) -> None:
         first = candidate(
-            "first", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=16,
+            "first",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=16,
         )
         second = candidate(
-            "second", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=32,
+            "second",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=32,
         )
         for row, delta, severe in ((first, 0.010, 2), (second, 0.002, 7)):
             quality = row.pop("quality")
             row["quality_cells"] = {
-                "8k": {**quality, "mean_nll_delta": delta,
-                       "new_severe_positions": severe},
-                "32k": {**quality, "mean_nll_delta": delta,
-                        "new_severe_positions": severe},
+                "8k": {**quality, "mean_nll_delta": delta, "new_severe_positions": severe},
+                "32k": {**quality, "mean_nll_delta": delta, "new_severe_positions": severe},
             }
-        result = pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_quality_cells": ["8k", "32k"],
-            "required_speed_workloads": WORKLOADS,
-            "candidates": [first, second],
-        })
+        result = pareto.classify(
+            {
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
+                "required_quality_cells": ["8k", "32k"],
+                "required_speed_workloads": WORKLOADS,
+                "candidates": [first, second],
+            }
+        )
         selected = result["same_recipe_static_profile_selection"]["selections"][0]
         self.assertEqual(selected["winner"], "first")
         self.assertEqual(selected["decisive_stage"], "minimum_quality_budget_consumption")
 
     def test_same_recipe_selection_uses_canonical_profile_for_identical_vectors(self) -> None:
         g32 = candidate(
-            "g32", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=32,
+            "g32",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=32,
         )
         g16 = candidate(
-            "g16", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=16,
+            "g16",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=16,
         )
-        selected = self.classify([g32, g16])["same_recipe_static_profile_selection"][
-            "selections"
-        ][0]
+        selected = self.classify([g32, g16])["same_recipe_static_profile_selection"]["selections"][
+            0
+        ]
         self.assertEqual(selected["winner"], "g16")
         self.assertEqual(selected["decisive_stage"], "canonical_static_profile_identity")
         self.assertEqual(selected["winner_cache_profile"], g16["cache_profile"])
@@ -432,13 +573,19 @@ class ParetoTest(unittest.TestCase):
 
     def test_static_profile_tie_break_retains_attention_identity(self) -> None:
         sparse = candidate(
-            "sparse", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768,
+            "sparse",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
             xattention_profile="b128-s16-tau900",
         )
         dense = candidate(
-            "dense", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768,
+            "dense",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
         )
         selected = self.classify([sparse, dense])["same_recipe_static_profile_selection"][
             "selections"
@@ -451,8 +598,11 @@ class ParetoTest(unittest.TestCase):
 
     def test_missing_execution_profile_is_rejected(self) -> None:
         row = candidate(
-            "missing-profile", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768,
+            "missing-profile",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
         )
         del row["execution_profile"]
         with self.assertRaisesRegex(ValueError, "execution_profile identity"):
@@ -460,12 +610,21 @@ class ParetoTest(unittest.TestCase):
 
     def test_ineligible_profile_is_not_in_same_recipe_selection(self) -> None:
         valid = candidate(
-            "valid", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=16,
+            "valid",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=16,
         )
         invalid = candidate(
-            "invalid", mean_nll_delta=0.03, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=32, eligible=False,
+            "invalid",
+            mean_nll_delta=0.03,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=32,
+            eligible=False,
         )
         selection = self.classify([valid, invalid])["same_recipe_static_profile_selection"]
         self.assertEqual(selection["selections"], [])
@@ -473,13 +632,21 @@ class ParetoTest(unittest.TestCase):
 
     def test_different_recipes_are_not_collapsed(self) -> None:
         first = candidate(
-            "first", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=16,
+            "first",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=16,
             weight_recipe="recipe-a",
         )
         second = candidate(
-            "second", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=32,
+            "second",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=32,
             weight_recipe="recipe-b",
         )
         selection = self.classify([first, second])["same_recipe_static_profile_selection"]
@@ -488,11 +655,18 @@ class ParetoTest(unittest.TestCase):
 
     def test_missing_zero_and_nonfinite_speed_cells_are_not_comparable(self) -> None:
         rows = []
-        for name, value in (("missing", None), ("zero", 0.0), ("nan", math.nan),
-                            ("infinite", math.inf)):
+        for name, value in (
+            ("missing", None),
+            ("zero", 0.0),
+            ("nan", math.nan),
+            ("infinite", math.inf),
+        ):
             row = candidate(
-                name, mean_nll_delta=0.01, severe_rate=0.0,
-                speed=(100.0, 80.0, 300.0), capacity=32768,
+                name,
+                mean_nll_delta=0.01,
+                severe_rate=0.0,
+                speed=(100.0, 80.0, 300.0),
+                capacity=32768,
             )
             if value is None:
                 del row["whole_inference_tokens_per_second"][WORKLOADS[1]]
@@ -502,21 +676,25 @@ class ParetoTest(unittest.TestCase):
         result = self.classify(rows)
         self.assertEqual(result["frontier"], [])
         for row in result["candidates"]:
-            self.assertIn(
-                f"missing_positive_whole_inference_speed:{WORKLOADS[1]}", row["reasons"]
-            )
+            self.assertIn(f"missing_positive_whole_inference_speed:{WORKLOADS[1]}", row["reasons"])
 
     def test_required_workloads_reject_duplicates(self) -> None:
         row = candidate(
-            "candidate", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 80.0, 300.0), capacity=32768,
+            "candidate",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 80.0, 300.0),
+            capacity=32768,
         )
         with self.assertRaisesRegex(ValueError, "nonempty unique string list"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_speed_workloads": [WORKLOADS[0], WORKLOADS[0]],
-                "candidates": [row],
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": [WORKLOADS[0], WORKLOADS[0]],
+                    "candidates": [row],
+                }
+            )
 
     def test_json_loader_rejects_duplicate_nested_workload_cells(self) -> None:
         with self.assertRaisesRegex(ValueError, "duplicate JSON object key: decode"):
@@ -527,29 +705,48 @@ class ParetoTest(unittest.TestCase):
 
     def test_provenance_artifact_identity_overrides_untrusted_recipe_label(self) -> None:
         first = candidate(
-            "first", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=16,
+            "first",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=16,
             weight_recipe="same-label",
         )
         second = candidate(
-            "second", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=32,
+            "second",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=32,
             weight_recipe="same-label",
         )
         provenance = [
-            {"candidate": "first", "artifact": {
-                "weights_id": "weights", "sha256": "a" * 64,
-            }},
-            {"candidate": "second", "artifact": {
-                "weights_id": "weights", "sha256": "b" * 64,
-            }},
+            {
+                "candidate": "first",
+                "artifact": {
+                    "weights_id": "weights",
+                    "sha256": "a" * 64,
+                },
+            },
+            {
+                "candidate": "second",
+                "artifact": {
+                    "weights_id": "weights",
+                    "sha256": "b" * 64,
+                },
+            },
         ]
-        result = pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_speed_workloads": WORKLOADS,
-            "candidates": [first, second],
-            "source_provenance": provenance,
-        })
+        result = pareto.classify(
+            {
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
+                "required_speed_workloads": WORKLOADS,
+                "candidates": [first, second],
+                "source_provenance": provenance,
+            }
+        )
         selection = result["same_recipe_static_profile_selection"]
         self.assertEqual(selection["selections"], [])
         self.assertEqual(selection["not_collapsed"], ["first", "second"])
@@ -560,69 +757,108 @@ class ParetoTest(unittest.TestCase):
 
     def test_matching_provenance_groups_candidates_despite_declared_labels(self) -> None:
         first = candidate(
-            "first", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=16,
+            "first",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=16,
             weight_recipe="label-a",
         )
         second = candidate(
-            "second", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=32,
+            "second",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=32,
             weight_recipe="label-b",
         )
         artifact = {"weights_id": "weights", "sha256": "a" * 64}
-        result = pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_speed_workloads": WORKLOADS,
-            "candidates": [first, second],
-            "source_provenance": [
-                {"candidate": "first", "artifact": artifact},
-                {"candidate": "second", "artifact": artifact},
-            ],
-        })
+        result = pareto.classify(
+            {
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
+                "required_speed_workloads": WORKLOADS,
+                "candidates": [first, second],
+                "source_provenance": [
+                    {"candidate": "first", "artifact": artifact},
+                    {"candidate": "second", "artifact": artifact},
+                ],
+            }
+        )
         selection = result["same_recipe_static_profile_selection"]
-        self.assertEqual(selection["selections"][0]["frontier_candidates"],
-                         ["first", "second"])
+        self.assertEqual(selection["selections"][0]["frontier_candidates"], ["first", "second"])
         self.assertEqual(selection["not_collapsed"], [])
 
     def test_invalid_or_ambiguous_provenance_is_not_used_for_grouping(self) -> None:
         first = candidate(
-            "first", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=16,
+            "first",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=16,
             weight_recipe="same-label",
         )
         second = candidate(
-            "second", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=32,
+            "second",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=32,
             weight_recipe="same-label",
         )
-        result = pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_speed_workloads": WORKLOADS,
-            "candidates": [first, second],
-            "source_provenance": [
-                {"candidate": "first", "artifact": {
-                    "weights_id": "weights", "sha256": "not-a-digest",
-                }},
-                {"candidate": "second", "artifact": {
-                    "weights_id": "weights", "sha256": "a" * 64,
-                }},
-                {"candidate": "second", "artifact": {
-                    "weights_id": "weights", "sha256": "a" * 64,
-                }},
-            ],
-        })
+        result = pareto.classify(
+            {
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
+                "required_speed_workloads": WORKLOADS,
+                "candidates": [first, second],
+                "source_provenance": [
+                    {
+                        "candidate": "first",
+                        "artifact": {
+                            "weights_id": "weights",
+                            "sha256": "not-a-digest",
+                        },
+                    },
+                    {
+                        "candidate": "second",
+                        "artifact": {
+                            "weights_id": "weights",
+                            "sha256": "a" * 64,
+                        },
+                    },
+                    {
+                        "candidate": "second",
+                        "artifact": {
+                            "weights_id": "weights",
+                            "sha256": "a" * 64,
+                        },
+                    },
+                ],
+            }
+        )
         selection = result["same_recipe_static_profile_selection"]
         self.assertEqual(selection["selections"], [])
         self.assertEqual(selection["not_collapsed"], ["first", "second"])
 
     def test_output_candidate_order_is_canonical(self) -> None:
         first = candidate(
-            "a", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768,
+            "a",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
         )
         second = candidate(
-            "b", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768,
+            "b",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
         )
         forward = self.classify([first, second])
         reverse = self.classify([second, first])
@@ -630,14 +866,26 @@ class ParetoTest(unittest.TestCase):
 
     def test_quality_fractions_use_each_declared_tier_budget(self) -> None:
         accuracy = candidate(
-            "accuracy", mean_nll_delta=0.01, severe_rate=0.0,
-            speed=(100.0, 100.0, 100.0), capacity=32768, group=16,
-            tier="accuracy", scored_positions=10000, new_severe_positions=4,
+            "accuracy",
+            mean_nll_delta=0.01,
+            severe_rate=0.0,
+            speed=(100.0, 100.0, 100.0),
+            capacity=32768,
+            group=16,
+            tier="accuracy",
+            scored_positions=10000,
+            new_severe_positions=4,
         )
         capacity_speed = candidate(
-            "capacity-speed", mean_nll_delta=math.log(1.05) / 2.0, severe_rate=0.0,
-            speed=(101.0, 101.0, 101.0), capacity=32768, group=32,
-            tier="capacity-speed", scored_positions=10000, new_severe_positions=25,
+            "capacity-speed",
+            mean_nll_delta=math.log(1.05) / 2.0,
+            severe_rate=0.0,
+            speed=(101.0, 101.0, 101.0),
+            capacity=32768,
+            group=32,
+            tier="capacity-speed",
+            scored_positions=10000,
+            new_severe_positions=25,
         )
         selection = self.classify([accuracy, capacity_speed])[
             "same_recipe_static_profile_selection"
@@ -655,40 +903,46 @@ class ParetoTest(unittest.TestCase):
     def test_required_mode_rejects_single_recipe_authority(self) -> None:
         rows = []
         for group, profile in (
-            (16, "dense"), (32, "dense"),
-            (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+            (16, "dense"),
+            (32, "dense"),
+            (16, "b128-s16-tau900"),
+            (32, "b128-s16-tau900"),
         ):
             winner = group == 16 and profile == "b128-s16-tau900"
-            rows.append(candidate(
-                f"g{group}-{profile}",
-                mean_nll_delta=0.005 if winner else 0.010,
-                severe_rate=0.0,
-                speed=(120.0, 120.0, 360.0) if winner else (100.0, 100.0, 300.0),
-                capacity=65536 if winner else 32768,
-                group=group,
-                xattention_profile=profile,
-            ))
+            rows.append(
+                candidate(
+                    f"g{group}-{profile}",
+                    mean_nll_delta=0.005 if winner else 0.010,
+                    severe_rate=0.0,
+                    speed=(120.0, 120.0, 360.0) if winner else (100.0, 100.0, 300.0),
+                    capacity=65536 if winner else 32768,
+                    group=group,
+                    xattention_profile=profile,
+                )
+            )
         artifact = {
             "weights_id": "r9700-q4g64-n16k16-eval",
             "sha256": "a" * 64,
             "conversion_receipt": migration_receipt("r9700-q4g64-n16k16-eval"),
         }
         with self.assertRaisesRegex(ValueError, "exactly all three product recipe"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input",
-                "schema_version": 4,
-                "required_speed_workloads": WORKLOADS,
-                "require_single_static_profile_selection": True,
-                "base_ranking_profile": "spec-none-ordinary",
-                "base_capacity_profile": "spec-none-ordinary",
-                "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
-                "candidates": rows,
-                "source_provenance": [
-                    {"candidate": row["name"], "artifact": artifact,
-                     "capacity_failures": []} for row in rows
-                ],
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": WORKLOADS,
+                    "require_single_static_profile_selection": True,
+                    "base_ranking_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
+                    "selected_prefill_chunk": 4096,
+                    "prefill_chunk_selection": CHUNK_SELECTION,
+                    "candidates": rows,
+                    "source_provenance": [
+                        {"candidate": row["name"], "artifact": artifact, "capacity_failures": []}
+                        for row in rows
+                    ],
+                }
+            )
 
     def test_required_mode_selects_one_terminal_winner_across_recipes(self) -> None:
         rows = []
@@ -704,97 +958,118 @@ class ParetoTest(unittest.TestCase):
                 "conversion_receipt": migration_receipt(recipe),
             }
             for group, profile in (
-                (16, "dense"), (32, "dense"),
-                (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+                (16, "dense"),
+                (32, "dense"),
+                (16, "b128-s16-tau900"),
+                (32, "b128-s16-tau900"),
             ):
                 name = f"{recipe}-g{group}-{profile}"
                 speed = winning_speed if (group, profile) == winning_profile else 90.0
                 row = candidate(
-                    name, mean_nll_delta=quality, severe_rate=0.0,
-                    speed=(speed, speed, speed), capacity=32768,
-                    group=group, xattention_profile=profile,
+                    name,
+                    mean_nll_delta=quality,
+                    severe_rate=0.0,
+                    speed=(speed, speed, speed),
+                    capacity=32768,
+                    group=group,
+                    xattention_profile=profile,
                 )
                 rows.append(row)
-                provenance.append({
-                    "candidate": name, "artifact": artifact, "capacity_failures": [],
-                })
-        result = pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_speed_workloads": WORKLOADS,
-            "require_single_static_profile_selection": True,
-            "base_ranking_profile": "spec-none-ordinary",
-            "base_capacity_profile": "spec-none-ordinary",
-            "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
-            "candidates": rows,
-            "source_provenance": provenance,
-        })
+                provenance.append(
+                    {
+                        "candidate": name,
+                        "artifact": artifact,
+                        "capacity_failures": [],
+                    }
+                )
+        result = pareto.classify(
+            {
+                "artifact_type": "ninfer_r9700_pareto_input",
+                "schema_version": 4,
+                "required_speed_workloads": WORKLOADS,
+                "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
+                "selected_prefill_chunk": 4096,
+                "prefill_chunk_selection": CHUNK_SELECTION,
+                "candidates": rows,
+                "source_provenance": provenance,
+            }
+        )
         terminal = result["terminal_production_selection"]
         self.assertEqual(
             terminal["eligible_profile_winners"],
-            ["r9700-q4-w8-mse-n16k16-eval-g32-dense",
-             "r9700-q4g64-f8e4m3-four-role-n16k16-eval-g16-dense",
-             "r9700-q4g64-n16k16-eval-g16-b128-s16-tau900"],
+            [
+                "r9700-q4-w8-mse-n16k16-eval-g32-dense",
+                "r9700-q4g64-f8e4m3-four-role-n16k16-eval-g16-dense",
+                "r9700-q4g64-n16k16-eval-g16-b128-s16-tau900",
+            ],
         )
         self.assertEqual(terminal["winner"], "r9700-q4-w8-mse-n16k16-eval-g32-dense")
-        self.assertEqual(
-            terminal["decisive_stage"], "maximin_whole_inference_throughput"
-        )
-        self.assertEqual(
-            terminal["winner_artifact"]["weights_id"], "r9700-q4-w8-mse-n16k16-eval"
-        )
+        self.assertEqual(terminal["decisive_stage"], "maximin_whole_inference_throughput")
+        self.assertEqual(terminal["winner_artifact"]["weights_id"], "r9700-q4-w8-mse-n16k16-eval")
         self.assertEqual(result["selected_prefill_chunk"], 4096)
         self.assertEqual(result["prefill_chunk_selection"], CHUNK_SELECTION)
         self.assertTrue(all(row["prefill_chunk"] == 4096 for row in result["candidates"]))
         self.assertNotIn("production_status", terminal)
         self.assertNotIn("shortlist_head_precision_status", terminal)
         self.assertNotIn("shortlist_head_precision_gate", terminal)
-        legacy_head_gate = [{
-            **row, "shortlist_head_precision_gate": {},
-        } if index == 0 else row for index, row in enumerate(rows)]
+        legacy_head_gate = [
+            {
+                **row,
+                "shortlist_head_precision_gate": {},
+            }
+            if index == 0
+            else row
+            for index, row in enumerate(rows)
+        ]
         with self.assertRaisesRegex(ValueError, "retired MTP shortlist-head gate"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_speed_workloads": WORKLOADS,
-                "require_single_static_profile_selection": True,
-                "base_ranking_profile": "spec-none-ordinary",
-                "base_capacity_profile": "spec-none-ordinary",
-                "selected_prefill_chunk": 4096,
-                "prefill_chunk_selection": CHUNK_SELECTION,
-                "candidates": legacy_head_gate,
-                "source_provenance": provenance,
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": WORKLOADS,
+                    "require_single_static_profile_selection": True,
+                    "base_ranking_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
+                    "selected_prefill_chunk": 4096,
+                    "prefill_chunk_selection": CHUNK_SELECTION,
+                    "candidates": legacy_head_gate,
+                    "source_provenance": provenance,
+                }
+            )
         stale_mtp = copy.deepcopy(rows)
         stale_mtp[0]["mtp_target_token_parity"] = {"c1": {"pass": True}}
         with self.assertRaisesRegex(ValueError, "lacks ordinary whole-inference ranking"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_speed_workloads": WORKLOADS,
-                "require_single_static_profile_selection": True,
-                "base_ranking_profile": "spec-none-ordinary",
-                "base_capacity_profile": "spec-none-ordinary",
-                "selected_prefill_chunk": 4096,
-                "prefill_chunk_selection": CHUNK_SELECTION,
-                "candidates": stale_mtp,
-                "source_provenance": provenance,
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": WORKLOADS,
+                    "require_single_static_profile_selection": True,
+                    "base_ranking_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
+                    "selected_prefill_chunk": 4096,
+                    "prefill_chunk_selection": CHUNK_SELECTION,
+                    "candidates": stale_mtp,
+                    "source_provenance": provenance,
+                }
+            )
 
         failed_pair_rows = []
         for row in rows:
             changed = dict(row)
             changed["quality_cells"] = {
-                "8k": dict(row["quality"]), "32k": dict(row["quality"]),
+                "8k": dict(row["quality"]),
+                "32k": dict(row["quality"]),
             }
             changed["capacity_by_cell"] = {
-                f"c{concurrency}": dict(row["capacity"])
-                for concurrency in range(1, 5)
+                f"c{concurrency}": dict(row["capacity"]) for concurrency in range(1, 5)
             }
             changed.pop("quality")
             changed.pop("capacity")
             if (
-                row["name"].startswith(
-                    "r9700-q4g64-f8e4m3-four-role-n16k16-eval-"
-                )
+                row["name"].startswith("r9700-q4g64-f8e4m3-four-role-n16k16-eval-")
                 and row["cache_profile"]["value_group"] == 16
             ):
                 changed["capacity_by_cell"].pop("c4")
@@ -803,16 +1078,20 @@ class ParetoTest(unittest.TestCase):
         failed_pair_provenance = []
         for source, row in zip(provenance, failed_pair_rows, strict=True):
             failed = "c4" not in row["capacity_by_cell"]
-            failed_pair_provenance.append({
-                **source,
-                "matrices": (
-                    {"pareto-capacity": {}}
-                    if failed else {"pareto-capacity": {}, "pareto-whole": {}}
-                ),
-                "capacity_failures": ([capacity_failure(4)] if failed else []),
-            })
+            failed_pair_provenance.append(
+                {
+                    **source,
+                    "matrices": (
+                        {"pareto-capacity": {}}
+                        if failed
+                        else {"pareto-capacity": {}, "pareto-whole": {}}
+                    ),
+                    "capacity_failures": ([capacity_failure(4)] if failed else []),
+                }
+            )
         failed_pair_payload = {
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+            "artifact_type": "ninfer_r9700_pareto_input",
+            "schema_version": 4,
             "required_speed_workloads": WORKLOADS,
             "required_quality_cells": ["8k", "32k"],
             "required_capacity_cells": [f"c{concurrency}" for concurrency in range(1, 5)],
@@ -832,9 +1111,9 @@ class ParetoTest(unittest.TestCase):
             pareto.classify(generic_failure_payload)
         failed_pair_result = pareto.classify(failed_pair_payload)
         excluded = [
-            row for row in failed_pair_result["candidates"]
-            if row["weight_recipe"]["weights_id"]
-            == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
+            row
+            for row in failed_pair_result["candidates"]
+            if row["weight_recipe"]["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
             and row["cache_profile"]["value_group"] == 16
         ]
         self.assertEqual(len(excluded), 2)
@@ -843,9 +1122,10 @@ class ParetoTest(unittest.TestCase):
         self.assertTrue(all("shortlist_head_precision_gate" not in row for row in excluded))
         self.assertEqual(
             next(
-                selection for selection in failed_pair_result[
-                    "same_recipe_static_profile_selection"
-                ]["selections"]
+                selection
+                for selection in failed_pair_result["same_recipe_static_profile_selection"][
+                    "selections"
+                ]
                 if selection["weight_recipe"]["weights_id"]
                 == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
             )["winner_cache_profile"]["value_group"],
@@ -855,7 +1135,8 @@ class ParetoTest(unittest.TestCase):
             input_path = Path(directory) / "pareto-input.json"
             input_path.write_text(json.dumps(failed_pair_payload), encoding="utf-8")
             failed_pair_result["pareto_input"] = {
-                "path": str(input_path), "sha256": pareto._file_sha256(input_path),
+                "path": str(input_path),
+                "sha256": pareto._file_sha256(input_path),
             }
             with patch.object(pareto, "_revalidate_numerical_quality"):
                 pareto.validate_terminal_production_authority(failed_pair_result)
@@ -864,13 +1145,22 @@ class ParetoTest(unittest.TestCase):
             # control. Real capacity symmetry remains independent of that rejection.
             quality_payload = copy.deepcopy(failed_pair_payload)
             rejected = []
-            for row, source in zip(quality_payload["candidates"], quality_payload["source_provenance"], strict=True):
-                if (row["cache_profile"]["value_group"] == 16
-                        and row["execution_profile"]["xattention_profile"] == "b128-s16-tau900"
-                        and not row["name"].startswith("r9700-q4g64-n16k16-eval-")):
-                    row["quality_cells"]["32k"].update({"eligible": False,
-                        "mean_nll_delta": .017, "scored_positions": 16383,
-                        "new_severe_positions": 19})
+            for row, source in zip(
+                quality_payload["candidates"], quality_payload["source_provenance"], strict=True
+            ):
+                if (
+                    row["cache_profile"]["value_group"] == 16
+                    and row["execution_profile"]["xattention_profile"] == "b128-s16-tau900"
+                    and not row["name"].startswith("r9700-q4g64-n16k16-eval-")
+                ):
+                    row["quality_cells"]["32k"].update(
+                        {
+                            "eligible": False,
+                            "mean_nll_delta": 0.017,
+                            "scored_positions": 16383,
+                            "new_severe_positions": 19,
+                        }
+                    )
                     row["whole_inference_tokens_per_second"] = {}
                     source["matrices"].pop("pareto-whole", None)
                     rejected.append(row["name"])
@@ -884,34 +1174,43 @@ class ParetoTest(unittest.TestCase):
             self.assertTrue(by_name[mixed_sparse]["capacity_eligible"])
             self.assertTrue(by_name[mixed_sparse.replace("b128-s16-tau900", "dense")]["comparable"])
             input_path.write_text(json.dumps(quality_payload), encoding="utf-8")
-            quality_result["pareto_input"] = {"path": str(input_path), "sha256": pareto._file_sha256(input_path)}
+            quality_result["pareto_input"] = {
+                "path": str(input_path),
+                "sha256": pareto._file_sha256(input_path),
+            }
             with patch.object(pareto, "_revalidate_numerical_quality"):
                 pareto.validate_terminal_production_authority(quality_result)
-            for mutation in ({"eligible": True}, {"complete_finite_aligned": False},
-                             {"mean_nll_delta": float("nan")}):
+            for mutation in (
+                {"eligible": True},
+                {"complete_finite_aligned": False},
+                {"mean_nll_delta": float("nan")},
+            ):
                 malformed = copy.deepcopy(quality_payload)
-                next(row for row in malformed["candidates"] if row["name"] == mixed_sparse)["quality_cells"]["32k"].update(mutation)
+                next(row for row in malformed["candidates"] if row["name"] == mixed_sparse)[
+                    "quality_cells"
+                ]["32k"].update(mutation)
                 with self.assertRaisesRegex(ValueError, "malformed numerical quality"):
                     pareto.classify(malformed)
 
             missing_whole = copy.deepcopy(failed_pair_payload)
-            next(row for row in missing_whole["candidates"] if row["name"] == mixed_sparse)["whole_inference_tokens_per_second"] = {}
+            next(row for row in missing_whole["candidates"] if row["name"] == mixed_sparse)[
+                "whole_inference_tokens_per_second"
+            ] = {}
             with self.assertRaisesRegex(ValueError, "lacks complete whole-inference evidence"):
                 pareto.classify(missing_whole)
 
         unmatched_rows = list(failed_pair_rows)
         restore_index = next(
-            index for index, row in enumerate(unmatched_rows)
-            if row["name"].startswith(
-                "r9700-q4g64-f8e4m3-four-role-n16k16-eval-"
-            )
+            index
+            for index, row in enumerate(unmatched_rows)
+            if row["name"].startswith("r9700-q4g64-f8e4m3-four-role-n16k16-eval-")
             and row["cache_profile"]["value_group"] == 16
-            and row["execution_profile"]["xattention_profile"]
-            == "b128-s16-tau900"
+            and row["execution_profile"]["xattention_profile"] == "b128-s16-tau900"
         )
         restored = dict(unmatched_rows[restore_index])
         restored["capacity_by_cell"] = {
-            **restored["capacity_by_cell"], "c4": dict(rows[restore_index]["capacity"]),
+            **restored["capacity_by_cell"],
+            "c4": dict(rows[restore_index]["capacity"]),
         }
         restored["whole_inference_tokens_per_second"] = dict(
             rows[restore_index]["whole_inference_tokens_per_second"]
@@ -921,110 +1220,138 @@ class ParetoTest(unittest.TestCase):
             pareto.classify({**failed_pair_payload, "candidates": unmatched_rows})
 
         without_chunk_authority = {
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+            "artifact_type": "ninfer_r9700_pareto_input",
+            "schema_version": 4,
             "required_speed_workloads": WORKLOADS,
             "require_single_static_profile_selection": True,
             "base_ranking_profile": "spec-none-ordinary",
             "base_capacity_profile": "spec-none-ordinary",
             "selected_prefill_chunk": 4096,
-            "candidates": rows, "source_provenance": provenance,
+            "candidates": rows,
+            "source_provenance": provenance,
         }
         with self.assertRaisesRegex(ValueError, "global prefill-chunk authority"):
             pareto.classify(without_chunk_authority)
 
-        mismatched_chunk = [{**row, "prefill_chunk": 2048} if index == 0 else row
-                            for index, row in enumerate(rows)]
+        mismatched_chunk = [
+            {**row, "prefill_chunk": 2048} if index == 0 else row for index, row in enumerate(rows)
+        ]
         with self.assertRaisesRegex(ValueError, "does not bind selected prefill chunk"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_speed_workloads": WORKLOADS,
-                "require_single_static_profile_selection": True,
-                "base_ranking_profile": "spec-none-ordinary",
-                "base_capacity_profile": "spec-none-ordinary",
-                "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
-                "candidates": mismatched_chunk,
-                "source_provenance": provenance,
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": WORKLOADS,
+                    "require_single_static_profile_selection": True,
+                    "base_ranking_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
+                    "selected_prefill_chunk": 4096,
+                    "prefill_chunk_selection": CHUNK_SELECTION,
+                    "candidates": mismatched_chunk,
+                    "source_provenance": provenance,
+                }
+            )
 
         duplicate_rows = []
         duplicate_provenance = []
         for row in rows[:4]:
             duplicate = {**row, "name": f"duplicate-{row['name']}"}
             duplicate_rows.append(duplicate)
-            duplicate_provenance.append({
-                "candidate": duplicate["name"],
-                "artifact": {"weights_id": "r9700-q4g64-n16k16-eval",
-                             "sha256": "c" * 64,
-                             "conversion_receipt": migration_receipt(
-                                 "r9700-q4g64-n16k16-eval")},
-                "capacity_failures": [],
-            })
+            duplicate_provenance.append(
+                {
+                    "candidate": duplicate["name"],
+                    "artifact": {
+                        "weights_id": "r9700-q4g64-n16k16-eval",
+                        "sha256": "c" * 64,
+                        "conversion_receipt": migration_receipt("r9700-q4g64-n16k16-eval"),
+                    },
+                    "capacity_failures": [],
+                }
+            )
         with self.assertRaisesRegex(ValueError, "one artifact hash per weights_id"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_speed_workloads": WORKLOADS,
-                "require_single_static_profile_selection": True,
-                "base_ranking_profile": "spec-none-ordinary",
-                "base_capacity_profile": "spec-none-ordinary",
-                "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
-                "candidates": [*rows, *duplicate_rows],
-                "source_provenance": [*provenance, *duplicate_provenance],
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": WORKLOADS,
+                    "require_single_static_profile_selection": True,
+                    "base_ranking_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
+                    "selected_prefill_chunk": 4096,
+                    "prefill_chunk_selection": CHUNK_SELECTION,
+                    "candidates": [*rows, *duplicate_rows],
+                    "source_provenance": [*provenance, *duplicate_provenance],
+                }
+            )
 
         fourth_rows = []
         fourth_provenance = []
         for row in rows[:4]:
             fourth = {**row, "name": f"fourth-{row['name']}"}
             fourth_rows.append(fourth)
-            fourth_provenance.append({
-                "candidate": fourth["name"],
-                "artifact": {"weights_id": "unqualified-recipe", "sha256": "c" * 64},
-                "capacity_failures": [],
-            })
+            fourth_provenance.append(
+                {
+                    "candidate": fourth["name"],
+                    "artifact": {"weights_id": "unqualified-recipe", "sha256": "c" * 64},
+                    "capacity_failures": [],
+                }
+            )
         with self.assertRaisesRegex(ValueError, "unsupported terminal weight recipe"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_speed_workloads": WORKLOADS,
-                "require_single_static_profile_selection": True,
-                "base_ranking_profile": "spec-none-ordinary",
-                "base_capacity_profile": "spec-none-ordinary",
-                "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
-                "candidates": [*rows, *fourth_rows],
-                "source_provenance": [*provenance, *fourth_provenance],
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": WORKLOADS,
+                    "require_single_static_profile_selection": True,
+                    "base_ranking_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
+                    "selected_prefill_chunk": 4096,
+                    "prefill_chunk_selection": CHUNK_SELECTION,
+                    "candidates": [*rows, *fourth_rows],
+                    "source_provenance": [*provenance, *fourth_provenance],
+                }
+            )
 
     def test_required_four_profile_selection_rejects_declared_recipe(self) -> None:
         rows = [
             candidate(
-                f"g{group}-{profile}", mean_nll_delta=0.01, severe_rate=0.0,
-                speed=(100.0, 100.0, 300.0), capacity=32768, group=group,
+                f"g{group}-{profile}",
+                mean_nll_delta=0.01,
+                severe_rate=0.0,
+                speed=(100.0, 100.0, 300.0),
+                capacity=32768,
+                group=group,
                 xattention_profile=profile,
             )
             for group, profile in (
-                (16, "dense"), (32, "dense"),
-                (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+                (16, "dense"),
+                (32, "dense"),
+                (16, "b128-s16-tau900"),
+                (32, "b128-s16-tau900"),
             )
         ]
         with self.assertRaisesRegex(ValueError, "unsupported terminal weight recipe"):
-            pareto.classify({
-                "artifact_type": "ninfer_r9700_pareto_input",
-                "schema_version": 4,
-                "required_speed_workloads": WORKLOADS,
-                "require_single_static_profile_selection": True,
-                "base_ranking_profile": "spec-none-ordinary",
-                "base_capacity_profile": "spec-none-ordinary",
-                "selected_prefill_chunk": 4096,
-                "prefill_chunk_selection": CHUNK_SELECTION,
-                "candidates": rows,
-                "source_provenance": [{
-                    "candidate": row["name"],
-                    "artifact": {"weights_id": "unqualified-recipe", "sha256": "a" * 64},
-                    "capacity_failures": [],
-                } for row in rows],
-            })
+            pareto.classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_speed_workloads": WORKLOADS,
+                    "require_single_static_profile_selection": True,
+                    "base_ranking_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
+                    "selected_prefill_chunk": 4096,
+                    "prefill_chunk_selection": CHUNK_SELECTION,
+                    "candidates": rows,
+                    "source_provenance": [
+                        {
+                            "candidate": row["name"],
+                            "artifact": {"weights_id": "unqualified-recipe", "sha256": "a" * 64},
+                            "capacity_failures": [],
+                        }
+                        for row in rows
+                    ],
+                }
+            )
 
 
 if __name__ == "__main__":

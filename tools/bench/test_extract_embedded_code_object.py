@@ -24,11 +24,16 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
         identifier = target.encode()
         header_size = len(OFFLOAD_MAGIC) + 8 + 24 + len(identifier)
         offset = (header_size + 15) // 16 * 16
-        return b"".join((
-            OFFLOAD_MAGIC, struct.pack("<Q", 1),
-            struct.pack("<QQQ", offset, len(payload), len(identifier)), identifier,
-            b"\0" * (offset - header_size), payload,
-        ))
+        return b"".join(
+            (
+                OFFLOAD_MAGIC,
+                struct.pack("<Q", 1),
+                struct.pack("<QQQ", offset, len(payload), len(identifier)),
+                identifier,
+                b"\0" * (offset - header_size),
+                payload,
+            )
+        )
 
     def test_selects_one_exact_gfx1201_inner_object_by_symbol(self) -> None:
         symbol = "exact_kernel_symbol"
@@ -38,14 +43,15 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
         selected, target, offset = _select_device_code_object(fatbin, symbol)
         self.assertEqual(selected, wanted)
         self.assertIn("gfx1201", target)
-        self.assertEqual(fatbin[offset:offset + len(wanted)], wanted)
+        self.assertEqual(fatbin[offset : offset + len(wanted)], wanted)
         with self.assertRaisesRegex(ValueError, "found 0"):
             _select_device_code_object(fatbin, "missing")
         with self.assertRaisesRegex(ValueError, "found 2"):
             _select_device_code_object(fatbin + self.bundle(wanted), symbol)
         with self.assertRaisesRegex(ValueError, "found 0"):
-            _select_device_code_object(self.bundle(wanted, target=
-                "hipv4-amdgcn-amd-amdhsa--gfx12010"), symbol)
+            _select_device_code_object(
+                self.bundle(wanted, target="hipv4-amdgcn-amd-amdhsa--gfx12010"), symbol
+            )
 
     def test_rejects_overlapping_or_empty_bundle_entries(self) -> None:
         symbol = "exact_kernel_symbol"
@@ -53,20 +59,30 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
         identifier = b"hipv4-amdgcn-amd-amdhsa--gfx1201"
         header_size = len(OFFLOAD_MAGIC) + 8 + 2 * 24 + 2 * len(identifier)
         offset = (header_size + 15) // 16 * 16
-        overlapping = b"".join((
-            OFFLOAD_MAGIC, struct.pack("<Q", 2),
-            struct.pack("<QQQ", offset, len(payload), len(identifier)), identifier,
-            struct.pack("<QQQ", offset + 1, len(payload) - 1, len(identifier)), identifier,
-            b"\0" * (offset - header_size), payload,
-        ))
+        overlapping = b"".join(
+            (
+                OFFLOAD_MAGIC,
+                struct.pack("<Q", 2),
+                struct.pack("<QQQ", offset, len(payload), len(identifier)),
+                identifier,
+                struct.pack("<QQQ", offset + 1, len(payload) - 1, len(identifier)),
+                identifier,
+                b"\0" * (offset - header_size),
+                payload,
+            )
+        )
         with self.assertRaisesRegex(ValueError, "found 0"):
             _select_device_code_object(overlapping, symbol)
 
-        empty = b"".join((
-            OFFLOAD_MAGIC, struct.pack("<Q", 1),
-            struct.pack("<QQQ", offset, 0, len(identifier)), identifier,
-            b"\0" * (offset - (len(OFFLOAD_MAGIC) + 8 + 24 + len(identifier))),
-        ))
+        empty = b"".join(
+            (
+                OFFLOAD_MAGIC,
+                struct.pack("<Q", 1),
+                struct.pack("<QQQ", offset, 0, len(identifier)),
+                identifier,
+                b"\0" * (offset - (len(OFFLOAD_MAGIC) + 8 + 24 + len(identifier))),
+            )
+        )
         with self.assertRaisesRegex(ValueError, "found 0"):
             _select_device_code_object(empty, symbol)
 
@@ -88,6 +104,7 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             if mutate is not None:
                 mutate.write_bytes(mutate.read_bytes() + b"changed")
             return subprocess.CompletedProcess(command, 0, b"", b"")
+
         return run
 
     def test_extracts_with_distinct_output_elf_and_preserves_input(self) -> None:
@@ -97,8 +114,9 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             original = executable.read_bytes()
             commands = []
             output = root / "selected.hip_fatbin"
-            result = extract(executable, output, objcopy=objcopy,
-                             runner=self.runner(payload, commands=commands))
+            result = extract(
+                executable, output, objcopy=objcopy, runner=self.runner(payload, commands=commands)
+            )
             self.assertEqual(output.read_bytes(), payload)
             self.assertEqual(executable.read_bytes(), original)
             command, kwargs = commands[0]
@@ -119,7 +137,10 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             executable.write_bytes(b"host-prefix" + fatbin + b"host-suffix")
             output = root / "selected.hsaco"
             result = extract(
-                executable, output, objcopy=objcopy, code_symbol=symbol,
+                executable,
+                output,
+                objcopy=objcopy,
+                code_symbol=symbol,
                 runner=self.runner(fatbin),
             )
             self.assertEqual(output.read_bytes(), device)
@@ -132,8 +153,12 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             executable, objcopy, payload = self.fixture(root)
             output = root / "selected.hip_fatbin"
             with self.assertRaisesRegex(ValueError, "changed during"):
-                extract(executable, output, objcopy=objcopy,
-                        runner=self.runner(payload, mutate=executable))
+                extract(
+                    executable,
+                    output,
+                    objcopy=objcopy,
+                    runner=self.runner(payload, mutate=executable),
+                )
             self.assertFalse(os.path.lexists(output))
 
     def test_rejects_identical_byte_inode_replacement_without_publishing(self) -> None:
@@ -160,8 +185,12 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             root = Path(directory)
             executable, objcopy, payload = self.fixture(root)
             with self.assertRaisesRegex(ValueError, "same inode"):
-                extract(executable, executable.parent / "." / executable.name,
-                        objcopy=objcopy, runner=self.runner(payload))
+                extract(
+                    executable,
+                    executable.parent / "." / executable.name,
+                    objcopy=objcopy,
+                    runner=self.runner(payload),
+                )
             alias = root / "alias"
             os.link(executable, alias)
             with self.assertRaisesRegex(ValueError, "same inode"):
@@ -169,8 +198,7 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             symlink_alias = root / "symlink-alias"
             symlink_alias.symlink_to(executable)
             with self.assertRaisesRegex(ValueError, "same inode"):
-                extract(executable, symlink_alias, objcopy=objcopy,
-                        runner=self.runner(payload))
+                extract(executable, symlink_alias, objcopy=objcopy, runner=self.runner(payload))
             occupied = root / "occupied"
             occupied.write_bytes(b"occupied")
             with self.assertRaisesRegex(ValueError, "refusing to overwrite"):
@@ -239,8 +267,10 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
                 extract(executable, output, objcopy=objcopy, runner=occupy)
             self.assertEqual(output.read_bytes(), b"concurrent owner")
 
-    @unittest.skipUnless(DEFAULT_OBJCOPY.is_file() and Path("/bin/true").is_file(),
-                         "synthetic ELF test requires llvm-objcopy and /bin/true")
+    @unittest.skipUnless(
+        DEFAULT_OBJCOPY.is_file() and Path("/bin/true").is_file(),
+        "synthetic ELF test requires llvm-objcopy and /bin/true",
+    )
     def test_real_objcopy_extracts_exact_synthetic_section_without_source_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -248,19 +278,27 @@ class ExtractEmbeddedCodeObjectTest(unittest.TestCase):
             payload_path = root / "payload.bin"
             payload_path.write_bytes(payload)
             executable = root / "synthetic.elf"
-            subprocess.run([
-                str(DEFAULT_OBJCOPY), "--add-section", f".hip_fatbin={payload_path}",
-                "/bin/true", str(executable),
-            ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            before = (executable.stat().st_dev, executable.stat().st_ino,
-                      executable.read_bytes())
+            subprocess.run(
+                [
+                    str(DEFAULT_OBJCOPY),
+                    "--add-section",
+                    f".hip_fatbin={payload_path}",
+                    "/bin/true",
+                    str(executable),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            before = (executable.stat().st_dev, executable.stat().st_ino, executable.read_bytes())
             output = root / "selected.hip_fatbin"
             result = extract(executable, output)
             self.assertEqual(output.read_bytes(), payload)
-            self.assertEqual((executable.stat().st_dev, executable.stat().st_ino,
-                              executable.read_bytes()), before)
-            self.assertEqual(result["code_object_sha256"],
-                             hashlib.sha256(payload).hexdigest())
+            self.assertEqual(
+                (executable.stat().st_dev, executable.stat().st_ino, executable.read_bytes()),
+                before,
+            )
+            self.assertEqual(result["code_object_sha256"], hashlib.sha256(payload).hexdigest())
 
 
 if __name__ == "__main__":

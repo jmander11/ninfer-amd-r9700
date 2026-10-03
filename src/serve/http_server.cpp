@@ -53,24 +53,21 @@ void set_owned_content(httplib::Response& response, std::string body,
 CompletionTimings completion_timings_from_outcome(const GenerationOutcome& outcome) {
     CompletionTimings timings = make_completion_timings(
         outcome.prompt_tokens, outcome.completion_tokens, outcome.metrics.prefill_seconds,
-        outcome.metrics.decode_seconds,
-        static_cast<int>(outcome.metrics.speculative_draft_tokens),
+        outcome.metrics.decode_seconds, static_cast<int>(outcome.metrics.speculative_draft_tokens),
         static_cast<int>(outcome.metrics.speculative_accepted_tokens),
         outcome.metrics.prefill_tail_tok_s, outcome.metrics.prefill_tail_window_s,
         outcome.metrics.prefix_cache_hit_tokens, outcome.metrics.recovery);
-    timings.prefix_reuse_path     = outcome.metrics.prefix_reuse_path;
-    timings.prefix_reuse_source   = outcome.metrics.prefix_reuse_source;
-    timings.captured_context_checkpoint_tokens =
-        outcome.metrics.captured_context_checkpoint_tokens;
-    timings.restored_context_checkpoint_tokens =
-        outcome.metrics.restored_context_checkpoint_tokens;
-    timings.ttft_ms          = outcome.metrics.ttft_seconds * 1000.0;
-    timings.reasoning_tokens = outcome.reasoning_tokens;
-    timings.kv_ram_save_ms   = outcome.metrics.kv_ram_save_seconds * 1000.0;
-    timings.kv_ram_load_ms   = outcome.metrics.kv_ram_load_seconds * 1000.0;
-    timings.kv_disk_save_ms  = outcome.metrics.kv_disk_save_seconds * 1000.0;
-    timings.kv_disk_load_ms  = outcome.metrics.kv_disk_load_seconds * 1000.0;
-    timings.kv_disk_h2d_ms   = outcome.metrics.kv_disk_h2d_seconds * 1000.0;
+    timings.prefix_reuse_path                  = outcome.metrics.prefix_reuse_path;
+    timings.prefix_reuse_source                = outcome.metrics.prefix_reuse_source;
+    timings.captured_context_checkpoint_tokens = outcome.metrics.captured_context_checkpoint_tokens;
+    timings.restored_context_checkpoint_tokens = outcome.metrics.restored_context_checkpoint_tokens;
+    timings.ttft_ms                            = outcome.metrics.ttft_seconds * 1000.0;
+    timings.reasoning_tokens                   = outcome.reasoning_tokens;
+    timings.kv_ram_save_ms                     = outcome.metrics.kv_ram_save_seconds * 1000.0;
+    timings.kv_ram_load_ms                     = outcome.metrics.kv_ram_load_seconds * 1000.0;
+    timings.kv_disk_save_ms                    = outcome.metrics.kv_disk_save_seconds * 1000.0;
+    timings.kv_disk_load_ms                    = outcome.metrics.kv_disk_load_seconds * 1000.0;
+    timings.kv_disk_h2d_ms                     = outcome.metrics.kv_disk_h2d_seconds * 1000.0;
     return timings;
 }
 
@@ -99,11 +96,11 @@ ThroughputReport make_throughput_report(const ninfer::RuntimeStats& previous,
             current.computed_prefill_tokens - previous.computed_prefill_tokens,
         .committed_decode_tokens =
             current.committed_decode_tokens - previous.committed_decode_tokens,
-        .decode_rounds     = current.decode_rounds - previous.decode_rounds,
-        .decode_row_rounds = current.decode_row_rounds - previous.decode_row_rounds,
-        .scheduler         = current,
-        .kv_ram_save_seconds = current.kv_ram_save_seconds - previous.kv_ram_save_seconds,
-        .kv_ram_load_seconds = current.kv_ram_load_seconds - previous.kv_ram_load_seconds,
+        .decode_rounds        = current.decode_rounds - previous.decode_rounds,
+        .decode_row_rounds    = current.decode_row_rounds - previous.decode_row_rounds,
+        .scheduler            = current,
+        .kv_ram_save_seconds  = current.kv_ram_save_seconds - previous.kv_ram_save_seconds,
+        .kv_ram_load_seconds  = current.kv_ram_load_seconds - previous.kv_ram_load_seconds,
         .kv_disk_save_seconds = current.kv_disk_save_seconds - previous.kv_disk_save_seconds,
         .kv_disk_load_seconds = current.kv_disk_load_seconds - previous.kv_disk_load_seconds,
         .kv_disk_h2d_seconds  = current.kv_disk_h2d_seconds - previous.kv_disk_h2d_seconds,
@@ -230,11 +227,11 @@ void HttpServer::record_generation(const RequestLogContext& context, GenerationO
         std::max(0.0, handler_seconds - outcome.metrics.total_seconds);
     log_request_done(context, outcome);
     GenerationObservation observation;
-    observation.protocol = metrics_protocol(context.protocol);
-    observation.stream   = context.stream;
-    observation.result   = outcome.finish_reason == ninfer::FinishReason::Cancelled
-                               ? GenerationResult::Cancelled
-                               : GenerationResult::Success;
+    observation.protocol          = metrics_protocol(context.protocol);
+    observation.stream            = context.stream;
+    observation.result            = outcome.finish_reason == ninfer::FinishReason::Cancelled
+                                        ? GenerationResult::Cancelled
+                                        : GenerationResult::Success;
     observation.thinking          = context.enable_thinking;
     observation.tools             = tools;
     observation.capture_requested = capture;
@@ -263,11 +260,11 @@ void HttpServer::record_failure(const RequestLogContext& context, bool tools, bo
     log_request_error(context, message);
     if (count_api_error && error != nullptr) { metrics_.observe_api_error(error->code); }
     GenerationObservation observation;
-    observation.protocol = metrics_protocol(context.protocol);
-    observation.stream   = context.stream;
-    observation.result   = error != nullptr && error->code == "client_disconnected"
-                               ? GenerationResult::Cancelled
-                               : GenerationResult::Error;
+    observation.protocol          = metrics_protocol(context.protocol);
+    observation.stream            = context.stream;
+    observation.result            = error != nullptr && error->code == "client_disconnected"
+                                        ? GenerationResult::Cancelled
+                                        : GenerationResult::Error;
     observation.thinking          = context.enable_thinking;
     observation.tools             = tools;
     observation.capture_requested = capture;
@@ -291,10 +288,10 @@ void HttpServer::handle_metrics_scrape(httplib::Response& response, bool json) {
         return;
     }
     ScrapeInputs inputs;
-    inputs.stats            = service_->runtime_stats();
-    inputs.http_in_flight   = service_->in_flight_requests();
-    inputs.response_records = response_store_.size();
-    inputs.response_bytes   = response_store_.bytes();
+    inputs.stats                   = service_->runtime_stats();
+    inputs.http_in_flight          = service_->in_flight_requests();
+    inputs.response_records        = response_store_.size();
+    inputs.response_bytes          = response_store_.bytes();
     const MetricsSnapshot snapshot = metrics_.snapshot(inputs);
     if (json) {
         handle_metrics_json(snapshot, response);
@@ -309,8 +306,8 @@ void HttpServer::log_throughput(const ThroughputReport& report) {
 }
 
 void HttpServer::run_stats_reporter() {
-    using Clock                   = std::chrono::steady_clock;
-    ninfer::RuntimeStats previous = service_->runtime_stats();
+    using Clock                     = std::chrono::steady_clock;
+    ninfer::RuntimeStats previous   = service_->runtime_stats();
     Clock::time_point previous_time = Clock::now();
     const auto interval             = std::chrono::milliseconds(options_.log_stats_interval_ms);
 
@@ -324,15 +321,13 @@ void HttpServer::run_stats_reporter() {
         const Clock::time_point now        = Clock::now();
         ThroughputReport report            = make_throughput_report(
             previous, current, std::chrono::duration<double>(now - previous_time).count());
-        report.kv_ram_capacity_bytes = current.kv_ram_capacity_bytes;
-        report.kv_ram_used_bytes     = current.kv_ram_used_bytes;
-        report.kv_ram_entry_count    = current.kv_ram_entry_count;
+        report.kv_ram_capacity_bytes  = current.kv_ram_capacity_bytes;
+        report.kv_ram_used_bytes      = current.kv_ram_used_bytes;
+        report.kv_ram_entry_count     = current.kv_ram_entry_count;
         report.kv_disk_capacity_bytes = current.kv_disk_capacity_bytes;
         report.kv_disk_used_bytes     = current.kv_disk_used_bytes;
         report.kv_disk_entry_count    = current.kv_disk_entry_count;
-        if (report_has_activity(report, previous)) {
-            log_throughput(report);
-        }
+        if (report_has_activity(report, previous)) { log_throughput(report); }
         previous      = current;
         previous_time = now;
     }
@@ -341,9 +336,9 @@ void HttpServer::run_stats_reporter() {
     const Clock::time_point now        = Clock::now();
     ThroughputReport tail              = make_throughput_report(
         previous, current, std::chrono::duration<double>(now - previous_time).count());
-    tail.kv_ram_capacity_bytes = current.kv_ram_capacity_bytes;
-    tail.kv_ram_used_bytes     = current.kv_ram_used_bytes;
-    tail.kv_ram_entry_count    = current.kv_ram_entry_count;
+    tail.kv_ram_capacity_bytes  = current.kv_ram_capacity_bytes;
+    tail.kv_ram_used_bytes      = current.kv_ram_used_bytes;
+    tail.kv_ram_entry_count     = current.kv_ram_entry_count;
     tail.kv_disk_capacity_bytes = current.kv_disk_capacity_bytes;
     tail.kv_disk_used_bytes     = current.kv_disk_used_bytes;
     tail.kv_disk_entry_count    = current.kv_disk_entry_count;
@@ -373,9 +368,9 @@ void HttpServer::register_routes() {
     });
     server_.set_logger([this](const httplib::Request& request, const httplib::Response& response) {
         if (!http_request_clock.active) { return; }
-        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                                             http_request_clock.started)
-                                   .count();
+        const double seconds      = std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                                                  http_request_clock.started)
+                                        .count();
         http_request_clock.active = false;
         metrics_.observe_http(request.path, request.method, response.status, seconds);
     });
@@ -642,10 +637,9 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                            (sink.is_writable && !sink.is_writable());
                 };
 
-                GenerationOutcome outcome =
-                    service_->run(stream->prepared, log_context.id, &output, {},
-                                  recovery_callback(log_context.id));
-                const CompletionTimings timings = completion_timings_from_outcome(outcome);
+                GenerationOutcome outcome = service_->run(stream->prepared, log_context.id, &output,
+                                                          {}, recovery_callback(log_context.id));
+                const CompletionTimings timings  = completion_timings_from_outcome(outcome);
                 const std::string_view remaining = unstreamed_content(outcome);
                 if (!outcome.tool_calls.empty()) {
                     if (!remaining.empty()) {
@@ -658,10 +652,9 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                                       make_chat_chunk_tool_calls(
                                           id, model, created, outcome.tool_calls, include_usage));
                     const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens};
-                    write_stream_item(
-                        sink, *stream,
-                        make_chat_chunk_final(id, model, created, "tool_calls", include_usage,
-                                              &timings, &usage));
+                    write_stream_item(sink, *stream,
+                                      make_chat_chunk_final(id, model, created, "tool_calls",
+                                                            include_usage, &timings, &usage));
                 } else {
                     if (tool_capable && !remaining.empty()) {
                         write_stream_item(sink, *stream,
@@ -690,7 +683,7 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                 return true;
             } catch (const ClientDisconnected& e) {
                 ApiError error;
-                error.code = "client_disconnected";
+                error.code    = "client_disconnected";
                 error.message = e.what();
                 record_failure(log_context, generation_tools, generation_capture, generation_media,
                                e.what(), &error);
@@ -788,9 +781,9 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
         prepared = service_->prepare(
             request, [&req] { return req.is_connection_alive && !req.is_connection_alive(); });
     } catch (const ApiException& e) {
-        record_rejection(make_request_rejection_log_context(req_id, "anthropic_messages", request,
-                                                            e.error()),
-                         request);
+        record_rejection(
+            make_request_rejection_log_context(req_id, "anthropic_messages", request, e.error()),
+            request);
         emit_messages_error(res, e.error());
         return;
     } catch (const std::exception& e) {
@@ -855,8 +848,8 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
     res.set_chunked_content_provider(
         "text/event-stream",
         [this, stream, id, model, input_tokens, tool_capable, log_context, generation_started,
-         generation_tools, generation_capture, generation_media](std::size_t,
-                                                                httplib::DataSink& sink) -> bool {
+         generation_tools, generation_capture,
+         generation_media](std::size_t, httplib::DataSink& sink) -> bool {
             if (stream->started) {
                 sink.done();
                 return true;
@@ -902,9 +895,8 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
                            (sink.is_writable && !sink.is_writable());
                 };
 
-                GenerationOutcome outcome =
-                    service_->run(stream->prepared, log_context.id, &output, {},
-                                  recovery_callback(log_context.id));
+                GenerationOutcome outcome = service_->run(stream->prepared, log_context.id, &output,
+                                                          {}, recovery_callback(log_context.id));
                 const std::string_view remaining = unstreamed_content(outcome);
 
                 if (thinking_open) {
@@ -955,7 +947,7 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
                 return true;
             } catch (const ClientDisconnected& e) {
                 ApiError error;
-                error.code = "client_disconnected";
+                error.code    = "client_disconnected";
                 error.message = e.what();
                 record_failure(log_context, generation_tools, generation_capture, generation_media,
                                e.what(), &error);

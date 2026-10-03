@@ -61,7 +61,8 @@ def publish(
     pending_input_inode = identity(pending_input)
     pending_result_inode = identity(pending_result)
     for path, owned in (
-        (pending_input, pending_input_inode), (pending_result, pending_result_inode)
+        (pending_input, pending_input_inode),
+        (pending_result, pending_result_inode),
     ):
         with path.open("rb") as source:
             opened = os.fstat(source.fileno())

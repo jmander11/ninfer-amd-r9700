@@ -50,8 +50,9 @@ def validate(path: Path, weights_id: str) -> None:
         artifact = inspect_candidate_artifact(path)
     except SystemExit as error:
         raise ValueError(str(error)) from error
-    if (artifact.get("weights_id") != weights_id
-            or not isinstance(artifact.get("conversion_receipt"), dict)):
+    if artifact.get("weights_id") != weights_id or not isinstance(
+        artifact.get("conversion_receipt"), dict
+    ):
         raise ValueError(f"artifact lacks its exact N16 migration receipt: {path}")
 
 

@@ -191,10 +191,7 @@ def encode_value_group(source: Sequence[float], group_size: int) -> EncodedValue
         codes = (0,) * group_size
         return EncodedValueGroup(group_size, 0, codes, pack_signed_int4(codes))
 
-    codes = tuple(
-        max(-7, min(7, round_nearest_even(_float32(value / scale))))
-        for value in values
-    )
+    codes = tuple(max(-7, min(7, round_nearest_even(_float32(value / scale)))) for value in values)
     return EncodedValueGroup(group_size, scale_bits, codes, pack_signed_int4(codes))
 
 

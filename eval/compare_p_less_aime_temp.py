@@ -325,9 +325,7 @@ def render(
             b = right_items[key]
             if a.get("score") is None or b.get("score") is None:
                 continue
-            if bool(a["score"]) == bool(b["score"]) and a.get("extracted") == b.get(
-                "extracted"
-            ):
+            if bool(a["score"]) == bool(b["score"]) and a.get("extracted") == b.get("extracted"):
                 continue
             disagreements.append(
                 {
@@ -369,9 +367,7 @@ def render(
             if p_mean is not None and q_mean is not None
             else "-"
         )
-        lines.append(
-            f"| {temp:g} | {fmt_pct(p_mean, None)} | {fmt_pct(q_mean, None)} | {delta} |"
-        )
+        lines.append(f"| {temp:g} | {fmt_pct(p_mean, None)} | {fmt_pct(q_mean, None)} | {delta} |")
 
     lines.extend(
         [

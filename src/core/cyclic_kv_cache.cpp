@@ -149,11 +149,11 @@ void CyclicKVCache::copy_lane_to_host(std::int32_t lane, void* dst, hipStream_t 
     for (std::size_t layer = 0; layer < k_.size(); ++layer) {
         Tensor source_k = k_[layer].slice(3, lane, 1);
         Tensor source_v = v_[layer].slice(3, lane, 1);
-        HIP_CHECK(hipMemcpyAsync(out, source_k.data, source_k.bytes(), hipMemcpyDeviceToHost,
-                                 stream));
+        HIP_CHECK(
+            hipMemcpyAsync(out, source_k.data, source_k.bytes(), hipMemcpyDeviceToHost, stream));
         out += source_k.bytes();
-        HIP_CHECK(hipMemcpyAsync(out, source_v.data, source_v.bytes(), hipMemcpyDeviceToHost,
-                                 stream));
+        HIP_CHECK(
+            hipMemcpyAsync(out, source_v.data, source_v.bytes(), hipMemcpyDeviceToHost, stream));
         out += source_v.bytes();
     }
 }

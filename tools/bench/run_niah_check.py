@@ -18,6 +18,7 @@ Outputs a per-run JSON record under profiles/bench/niah-check/ (gitignored). Dur
 uses an explicit --out together with --server-log, --artifact, and --serve-bin; that mode binds the
 loaded files and requires one fresh full-prefill request_done event for every HTTP response.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -80,8 +81,7 @@ def file_identity(path: Path) -> dict[str, Any]:
     with resolved.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
-    return {"path": str(resolved), "bytes": resolved.stat().st_size,
-            "sha256": digest.hexdigest()}
+    return {"path": str(resolved), "bytes": resolved.stat().st_size, "sha256": digest.hexdigest()}
 
 
 def _json_sha256(value: dict[str, Any]) -> str:
@@ -99,50 +99,67 @@ def load_static_profile_selection(path: Path, artifact: dict[str, Any]) -> dict[
     selection = value.get("same_recipe_static_profile_selection")
     choices = selection.get("selections") if isinstance(selection, dict) else None
     terminal = value.get("terminal_production_selection")
-    if (value.get("artifact_type") != "ninfer_r9700_pareto_comparison" or
-            value.get("schema_version") != 7 or not isinstance(choices, list) or
-            value.get("single_static_profile_selection_required") is not True or
-            not choices or any(not isinstance(choice, dict) for choice in choices) or
-            selection.get("rule") != "same_recipe_static_profile_maximin_v2" or
-            not isinstance(terminal, dict) or terminal.get("rule") !=
-            "global_maximin_whole_then_capacity_then_quality_then_canonical_v1"):
+    if (
+        value.get("artifact_type") != "ninfer_r9700_pareto_comparison"
+        or value.get("schema_version") != 7
+        or not isinstance(choices, list)
+        or value.get("single_static_profile_selection_required") is not True
+        or not choices
+        or any(not isinstance(choice, dict) for choice in choices)
+        or selection.get("rule") != "same_recipe_static_profile_maximin_v2"
+        or not isinstance(terminal, dict)
+        or terminal.get("rule")
+        != "global_maximin_whole_then_capacity_then_quality_then_canonical_v1"
+    ):
         raise ValueError("static profile authority is not a terminal schema-v7 decision")
     winner = terminal.get("winner")
     candidates = value.get("candidates")
     frontier = value.get("frontier")
-    if (not isinstance(candidates, list) or not isinstance(frontier, list) or
-            any(not isinstance(name, str) or not name for name in frontier) or
-            len(frontier) != len(set(frontier))):
+    if (
+        not isinstance(candidates, list)
+        or not isinstance(frontier, list)
+        or any(not isinstance(name, str) or not name for name in frontier)
+        or len(frontier) != len(set(frontier))
+    ):
         raise ValueError("static profile authority lacks candidate/frontier arrays")
     expected_profiles = {
-        (16, "dense"), (32, "dense"),
-        (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+        (16, "dense"),
+        (32, "dense"),
+        (16, "b128-s16-tau900"),
+        (32, "b128-s16-tau900"),
     }
     candidate_profiles = []
     for row in candidates:
         cache_row = row.get("cache_profile") if isinstance(row, dict) else None
         execution_row = row.get("execution_profile") if isinstance(row, dict) else None
         recipe_row = row.get("weight_recipe") if isinstance(row, dict) else None
-        candidate_profiles.append((
-            cache_row.get("value_group") if isinstance(cache_row, dict) else None,
-            execution_row.get("xattention_profile") if isinstance(execution_row, dict) else None,
-        ))
-        if (not isinstance(recipe_row, dict) or recipe_row.get("kind") != "artifact" or
-                not isinstance(recipe_row.get("weights_id"), str) or
-                not isinstance(recipe_row.get("sha256"), str) or
-                len(recipe_row["sha256"]) != 64 or
-                any(character not in "0123456789abcdef"
-                    for character in recipe_row["sha256"])):
+        candidate_profiles.append(
+            (
+                cache_row.get("value_group") if isinstance(cache_row, dict) else None,
+                execution_row.get("xattention_profile")
+                if isinstance(execution_row, dict)
+                else None,
+            )
+        )
+        if (
+            not isinstance(recipe_row, dict)
+            or recipe_row.get("kind") != "artifact"
+            or not isinstance(recipe_row.get("weights_id"), str)
+            or not isinstance(recipe_row.get("sha256"), str)
+            or len(recipe_row["sha256"]) != 64
+            or any(character not in "0123456789abcdef" for character in recipe_row["sha256"])
+        ):
             raise ValueError("static profile authority has unbound candidate provenance")
     recipe_groups = {}
     for row, profile_identity in zip(candidates, candidate_profiles, strict=True):
         recipe = json.dumps(row["weight_recipe"], sort_keys=True)
         recipe_groups.setdefault(recipe, []).append(profile_identity)
-    if any(len(profiles) != 4 or set(profiles) != expected_profiles
-           for profiles in recipe_groups.values()):
+    if any(
+        len(profiles) != 4 or set(profiles) != expected_profiles
+        for profiles in recipe_groups.values()
+    ):
         raise ValueError("static profile authority lacks dense/sparse G16/G32 per artifact")
-    rows = [row for row in candidates
-            if isinstance(row, dict) and row.get("name") == winner]
+    rows = [row for row in candidates if isinstance(row, dict) and row.get("name") == winner]
     if not isinstance(winner, str) or not winner or len(rows) != 1 or winner not in frontier:
         raise ValueError("static profile winner is not one retained frontier candidate")
     per_recipe_winners = [choice.get("winner") for choice in choices]
@@ -163,26 +180,41 @@ def load_static_profile_selection(path: Path, artifact: dict[str, Any]) -> dict[
     }
     group = cache.get("value_group") if isinstance(cache, dict) else None
     profile = execution.get("xattention_profile") if isinstance(execution, dict) else None
-    if (not isinstance(cache, dict) or set(cache) != {"value_group", "plane_layouts"} or
-            group not in (16, 32) or layouts != expected_layouts or
-            not isinstance(execution, dict) or set(execution) != {
-                "q4_activation_bits", "w8_activation_bits", "decode_attention_profile",
-                "xattention_profile",
-            } or execution.get("q4_activation_bits") != 8 or
-            execution.get("w8_activation_bits") != 8 or
-            execution.get("decode_attention_profile") !=
-            "packed-t1to6-split512-t4tree-v1" or profile not in XATTENTION_PROFILES):
+    if (
+        not isinstance(cache, dict)
+        or set(cache) != {"value_group", "plane_layouts"}
+        or group not in (16, 32)
+        or layouts != expected_layouts
+        or not isinstance(execution, dict)
+        or set(execution)
+        != {
+            "q4_activation_bits",
+            "w8_activation_bits",
+            "decode_attention_profile",
+            "xattention_profile",
+        }
+        or execution.get("q4_activation_bits") != 8
+        or execution.get("w8_activation_bits") != 8
+        or execution.get("decode_attention_profile") != "packed-t1to6-split512-t4tree-v1"
+        or profile not in XATTENTION_PROFILES
+    ):
         raise ValueError("static profile winner has an unsupported cache/attention identity")
     recipe = terminal.get("winner_artifact")
-    if (not isinstance(recipe, dict) or recipe.get("kind") != "artifact" or
-            recipe.get("weights_id") != artifact["weights_id"] or
-            recipe.get("sha256") != artifact["sha256"] or
-            rows[0].get("weight_recipe") != recipe):
+    if (
+        not isinstance(recipe, dict)
+        or recipe.get("kind") != "artifact"
+        or recipe.get("weights_id") != artifact["weights_id"]
+        or recipe.get("sha256") != artifact["sha256"]
+        or rows[0].get("weight_recipe") != recipe
+    ):
         raise ValueError("static profile authority does not select the supplied artifact bytes")
     return {
-        "path": str(resolved), "bytes": resolved.stat().st_size,
+        "path": str(resolved),
+        "bytes": resolved.stat().st_size,
         "sha256": hashlib.sha256(raw).hexdigest(),
-        "winner": winner, "kv_value_group": group, "xattention_profile": profile,
+        "winner": winner,
+        "kv_value_group": group,
+        "xattention_profile": profile,
         "prefill_chunk": value["selected_prefill_chunk"],
     }
 
@@ -209,9 +241,12 @@ def _require_log_event(event: dict[str, Any], name: str) -> None:
         raise ValueError(f"unexpected server log identity {identity!r}; expected {expected!r}")
 
 
-def prepare_server_log_binding(server_log: Path, artifact: Path,
-                               serve_bin: Path, selection: Path,
-                               ) -> tuple[dict[str, Any], int]:
+def prepare_server_log_binding(
+    server_log: Path,
+    artifact: Path,
+    serve_bin: Path,
+    selection: Path,
+) -> tuple[dict[str, Any], int]:
     log_path = server_log.resolve(strict=True)
     initial = log_path.read_bytes()
     events = _parse_jsonl(initial, log_path)
@@ -246,7 +281,8 @@ def prepare_server_log_binding(server_log: Path, artifact: Path,
     if not isinstance(weights_id, str) or not weights_id or target != "qwen3_8_27b_r9700":
         raise ValueError("server_start lacks canonical artifact identity")
     selected = load_static_profile_selection(
-        selection, {**artifact_identity, "weights_id": weights_id})
+        selection, {**artifact_identity, "weights_id": weights_id}
+    )
     if not isinstance(logged_argv, list) or not logged_argv:
         raise ValueError("server_start has no startup argv")
     try:
@@ -269,7 +305,8 @@ def prepare_server_log_binding(server_log: Path, artifact: Path,
     if engine.get("kv_value_group") != selected["kv_value_group"]:
         raise ValueError(
             f"server_start kv_value_group={engine.get('kv_value_group')!r}; "
-            f"selected G{selected['kv_value_group']}")
+            f"selected G{selected['kv_value_group']}"
+        )
     expected_xattention_profile = selected["xattention_profile"]
     expected_xattention = (
         {"xattention_qualification": False}
@@ -284,57 +321,69 @@ def prepare_server_log_binding(server_log: Path, artifact: Path,
     )
     for key, value in expected_xattention.items():
         if engine.get(key) != value:
-            raise ValueError(
-                f"server_start {key}={engine.get(key)!r}; expected {value!r}"
-            )
+            raise ValueError(f"server_start {key}={engine.get(key)!r}; expected {value!r}")
     if expected_xattention_profile == "dense":
         unexpected = [
-            key for key in (
-                "xattention_profile", "xattention_find_block", "xattention_stride",
+            key
+            for key in (
+                "xattention_profile",
+                "xattention_find_block",
+                "xattention_stride",
                 "xattention_tau_permille",
-            ) if key in engine
+            )
+            if key in engine
         ]
         if unexpected:
             raise ValueError(
                 f"dense server_start carries XAttention profile fields: {unexpected!r}"
             )
 
-    return ({
-        "server_log": {
-            "path": str(log_path),
-            "initial_bytes": len(initial),
-            "initial_sha256": hashlib.sha256(initial).hexdigest(),
+    return (
+        {
+            "server_log": {
+                "path": str(log_path),
+                "initial_bytes": len(initial),
+                "initial_sha256": hashlib.sha256(initial).hexdigest(),
+            },
+            "server_start": {
+                "server_instance_id": instance,
+                "event_sha256": _json_sha256(start),
+                "public_model_id": logged_server.get("public_model_id"),
+                "engine": start.get("engine", {}),
+                "xattention_profile": expected_xattention_profile,
+            },
+            "static_profile_selection": selected,
+            "artifact": {**artifact_identity, "target": target, "weights_id": weights_id},
+            "server_executable": executable_identity,
         },
-        "server_start": {
-            "server_instance_id": instance,
-            "event_sha256": _json_sha256(start),
-            "public_model_id": logged_server.get("public_model_id"),
-            "engine": start.get("engine", {}),
-            "xattention_profile": expected_xattention_profile,
-        },
-        "static_profile_selection": selected,
-        "artifact": {**artifact_identity, "target": target, "weights_id": weights_id},
-        "server_executable": executable_identity,
-    }, len(initial))
+        len(initial),
+    )
 
 
-def validate_fresh_prefill_log(server_log: Path, offset: int, binding: dict[str, Any],
-                               expected: list[dict[str, Any]]) -> dict[str, Any]:
+def validate_fresh_prefill_log(
+    server_log: Path, offset: int, binding: dict[str, Any], expected: list[dict[str, Any]]
+) -> dict[str, Any]:
     log_path = server_log.resolve(strict=True)
     data = log_path.read_bytes()
     if len(data) < offset:
         raise ValueError("server request log was truncated during the NIAH run")
-    if (offset != binding["server_log"]["initial_bytes"] or
-            hashlib.sha256(data[:offset]).hexdigest() !=
-            binding["server_log"]["initial_sha256"]):
+    if (
+        offset != binding["server_log"]["initial_bytes"]
+        or hashlib.sha256(data[:offset]).hexdigest() != binding["server_log"]["initial_sha256"]
+    ):
         raise ValueError("server request log prefix changed during the NIAH run")
     events = _parse_jsonl(data[offset:], log_path)
     instance = binding["server_start"]["server_instance_id"]
-    relevant = [event for event in events if event.get("server_instance_id") == instance and
-                event.get("event") in {"request_done", "request_error", "request_rejected"}]
+    relevant = [
+        event
+        for event in events
+        if event.get("server_instance_id") == instance
+        and event.get("event") in {"request_done", "request_error", "request_rejected"}
+    ]
     if len(relevant) != len(expected):
         raise ValueError(
-            f"server log has {len(relevant)} terminal request events, expected {len(expected)}")
+            f"server log has {len(relevant)} terminal request events, expected {len(expected)}"
+        )
 
     validated = []
     previous_request_id = None
@@ -352,8 +401,14 @@ def validate_fresh_prefill_log(server_log: Path, offset: int, binding: dict[str,
             restored = int(checkpoint["restored_tokens"])
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError(f"request_done event {index} lacks fresh-prefill metrics") from error
-        if (request_id <= 0 or prompt_tokens <= 0 or completion_tokens < 0 or computed < 0 or
-                cache_hit < 0 or restored < 0):
+        if (
+            request_id <= 0
+            or prompt_tokens <= 0
+            or completion_tokens < 0
+            or computed < 0
+            or cache_hit < 0
+            or restored < 0
+        ):
             raise ValueError(f"request_done event {index} has invalid negative/empty metrics")
         if previous_request_id is not None and request_id <= previous_request_id:
             raise ValueError("NIAH request IDs are not strictly increasing")
@@ -372,23 +427,36 @@ def validate_fresh_prefill_log(server_log: Path, offset: int, binding: dict[str,
         }
         if actual_request != wanted_request:
             raise ValueError(f"request_done event {index} does not match submitted NIAH request")
-        if (prompt_tokens != submitted["prompt_tokens"] or
-                completion_tokens != submitted["completion_tokens"]):
+        if (
+            prompt_tokens != submitted["prompt_tokens"]
+            or completion_tokens != submitted["completion_tokens"]
+        ):
             raise ValueError(f"request_done event {index} disagrees with HTTP usage")
-        if (computed != prompt_tokens or cache_hit != 0 or restored != 0 or
-                result.get("reuse_source") != "none"):
+        if (
+            computed != prompt_tokens
+            or cache_hit != 0
+            or restored != 0
+            or result.get("reuse_source") != "none"
+        ):
             raise ValueError(f"request_done event {index} did not perform a fresh full prefill")
-        validated.append({"request_id": request_id, "prompt_tokens": prompt_tokens,
-                          "computed_prefill_tokens": computed})
+        validated.append(
+            {
+                "request_id": request_id,
+                "prompt_tokens": prompt_tokens,
+                "computed_prefill_tokens": computed,
+            }
+        )
 
     if file_identity(Path(binding["artifact"]["path"])) != {
-            key: binding["artifact"][key] for key in ("path", "bytes", "sha256")}:
+        key: binding["artifact"][key] for key in ("path", "bytes", "sha256")
+    }:
         raise ValueError("artifact bytes changed during the NIAH run")
     if file_identity(Path(binding["server_executable"]["path"])) != binding["server_executable"]:
         raise ValueError("server executable bytes changed during the NIAH run")
     selected = binding["static_profile_selection"]
     if file_identity(Path(selected["path"])) != {
-            key: selected[key] for key in ("path", "bytes", "sha256")}:
+        key: selected[key] for key in ("path", "bytes", "sha256")
+    }:
         raise ValueError("static profile selection bytes changed during the NIAH run")
     prefix = data[:]
     return {
@@ -456,8 +524,7 @@ def load_messages_and_identity(fixture: str) -> tuple[list, dict[str, Any]]:
     path = resolve_fixture(fixture).resolve(strict=True)
     data = path.read_bytes()
     raw = json.loads(data)
-    identity = {"path": str(path), "bytes": len(data),
-                "sha256": hashlib.sha256(data).hexdigest()}
+    identity = {"path": str(path), "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
     if isinstance(raw, list):
         return raw, identity
     return raw.get("messages", []), identity
@@ -494,55 +561,90 @@ def main() -> int:
     ap.add_argument("--base", default=DEFAULT_BASE)
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--key", default=None, help="API key (else read from env/.env)")
-    ap.add_argument("--needle", default=DEFAULT_NEEDLE,
-                    help="substring that must appear in the answer for a PASS")
-    ap.add_argument("--exact-answer", action="store_true",
-                    help="require the stripped response to equal --needle exactly")
-    ap.add_argument("--fixture", action="append", default=None,
-                    help="fixture ref (repeatable). Default: 8k + 64k NIAH.")
-    ap.add_argument("--lengths", default="",
-                    help="NIAH matrix lengths (comma list, e.g. '8k,64k,200k')")
-    ap.add_argument("--positions", default="",
-                    help="NIAH matrix positions (comma list from "
-                         "start/q25/mid/q75/end, or a subset); with --lengths, "
-                         "runs the position-matrix cells")
-    ap.add_argument("--multikey", action="store_true",
-                    help="run the multi-key matrix cells (32 same-form distractor records)")
+    ap.add_argument(
+        "--needle",
+        default=DEFAULT_NEEDLE,
+        help="substring that must appear in the answer for a PASS",
+    )
+    ap.add_argument(
+        "--exact-answer",
+        action="store_true",
+        help="require the stripped response to equal --needle exactly",
+    )
+    ap.add_argument(
+        "--fixture",
+        action="append",
+        default=None,
+        help="fixture ref (repeatable). Default: 8k + 64k NIAH.",
+    )
+    ap.add_argument(
+        "--lengths", default="", help="NIAH matrix lengths (comma list, e.g. '8k,64k,200k')"
+    )
+    ap.add_argument(
+        "--positions",
+        default="",
+        help="NIAH matrix positions (comma list from "
+        "start/q25/mid/q75/end, or a subset); with --lengths, "
+        "runs the position-matrix cells",
+    )
+    ap.add_argument(
+        "--multikey",
+        action="store_true",
+        help="run the multi-key matrix cells (32 same-form distractor records)",
+    )
     ap.add_argument("--max-tokens", type=int, default=64)
-    ap.add_argument("--thinking", action="store_true", default=False,
-                    help="enable thinking (off by default so the answer is the needle)")
+    ap.add_argument(
+        "--thinking",
+        action="store_true",
+        default=False,
+        help="enable thinking (off by default so the answer is the needle)",
+    )
     ap.add_argument("--seed", type=int, default=None)
-    ap.add_argument("--temperature", type=float, default=0.0,
-                    help="request temperature; above zero each run uses seed + run index so "
-                         "repeated runs are independent samples (the production p-less profile "
-                         "is the server default at --temperature 1.5)")
+    ap.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="request temperature; above zero each run uses seed + run index so "
+        "repeated runs are independent samples (the production p-less profile "
+        "is the server default at --temperature 1.5)",
+    )
     ap.add_argument("--runs", type=int, default=1, help="repeat each case N times")
     ap.add_argument("--timeout", type=float, default=600.0)
     ap.add_argument("--label", default="niah")
-    ap.add_argument("--out", type=Path,
-                    help="explicit JSON evidence path (must not already exist)")
-    ap.add_argument("--server-log", type=Path,
-                    help="serving schema-v20 request JSONL used to prove fresh full prefill")
-    ap.add_argument("--artifact", type=Path,
-                    help="exact artifact loaded by the supplied server log")
-    ap.add_argument("--serve-bin", type=Path,
-                        help="exact ninfer-serve executable named by server_start argv")
-    ap.add_argument("--selection", type=Path,
-                    help="schema-v7 terminal artifact/cache/execution selection authority")
+    ap.add_argument("--out", type=Path, help="explicit JSON evidence path (must not already exist)")
+    ap.add_argument(
+        "--server-log",
+        type=Path,
+        help="serving schema-v20 request JSONL used to prove fresh full prefill",
+    )
+    ap.add_argument(
+        "--artifact", type=Path, help="exact artifact loaded by the supplied server log"
+    )
+    ap.add_argument(
+        "--serve-bin", type=Path, help="exact ninfer-serve executable named by server_start argv"
+    )
+    ap.add_argument(
+        "--selection",
+        type=Path,
+        help="schema-v7 terminal artifact/cache/execution selection authority",
+    )
     args = ap.parse_args()
 
     durable_values = (args.server_log, args.artifact, args.serve_bin, args.selection)
     if any(value is not None for value in durable_values):
         if any(value is None for value in durable_values) or args.out is None:
-            ap.error("durable evidence requires --out, --server-log, --artifact, --serve-bin, "
-                     "and --selection")
+            ap.error(
+                "durable evidence requires --out, --server-log, --artifact, --serve-bin, "
+                "and --selection"
+            )
 
     binding = None
     log_offset = 0
     if args.server_log is not None:
         try:
             binding, log_offset = prepare_server_log_binding(
-                args.server_log, args.artifact, args.serve_bin, args.selection)
+                args.server_log, args.artifact, args.serve_bin, args.selection
+            )
             if binding["server_start"]["public_model_id"] != args.model:
                 raise ValueError("--model does not match server_start public model id")
         except (OSError, ValueError) as error:
@@ -555,19 +657,27 @@ def main() -> int:
             cases.append((label, ref))
     elif args.lengths or args.positions or args.multikey:
         known_lengths = NIAH_MULTIKEY_LENGTHS if args.multikey else NIAH_LENGTHS
-        lengths = ([p.strip() for p in args.lengths.split(",") if p.strip()]
-                   if args.lengths else list(known_lengths))
-        positions = ([p.strip() for p in args.positions.split(",") if p.strip()]
-                     if args.positions else list(NIAH_POSITIONS))
+        lengths = (
+            [p.strip() for p in args.lengths.split(",") if p.strip()]
+            if args.lengths
+            else list(known_lengths)
+        )
+        positions = (
+            [p.strip() for p in args.positions.split(",") if p.strip()]
+            if args.positions
+            else list(NIAH_POSITIONS)
+        )
         # validate against the known sets so a typo fails fast
         for l in lengths:
             if l not in known_lengths:
-                raise SystemExit(f"unknown NIAH length {l!r} (choose from "
-                           f"{', '.join(known_lengths)})")
+                raise SystemExit(
+                    f"unknown NIAH length {l!r} (choose from {', '.join(known_lengths)})"
+                )
         for p in positions:
             if p not in NIAH_POSITIONS:
-                raise SystemExit(f"unknown NIAH position {p!r} (choose from "
-                           f"{', '.join(NIAH_POSITIONS)})")
+                raise SystemExit(
+                    f"unknown NIAH position {p!r} (choose from {', '.join(NIAH_POSITIONS)})"
+                )
         cases = matrix_cases(lengths, positions, args.multikey)
     else:
         cases = DEFAULT_FIXTURES
@@ -583,8 +693,10 @@ def main() -> int:
 
     key = load_key(args.key)
     if not key:
-        print("ERROR: no API key (pass --key or set NINFER_API_KEY / LLAMA_CPP_LOCAL_API_KEY)",
-              file=__import__("sys").stderr)
+        print(
+            "ERROR: no API key (pass --key or set NINFER_API_KEY / LLAMA_CPP_LOCAL_API_KEY)",
+            file=__import__("sys").stderr,
+        )
         return 2
 
     if args.out is None:
@@ -644,8 +756,7 @@ def main() -> int:
                 total += 1
                 all_pass = False
                 snippets.append(f"RUN ERROR: {exc}")
-                request_records.append({"run": run + 1, "status": "error",
-                                        "error": str(exc)})
+                request_records.append({"run": run + 1, "status": "error", "error": str(exc)})
                 print(f"  [{label}] run {run + 1}/{args.runs}: ERROR {exc}")
                 continue
             wall = time.perf_counter() - t0
@@ -661,10 +772,7 @@ def main() -> int:
                 all_pass = False
             total += 1
             normalized_answer = text.strip()
-            ok = (
-                normalized_answer == args.needle
-                if args.exact_answer else args.needle in text
-            )
+            ok = normalized_answer == args.needle if args.exact_answer else args.needle in text
             retrieved += 1 if ok else 0
             status = "PASS" if ok else "FAIL"
             all_pass = all_pass and ok
@@ -672,44 +780,54 @@ def main() -> int:
             if len(preview) > 240:
                 preview = preview[:240] + "..."
             snippets.append(f"{status}: {preview}")
-            request_records.append({"run": run + 1, "status": status.lower(),
-                                    "prompt_tokens": prompt_tokens,
-                                    "completion_tokens": completion_tokens,
-                                    "answer_bytes": len(normalized_answer.encode("utf-8")),
-                                    "answer_sha256": hashlib.sha256(
-                                        normalized_answer.encode("utf-8")
-                                    ).hexdigest()})
-            expected_log_requests.append({
-                "model": args.model,
-                "message_count": len(messages),
-                "requested_output_tokens": args.max_tokens,
-                "enable_thinking": args.thinking,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-            })
-            print(f"  [{label}] run {run + 1}/{args.runs}: {status} "
-                  f"(wall {wall:.1f}s, needle={ok})\n      {preview}")
+            request_records.append(
+                {
+                    "run": run + 1,
+                    "status": status.lower(),
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "answer_bytes": len(normalized_answer.encode("utf-8")),
+                    "answer_sha256": hashlib.sha256(normalized_answer.encode("utf-8")).hexdigest(),
+                }
+            )
+            expected_log_requests.append(
+                {
+                    "model": args.model,
+                    "message_count": len(messages),
+                    "requested_output_tokens": args.max_tokens,
+                    "enable_thinking": args.thinking,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                }
+            )
+            print(
+                f"  [{label}] run {run + 1}/{args.runs}: {status} "
+                f"(wall {wall:.1f}s, needle={ok})\n      {preview}"
+            )
         fixture_unchanged = file_identity(fixture_path) == fixture_identity
         all_pass = all_pass and fixture_unchanged
         passed = retrieved == total and total > 0 and fixture_unchanged
-        record["cases"].append({
-            "label": label,
-            "fixture": str(ref),
-            "fixture_identity": fixture_identity,
-            "fixture_unchanged": fixture_unchanged,
-            "prompt_chars": n_prompt_chars,
-            "retrieved": retrieved,
-            "total": total,
-            "recall": (retrieved / total) if total else 0.0,
-            "passed": passed,
-            "snippets": snippets,
-            "requests": request_records,
-        })
+        record["cases"].append(
+            {
+                "label": label,
+                "fixture": str(ref),
+                "fixture_identity": fixture_identity,
+                "fixture_unchanged": fixture_unchanged,
+                "prompt_chars": n_prompt_chars,
+                "retrieved": retrieved,
+                "total": total,
+                "recall": (retrieved / total) if total else 0.0,
+                "passed": passed,
+                "snippets": snippets,
+                "requests": request_records,
+            }
+        )
 
     if binding is not None:
         try:
             record["fresh_full_prefill"] = validate_fresh_prefill_log(
-                args.server_log, log_offset, binding, expected_log_requests)
+                args.server_log, log_offset, binding, expected_log_requests
+            )
         except (OSError, ValueError) as error:
             record["fresh_full_prefill"] = {"pass": False, "error": str(error)}
             all_pass = False
@@ -762,10 +880,12 @@ def main() -> int:
             print(f"  [FAIL] {c['label']}: {nfail}/{c['total']} runs failed to retrieve the needle")
     all_pass = record["pass"]
     verdict = "PASS" if all_pass else "FAIL"
-    print(f"NIAH gate: {verdict} "
-          f"({len(failed_cases)}/{len(record['cases'])} cases, "
-          f"{failed_runs}/{total_runs} runs failed; "
-          f"all cases must retrieve the needle in every run)")
+    print(
+        f"NIAH gate: {verdict} "
+        f"({len(failed_cases)}/{len(record['cases'])} cases, "
+        f"{failed_runs}/{total_runs} runs failed; "
+        f"all cases must retrieve the needle in every run)"
+    )
     return 0 if all_pass else 1
 
 

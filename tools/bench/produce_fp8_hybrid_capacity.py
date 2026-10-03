@@ -29,11 +29,25 @@ SCHEMA = "ninfer.r9700.fp8-hybrid-current-capacity.v2"
 HEADROOM = 1 << 30
 PAGE_TOKENS = 64
 PLANNER_FIELDS = (
-    "target", "weights_profile", "capacity_tokens", "page_tokens", "prefill_chunk",
-    "kv_value_group", "speculative_backend", "draft_tokens", "proposal_head",
-    "device_graph", "concurrency", "minimum_groups", "maximum_groups",
-    "minimum_sequence_bytes", "workspace_bytes", "graph_allowance_bytes",
-    "request_transient_bytes", "minimum_reservation_bytes", "kv_payload_bytes",
+    "target",
+    "weights_profile",
+    "capacity_tokens",
+    "page_tokens",
+    "prefill_chunk",
+    "kv_value_group",
+    "speculative_backend",
+    "draft_tokens",
+    "proposal_head",
+    "device_graph",
+    "concurrency",
+    "minimum_groups",
+    "maximum_groups",
+    "minimum_sequence_bytes",
+    "workspace_bytes",
+    "graph_allowance_bytes",
+    "request_transient_bytes",
+    "minimum_reservation_bytes",
+    "kv_payload_bytes",
     "kv_increment_bytes",
 )
 PLANNER_PROFILE = {
@@ -48,7 +62,9 @@ PLANNER_PROFILE = {
     "proposal_head": "optimized",
     "device_graph": "1",
 }
-PLANNER_INTEGER_FIELDS = PLANNER_FIELDS[2:6] + ("draft_tokens", "device_graph") + PLANNER_FIELDS[10:]
+PLANNER_INTEGER_FIELDS = (
+    PLANNER_FIELDS[2:6] + ("draft_tokens", "device_graph") + PLANNER_FIELDS[10:]
+)
 
 
 def _materialized_weights(*, mtp: bool, optimized_proposal: bool) -> tuple[int, int, int]:
@@ -138,8 +154,7 @@ def capacity_weights(source: Mapping[str, object]) -> tuple[int, int, dict[str, 
                 "value_scale": "feature-fastest-page-major",
             },
             "q4_activation_bits": 8,
-            "q4_prefill_cta_profile":
-                "m64n128-pingpong-n16-k16-scalar-base-production",
+            "q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-scalar-base-production",
             "xattention_qualification": False,
         },
         "config",
@@ -175,9 +190,7 @@ def capacity_weights(source: Mapping[str, object]) -> tuple[int, int, dict[str, 
         "mtp3_optimized_bytes": MTP3_OPTIMIZED_WEIGHT_BYTES,
         "mtp3_optimized_payload_bytes": MTP3_OPTIMIZED_PAYLOAD_BYTES,
         "mtp3_optimized_tensor_count": MTP3_OPTIMIZED_TENSOR_COUNT,
-        "mtp_and_optimized_draft_increment_bytes": (
-            MTP3_OPTIMIZED_WEIGHT_BYTES - observed
-        ),
+        "mtp_and_optimized_draft_increment_bytes": (MTP3_OPTIMIZED_WEIGHT_BYTES - observed),
     }
     return MTP3_OPTIMIZED_WEIGHT_BYTES, device, arithmetic
 
@@ -238,7 +251,9 @@ def parse_planner(text: str) -> list[dict[str, int]]:
         for key in PLANNER_INTEGER_FIELDS:
             value = raw[key]
             if not value.isascii() or not value.isdecimal():
-                raise ValueError(f"planner capacity authority {key} is not an exact nonnegative integer")
+                raise ValueError(
+                    f"planner capacity authority {key} is not an exact nonnegative integer"
+                )
         rows.append({key: int(raw[key]) for key in PLANNER_FIELDS if key in PLANNER_INTEGER_FIELDS})
     if [row["concurrency"] for row in rows] != [1, 2, 3, 4]:
         raise ValueError("planner capacity authority lacks exact C1..4 rows")
@@ -250,8 +265,10 @@ def parse_planner(text: str) -> list[dict[str, int]]:
         if row["maximum_groups"] < row["minimum_groups"]:
             raise ValueError("planner maximum groups precede the minimum")
         expected_reservation = (
-            row["minimum_sequence_bytes"] + row["workspace_bytes"]
-            + row["graph_allowance_bytes"] + row["request_transient_bytes"]
+            row["minimum_sequence_bytes"]
+            + row["workspace_bytes"]
+            + row["graph_allowance_bytes"]
+            + row["request_transient_bytes"]
         )
         if row["minimum_reservation_bytes"] != expected_reservation:
             raise ValueError("planner minimum reservation arithmetic is inconsistent")
@@ -283,44 +300,54 @@ def assemble(rows: list[dict[str, int]], weights: int, device: int) -> dict[str,
             sequence = row["minimum_sequence_bytes"] + (groups - minimum) * increment
             slack = budget - resolved
         preserved = groups is not None and groups >= minimum and slack >= 0
-        cells.append({**row, "resolved_groups": groups,
-                      "aggregate_capacity_tokens": None if groups is None else groups * PAGE_TOKENS,
-                      "resolved_sequence_bytes": sequence,
-                      "resolved_reservation_bytes": resolved, "remaining_slack_bytes": slack,
-                      "capacity_preserved": preserved})
-    return {"schema": SCHEMA,
-            "scope": {
-                "target": "qwen3_8_27b_r9700",
-                "weights_profile": "R9700Q4G64Fp8FourRoleN16K16Evaluation",
-                "gpu_name": "AMD Radeon AI PRO R9700",
-                "architecture_name": "gfx1201",
-                "capacity_tokens": 262144,
-                "page_tokens": PAGE_TOKENS,
-                "prefill_chunk": 8192,
-                "kv_cache_format": "fp8-k-int4-v",
-                "kv_value_group": 16,
-                "kv_plane_layouts": {
-                    "key": "token-fastest-head-major",
-                    "value": "feature-fastest-page-major",
-                    "value_scale": "feature-fastest-page-major",
-                },
-                "speculative_backend": "mtp",
-                "draft_tokens": 3,
-                "proposal_head": "optimized",
-                "device_graph": True,
-                "dense_source_prefill_chunk": 4096,
-                "dense_source_q4_activation_bits": 8,
-                "dense_source_q4_prefill_cta_profile":
-                    "m64n128-pingpong-n16-k16-scalar-base-production",
-                "dense_source_xattention_qualification": False,
-                "automatic_headroom_bytes": HEADROOM,
+        cells.append(
+            {
+                **row,
+                "resolved_groups": groups,
+                "aggregate_capacity_tokens": None if groups is None else groups * PAGE_TOKENS,
+                "resolved_sequence_bytes": sequence,
+                "resolved_reservation_bytes": resolved,
+                "remaining_slack_bytes": slack,
+                "capacity_preserved": preserved,
+            }
+        )
+    return {
+        "schema": SCHEMA,
+        "scope": {
+            "target": "qwen3_8_27b_r9700",
+            "weights_profile": "R9700Q4G64Fp8FourRoleN16K16Evaluation",
+            "gpu_name": "AMD Radeon AI PRO R9700",
+            "architecture_name": "gfx1201",
+            "capacity_tokens": 262144,
+            "page_tokens": PAGE_TOKENS,
+            "prefill_chunk": 8192,
+            "kv_cache_format": "fp8-k-int4-v",
+            "kv_value_group": 16,
+            "kv_plane_layouts": {
+                "key": "token-fastest-head-major",
+                "value": "feature-fastest-page-major",
+                "value_scale": "feature-fastest-page-major",
             },
-            "weights_capacity_bytes": weights, "device_capacity_bytes": device,
-            "runtime_budget_after_weights_and_headroom_bytes": budget,
-            "cells": cells,
-            "prior_c4_slack": {"retained_claim_bytes": 2_004_481,
-                               "current_derived_bytes": cells[-1]["remaining_slack_bytes"],
-                               "confirmed_exact": cells[-1]["remaining_slack_bytes"] == 2_004_481}}
+            "speculative_backend": "mtp",
+            "draft_tokens": 3,
+            "proposal_head": "optimized",
+            "device_graph": True,
+            "dense_source_prefill_chunk": 4096,
+            "dense_source_q4_activation_bits": 8,
+            "dense_source_q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-scalar-base-production",
+            "dense_source_xattention_qualification": False,
+            "automatic_headroom_bytes": HEADROOM,
+        },
+        "weights_capacity_bytes": weights,
+        "device_capacity_bytes": device,
+        "runtime_budget_after_weights_and_headroom_bytes": budget,
+        "cells": cells,
+        "prior_c4_slack": {
+            "retained_claim_bytes": 2_004_481,
+            "current_derived_bytes": cells[-1]["remaining_slack_bytes"],
+            "confirmed_exact": cells[-1]["remaining_slack_bytes"] == 2_004_481,
+        },
+    }
 
 
 def current_report(planner: Path, weight_report: Path) -> dict[str, object]:
@@ -333,7 +360,10 @@ def current_report(planner: Path, weight_report: Path) -> dict[str, object]:
         report_bytes, report_hash = _descriptor_bytes_and_sha256(report_fd)
         completed = subprocess.run(
             [f"/proc/self/fd/{planner_fd}", "--host-hybrid-capacity-csv"],
-            check=True, capture_output=True, text=True, pass_fds=(planner_fd,),
+            check=True,
+            capture_output=True,
+            text=True,
+            pass_fds=(planner_fd,),
         )
         source = json.loads(report_bytes)
         weights, device, materialization = capacity_weights(source)

@@ -23,7 +23,6 @@ namespace {
 
 using namespace detail::gated_delta_net::recurrence;
 
-
 struct Geometry {
     int width;
     int batch;
@@ -37,8 +36,8 @@ __device__ __forceinline__ void stage_qk(const hip_bfloat16* q, const hip_bfloat
     if (tid < kDim) {
         const float qv = static_cast<float>(q[base + tid]);
         const float kv = static_cast<float>(k[base + tid]);
-        staged_q[tid] = qv;
-        staged_k[tid] = kv;
+        staged_q[tid]  = qv;
+        staged_k[tid]  = kv;
         reduction[tid] = qv * qv;
     }
     __syncthreads();
@@ -65,12 +64,9 @@ __device__ __forceinline__ void stage_qk(const hip_bfloat16* q, const hip_bfloat
 }
 
 template <bool Normalize>
-__device__ __forceinline__ void stage_qk_ordinary(const hip_bfloat16* q,
-                                                  const hip_bfloat16* k,
-                                                  std::size_t base,
-                                                  float* staged_q,
-                                                  float* staged_k,
-                                                  float* wave_reductions) {
+__device__ __forceinline__ void stage_qk_ordinary(const hip_bfloat16* q, const hip_bfloat16* k,
+                                                  std::size_t base, float* staged_q,
+                                                  float* staged_k, float* wave_reductions) {
     const int tid = static_cast<int>(threadIdx.x);
     if constexpr (Normalize) {
         if (tid < 32) {
@@ -78,13 +74,13 @@ __device__ __forceinline__ void stage_qk_ordinary(const hip_bfloat16* q,
             float k_sum = 0.0F;
 #pragma unroll
             for (int item = 0; item < 4; ++item) {
-                const int index = tid + item * 32;
+                const int index     = tid + item * 32;
                 const float q_value = static_cast<float>(q[base + index]);
                 const float k_value = static_cast<float>(k[base + index]);
-                staged_q[index] = q_value;
-                staged_k[index] = k_value;
-                q_sum = fmaf(q_value, q_value, q_sum);
-                k_sum = fmaf(k_value, k_value, k_sum);
+                staged_q[index]     = q_value;
+                staged_k[index]     = k_value;
+                q_sum               = fmaf(q_value, q_value, q_sum);
+                k_sum               = fmaf(k_value, k_value, k_sum);
             }
             q_sum = wave_sum(q_sum);
             k_sum = wave_sum(k_sum);
@@ -106,17 +102,16 @@ __device__ __forceinline__ void stage_qk_ordinary(const hip_bfloat16* q,
 }
 
 template <bool Normalize>
-__global__ __launch_bounds__(kOrdinaryBlock, 1)
-void ordinary_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v,
-                     const float* g, const float* beta, const float* state_in, float* state_out,
-                     hip_bfloat16* output, float* prefix_state, int prefix_tokens,
-                     int width, float scale) {
+__global__ __launch_bounds__(kOrdinaryBlock, 1) void ordinary_kernel(
+    const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v, const float* g,
+    const float* beta, const float* state_in, float* state_out, hip_bfloat16* output,
+    float* prefix_state, int prefix_tokens, int width, float scale) {
     const int value_head = static_cast<int>(blockIdx.x) / kOrdinaryRowTiles;
-    const int row_tile = static_cast<int>(blockIdx.x) % kOrdinaryRowTiles;
-    const int tid = static_cast<int>(threadIdx.x);
-    const int value_row = row_tile * kOrdinaryRowsPerBlock + tid / kThreadsPerRow;
-    const int sublane = tid % kThreadsPerRow;
-    const int q_head = value_head / kGroup;
+    const int row_tile   = static_cast<int>(blockIdx.x) % kOrdinaryRowTiles;
+    const int tid        = static_cast<int>(threadIdx.x);
+    const int value_row  = row_tile * kOrdinaryRowsPerBlock + tid / kThreadsPerRow;
+    const int sublane    = tid % kThreadsPerRow;
+    const int q_head     = value_head / kGroup;
     __shared__ float staged_q[kDim];
     __shared__ float staged_k[kDim];
     __shared__ float wave_reductions[8];
@@ -126,15 +121,13 @@ void ordinary_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
     load_state_row(state_in, state_base, value_row, sublane, local);
     __syncthreads();
     for (int token = 0; token < width; ++token) {
-        const std::size_t qk_base =
-            (static_cast<std::size_t>(token) * kQHeads + q_head) * kDim;
-        const std::size_t vh = static_cast<std::size_t>(token) * kValueHeads + value_head;
+        const std::size_t qk_base = (static_cast<std::size_t>(token) * kQHeads + q_head) * kDim;
+        const std::size_t vh      = static_cast<std::size_t>(token) * kValueHeads + value_head;
         if (tid == 0) {
             controls[0] = expf(g[vh]);
             controls[1] = beta[vh];
         }
-        stage_qk_ordinary<Normalize>(q, k, qk_base, staged_q, staged_k,
-                                     wave_reductions);
+        stage_qk_ordinary<Normalize>(q, k, qk_base, staged_q, staged_k, wave_reductions);
         float value = 0.0F;
         if (sublane == 0) { value = static_cast<float>(v[vh * kDim + value_row]); }
         value = __shfl(value, (tid & 31) & -kThreadsPerRow, 32);
@@ -149,27 +142,25 @@ void ordinary_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
 }
 
 template <bool Normalize>
-__global__ __launch_bounds__(kBlock, 1)
-void snapshot_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v,
-                     const float* g, const float* beta, float* states,
-                     const std::int32_t* valid_columns,
-                     const std::int32_t* initial_slots,
-                     const std::int32_t* snapshot_bases, hip_bfloat16* output,
-                     int width, int slots, float scale, CacheWarm warm, unsigned work_ctas) {
+__global__ __launch_bounds__(kBlock, 1) void snapshot_kernel(
+    const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v, const float* g,
+    const float* beta, float* states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_slots, const std::int32_t* snapshot_bases, hip_bfloat16* output,
+    int width, int slots, float scale, CacheWarm warm, unsigned work_ctas) {
     if (blockIdx.x >= work_ctas) {
         warm_cache(warm, blockIdx.x - work_ctas, gridDim.x - work_ctas, threadIdx.x, blockDim.x);
         return;
     }
-    const int combined = static_cast<int>(blockIdx.x);
-    const int batch = combined / kValueHeads;
-    const int value_head = combined % kValueHeads;
-    const int tid = static_cast<int>(threadIdx.x);
-    const int value_row = tid / kThreadsPerRow;
-    const int sublane = tid % kThreadsPerRow;
-    const int q_head = value_head / kGroup;
-    const int valid = valid_columns == nullptr ? width : valid_columns[batch];
-    const int initial = initial_slots[batch];
-    const int destination = snapshot_bases[batch];
+    const int combined            = static_cast<int>(blockIdx.x);
+    const int batch               = combined / kValueHeads;
+    const int value_head          = combined % kValueHeads;
+    const int tid                 = static_cast<int>(threadIdx.x);
+    const int value_row           = tid / kThreadsPerRow;
+    const int sublane             = tid % kThreadsPerRow;
+    const int q_head              = value_head / kGroup;
+    const int valid               = valid_columns == nullptr ? width : valid_columns[batch];
+    const int initial             = initial_slots[batch];
+    const int destination         = snapshot_bases[batch];
     const std::size_t slot_stride = static_cast<std::size_t>(kValueHeads) * kDim * kDim;
     __shared__ float staged_q[kDim];
     __shared__ float staged_k[kDim];
@@ -181,7 +172,8 @@ void snapshot_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
             if (sublane == 0) {
                 const std::size_t out_index =
                     ((static_cast<std::size_t>(batch) * width + token) * kValueHeads + value_head) *
-                        kDim + value_row;
+                        kDim +
+                    value_row;
                 output[out_index] = hip_bfloat16(NAN);
             }
         }
@@ -192,7 +184,7 @@ void snapshot_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
     load_state_row(states, initial_base, value_row, sublane, local);
     __syncthreads();
     for (int token = 0; token < valid; ++token) {
-        const std::size_t column = static_cast<std::size_t>(batch) * width + token;
+        const std::size_t column  = static_cast<std::size_t>(batch) * width + token;
         const std::size_t qk_base = (column * kQHeads + q_head) * kDim;
         if constexpr (Normalize && r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
             stage_qk_ordinary<true>(q, k, qk_base, staged_q, staged_k, reduction);
@@ -201,8 +193,7 @@ void snapshot_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
         }
         const std::size_t vh = column * kValueHeads + value_head;
         transition(local, staged_q, staged_k, static_cast<float>(v[vh * kDim + value_row]),
-                   expf(g[vh]), beta[vh], scale, sublane,
-                   output + vh * kDim + value_row);
+                   expf(g[vh]), beta[vh], scale, sublane, output + vh * kDim + value_row);
         const std::size_t snapshot_base =
             static_cast<std::size_t>(destination + token) * slot_stride +
             static_cast<std::size_t>(value_head) * kDim * kDim;
@@ -234,7 +225,10 @@ void require_tensor(const Tensor& tensor, DType dtype, std::initializer_list<std
 
 bool empty(const Tensor& tensor) { return tensor.data == nullptr; }
 
-struct Range { std::uintptr_t begin; std::uintptr_t end; };
+struct Range {
+    std::uintptr_t begin;
+    std::uintptr_t end;
+};
 
 Range range(const Tensor& tensor) {
     const auto begin = reinterpret_cast<std::uintptr_t>(tensor.data);
@@ -291,14 +285,13 @@ void require_selector(const Tensor& tensor, int batch, const char* label, bool a
 } // namespace
 
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk, Tensor& state,
-                     Tensor& out, hipStream_t stream) {
+                     const Tensor& beta, float scale, bool normalize_qk, Tensor& state, Tensor& out,
+                     hipStream_t stream) {
     gated_delta_net(q, k, v, g, beta, scale, normalize_qk, state, state, out, stream);
 }
 
-static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor& v,
-                                 const Tensor& g, const Tensor& beta, float scale,
-                                 bool normalize_qk,
+static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
+                                 const Tensor& beta, float scale, bool normalize_qk,
                                  const Tensor& state_in, Tensor& state_out, Tensor& out,
                                  Tensor* prefix_state, std::int32_t prefix_tokens,
                                  hipStream_t stream) {
@@ -320,9 +313,7 @@ static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor&
             throw std::invalid_argument("gated_delta_net: invalid traced prefix frontier");
         }
         disjoint({&q, &k, &v, &g, &beta, &out, &state_in, prefix_state});
-        if (!same_state) {
-            disjoint({&q, &k, &v, &g, &beta, &out, &state_out, prefix_state});
-        }
+        if (!same_state) { disjoint({&q, &k, &v, &g, &beta, &out, &state_out, prefix_state}); }
     }
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
     // The chunked route reads q/k rows as 16-byte vectors; arena storage always qualifies.
@@ -338,44 +329,46 @@ static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor&
             geometry.width, scale, stream));
         return;
     }
-#define NINFER_LAUNCH_ORDINARY(NORM) \
-    hipLaunchKernelGGL((ordinary_kernel<NORM>), dim3(kValueHeads * kOrdinaryRowTiles), \
-                       dim3(kOrdinaryBlock), 0, stream, \
-                       static_cast<const hip_bfloat16*>(q.data), \
-                       static_cast<const hip_bfloat16*>(k.data), \
-                       static_cast<const hip_bfloat16*>(v.data), \
-                       static_cast<const float*>(g.data), static_cast<const float*>(beta.data), \
-                       static_cast<const float*>(state_in.data), \
-                       static_cast<float*>(state_out.data), \
-                       static_cast<hip_bfloat16*>(out.data), \
-                       prefix_state == nullptr ? nullptr : static_cast<float*>(prefix_state->data), \
-                       prefix_tokens, geometry.width, scale)
-    if (normalize_qk) { NINFER_LAUNCH_ORDINARY(true); }
-    else { NINFER_LAUNCH_ORDINARY(false); }
+#define NINFER_LAUNCH_ORDINARY(NORM)                                                               \
+    hipLaunchKernelGGL(                                                                            \
+        (ordinary_kernel<NORM>), dim3(kValueHeads* kOrdinaryRowTiles), dim3(kOrdinaryBlock), 0,    \
+        stream, static_cast<const hip_bfloat16*>(q.data),                                          \
+        static_cast<const hip_bfloat16*>(k.data), static_cast<const hip_bfloat16*>(v.data),        \
+        static_cast<const float*>(g.data), static_cast<const float*>(beta.data),                   \
+        static_cast<const float*>(state_in.data), static_cast<float*>(state_out.data),             \
+        static_cast<hip_bfloat16*>(out.data),                                                      \
+        prefix_state == nullptr ? nullptr : static_cast<float*>(prefix_state->data),               \
+        prefix_tokens, geometry.width, scale)
+    if (normalize_qk) {
+        NINFER_LAUNCH_ORDINARY(true);
+    } else {
+        NINFER_LAUNCH_ORDINARY(false);
+    }
 #undef NINFER_LAUNCH_ORDINARY
     HIP_CHECK(hipGetLastError());
 }
 
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk,
-                     const Tensor& state_in, Tensor& state_out, Tensor& out, hipStream_t stream) {
-    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, state_in, state_out, out,
-                         nullptr, 0, stream);
+                     const Tensor& beta, float scale, bool normalize_qk, const Tensor& state_in,
+                     Tensor& state_out, Tensor& out, hipStream_t stream) {
+    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, state_in, state_out, out, nullptr,
+                         0, stream);
 }
 
-void gated_delta_net_trace_prefix_state(
-    const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g, const Tensor& beta,
-    float scale, bool normalize_qk, Tensor& state, Tensor& out,
-    Tensor& prefix_state, std::int32_t prefix_tokens, hipStream_t stream) {
-    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, state, state, out,
-                         &prefix_state, prefix_tokens, stream);
+void gated_delta_net_trace_prefix_state(const Tensor& q, const Tensor& k, const Tensor& v,
+                                        const Tensor& g, const Tensor& beta, float scale,
+                                        bool normalize_qk, Tensor& state, Tensor& out,
+                                        Tensor& prefix_state, std::int32_t prefix_tokens,
+                                        hipStream_t stream) {
+    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, state, state, out, &prefix_state,
+                         prefix_tokens, stream);
 }
 
 void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                              const Tensor& beta, float scale, bool normalize_qk,
-                              Tensor& states, const Tensor& valid_columns,
-                              const Tensor& initial_slots, const Tensor& snapshot_bases,
-                              Tensor& out, hipStream_t stream, const CacheWarm& warm) {
+                              const Tensor& beta, float scale, bool normalize_qk, Tensor& states,
+                              const Tensor& valid_columns, const Tensor& initial_slots,
+                              const Tensor& snapshot_bases, Tensor& out, hipStream_t stream,
+                              const CacheWarm& warm) {
     const Geometry geometry =
         validate_inputs(q, k, v, g, beta, scale, out, q.ne[3], kMaximumVerifyWidth);
     if (states.ne[3] < 1) { throw std::invalid_argument("gated_delta_net: empty state pool"); }
@@ -390,20 +383,24 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
     disjoint({&q, &k, &v, &g, &beta, &out, &states, &valid_columns, &snapshot_bases});
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
     const unsigned snapshot_ctas = static_cast<unsigned>(geometry.batch * kValueHeads);
-#define NINFER_LAUNCH_SNAPSHOT(NORM) \
-    hipLaunchKernelGGL((snapshot_kernel<NORM>), \
-                       dim3(snapshot_ctas + cache_warm_ctas(warm, kBlock, snapshot_ctas)), dim3(kBlock), \
-                       0, stream, static_cast<const hip_bfloat16*>(q.data), \
-                       static_cast<const hip_bfloat16*>(k.data), static_cast<const hip_bfloat16*>(v.data), \
-                       static_cast<const float*>(g.data), static_cast<const float*>(beta.data), \
-                       static_cast<float*>(states.data), \
-                       empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data), \
-                       static_cast<const std::int32_t*>(initial_slots.data), \
-                       static_cast<const std::int32_t*>(snapshot_bases.data), \
-                       static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale, \
-                       warm, snapshot_ctas)
-    if (normalize_qk) { NINFER_LAUNCH_SNAPSHOT(true); }
-    else { NINFER_LAUNCH_SNAPSHOT(false); }
+#define NINFER_LAUNCH_SNAPSHOT(NORM)                                                               \
+    hipLaunchKernelGGL(                                                                            \
+        (snapshot_kernel<NORM>),                                                                   \
+        dim3(snapshot_ctas + cache_warm_ctas(warm, kBlock, snapshot_ctas)), dim3(kBlock), 0,       \
+        stream, static_cast<const hip_bfloat16*>(q.data),                                          \
+        static_cast<const hip_bfloat16*>(k.data), static_cast<const hip_bfloat16*>(v.data),        \
+        static_cast<const float*>(g.data), static_cast<const float*>(beta.data),                   \
+        static_cast<float*>(states.data),                                                          \
+        empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data),     \
+        static_cast<const std::int32_t*>(initial_slots.data),                                      \
+        static_cast<const std::int32_t*>(snapshot_bases.data),                                     \
+        static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale, warm,           \
+        snapshot_ctas)
+    if (normalize_qk) {
+        NINFER_LAUNCH_SNAPSHOT(true);
+    } else {
+        NINFER_LAUNCH_SNAPSHOT(false);
+    }
 #undef NINFER_LAUNCH_SNAPSHOT
     HIP_CHECK(hipGetLastError());
 }
@@ -440,10 +437,10 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
     require_selector(initial_slots, geometry.batch, "initial_slots", false);
     require_tensor(key_record, DType::BF16, {kDim, kQHeads, geometry.width, geometry.batch},
                    "key_record");
-    require_tensor(value_record, DType::BF16,
-                   {kDim, kValueHeads, geometry.width, geometry.batch}, "value_record");
-    require_tensor(gate_record, DType::FP32,
-                   {2, kValueHeads, geometry.width, geometry.batch}, "gate_record");
+    require_tensor(value_record, DType::BF16, {kDim, kValueHeads, geometry.width, geometry.batch},
+                   "value_record");
+    require_tensor(gate_record, DType::FP32, {2, kValueHeads, geometry.width, geometry.batch},
+                   "gate_record");
     const bool tree = parent_index != nullptr && !empty(*parent_index);
     if (tree) {
         require_tensor(*parent_index, DType::I32, {geometry.width, geometry.batch}, "parent_index");
@@ -451,8 +448,18 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
             throw std::invalid_argument("gated_delta_net replay: tree mode requires workspace");
         }
     }
-    std::vector<const Tensor*> tensors{&q, &k, &v, &g, &beta, &states, &valid_columns,
-                                       &initial_slots, &key_record, &value_record, &gate_record, &out};
+    std::vector<const Tensor*> tensors{&q,
+                                       &k,
+                                       &v,
+                                       &g,
+                                       &beta,
+                                       &states,
+                                       &valid_columns,
+                                       &initial_slots,
+                                       &key_record,
+                                       &value_record,
+                                       &gate_record,
+                                       &out};
     if (tree) { tensors.push_back(parent_index); }
     disjoint(tensors);
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
@@ -460,33 +467,34 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
         static_cast<unsigned>(geometry.batch * kValueHeads * kOrdinaryRowTiles);
     const dim3 record_grid(record_ctas + cache_warm_ctas(warm, kOrdinaryBlock, record_ctas));
     if (tree) {
-        auto scope = workspace->scope();
+        auto scope              = workspace->scope();
         const std::size_t bytes = gated_delta_net_replay_record_workspace_capacity_bytes(
             kValueHeads, geometry.batch, geometry.width);
         float* scratch = static_cast<float*>(workspace->alloc_bytes(bytes).data);
-        hipLaunchKernelGGL((record_kernel<true>), record_grid, dim3(kOrdinaryBlock),
-                           0, stream, static_cast<const hip_bfloat16*>(q.data),
-                           static_cast<const hip_bfloat16*>(k.data),
-                           static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
-                           static_cast<const float*>(beta.data), static_cast<const float*>(states.data),
-                           empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data),
-                           static_cast<const std::int32_t*>(initial_slots.data),
-                           static_cast<const std::int32_t*>(parent_index->data), scratch,
-                           static_cast<hip_bfloat16*>(key_record.data),
-                           static_cast<hip_bfloat16*>(value_record.data),
-                           static_cast<float*>(gate_record.data), static_cast<hip_bfloat16*>(out.data),
-                           geometry.width, states.ne[3], scale, warm, record_ctas);
+        hipLaunchKernelGGL(
+            (record_kernel<true>), record_grid, dim3(kOrdinaryBlock), 0, stream,
+            static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
+            static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
+            static_cast<const float*>(beta.data), static_cast<const float*>(states.data),
+            empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data),
+            static_cast<const std::int32_t*>(initial_slots.data),
+            static_cast<const std::int32_t*>(parent_index->data), scratch,
+            static_cast<hip_bfloat16*>(key_record.data),
+            static_cast<hip_bfloat16*>(value_record.data), static_cast<float*>(gate_record.data),
+            static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale, warm,
+            record_ctas);
     } else {
-        hipLaunchKernelGGL((record_kernel<false>), record_grid, dim3(kOrdinaryBlock), 0, stream, static_cast<const hip_bfloat16*>(q.data),
-                           static_cast<const hip_bfloat16*>(k.data),
-                           static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
-                           static_cast<const float*>(beta.data), static_cast<const float*>(states.data),
-                           empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data),
-                           static_cast<const std::int32_t*>(initial_slots.data), nullptr, nullptr,
-                           static_cast<hip_bfloat16*>(key_record.data),
-                           static_cast<hip_bfloat16*>(value_record.data),
-                           static_cast<float*>(gate_record.data), static_cast<hip_bfloat16*>(out.data),
-                           geometry.width, states.ne[3], scale, warm, record_ctas);
+        hipLaunchKernelGGL(
+            (record_kernel<false>), record_grid, dim3(kOrdinaryBlock), 0, stream,
+            static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
+            static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
+            static_cast<const float*>(beta.data), static_cast<const float*>(states.data),
+            empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data),
+            static_cast<const std::int32_t*>(initial_slots.data), nullptr, nullptr,
+            static_cast<hip_bfloat16*>(key_record.data),
+            static_cast<hip_bfloat16*>(value_record.data), static_cast<float*>(gate_record.data),
+            static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale, warm,
+            record_ctas);
     }
     HIP_CHECK(hipGetLastError());
 }

@@ -28,10 +28,11 @@ struct GdnReplayFoldRow {
  *
  * linear_state_slot is in [0,states.spec.slot_count), is distinct across rows that fold (commit or
  * path length nonzero), and is the same absolute slot used to produce that row's records.
- * commit_columns is in [0,T] and is the linear/MTP packed prefix. Zero is a strict no-op for the row: no record or state is read and
- * neither recurrent state nor convolution history is written. path_length < 0 keeps that prefix
- * behavior: the Op consumes raw key/value/{g,beta} records in packed order [0,commit_columns) and
- * sets convolution history to tail_3(old_history || conv_record[0:commit_columns]).
+ * commit_columns is in [0,T] and is the linear/MTP packed prefix. Zero is a strict no-op for the
+ * row: no record or state is read and neither recurrent state nor convolution history is written.
+ * path_length < 0 keeps that prefix behavior: the Op consumes raw key/value/{g,beta} records in
+ * packed order [0,commit_columns) and sets convolution history to tail_3(old_history ||
+ * conv_record[0:commit_columns]).
  *
  * path_length == 0 is also a strict no-op. path_length > 0 replays records at
  * path[0], path[1], ..., path[path_length-1] in that time order. Each path[i] is in [0,T). The
@@ -55,6 +56,7 @@ struct GdnDeferredFoldRow {
     std::int32_t record_row        = 0;
     std::int32_t reserved          = 0;
 };
+
 struct GdnDeferredFoldRows {
     std::array<GdnDeferredFoldRow, 8> row{};
 };
@@ -68,9 +70,9 @@ struct GdnLayerFold {
     const GdnReplayRecords* records = nullptr;
     Tensor recurrent;
     Tensor conv;
-    std::int32_t layer             = 0;
+    std::int32_t layer              = 0;
     const GdnDeferredFoldRows* rows = nullptr;
-    std::int32_t batch             = 0;
+    std::int32_t batch              = 0;
 };
 
 /**

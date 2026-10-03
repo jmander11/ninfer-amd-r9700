@@ -114,9 +114,7 @@ def test_row_scaled_geometry_is_distinct_and_k128_padded():
         geometry.scale_bytes,
         geometry.payload_bytes,
     ) == (256, 256, 768, 4, 768, 12, 780)
-    assert encoded_size(
-        "row-scaled-k128-v1", "F8E4M3_ROW_F32S", (3, 129)
-    ) == 780
+    assert encoded_size("row-scaled-k128-v1", "F8E4M3_ROW_F32S", (3, 129)) == 780
 
     with pytest.raises(ValueError, match="does not accept"):
         encoded_size("row-split-k128-v1", "F8E4M3_ROW_F32S", (3, 129))
@@ -138,9 +136,7 @@ def test_row_scaled_geometry_is_distinct_and_k128_padded():
         ("W8G32_F16S", 33, (-127, -1, 0, 1, 127), b"\x81\xff\x00\x01\x7f", b""),
     ],
 )
-def test_row_split_plane_bit_order_and_round_trip(
-    format_name, k, prefix, base_prefix, high_prefix
-):
+def test_row_split_plane_bit_order_and_round_trip(format_name, k, prefix, base_prefix, high_prefix):
     geometry = row_split_geometry(format_name, (1, k))
     group_size = geometry.k_pad // geometry.groups_per_row
     codes = torch.zeros((1, geometry.groups_per_row, group_size), dtype=torch.int8)
@@ -157,13 +153,11 @@ def test_row_split_plane_bit_order_and_round_trip(
     assert payload[geometry.base_bytes : geometry.high_offset] == bytes(
         geometry.high_offset - geometry.base_bytes
     )
-    assert payload[
-        geometry.high_offset + geometry.high_bytes : geometry.scale_offset
-    ] == bytes(geometry.scale_offset - geometry.high_offset - geometry.high_bytes)
-
-    decoded_scales, decoded_codes = decode_row_split_codes(
-        payload, format_name, (1, k)
+    assert payload[geometry.high_offset + geometry.high_bytes : geometry.scale_offset] == bytes(
+        geometry.scale_offset - geometry.high_offset - geometry.high_bytes
     )
+
+    decoded_scales, decoded_codes = decode_row_split_codes(payload, format_name, (1, k))
     assert torch.equal(decoded_scales, scales)
     assert torch.equal(decoded_codes, codes)
 
@@ -191,18 +185,20 @@ def test_q4_row_split_is_an_exact_permutation_of_n16k16():
     shape = (32, 130)
     geometry = q4_n16k16_geometry(shape)
     generator = torch.Generator().manual_seed(3)
-    codes = torch.randint(-8, 8, (32, geometry.groups_per_row, 64), dtype=torch.int8,
-                          generator=generator)
-    codes[:, 2, 130 - 128:] = 0  # K padding (features 130..255) codes are zero
+    codes = torch.randint(
+        -8, 8, (32, geometry.groups_per_row, 64), dtype=torch.int8, generator=generator
+    )
+    codes[:, 2, 130 - 128 :] = 0  # K padding (features 130..255) codes are zero
     codes[:, 3] = 0
     scales = (torch.rand((32, geometry.groups_per_row), generator=generator) + 0.01).half()
     rows = encode_row_split(codes, scales, "Q4G64_F16S", shape)
     tiled = encode_q4_n16k16(codes, scales, shape)
     assert encoded_size("row-split-k128-v1", "Q4G64_F16S", shape) == len(rows) == len(tiled)
     # Row r's codes are one contiguous run and its scales follow the aligned code plane.
-    assert rows[5 * geometry.groups_per_row * 32:6 * geometry.groups_per_row * 32] == bytes(
+    assert rows[5 * geometry.groups_per_row * 32 : 6 * geometry.groups_per_row * 32] == bytes(
         (int(codes[5].flatten()[2 * i]) & 15) | ((int(codes[5].flatten()[2 * i + 1]) & 15) << 4)
-        for i in range(geometry.groups_per_row * 32))
+        for i in range(geometry.groups_per_row * 32)
+    )
     decoded_scales, decoded_codes = decode_row_split_codes(rows, "Q4G64_F16S", shape)
     assert torch.equal(decoded_scales, scales) and torch.equal(decoded_codes, codes)
     assert b"".join(transcode_q4_n16k16(rows, shape)) == tiled
@@ -250,25 +246,19 @@ def test_consecutive_views_arbitrary_gathers_and_standalone_assembly():
     )
     assert torch.equal(gathered_scales, scales[[3, 1]])
     assert torch.equal(gathered_codes, codes[[3, 1]])
-    expected = (
-        codes[[3, 1]].float() * scales[[3, 1]].float().unsqueeze(-1)
-    ).reshape(2, geometry.k_pad)[:, : shape[1]]
-    actual = dequantize_row_split(
-        gathered, format_name, (2, shape[1]), dtype=torch.float32
-    )
+    expected = (codes[[3, 1]].float() * scales[[3, 1]].float().unsqueeze(-1)).reshape(
+        2, geometry.k_pad
+    )[:, : shape[1]]
+    actual = dequantize_row_split(gathered, format_name, (2, shape[1]), dtype=torch.float32)
     assert torch.equal(actual, expected)
 
     resident = torch.frombuffer(bytearray(payload), dtype=torch.uint8)
-    tensor_gather = gather_row_planes(
-        resident, geometry, torch.tensor([2, 0], dtype=torch.long)
-    )
+    tensor_gather = gather_row_planes(resident, geometry, torch.tensor([2, 0], dtype=torch.long))
     assert all(
         isinstance(plane, torch.Tensor)
         for plane in (tensor_gather.base, tensor_gather.high, tensor_gather.scale)
     )
     tensor_payload = assemble_row_planes(tensor_gather, format_name, shape[1])
-    tensor_scales, tensor_codes = decode_row_split_codes(
-        tensor_payload, format_name, (2, shape[1])
-    )
+    tensor_scales, tensor_codes = decode_row_split_codes(tensor_payload, format_name, (2, shape[1]))
     assert torch.equal(tensor_scales, scales[[2, 0]])
     assert torch.equal(tensor_codes, codes[[2, 0]])

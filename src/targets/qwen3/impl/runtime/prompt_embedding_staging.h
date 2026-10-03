@@ -39,10 +39,12 @@ public:
         ~Lease();
 
         [[nodiscard]] const ops::StagedEmbedding& view() const noexcept { return view_; }
+
         void end();
 
     private:
         friend class PromptEmbeddingStaging;
+
         Lease(PromptEmbeddingStaging& owner, ops::StagedEmbedding view) noexcept
             : owner_(&owner), view_(view) {}
 
@@ -58,6 +60,7 @@ public:
 
     [[nodiscard]] static std::uint64_t capacity_bytes(QType qtype, std::int32_t features,
                                                       std::int32_t capacity_ids);
+
     [[nodiscard]] std::int32_t capacity_ids() const noexcept { return capacity_ids_; }
 
     // Makes the rows of `window` resident, staging them now unless the current image begins with
@@ -77,11 +80,11 @@ private:
     DeviceSpan device_image_;
     std::int32_t capacity_ids_ = 0;
     PinnedHostBuffer host_image_;
-    hipEvent_t copied_   = nullptr;
-    hipEvent_t released_ = nullptr;
-    bool copy_recorded_     = false;
-    bool release_recorded_  = false;
-    bool leased_            = false;
+    hipEvent_t copied_     = nullptr;
+    hipEvent_t released_   = nullptr;
+    bool copy_recorded_    = false;
+    bool release_recorded_ = false;
+    bool leased_           = false;
     std::vector<std::int32_t> staged_ids_;
     ops::EmbeddingStage stage_{};
 };

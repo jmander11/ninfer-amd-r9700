@@ -47,7 +47,9 @@ std::string between(const std::string& text, const std::string& start, const std
 
 struct CommaDecimal : std::numpunct<char> {
     char do_decimal_point() const override { return ','; }
+
     char do_thousands_sep() const override { return '.'; }
+
     std::string do_grouping() const override { return "\3"; }
 };
 
@@ -58,20 +60,20 @@ GenerationOutcome success_outcome() {
     outcome.reasoning_tokens  = 0;
     outcome.finish_reason     = ninfer::FinishReason::StopToken;
     outcome.tool_calls.resize(2);
-    outcome.metrics.speculative_backend          = ninfer::SpeculativeBackend::Mtp;
-    outcome.metrics.speculative_accepted_tokens  = 6;
-    outcome.metrics.speculative_draft_tokens     = 12;
-    outcome.metrics.speculative_rounds           = 3;
-    outcome.metrics.prefix_cache_hit_tokens      = 40;
-    outcome.metrics.prefix_reuse_path            = ninfer::PrefixReusePath::AppendAtFrontier;
-    outcome.metrics.prefix_reuse_source          = ninfer::PrefixReuseSource::HostRam;
-    outcome.metrics.recovery.cycle_exclusions    = 4;
-    outcome.metrics.queued_seconds               = 0.2;
-    outcome.metrics.copy_hold_seconds            = 0.05;
-    outcome.metrics.decode_seconds               = 1.0;
-    outcome.metrics.ttft_seconds                 = 0.3;
-    outcome.metrics.total_seconds                = 1.4;
-    outcome.metrics.prefill_seconds              = 0.1;
+    outcome.metrics.speculative_backend         = ninfer::SpeculativeBackend::Mtp;
+    outcome.metrics.speculative_accepted_tokens = 6;
+    outcome.metrics.speculative_draft_tokens    = 12;
+    outcome.metrics.speculative_rounds          = 3;
+    outcome.metrics.prefix_cache_hit_tokens     = 40;
+    outcome.metrics.prefix_reuse_path           = ninfer::PrefixReusePath::AppendAtFrontier;
+    outcome.metrics.prefix_reuse_source         = ninfer::PrefixReuseSource::HostRam;
+    outcome.metrics.recovery.cycle_exclusions   = 4;
+    outcome.metrics.queued_seconds              = 0.2;
+    outcome.metrics.copy_hold_seconds           = 0.05;
+    outcome.metrics.decode_seconds              = 1.0;
+    outcome.metrics.ttft_seconds                = 0.3;
+    outcome.metrics.total_seconds               = 1.4;
+    outcome.metrics.prefill_seconds             = 0.1;
     return outcome;
 }
 
@@ -90,8 +92,8 @@ int main() {
     ninfer::serve::ServeOptions options;
     options.speculative.backend = ninfer::SpeculativeBackend::Mtp;
     ninfer::MemorySummary memory;
-    memory.device_graph_observed_bytes    = 3u << 20;
-    memory.available_after_startup_bytes  = 5u << 20;
+    memory.device_graph_observed_bytes   = 3u << 20;
+    memory.available_after_startup_bytes = 5u << 20;
     ninfer::serve::ServerLogEnvironment environment;
     environment.architecture_name         = "gfx1201";
     environment.hip_runtime_version       = "7.0.0";
@@ -103,27 +105,30 @@ int main() {
     inputs.stats.gpu_kv_main_capacity_pages = 128;
     inputs.stats.gpu_kv_main_entitled_pages = 40;
     inputs.stats.gpu_kv_spec_capacity_pages = 16;
-    const auto snapshot    = metrics.snapshot(inputs);
-    const std::string text = snapshot.prometheus_text();
+    const auto snapshot                     = metrics.snapshot(inputs);
+    const std::string text                  = snapshot.prometheus_text();
 
-    failures += check(text.find("# HELP ninfer_engine_info ") != std::string::npos &&
-                          text.find("# HELP ninfer_engine_info ") < text.find("# TYPE ninfer_engine_info "),
-                      "HELP does not precede TYPE");
+    failures +=
+        check(text.find("# HELP ninfer_engine_info ") != std::string::npos &&
+                  text.find("# HELP ninfer_engine_info ") < text.find("# TYPE ninfer_engine_info "),
+              "HELP does not precede TYPE");
     failures += check(contains(text, "le=\"+Inf\""), "histogram is missing +Inf");
-    failures += check(
-        contains(text, "ninfer_gpu_kv_pages{pool=\"main\",state=\"entitled\"} 40\n") &&
-            contains(text, "ninfer_gpu_kv_capacity_tokens{pool=\"main\"} 8192\n") &&
-            contains(text, "ninfer_gpu_kv_capacity_tokens{pool=\"spec\"} 1024\n"),
-        "device KV pool pages are not rendered from RuntimeStats");
+    failures +=
+        check(contains(text, "ninfer_gpu_kv_pages{pool=\"main\",state=\"entitled\"} 40\n") &&
+                  contains(text, "ninfer_gpu_kv_capacity_tokens{pool=\"main\"} 8192\n") &&
+                  contains(text, "ninfer_gpu_kv_capacity_tokens{pool=\"spec\"} 1024\n"),
+              "device KV pool pages are not rendered from RuntimeStats");
     failures += check(contains(text, "le=\"0.005\""), "histogram bound is not locale-independent");
     failures += check(contains(text, "model_id=\"id \\\"quoted\\\"\\nline\""),
                       "label escaping dropped quote or newline");
-    failures += check(contains(text, "kv_cache_format=\"fp8-k-int4-v\"") &&
-                          contains(text, "gpu_arch=\"gfx1201\"") &&
-                          contains(text, "ninfer_device_graph_observed_bytes 3145728\n") &&
-                          contains(text, "ninfer_device_memory_bytes{kind=\"total\"} 34359738368\n") &&
-                          contains(text, "ninfer_device_memory_bytes{kind=\"available_after_startup\"} 5242880\n"),
-                      "AMD engine identity or startup device memory missing");
+    failures += check(
+        contains(text, "kv_cache_format=\"fp8-k-int4-v\"") &&
+            contains(text, "gpu_arch=\"gfx1201\"") &&
+            contains(text, "ninfer_device_graph_observed_bytes 3145728\n") &&
+            contains(text, "ninfer_device_memory_bytes{kind=\"total\"} 34359738368\n") &&
+            contains(text,
+                     "ninfer_device_memory_bytes{kind=\"available_after_startup\"} 5242880\n"),
+        "AMD engine identity or startup device memory missing");
     failures += check(!contains(text, "cuda") && !contains(text, "nvfp4") &&
                           !contains(text, "xattn_tau") && !contains(text, "keep_frac"),
                       "exposition names an NVIDIA-only concept");
@@ -134,9 +139,9 @@ int main() {
                       "phase histogram sum is missing");
 
     inputs.stats.kv_cache_fallbacks = 10;
-    const std::string first = metrics.snapshot(inputs).prometheus_text();
+    const std::string first         = metrics.snapshot(inputs).prometheus_text();
     inputs.stats.kv_cache_fallbacks = 20;
-    const std::string second = metrics.snapshot(inputs).prometheus_text();
+    const std::string second        = metrics.snapshot(inputs).prometheus_text();
     failures += check(contains(second, "ninfer_kv_cache_fallbacks_total 20\n") &&
                           !contains(second, "ninfer_kv_cache_fallbacks_total 30"),
                       "absolute counter accumulated across scrapes");
@@ -161,7 +166,8 @@ int main() {
         failures += check(contains(fresh, std::string("phase=\"") + phase + "\""),
                           "fresh render is missing a phase");
     }
-    failures += check(contains(fresh, "path=\"append_frontier\"") && contains(fresh, "source=\"host_ram\"") &&
+    failures += check(contains(fresh, "path=\"append_frontier\"") &&
+                          contains(fresh, "source=\"host_ram\"") &&
                           contains(fresh, "kind=\"cycle_exclusion\"") &&
                           contains(fresh, "reason=\"tool_calls\"") &&
                           contains(fresh, "code=\"invalid_api_key\"") &&
@@ -169,7 +175,7 @@ int main() {
                           contains(fresh, "k=\"1\"}") && contains(fresh, "k=\"15\"}"),
                       "fresh render is missing a closed label");
 
-    GenerationOutcome outcome = success_outcome();
+    GenerationOutcome outcome                         = success_outcome();
     outcome.metrics.speculative_accepted_per_position = {1, 2};
     outcome.metrics.speculative_rounds_per_draft      = {0, 3};
     outcome.metrics.speculative_live_draft_tokens     = 4;
@@ -181,22 +187,24 @@ int main() {
     const std::string observed = metrics.snapshot(inputs).prometheus_text();
     failures += check(contains(observed, "ninfer_speculative_accepted_tokens_total 6\n"),
                       "accepted tokens were not recorded");
-    failures += check(contains(observed, "ninfer_prefix_cache_hit_tokens_total{source=\"host_ram\"} 40\n"),
-                      "prefix hit tokens were not recorded");
+    failures +=
+        check(contains(observed, "ninfer_prefix_cache_hit_tokens_total{source=\"host_ram\"} 40\n"),
+              "prefix hit tokens were not recorded");
     failures += check(contains(observed, "ninfer_recovery_cycle_exclusions_total 4\n"),
                       "cycle exclusions were logged instead of counted");
     failures += check(contains(observed, "ninfer_generation_tool_calls_total 2\n"),
                       "tool calls were not recorded");
-    failures += check(contains(observed, "ninfer_generation_phase_seconds_count{phase=\"queue\"} 1\n") &&
-                          contains(observed, "ninfer_generation_phase_seconds_count{phase=\"copy_hold\"} 1\n") &&
-                          contains(observed, "ninfer_generation_phase_seconds_count{phase=\"decode\"} 1\n"),
-                      "phase histogram did not observe queue copy_hold and decode");
+    failures += check(
+        contains(observed, "ninfer_generation_phase_seconds_count{phase=\"queue\"} 1\n") &&
+            contains(observed, "ninfer_generation_phase_seconds_count{phase=\"copy_hold\"} 1\n") &&
+            contains(observed, "ninfer_generation_phase_seconds_count{phase=\"decode\"} 1\n"),
+        "phase histogram did not observe queue copy_hold and decode");
     const std::string decode_le_1 = between(
         observed, "ninfer_generation_phase_seconds_bucket{le=\"0.5\",phase=\"decode\"} ", "\n");
     const std::string decode_le_2 = between(
         observed, "ninfer_generation_phase_seconds_bucket{le=\"2.5\",phase=\"decode\"} ", "\n");
-    failures += check(decode_le_1 == "0" && decode_le_2 == "1",
-                      "histogram buckets are not cumulative");
+    failures +=
+        check(decode_le_1 == "0" && decode_le_2 == "1", "histogram buckets are not cumulative");
 
     for (const std::uint32_t exclusions : {1U, 2U, 4U}) {
         ninfer::RecoveryEvent event;
@@ -211,8 +219,9 @@ int main() {
     metrics.observe_generation(terminal);
     const std::string recovery = metrics.snapshot(inputs).prometheus_text();
     failures += check(
-        contains(recovery,
-                 "ninfer_recovery_events_total{cause=\"reasoning_cycle\",kind=\"cycle_exclusion\"} 3\n"),
+        contains(
+            recovery,
+            "ninfer_recovery_events_total{cause=\"reasoning_cycle\",kind=\"cycle_exclusion\"} 3\n"),
         "cycle exclusion events were not counted once each");
     failures += check(contains(recovery, "ninfer_recovery_cycle_exclusions_total 8\n"),
                       "terminal cycle exclusions did not add the true total");
@@ -235,10 +244,10 @@ int main() {
         "exhausted causes did not map to the closed set");
 
     GenerationOutcome skipped;
-    skipped.prompt_tokens          = 32;
-    skipped.completion_tokens      = 1;
-    skipped.metrics.decode_seconds = 0;
-    skipped.metrics.prefill_seconds = 0;
+    skipped.prompt_tokens                   = 32;
+    skipped.completion_tokens               = 1;
+    skipped.metrics.decode_seconds          = 0;
+    skipped.metrics.prefill_seconds         = 0;
     skipped.metrics.prefix_cache_hit_tokens = 32;
     GenerationObservation skip;
     skip.result  = GenerationResult::Success;
@@ -246,20 +255,24 @@ int main() {
     ServeMetrics skip_metrics;
     skip_metrics.observe_generation(skip);
     const std::string skipped_text = skip_metrics.snapshot({}).prometheus_text();
-    failures += check(contains(skipped_text, "ninfer_generation_output_tokens_per_second_count 0\n") &&
-                          contains(skipped_text, "ninfer_generation_inter_token_latency_seconds_count{protocol=\"openai_chat\"} 0\n") &&
-                          contains(skipped_text, "ninfer_generation_phase_seconds_count{phase=\"prefill\"} 0\n"),
-                      "zero decode or a full prefix hit observed a sample");
+    failures += check(
+        contains(skipped_text, "ninfer_generation_output_tokens_per_second_count 0\n") &&
+            contains(skipped_text, "ninfer_generation_inter_token_latency_seconds_count{protocol="
+                                   "\"openai_chat\"} 0\n") &&
+            contains(skipped_text, "ninfer_generation_phase_seconds_count{phase=\"prefill\"} 0\n"),
+        "zero decode or a full prefix hit observed a sample");
 
     const std::string json_text = metrics.snapshot(inputs).json();
-    const auto json = nlohmann::json::parse(json_text);
+    const auto json             = nlohmann::json::parse(json_text);
     for (const char* key : {"engine", "build", "scheduler", "http", "gpu_kv", "kv_ram", "kv_disk",
                             "prefix_reuse", "speculative", "recovery", "generation", "phases",
                             "response_store", "device_memory", "start_time_unix_s"}) {
         failures += check(json.contains(key), "metrics json is missing a required key");
     }
-    failures += check(json.at("kv_ram").at("used_bytes") == 4096, "kv_ram.used_bytes drifted from the snapshot");
-    failures += check(json.at("phases").at("decode").at("count") == 1, "phases.decode.count drifted from the fixture");
+    failures += check(json.at("kv_ram").at("used_bytes") == 4096,
+                      "kv_ram.used_bytes drifted from the snapshot");
+    failures += check(json.at("phases").at("decode").at("count") == 1,
+                      "phases.decode.count drifted from the fixture");
     failures += check(json.at("device_memory").at("total") == 34359738368.0 &&
                           json.at("device_memory").at("graph_observed") == 3145728.0,
                       "device_memory drifted from the startup snapshot");
@@ -272,22 +285,24 @@ int main() {
 
     // Prefill throughput is thousands of tokens per second; it must land in a finite bucket.
     ServeMetrics rate_metrics;
-    GenerationOutcome prefill = success_outcome();
+    GenerationOutcome prefill          = success_outcome();
     prefill.metrics.prefill_tail_tok_s = 7000.0;
     GenerationObservation rate;
     rate.outcome = &prefill;
     rate_metrics.observe_generation(rate);
     const std::string rate_text = rate_metrics.snapshot({}).prometheus_text();
-    failures += check(contains(rate_text,
-                               "ninfer_generation_prefill_tokens_per_second_bucket{le=\"6000\"} 0\n") &&
-                          contains(rate_text,
-                                   "ninfer_generation_prefill_tokens_per_second_bucket{le=\"8000\"} 1\n"),
-                      "prefill tokens per second has no finite bucket at real rates");
+    failures +=
+        check(contains(rate_text,
+                       "ninfer_generation_prefill_tokens_per_second_bucket{le=\"6000\"} 0\n") &&
+                  contains(rate_text,
+                           "ninfer_generation_prefill_tokens_per_second_bucket{le=\"8000\"} 1\n"),
+              "prefill tokens per second has no finite bucket at real rates");
     // A 1 s decode over the fixture's 9-token completion is 0.1-0.25 s per token.
-    failures += check(
-        contains(rate_text, "ninfer_generation_inter_token_latency_seconds_bucket{le=\"0.1\",protocol=\"openai_chat\"} 0\n") &&
-            contains(rate_text, "ninfer_generation_inter_token_latency_seconds_bucket{le=\"0.25\",protocol=\"openai_chat\"} 1\n"),
-        "inter-token latency bucket drifted");
+    failures += check(contains(rate_text, "ninfer_generation_inter_token_latency_seconds_bucket{le="
+                                          "\"0.1\",protocol=\"openai_chat\"} 0\n") &&
+                          contains(rate_text, "ninfer_generation_inter_token_latency_seconds_"
+                                              "bucket{le=\"0.25\",protocol=\"openai_chat\"} 1\n"),
+                      "inter-token latency bucket drifted");
     failures += check(contains(rate_text, "ninfer_generation_prompt_tokens_bucket{le=\"262144\"}"),
                       "token histogram does not reach 262144");
 
@@ -308,18 +323,21 @@ int main() {
     event_metrics.observe_http("/v1/score", "POST", 400, 0.01);
     event_metrics.observe_http("/nope", "BREW", 999, 0.5);
     const std::string event_text = event_metrics.snapshot({}).prometheus_text();
-    failures += check(contains(event_text, "ninfer_api_errors_total{code=\"unknown_parameter\"} 1\n") &&
-                          contains(event_text, "ninfer_api_errors_total{code=\"unnamed\"} 1\n") &&
-                          contains(event_text, "ninfer_api_errors_total{code=\"other\"} 1\n"),
-                      "API error codes did not map to the closed set");
-    failures += check(contains(event_text, "ninfer_generation_media_requests_total 1\n") &&
-                          contains(event_text,
-                                   "ninfer_generation_requests_total{protocol=\"anthropic_messages\","
-                                   "result=\"error\",stream=\"true\",thinking=\"false\",tools=\"false\"} 1\n"),
-                      "a failed media generation was not counted");
-    failures += check(contains(event_text,
-                               "ninfer_token_count_requests_total{protocol=\"openai_responses\"} 1\n"),
-                      "token-count request was not counted");
+    failures +=
+        check(contains(event_text, "ninfer_api_errors_total{code=\"unknown_parameter\"} 1\n") &&
+                  contains(event_text, "ninfer_api_errors_total{code=\"unnamed\"} 1\n") &&
+                  contains(event_text, "ninfer_api_errors_total{code=\"other\"} 1\n"),
+              "API error codes did not map to the closed set");
+    failures += check(
+        contains(event_text, "ninfer_generation_media_requests_total 1\n") &&
+            contains(event_text,
+                     "ninfer_generation_requests_total{protocol=\"anthropic_messages\","
+                     "result=\"error\",stream=\"true\",thinking=\"false\",tools=\"false\"} 1\n"),
+        "a failed media generation was not counted");
+    failures +=
+        check(contains(event_text,
+                       "ninfer_token_count_requests_total{protocol=\"openai_responses\"} 1\n"),
+              "token-count request was not counted");
     failures += check(
         contains(event_text,
                  "ninfer_http_requests_total{method=\"POST\",protocol=\"openai_responses\","
@@ -330,11 +348,13 @@ int main() {
                                  "route=\"/v1/score\",status=\"400\"} 1\n") &&
             contains(event_text, "ninfer_http_requests_total{method=\"other\",protocol=\"other\","
                                  "route=\"other\",status=\"other\"} 1\n") &&
-            contains(event_text, "ninfer_http_request_duration_seconds_count{protocol=\"openai_responses\","
-                                 "route=\"/v1/responses/{id}/cancel\"} 2\n"),
+            contains(event_text,
+                     "ninfer_http_request_duration_seconds_count{protocol=\"openai_responses\","
+                     "route=\"/v1/responses/{id}/cancel\"} 2\n"),
         "HTTP requests were not classified by route, method, and status");
 
-    failures += check(ninfer::serve::metrics_protocol("openai_chat_completions") == MetricsProtocol::OpenAiChat &&
+    failures += check(ninfer::serve::metrics_protocol("openai_chat_completions") ==
+                              MetricsProtocol::OpenAiChat &&
                           ninfer::serve::metrics_protocol("openai_responses") ==
                               MetricsProtocol::OpenAiResponses &&
                           ninfer::serve::metrics_protocol("anthropic_messages") ==
@@ -349,9 +369,9 @@ int main() {
     auto routed = ninfer::serve::classify_http_route("/v1/responses/abc/cancel");
     failures += check(std::string(routed.route) == "/v1/responses/{id}/cancel",
                       "response cancel was not classified before the id route");
-    failures += check(std::string(ninfer::serve::classify_http_route("/v1/score").route) ==
-                          "/v1/score",
-                      "score route was not classified");
+    failures +=
+        check(std::string(ninfer::serve::classify_http_route("/v1/score").route) == "/v1/score",
+              "score route was not classified");
 
     httplib::Server server;
     server.Get("/metrics", [&](const httplib::Request&, httplib::Response& response) {

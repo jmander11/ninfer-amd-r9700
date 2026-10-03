@@ -54,8 +54,9 @@ def _overlaps(interval: tuple[int, int], begin: int, end: int) -> bool:
     return max(interval[0], begin) < min(interval[1], end)
 
 
-def _category(region: str, begin: int, end: int, measured: tuple[int, int],
-              text: list[tuple[int, int]]) -> str:
+def _category(
+    region: str, begin: int, end: int, measured: tuple[int, int], text: list[tuple[int, int]]
+) -> str:
     # rocprof assigns the nearest active ROCTX range to each asynchronous GPU
     # operation. That association, rather than timestamp containment in a host
     # range, is the execution-stage authority. In particular, an operation
@@ -64,8 +65,9 @@ def _category(region: str, begin: int, end: int, measured: tuple[int, int],
     # selected-range association.
     if region.startswith("ninfer.mtp.prefill."):
         return "mtp_prefill"
-    if region.startswith(("ninfer.attention.prefill.", "ninfer.gdn.prefill.",
-                          "ninfer.post-mixer.prefill.")):
+    if region.startswith(
+        ("ninfer.attention.prefill.", "ninfer.gdn.prefill.", "ninfer.post-mixer.prefill.")
+    ):
         return "base_text_prefill"
     if region.startswith("ninfer.prefill.prefill.chunk"):
         return "prefill_orchestration"
@@ -76,8 +78,9 @@ def _category(region: str, begin: int, end: int, measured: tuple[int, int],
     return "measured_other"
 
 
-def _intersections(begin: int, end: int,
-                   intervals: Iterable[tuple[int, int]]) -> Iterable[tuple[int, int]]:
+def _intersections(
+    begin: int, end: int, intervals: Iterable[tuple[int, int]]
+) -> Iterable[tuple[int, int]]:
     for parent_begin, parent_end in intervals:
         clipped_begin, clipped_end = max(begin, parent_begin), min(end, parent_end)
         if clipped_begin < clipped_end:
@@ -134,8 +137,12 @@ def _operator_family(name: str, marker_family: str) -> str:
     # generic spelling is not sufficient evidence by itself.
     if marker_family == "gdn" and any(
         needle in name
-        for needle in ("ordinary_kernel<", "snapshot_kernel<", "record_kernel<",
-                       "recurrent_kernel(")
+        for needle in (
+            "ordinary_kernel<",
+            "snapshot_kernel<",
+            "record_kernel<",
+            "recurrent_kernel(",
+        )
     ):
         return "gdn_recurrence"
     rules = (
@@ -163,6 +170,7 @@ def _ms(nanoseconds: int) -> float:
 
 def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
     from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
+
     report = json.loads(benchmark_report.read_text(encoding="utf-8"))
     validate_report_phase_timing(report)
     if report.get("artifact_type") != "ninfer_bench_report":
@@ -186,24 +194,36 @@ def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
     connection = sqlite3.connect(f"file:{database.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        tables = {row[0] for row in connection.execute(
-            "select name from sqlite_master where type in ('table','view')")}
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "select name from sqlite_master where type in ('table','view')"
+            )
+        }
         required = {"regions", "kernels", "memory_copies"}
         if not required <= tables:
             raise ValueError("rocprof database lacks regions, kernels, or memory_copies views")
-        region_rows = list(connection.execute(
-            'select start, "end", extdata from regions order by start'))
-        kernel_rows = list(connection.execute(
-            'select start, "end", duration, name, coalesce(region, "") region '
-            'from kernels order by start'))
-        copy_rows = list(connection.execute(
-            'select start, "end", duration, name, coalesce(region_name, "") region_name, size '
-            'from memory_copies order by start'))
+        region_rows = list(
+            connection.execute('select start, "end", extdata from regions order by start')
+        )
+        kernel_rows = list(
+            connection.execute(
+                'select start, "end", duration, name, coalesce(region, "") region '
+                "from kernels order by start"
+            )
+        )
+        copy_rows = list(
+            connection.execute(
+                'select start, "end", duration, name, coalesce(region_name, "") region_name, size '
+                "from memory_copies order by start"
+            )
+        )
     finally:
         connection.close()
 
-    regions = [((int(row["start"]), int(row["end"])), _message(row["extdata"]))
-               for row in region_rows]
+    regions = [
+        ((int(row["start"]), int(row["end"])), _message(row["extdata"])) for row in region_rows
+    ]
     measured_ranges = [interval for interval, message in regions if message == MEASURED]
     if len(measured_ranges) != 1:
         raise ValueError("trace must contain exactly one ninfer_bench_measured range")
@@ -236,9 +256,7 @@ def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
     symbols: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
     marker_families: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
     symbol_families: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
-    operator_attribution: dict[tuple[str, str, str, str], list[int]] = defaultdict(
-        lambda: [0, 0]
-    )
+    operator_attribution: dict[tuple[str, str, str, str], list[int]] = defaultdict(lambda: [0, 0])
     for row in kernel_rows:
         begin, end = int(row["start"]), int(row["end"])
         duration = int(row["duration"])
@@ -252,7 +270,8 @@ def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
         marker_family = _marker_family(region)
         symbol_family = _symbol_family(name)
         for mapping, key in (
-            (symbols, name), (marker_families, marker_family),
+            (symbols, name),
+            (marker_families, marker_family),
             (symbol_families, symbol_family),
         ):
             mapping[(category, key)][0] += 1
@@ -267,14 +286,20 @@ def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
 
     def aggregate(mapping: dict[tuple[str, str], list[int]], label: str) -> list[dict[str, Any]]:
         return [
-            {"execution_category": category, label: key, "calls": values[0],
-             "summed_duration_ms": _ms(values[1])}
+            {
+                "execution_category": category,
+                label: key,
+                "calls": values[0],
+                "summed_duration_ms": _ms(values[1]),
+            }
             for (category, key), values in sorted(
-                mapping.items(), key=lambda item: (-item[1][1], item[0]))
+                mapping.items(), key=lambda item: (-item[1][1], item[0])
+            )
         ]
 
-    def top_per_category(mapping: dict[tuple[str, str], list[int]], label: str,
-                         limit: int) -> list[dict[str, Any]]:
+    def top_per_category(
+        mapping: dict[tuple[str, str], list[int]], label: str, limit: int
+    ) -> list[dict[str, Any]]:
         result = []
         counts: dict[str, int] = defaultdict(int)
         for row in aggregate(mapping, label):
@@ -329,7 +354,8 @@ def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
         "database": str(database.resolve()),
         "benchmark_report": str(benchmark_report.resolve()),
         "workload": {
-            "kind": test["kind"], "prompt_tokens": prompt_tokens,
+            "kind": test["kind"],
+            "prompt_tokens": prompt_tokens,
             "generated_tokens": test.get("n_gen"),
             "concurrency": concurrency,
             "prefill_chunk": report.get("config", {}).get("prefill_chunk"),
@@ -342,9 +368,12 @@ def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
             "mtp_prefill_wall_ms": _ms(_duration_ns(mtp)),
         },
         "kernel_execution_categories": [
-            {"category": category, "calls": category_calls[category],
-             "independent_summed_duration_ms": _ms(category_sum[category]),
-             "active_union_ms": _ms(_duration_ns(category_intervals[category]))}
+            {
+                "category": category,
+                "calls": category_calls[category],
+                "independent_summed_duration_ms": _ms(category_sum[category]),
+                "active_union_ms": _ms(_duration_ns(category_intervals[category])),
+            }
             for category in sorted(category_calls)
         ],
         "prefill_stage_attribution": {
@@ -360,18 +389,29 @@ def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
         "prefill_kernel_active_wall_fraction": kernel_active_ns / text_wall_ns,
         "prefill_no_kernel_wall_interpretation": (
             "kernel-inactive wall gap only; marker/kernel/copy trace cannot separate host work "
-            "from true GPU idle"),
+            "from true GPU idle"
+        ),
         "memory_copy_categories": [
-            {"category": category, "calls": values[0], "bytes": values[1],
-             "independent_summed_duration_ms": _ms(values[2]),
-             "active_union_ms": _ms(_duration_ns(copy_intervals[category]))}
+            {
+                "category": category,
+                "calls": values[0],
+                "bytes": values[1],
+                "independent_summed_duration_ms": _ms(values[2]),
+                "active_union_ms": _ms(_duration_ns(copy_intervals[category])),
+            }
             for category, values in sorted(copy_stats.items())
         ],
         "memory_copy_kinds": [
-            {"execution_category": category, "name": name, "calls": values[0],
-             "bytes": values[1], "independent_summed_duration_ms": _ms(values[2])}
+            {
+                "execution_category": category,
+                "name": name,
+                "calls": values[0],
+                "bytes": values[1],
+                "independent_summed_duration_ms": _ms(values[2]),
+            }
             for (category, name), values in sorted(
-                copy_kinds.items(), key=lambda item: (-item[1][2], item[0]))
+                copy_kinds.items(), key=lambda item: (-item[1][2], item[0])
+            )
         ],
         "symbol_families": aggregate(symbol_families, "family"),
         "marker_families": aggregate(marker_families, "family"),
@@ -400,7 +440,8 @@ def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
         },
         "top_kernels": top_per_category(symbols, "name", 20),
         "duration_note": (
-            "independent sums may overlap across streams; active_union is wall-time union"),
+            "independent sums may overlap across streams; active_union is wall-time union"
+        ),
     }
 
 

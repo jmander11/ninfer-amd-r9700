@@ -33,7 +33,9 @@ def _flag(command: list[str], name: str) -> str:
 
 
 def _require_distinct_campaigns(
-    first: Path, second: Path, output: Path | None = None,
+    first: Path,
+    second: Path,
+    output: Path | None = None,
 ) -> None:
     first_resolved = first.resolve(strict=True)
     second_resolved = second.resolve(strict=True)
@@ -73,7 +75,8 @@ def load_campaign(path: Path) -> tuple[dict, dict[int, tuple[dict, Path]]]:
     if not isinstance(campaign_cells, list):
         raise ValueError(f"{path} lacks the exact reference-cell inventory")
     reference_cells = [
-        cell for cell in campaign_cells
+        cell
+        for cell in campaign_cells
         if isinstance(cell, dict) and cell.get("scheme") == run.BASELINE
     ]
     if len(reference_cells) != len(lengths) or len(campaign_cells) != len(lengths):
@@ -94,8 +97,7 @@ def load_campaign(path: Path) -> tuple[dict, dict[int, tuple[dict, Path]]]:
             and Path(command[0]).name.startswith("python")
             and isinstance(execution, dict)
             and isinstance(execution.get("python_executable"), str)
-            and Path(command[0]).resolve()
-            == Path(execution["python_executable"]).resolve()
+            and Path(command[0]).resolve() == Path(execution["python_executable"]).resolve()
         ):
             raise ValueError(f"{path} BF16 scorer command differs from its identity")
     if not scorer.is_file():
@@ -161,30 +163,35 @@ def compare(
     second_cells: dict[int, tuple[dict, Path]],
 ) -> dict:
     identity_fields = (
-        "model_id", "reference_weights_id", "reference_source", "reference_execution",
-        "corpus", "lengths", "skip", "prefill_chunk", "schedules", "spec",
-        "draft_tokens", "terrible_nll",
+        "model_id",
+        "reference_weights_id",
+        "reference_source",
+        "reference_execution",
+        "corpus",
+        "lengths",
+        "skip",
+        "prefill_chunk",
+        "schedules",
+        "spec",
+        "draft_tokens",
+        "terrible_nll",
     )
     missing_identity = [
-        field for field in identity_fields
+        field
+        for field in identity_fields
         if field not in first_payload or field not in second_payload
     ]
     if missing_identity:
-        raise ValueError(
-            "BF16 repeat campaign identity is missing: " + ", ".join(missing_identity)
-        )
+        raise ValueError("BF16 repeat campaign identity is missing: " + ", ".join(missing_identity))
     differing_identity = [
-        field for field in identity_fields
-        if first_payload[field] != second_payload[field]
+        field for field in identity_fields if first_payload[field] != second_payload[field]
     ]
     if "scorers" not in first_payload or "scorers" not in second_payload:
         raise ValueError("BF16 repeat campaign identity is missing: scorers")
     if first_payload["scorers"] != second_payload["scorers"]:
         differing_identity.append("scorers")
     if differing_identity:
-        raise ValueError(
-            "BF16 repeat campaign identity differs: " + ", ".join(differing_identity)
-        )
+        raise ValueError("BF16 repeat campaign identity differs: " + ", ".join(differing_identity))
 
     rows = []
     exact = True
@@ -197,8 +204,7 @@ def compare(
             missing = [field for field in run.BF16_SCORER_REPORT_FIELDS if field not in cell]
             if missing:
                 raise ValueError(
-                    f"{label} BF16 {tokens}-token cell lacks semantic fields: "
-                    + ", ".join(missing)
+                    f"{label} BF16 {tokens}-token cell lacks semantic fields: " + ", ".join(missing)
                 )
             expected_elements = run.expected_tokens_scored(cell)
             if (
@@ -209,8 +215,11 @@ def compare(
                 raise ValueError(f"{label} BF16 {tokens}-token cell has inconsistent lengths")
             expected_bytes = expected_elements * 4
             for suffix in (".nllf32", ".argmaxi32"):
-                sidecar = first_path.with_suffix(suffix) if label == "first" \
+                sidecar = (
+                    first_path.with_suffix(suffix)
+                    if label == "first"
                     else second_path.with_suffix(suffix)
+                )
                 if not sidecar.is_file() or sidecar.stat().st_size != expected_bytes:
                     raise ValueError(
                         f"{label} BF16 {tokens}-token {suffix} sidecar has invalid length"
@@ -218,29 +227,34 @@ def compare(
             _validate_sidecar_content(
                 label, tokens, cell, first_path if label == "first" else second_path
             )
-        semantic_fields = {
-            field: first_cell[field]
-            for field in run.BF16_SCORER_REPORT_FIELDS
-        }
+        semantic_fields = {field: first_cell[field] for field in run.BF16_SCORER_REPORT_FIELDS}
         semantic_exact = all(
-            first_cell[field] == second_cell[field]
-            for field in run.BF16_SCORER_REPORT_FIELDS
+            first_cell[field] == second_cell[field] for field in run.BF16_SCORER_REPORT_FIELDS
         )
-        nll_hashes = (_sha256(first_path.with_suffix(".nllf32")),
-                      _sha256(second_path.with_suffix(".nllf32")))
-        argmax_hashes = (_sha256(first_path.with_suffix(".argmaxi32")),
-                         _sha256(second_path.with_suffix(".argmaxi32")))
-        row_exact = semantic_exact and nll_hashes[0] == nll_hashes[1] \
+        nll_hashes = (
+            _sha256(first_path.with_suffix(".nllf32")),
+            _sha256(second_path.with_suffix(".nllf32")),
+        )
+        argmax_hashes = (
+            _sha256(first_path.with_suffix(".argmaxi32")),
+            _sha256(second_path.with_suffix(".argmaxi32")),
+        )
+        row_exact = (
+            semantic_exact
+            and nll_hashes[0] == nll_hashes[1]
             and argmax_hashes[0] == argmax_hashes[1]
+        )
         exact = exact and row_exact
-        rows.append({
-            "prompt_tokens": tokens,
-            "exact": row_exact,
-            "semantic_fields_exact": semantic_exact,
-            "semantic_fields": semantic_fields,
-            "nll_sha256": {"first": nll_hashes[0], "second": nll_hashes[1]},
-            "argmax_sha256": {"first": argmax_hashes[0], "second": argmax_hashes[1]},
-        })
+        rows.append(
+            {
+                "prompt_tokens": tokens,
+                "exact": row_exact,
+                "semantic_fields_exact": semantic_exact,
+                "semantic_fields": semantic_fields,
+                "nll_sha256": {"first": nll_hashes[0], "second": nll_hashes[1]},
+                "argmax_sha256": {"first": argmax_hashes[0], "second": argmax_hashes[1]},
+            }
+        )
     return {"exact": exact, "rows": rows}
 
 
@@ -254,15 +268,17 @@ def main() -> int:
     first_payload, first_cells = load_campaign(args.first)
     second_payload, second_cells = load_campaign(args.second)
     result = compare(first_payload, first_cells, second_payload, second_cells)
-    result.update({
-        "artifact_type": ARTIFACT_TYPE,
-        "schema_version": SCHEMA_VERSION,
-        "quality_evidence": False,
-        "inputs": {
-            "first": {"path": str(args.first.resolve()), "sha256": _sha256(args.first)},
-            "second": {"path": str(args.second.resolve()), "sha256": _sha256(args.second)},
-        },
-    })
+    result.update(
+        {
+            "artifact_type": ARTIFACT_TYPE,
+            "schema_version": SCHEMA_VERSION,
+            "quality_evidence": False,
+            "inputs": {
+                "first": {"path": str(args.first.resolve()), "sha256": _sha256(args.first)},
+                "second": {"path": str(args.second.resolve()), "sha256": _sha256(args.second)},
+            },
+        }
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"BF16 repeat comparison: exact={result['exact']} ({args.out})")

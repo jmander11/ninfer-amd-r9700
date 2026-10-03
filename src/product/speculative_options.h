@@ -34,9 +34,9 @@ inline void validate_speculative_cli_options(const SpeculativeOptions& options) 
     case SpeculativeBackend::None:
         if (options.draft_tokens != 0 || options.proposal_head != ProposalHead::Full ||
             options.dflash_verify_width != 0 || options.adaptive_draft) {
-            throw std::invalid_argument(
-                "--draft-tokens, --lm-head-draft, --dflash-verify-width, and --adaptive-draft require "
-                "--spec mtp|dflash");
+            throw std::invalid_argument("--draft-tokens, --lm-head-draft, --dflash-verify-width, "
+                                        "and --adaptive-draft require "
+                                        "--spec mtp|dflash");
         }
         return;
     case SpeculativeBackend::Mtp:

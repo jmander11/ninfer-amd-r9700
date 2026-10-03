@@ -83,7 +83,7 @@ public:
     // independently from GPU execution.
     [[nodiscard]] GenerationHandle
     submit(PreparedPrompt prompt, RequestOptions options,
-           OutputDelivery delivery = OutputDelivery::TerminalOnly,
+           OutputDelivery delivery                                = OutputDelivery::TerminalOnly,
            std::chrono::steady_clock::time_point pending_deadline = {},
            HostInputLease host_input                              = {});
 
@@ -99,9 +99,9 @@ public:
     // generation can interleave between candidates. Each sequence is evaluated
     // independently; this does not promise shared-prefix computation reuse.
     // At most 16 sequences and 4 * max_context aggregate prepared tokens.
-    [[nodiscard]] std::vector<ScoreResult>
-    score_many(std::vector<PreparedPrompt> prompts, std::vector<ScoreOptions> options,
-               const CancellationView& cancellation = {});
+    [[nodiscard]] std::vector<ScoreResult> score_many(std::vector<PreparedPrompt> prompts,
+                                                      std::vector<ScoreOptions> options,
+                                                      const CancellationView& cancellation = {});
 
     [[nodiscard]] const EngineOptions& options() const;
     [[nodiscard]] LoadSummary load_summary() const;

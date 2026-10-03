@@ -42,9 +42,7 @@ def compute_shortlist(
     tokenizer_vocab_size: int | None = None,
 ) -> DraftHeadContext:
     domain = (
-        min(TOKENIZER_VOCAB_SIZE, vocab)
-        if tokenizer_vocab_size is None
-        else tokenizer_vocab_size
+        min(TOKENIZER_VOCAB_SIZE, vocab) if tokenizer_vocab_size is None else tokenizer_vocab_size
     )
     return _compute_shortlist(
         ranking_path,

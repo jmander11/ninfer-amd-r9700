@@ -23,8 +23,7 @@ namespace ninfer::ops {
 void full_attention_projection_t1(const Tensor& hidden, const Weight& query_key,
                                   const Weight& gate_value, Tensor& query, Tensor& key,
                                   Tensor& gate, Tensor& value,
-                                  const DeviceSpan& activation_workspace,
-                                  hipStream_t stream);
+                                  const DeviceSpan& activation_workspace, hipStream_t stream);
 
 /**
  * Computes the same full-attention projection for a compact T=2..4 decode batch.
@@ -36,7 +35,6 @@ void full_attention_projection_t1(const Tensor& hidden, const Weight& query_key,
 void full_attention_projection_decode(const Tensor& hidden, const Weight& query_key,
                                       const Weight& gate_value, Tensor& query, Tensor& key,
                                       Tensor& gate, Tensor& value,
-                                      const DeviceSpan& activation_workspace,
-                                      hipStream_t stream);
+                                      const DeviceSpan& activation_workspace, hipStream_t stream);
 
 } // namespace ninfer::ops

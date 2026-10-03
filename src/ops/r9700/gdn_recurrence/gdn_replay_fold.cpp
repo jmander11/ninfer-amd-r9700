@@ -268,8 +268,9 @@ fold::LayerArgs replay_fold_layer_args(const GdnLayerFold& layer_fold) {
         throw std::invalid_argument("gdn_replay_fold_layer: unsupported layer, batch or rows");
     }
     const std::int32_t slots = layer_fold.recurrent.ne[3];
-    require_tensor(layer_fold.recurrent, DType::FP32, {kStateDim, kStateDim, spec.value_heads, slots},
-                   256, "gdn_replay_fold_layer", "recurrent state");
+    require_tensor(layer_fold.recurrent, DType::FP32,
+                   {kStateDim, kStateDim, spec.value_heads, slots}, 256, "gdn_replay_fold_layer",
+                   "recurrent state");
     require_tensor(layer_fold.conv, DType::BF16, {spec.conv_channels, 3, slots}, 256,
                    "gdn_replay_fold_layer", "conv state");
     static_assert(sizeof(fold::DeferredRow) == sizeof(GdnDeferredFoldRow) &&
@@ -280,11 +281,11 @@ fold::LayerArgs replay_fold_layer_args(const GdnLayerFold& layer_fold) {
                    static_cast<const float*>(records.gate.data),
                    static_cast<const hip_bfloat16*>(records.conv.data), spec.record_capacity,
                    spec.width},
-        .layer = layer_fold.layer,
+        .layer  = layer_fold.layer,
         .recurrent_layer = static_cast<float*>(layer_fold.recurrent.data),
-        .conv_layer = static_cast<hip_bfloat16*>(layer_fold.conv.data),
-        .rows = reinterpret_cast<const fold::DeferredRow*>(layer_fold.rows),
-        .batch = layer_fold.batch,
+        .conv_layer      = static_cast<hip_bfloat16*>(layer_fold.conv.data),
+        .rows            = reinterpret_cast<const fold::DeferredRow*>(layer_fold.rows),
+        .batch           = layer_fold.batch,
     };
 }
 

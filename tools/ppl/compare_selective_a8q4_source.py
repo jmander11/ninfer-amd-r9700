@@ -14,11 +14,19 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from tools.ppl.compare_q4_group_source import (
-    _against, _load_bf16, _sidecar_values, _source_key,
+    _against,
+    _load_bf16,
+    _sidecar_values,
+    _source_key,
 )
 from tools.ppl.q4_group_source_diagnostic import _atomic_new, sha256_file
 from tools.ppl.selective_a8q4_source_diagnostic import (
-    ARTIFACT_TYPE, SCHEMA_VERSION, TOKENS, _implementation, _profile_contract, _scope,
+    ARTIFACT_TYPE,
+    SCHEMA_VERSION,
+    TOKENS,
+    _implementation,
+    _profile_contract,
+    _scope,
 )
 
 
@@ -40,24 +48,34 @@ def _validate_exact_scope(report: dict, path: Path) -> None:
 
 def _load_score(path: Path, profile: str, bf16_path: Path):
     report = json.loads(path.read_text(encoding="utf-8"))
-    if (report.get("artifact_type") != ARTIFACT_TYPE
-            or report.get("schema_version") != SCHEMA_VERSION
-            or report.get("status") != "diagnostic_represented_formula_not_product_ppl"
-            or report.get("profile") != profile
-            or report.get("formula") != _profile_contract(profile)
-            or report.get("implementation_sha256") != _implementation()):
+    if (
+        report.get("artifact_type") != ARTIFACT_TYPE
+        or report.get("schema_version") != SCHEMA_VERSION
+        or report.get("status") != "diagnostic_represented_formula_not_product_ppl"
+        or report.get("profile") != profile
+        or report.get("formula") != _profile_contract(profile)
+        or report.get("implementation_sha256") != _implementation()
+    ):
         raise ValueError(f"{path}: activation-inclusive score identity differs")
-    expected_workload = {"tokens": TOKENS, "skip": "half", "prefill_chunk": 4096,
-                         "schedule": "prefill", "device": 0, "scored_positions": 4095}
+    expected_workload = {
+        "tokens": TOKENS,
+        "skip": "half",
+        "prefill_chunk": 4096,
+        "schedule": "prefill",
+        "device": 0,
+        "scored_positions": 4095,
+    }
     if report.get("workload") != expected_workload:
         raise ValueError(f"{path}: activation-inclusive workload differs")
     _validate_exact_scope(report, path)
     if report.get("bf16_authority") != {
-        "path": str(bf16_path.resolve()), "sha256": sha256_file(bf16_path),
+        "path": str(bf16_path.resolve()),
+        "sha256": sha256_file(bf16_path),
     }:
         raise ValueError(f"{path}: BF16 authority binding differs")
     if report.get("sampled_source_gate") != {
-        "path": str(SOURCE_SCREEN.resolve()), "sha256": sha256_file(SOURCE_SCREEN),
+        "path": str(SOURCE_SCREEN.resolve()),
+        "sha256": sha256_file(SOURCE_SCREEN),
     }:
         raise ValueError(f"{path}: sampled source gate binding differs")
     nlls = _sidecar_values(path, ".nllf32", "f")
@@ -67,16 +85,26 @@ def _load_score(path: Path, profile: str, bf16_path: Path):
     for kind, suffix in (("nll", ".nllf32"), ("argmax", ".argmaxi32")):
         target = path.with_suffix(suffix)
         if report.get("sidecars", {}).get(kind) != {
-            "path": target.name, "sha256": sha256_file(target),
+            "path": target.name,
+            "sha256": sha256_file(target),
         }:
             raise ValueError(f"{path}: {kind} sidecar binding differs")
     result = report.get("result", {})
-    exact = {"tokens_scored": 4095, "argmax_tokens": 4095, "non_finite": 0,
-             "terrible_tokens": sum(value >= 10.0 for value in nlls)}
-    derived = {"sum_nll": sum(nlls), "mean_nll": sum(nlls) / len(nlls),
-               "max_nll": max(nlls), "ppl": math.exp(sum(nlls) / len(nlls))}
-    if any(result.get(key) != value for key, value in exact.items()) \
-            or any(not _close(result.get(key), value) for key, value in derived.items()):
+    exact = {
+        "tokens_scored": 4095,
+        "argmax_tokens": 4095,
+        "non_finite": 0,
+        "terrible_tokens": sum(value >= 10.0 for value in nlls),
+    }
+    derived = {
+        "sum_nll": sum(nlls),
+        "mean_nll": sum(nlls) / len(nlls),
+        "max_nll": max(nlls),
+        "ppl": math.exp(sum(nlls) / len(nlls)),
+    }
+    if any(result.get(key) != value for key, value in exact.items()) or any(
+        not _close(result.get(key), value) for key, value in derived.items()
+    ):
         raise ValueError(f"{path}: result summary differs from sidecars")
     duration = result.get("score_seconds")
     if type(duration) not in (int, float) or not math.isfinite(duration) or duration <= 0:
@@ -92,50 +120,66 @@ def compare(control_path: Path, candidate_path: Path, bf16_path: Path) -> dict[s
         candidate_path, "a8g128-q4g128-mse", bf16_path
     )
     bf16, bf16_nll, bf16_argmax = _load_bf16(bf16_path)
-    if (_source_key(control) != _source_key(candidate)
-            or control["execution"] != candidate["execution"]
-            or control["matrix_scope"] != candidate["matrix_scope"]
-            or control["sampled_source_gate"] != candidate["sampled_source_gate"]):
+    if (
+        _source_key(control) != _source_key(candidate)
+        or control["execution"] != candidate["execution"]
+        or control["matrix_scope"] != candidate["matrix_scope"]
+        or control["sampled_source_gate"] != candidate["sampled_source_gate"]
+    ):
         raise ValueError("activation-inclusive paired score identity differs")
-    bf16_key = _source_key({"source": {
-        "config_sha256": bf16["source_config_sha256"],
-        "index_sha256": bf16["source_index_sha256"],
-        "shards_sha256": bf16["source_shards_sha256"],
-        "corpus_ids_sha256": bf16["corpus_ids_sha256"],
-    }})
+    bf16_key = _source_key(
+        {
+            "source": {
+                "config_sha256": bf16["source_config_sha256"],
+                "index_sha256": bf16["source_index_sha256"],
+                "shards_sha256": bf16["source_shards_sha256"],
+                "corpus_ids_sha256": bf16["corpus_ids_sha256"],
+            }
+        }
+    )
     if _source_key(control) != bf16_key:
         raise ValueError("activation-inclusive scores and BF16 source/corpus differ")
     control_gate = _against(bf16_nll, control_nll, bf16_argmax, control_argmax)
     candidate_gate = _against(bf16_nll, candidate_nll, bf16_argmax, candidate_argmax)
     paired = _against(control_nll, candidate_nll, control_argmax, candidate_argmax)
-    if control.get("against_bf16") != control_gate or candidate.get("against_bf16") != candidate_gate:
+    if (
+        control.get("against_bf16") != control_gate
+        or candidate.get("against_bf16") != candidate_gate
+    ):
         raise ValueError("activation-inclusive retained gate differs from sidecars")
-    if (control_gate["new_severe_position_budget"] != EXPECTED_BUDGET
-            or candidate_gate["new_severe_position_budget"] != EXPECTED_BUDGET):
+    if (
+        control_gate["new_severe_position_budget"] != EXPECTED_BUDGET
+        or candidate_gate["new_severe_position_budget"] != EXPECTED_BUDGET
+    ):
         raise ValueError("activation-inclusive severe-position budget differs")
-    passed = (control_gate["mean_nll_delta_pass"]
-              and control_gate["new_severe_positions_pass"]
-              and candidate_gate["mean_nll_delta_pass"]
-              and candidate_gate["new_severe_positions_pass"])
+    passed = (
+        control_gate["mean_nll_delta_pass"]
+        and control_gate["new_severe_positions_pass"]
+        and candidate_gate["mean_nll_delta_pass"]
+        and candidate_gate["new_severe_positions_pass"]
+    )
     return {
         "artifact_type": COMPARISON_TYPE,
         "schema_version": SCHEMA_VERSION,
         "status": "activation_inclusive_source_gate_not_product_admission",
         "inputs": {
-            "control": {"path": str(control_path.resolve()),
-                        "sha256": sha256_file(control_path)},
-            "candidate": {"path": str(candidate_path.resolve()),
-                          "sha256": sha256_file(candidate_path)},
+            "control": {"path": str(control_path.resolve()), "sha256": sha256_file(control_path)},
+            "candidate": {
+                "path": str(candidate_path.resolve()),
+                "sha256": sha256_file(candidate_path),
+            },
             "bf16": {"path": str(bf16_path.resolve()), "sha256": sha256_file(bf16_path)},
         },
         "control_against_bf16": control_gate,
         "candidate_against_bf16": candidate_gate,
         "candidate_minus_control": paired,
-        "acceptance": {"maximum_mean_nll_delta": candidate_gate["maximum_mean_nll_delta"],
-                       "maximum_new_severe_positions": EXPECTED_BUDGET,
-                       "severe_threshold_nll": 10.0,
-                       "control_and_candidate_must_pass_direct_bf16_gate": True,
-                       "paired_candidate_minus_control_is_diagnostic": True},
+        "acceptance": {
+            "maximum_mean_nll_delta": candidate_gate["maximum_mean_nll_delta"],
+            "maximum_new_severe_positions": EXPECTED_BUDGET,
+            "severe_threshold_nll": 10.0,
+            "control_and_candidate_must_pass_direct_bf16_gate": True,
+            "paired_candidate_minus_control_is_diagnostic": True,
+        },
         "pass": passed,
         "next_if_pass": "one disconnected A8G128-by-Q4G128 kernel qualification",
         "limitations": [
@@ -145,8 +189,9 @@ def compare(control_path: Path, candidate_path: Path, bf16_path: Path) -> dict[s
     }
 
 
-def validate_comparison(path: Path, control_path: Path, candidate_path: Path,
-                        bf16_path: Path) -> dict[str, object]:
+def validate_comparison(
+    path: Path, control_path: Path, candidate_path: Path, bf16_path: Path
+) -> dict[str, object]:
     retained = json.loads(path.read_text(encoding="utf-8"))
     expected = compare(control_path, candidate_path, bf16_path)
     if retained != expected:

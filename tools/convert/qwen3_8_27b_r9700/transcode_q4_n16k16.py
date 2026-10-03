@@ -14,14 +14,20 @@ import struct
 from dataclasses import dataclass
 from typing import Iterator, Sequence
 
-from tools.artifact.container import (MAGIC, PAYLOAD_ALIGNMENT, PREFIX, Artifact,
-                                      ArtifactIdentity, ArtifactWriter, ResourceSpec, TensorSpec,
-                                      plan_objects,
-                                      )
+from tools.artifact.container import (
+    MAGIC,
+    PAYLOAD_ALIGNMENT,
+    PREFIX,
+    Artifact,
+    ArtifactIdentity,
+    ArtifactWriter,
+    ResourceSpec,
+    TensorSpec,
+    plan_objects,
+)
 from tools.artifact.layouts import align_up, encoded_size, get_layout, q4_n16k16_geometry
 
-from . import (fp8_hybrid_decision, fp8_hybrid_inventory, q4_inventory,
-               q4_w8_mse_inventory)
+from . import fp8_hybrid_decision, fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory
 
 
 OLD_Q4_LAYOUT = "row-split-k128-v1"
@@ -36,13 +42,13 @@ class MigrationProfile:
 
 
 PROFILES_BY_SOURCE = {
-    "r9700-q4g64-eval": MigrationProfile(
-        "r9700-q4g64-n16k16-eval", q4_inventory.OBJECT_SPECS),
+    "r9700-q4g64-eval": MigrationProfile("r9700-q4g64-n16k16-eval", q4_inventory.OBJECT_SPECS),
     "r9700-q4-w8-mse-eval": MigrationProfile(
-        "r9700-q4-w8-mse-n16k16-eval", q4_w8_mse_inventory.OBJECT_SPECS),
+        "r9700-q4-w8-mse-n16k16-eval", q4_w8_mse_inventory.OBJECT_SPECS
+    ),
     "r9700-q4g64-f8e4m3-four-role-eval": MigrationProfile(
-        "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
-        fp8_hybrid_inventory.OBJECT_SPECS),
+        "r9700-q4g64-f8e4m3-four-role-n16k16-eval", fp8_hybrid_inventory.OBJECT_SPECS
+    ),
 }
 
 
@@ -54,7 +60,10 @@ def _legacy_directory(path: Path):
         if magic != MAGIC or json_bytes <= 0:
             raise ValueError("source is not a NInfer v2 artifact")
         raw = json.loads(file.read(json_bytes).decode("utf-8"))
-        if set(raw) != {"identity", "objects"} or set(raw["identity"]) != {"model_id", "weights_id"}:
+        if set(raw) != {"identity", "objects"} or set(raw["identity"]) != {
+            "model_id",
+            "weights_id",
+        }:
             raise ValueError("source directory has an unexpected schema")
         payload_offset = align_up(PREFIX.size + json_bytes, PAYLOAD_ALIGNMENT)
         mapping = mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ)
@@ -75,7 +84,7 @@ def _q4_chunks(source: memoryview, n: int, k: int) -> Iterator[bytes]:
             for pair in range(4):
                 for lane in range(16):
                     begin = (tile * 16 + lane) * row_bytes + group * 32 + pair * 8
-                    out[cursor:cursor + 8] = source[begin:begin + 8]
+                    out[cursor : cursor + 8] = source[begin : begin + 8]
                     cursor += 8
         yield bytes(out)
     for tile in range(n // 16):
@@ -84,17 +93,18 @@ def _q4_chunks(source: memoryview, n: int, k: int) -> Iterator[bytes]:
         for group in range(groups):
             for lane in range(16):
                 begin = old_scale + ((tile * 16 + lane) * groups + group) * 2
-                out[cursor:cursor + 2] = source[begin:begin + 2]
+                out[cursor : cursor + 2] = source[begin : begin + 2]
                 cursor += 2
         yield bytes(out)
 
 
 def _logical_hashes(payload: memoryview, n: int, k: int, *, tiled: bool) -> tuple[str, str]:
-    geometry = q4_n16k16_geometry((n, k)); groups = geometry.groups_per_row
+    geometry = q4_n16k16_geometry((n, k))
+    groups = geometry.groups_per_row
     codes, scales = hashlib.sha256(), hashlib.sha256()
     if not tiled:
-        codes.update(payload[:geometry.base_bytes])
-        scales.update(payload[geometry.scale_offset:geometry.scale_offset + geometry.scale_bytes])
+        codes.update(payload[: geometry.base_bytes])
+        scales.update(payload[geometry.scale_offset : geometry.scale_offset + geometry.scale_bytes])
         return codes.hexdigest(), scales.hexdigest()
     for row in range(n):
         row_data = bytearray(groups * 32)
@@ -102,13 +112,13 @@ def _logical_hashes(payload: memoryview, n: int, k: int, *, tiled: bool) -> tupl
             for pair in range(4):
                 source = (((row // 16) * groups + group) * 4 + pair) * 16 * 8 + (row % 16) * 8
                 target = group * 32 + pair * 8
-                row_data[target:target + 8] = payload[source:source + 8]
+                row_data[target : target + 8] = payload[source : source + 8]
         codes.update(row_data)
     for row in range(n):
         row_data = bytearray(groups * 2)
         for group in range(groups):
             source = geometry.scale_offset + (((row // 16) * groups + group) * 16 + row % 16) * 2
-            row_data[group * 2:group * 2 + 2] = payload[source:source + 2]
+            row_data[group * 2 : group * 2 + 2] = payload[source : source + 2]
         scales.update(row_data)
     return codes.hexdigest(), scales.hexdigest()
 
@@ -143,8 +153,10 @@ def _read_bytes_identity(path: Path, expected: tuple[int, int, int]) -> bytes:
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     try:
         before = os.fstat(descriptor)
-        if (not stat.S_ISREG(before.st_mode)
-                or (before.st_dev, before.st_ino, before.st_uid) != expected):
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino, before.st_uid) != expected
+        ):
             raise RuntimeError(f"file identity changed before readback: {path}")
         chunks = []
         while block := os.read(descriptor, 1 << 20):
@@ -158,8 +170,15 @@ def _read_bytes_identity(path: Path, expected: tuple[int, int, int]) -> bytes:
 
 
 def _stat_fingerprint(value: os.stat_result) -> tuple[int, ...]:
-    return (value.st_dev, value.st_ino, value.st_uid, value.st_mode, value.st_size,
-            value.st_mtime_ns, value.st_ctime_ns)
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_uid,
+        value.st_mode,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
 
 
 def _unlink_owned_fingerprint(path: Path, expected: tuple[int, ...]) -> None:
@@ -180,9 +199,9 @@ def _hash_open_fd(descriptor: int) -> str:
 
 
 def _object_plan_sha256(objects: object) -> str:
-    return hashlib.sha256(json.dumps(
-        objects, sort_keys=True, separators=(",", ":")
-    ).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(objects, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _identity(path: Path) -> tuple[int, int, int]:
@@ -197,8 +216,10 @@ def _unlink_owned(path: Path, expected: tuple[int, int, int] | None) -> None:
         return
     try:
         observed = os.lstat(path)
-        if (stat.S_ISREG(observed.st_mode) and
-                (observed.st_dev, observed.st_ino, observed.st_uid) == expected):
+        if (
+            stat.S_ISREG(observed.st_mode)
+            and (observed.st_dev, observed.st_ino, observed.st_uid) == expected
+        ):
             os.unlink(path)
     except FileNotFoundError:
         pass
@@ -227,17 +248,27 @@ def _validate_registered_inventory(
                 raise ValueError(f"source tensor {expected.name} has unexpected descriptor members")
             expected_layout = OLD_Q4_LAYOUT if expected.format == "Q4G64_F16S" else expected.layout
             q4_objects += int(expected.format == "Q4G64_F16S")
-            required = {"kind": "tensor", "shape": list(expected.shape),
-                        "format": expected.format, "layout": expected_layout,
-                        "offset": align_up(cursor, get_layout(expected.layout).alignment),
-                        "bytes": encoded_size(expected.layout, expected.format, expected.shape)}
+            required = {
+                "kind": "tensor",
+                "shape": list(expected.shape),
+                "format": expected.format,
+                "layout": expected_layout,
+                "offset": align_up(cursor, get_layout(expected.layout).alignment),
+                "bytes": encoded_size(expected.layout, expected.format, expected.shape),
+            }
         else:
             if set(raw) != {"name", "kind", "encoding", "offset", "bytes"}:
-                raise ValueError(f"source resource {expected.name} has unexpected descriptor members")
+                raise ValueError(
+                    f"source resource {expected.name} has unexpected descriptor members"
+                )
             if type(raw.get("bytes")) is not int or raw["bytes"] <= 0:
                 raise ValueError(f"source resource {expected.name} has invalid byte size")
-            required = {"kind": "resource", "encoding": expected.encoding,
-                        "offset": cursor, "bytes": raw["bytes"]}
+            required = {
+                "kind": "resource",
+                "encoding": expected.encoding,
+                "offset": cursor,
+                "bytes": raw["bytes"],
+            }
         if any(raw.get(key) != value for key, value in required.items()):
             raise ValueError(f"source object {expected.name} differs from registered inventory")
         cursor = required["offset"] + required["bytes"]
@@ -289,8 +320,7 @@ def preflight(source_path: Path, output_path: Path | None = None) -> dict[str, o
             "source": str(source_path),
             "output": None if output_path is None else str(output_path),
             "source_identity": source_identity,
-            "identity": {"model_id": MODEL_ID,
-                         "weights_id": profile.output_weights_id},
+            "identity": {"model_id": MODEL_ID, "weights_id": profile.output_weights_id},
             "source_file_size_bytes": file_bytes,
             "source_payload_offset": payload_offset,
             "source_payload_bytes": payload_bytes,
@@ -318,21 +348,24 @@ def transcode(source_path: Path, output_path: Path) -> dict[str, object]:
     entries = []
     try:
         source_identity, profile = _profile(raw["identity"])
-        expected_q4_objects, payload_bytes = _validate_registered_inventory(
-            raw["objects"], profile)
+        expected_q4_objects, payload_bytes = _validate_registered_inventory(raw["objects"], profile)
         if payload_offset + payload_bytes != file_bytes:
             raise ValueError("source artifact payload extent differs from registered inventory")
         identity = ArtifactIdentity(MODEL_ID, profile.output_weights_id)
         specs, entries, q4_names, source_hashes = [], [], [], {}
         cursor = 0
         for item in raw["objects"]:
-            if not isinstance(item, dict) or item.get("offset") is None or item.get("bytes") is None:
+            if (
+                not isinstance(item, dict)
+                or item.get("offset") is None
+                or item.get("bytes") is None
+            ):
                 raise ValueError("malformed source object")
             offset, size = int(item["offset"]), int(item["bytes"])
             if offset < cursor or payload_offset + offset + size > file_bytes:
                 raise ValueError(f"invalid source range for {item.get('name')}")
             cursor = offset + size
-            payload = source_view[payload_offset + offset:payload_offset + offset + size]
+            payload = source_view[payload_offset + offset : payload_offset + offset + size]
             if item.get("kind") == "resource":
                 spec = ResourceSpec(item["name"], item["encoding"], size)
                 entries.append((item["name"], payload))
@@ -380,10 +413,17 @@ def transcode(source_path: Path, output_path: Path) -> dict[str, object]:
             for old, new in zip(raw["objects"], output.objects, strict=True):
                 new_payload = output.payload(new)
                 if old.get("format") == "Q4G64_F16S":
-                    if _logical_hashes(new_payload, *old["shape"], tiled=True) != source_hashes[old["name"]]:
+                    if (
+                        _logical_hashes(new_payload, *old["shape"], tiled=True)
+                        != source_hashes[old["name"]]
+                    ):
                         raise RuntimeError(f"Q4 decode equivalence failed for {old['name']}")
                 else:
-                    old_payload = source_view[payload_offset + old["offset"]:payload_offset + old["offset"] + old["bytes"]]
+                    old_payload = source_view[
+                        payload_offset + old["offset"] : payload_offset
+                        + old["offset"]
+                        + old["bytes"]
+                    ]
                     if hashlib.sha256(new_payload).digest() != hashlib.sha256(old_payload).digest():
                         raise RuntimeError(f"non-Q4 payload changed for {old['name']}")
                     old_payload.release()
@@ -408,12 +448,16 @@ def transcode(source_path: Path, output_path: Path) -> dict[str, object]:
             os.close(directory_fd)
         if _file_sha256(output_path) != stage_sha256 or _identity(output_path) != stage_identity:
             raise RuntimeError("published artifact failed immutable readback verification")
-        return {"source": str(source_path), "output": str(output_path),
-                "source_identity": source_identity,
-                "identity": {"model_id": identity.model_id, "weights_id": identity.weights_id},
-                "objects": len(specs), "q4_objects": len(q4_names),
-                "output_sha256": stage_sha256,
-                "verification": "exact logical Q4 code/scale hashes and exact non-Q4 payload hashes"}
+        return {
+            "source": str(source_path),
+            "output": str(output_path),
+            "source_identity": source_identity,
+            "identity": {"model_id": identity.model_id, "weights_id": identity.weights_id},
+            "objects": len(specs),
+            "q4_objects": len(q4_names),
+            "output_sha256": stage_sha256,
+            "verification": "exact logical Q4 code/scale hashes and exact non-Q4 payload hashes",
+        }
     except BaseException:
         if published:
             _unlink_owned(output_path, stage_identity)
@@ -452,17 +496,20 @@ def _validate_migration_pair(source_path: Path, output_path: Path) -> dict[str, 
         expected_specs = []
         for old in raw["objects"]:
             if old["kind"] == "tensor":
-                expected_specs.append(TensorSpec(
-                    old["name"], tuple(old["shape"]), old["format"],
-                    NEW_Q4_LAYOUT if old["format"] == "Q4G64_F16S" else old["layout"],
-                ))
+                expected_specs.append(
+                    TensorSpec(
+                        old["name"],
+                        tuple(old["shape"]),
+                        old["format"],
+                        NEW_Q4_LAYOUT if old["format"] == "Q4G64_F16S" else old["layout"],
+                    )
+                )
             else:
                 expected_specs.append(ResourceSpec(old["name"], old["encoding"], old["bytes"]))
         expected_objects = plan_objects(expected_specs)
         with Artifact.open(output_path) as output:
             output_open = os.fstat(output._file.fileno())
-            if (output_open.st_dev, output_open.st_ino,
-                    output_open.st_uid) != output_file_identity:
+            if (output_open.st_dev, output_open.st_ino, output_open.st_uid) != output_file_identity:
                 raise RuntimeError("output artifact identity changed while opening")
             expected_identity = ArtifactIdentity(MODEL_ID, profile.output_weights_id)
             if output.identity != expected_identity or output.objects != expected_objects:
@@ -471,30 +518,35 @@ def _validate_migration_pair(source_path: Path, output_path: Path) -> dict[str, 
                 if new.name != old["name"] or new.kind != old["kind"] or new.bytes != old["bytes"]:
                     raise ValueError(f"migrated descriptor differs for {old['name']}")
                 old_payload = source_view[
-                    payload_offset + old["offset"]:
-                    payload_offset + old["offset"] + old["bytes"]
+                    payload_offset + old["offset"] : payload_offset + old["offset"] + old["bytes"]
                 ]
                 new_payload = output.payload(new)
                 try:
                     if old.get("format") == "Q4G64_F16S":
-                        if (new.format != old["format"] or tuple(new.shape) != tuple(old["shape"])
-                                or old["layout"] != OLD_Q4_LAYOUT
-                                or new.layout != NEW_Q4_LAYOUT
-                                or _logical_hashes(old_payload, *old["shape"], tiled=False)
-                                != _logical_hashes(new_payload, *old["shape"], tiled=True)):
+                        if (
+                            new.format != old["format"]
+                            or tuple(new.shape) != tuple(old["shape"])
+                            or old["layout"] != OLD_Q4_LAYOUT
+                            or new.layout != NEW_Q4_LAYOUT
+                            or _logical_hashes(old_payload, *old["shape"], tiled=False)
+                            != _logical_hashes(new_payload, *old["shape"], tiled=True)
+                        ):
                             raise ValueError(f"logical Q4 migration differs for {old['name']}")
                         q4_objects += 1
                     else:
                         if old["kind"] == "tensor":
                             descriptor_matches = (
-                                new.format == old["format"] and new.layout == old["layout"]
+                                new.format == old["format"]
+                                and new.layout == old["layout"]
                                 and tuple(new.shape) == tuple(old["shape"])
                             )
                         else:
                             descriptor_matches = new.encoding == old["encoding"]
-                        if (not descriptor_matches
-                                or hashlib.sha256(old_payload).digest()
-                                != hashlib.sha256(new_payload).digest()):
+                        if (
+                            not descriptor_matches
+                            or hashlib.sha256(old_payload).digest()
+                            != hashlib.sha256(new_payload).digest()
+                        ):
                             raise ValueError(f"non-Q4 migration differs for {old['name']}")
                 finally:
                     new_payload.release()
@@ -538,7 +590,8 @@ def _publish_json_create_only(
     published = False
     try:
         descriptor = os.open(
-            stage, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            stage,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
             0o444,
         )
         try:
@@ -563,8 +616,11 @@ def _publish_json_create_only(
         if path.read_bytes() != encoded or _identity(path) != stage_identity:
             raise RuntimeError("published receipt failed immutable readback")
         _unlink_owned(stage, stage_identity)
-        return (hashlib.sha256(encoded).hexdigest(), stage_identity,
-                _stat_fingerprint(os.lstat(path)))
+        return (
+            hashlib.sha256(encoded).hexdigest(),
+            stage_identity,
+            _stat_fingerprint(os.lstat(path)),
+        )
     except BaseException:
         if published:
             _unlink_owned(path, stage_identity)
@@ -582,8 +638,10 @@ def publish_hybrid_migration_receipt(source_path: Path, output_path: Path) -> di
         raise ValueError("migration receipt is supported only for the selected four-role identity")
     source = Path(str(validation["source"]))
     output = Path(str(validation["output"]))
-    if (_identity(source) != validation["source_file_identity"]
-            or _identity(output) != validation["output_file_identity"]):
+    if (
+        _identity(source) != validation["source_file_identity"]
+        or _identity(output) != validation["output_file_identity"]
+    ):
         raise RuntimeError("artifact identity changed after migration validation")
     upstream_path = Path(str(source) + ".conversion.json")
     if upstream_path.is_symlink() or not upstream_path.is_file():
@@ -630,14 +688,17 @@ def publish_hybrid_migration_receipt(source_path: Path, output_path: Path) -> di
         "recipe_id": decision.recipe_id,
         "source": original_source,
         "artifact": {
-            "path": str(output), "bytes": validation["output_bytes"],
+            "path": str(output),
+            "bytes": validation["output_bytes"],
             "sha256": validation["output_sha256"],
         },
         "candidate": new_candidate,
         "migration": {
             "source_artifact": {
-                "path": str(source), "identity": validation["source_identity"],
-                "bytes": validation["source_bytes"], "sha256": validation["source_sha256"],
+                "path": str(source),
+                "identity": validation["source_identity"],
+                "bytes": validation["source_bytes"],
+                "sha256": validation["source_sha256"],
             },
             "source_conversion_receipt": {
                 "path": str(upstream_path.resolve(strict=True)),
@@ -672,10 +733,12 @@ def publish_hybrid_migration_receipt(source_path: Path, output_path: Path) -> di
 
         def owners_stable() -> bool:
             for path, descriptor, fingerprint, digest in opened_owners:
-                if (_identity(path) != fingerprint[:3]
-                        or _stat_fingerprint(os.fstat(descriptor)) != fingerprint
-                        or _hash_open_fd(descriptor) != digest
-                        or _stat_fingerprint(os.fstat(descriptor)) != fingerprint):
+                if (
+                    _identity(path) != fingerprint[:3]
+                    or _stat_fingerprint(os.fstat(descriptor)) != fingerprint
+                    or _hash_open_fd(descriptor) != digest
+                    or _stat_fingerprint(os.fstat(descriptor)) != fingerprint
+                ):
                     return False
             return all(
                 _identity(path) == fingerprint[:3]
@@ -686,15 +749,18 @@ def publish_hybrid_migration_receipt(source_path: Path, output_path: Path) -> di
         if not owners_stable():
             raise RuntimeError("artifact authority changed before receipt publication")
         receipt_sha256, receipt_identity, receipt_fingerprint = _publish_json_create_only(
-            receipt_path, receipt)
+            receipt_path, receipt
+        )
         try:
             if not owners_stable():
                 raise RuntimeError("migration authority changed after receipt publication")
             expected_receipt = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()
             actual_receipt = _read_bytes_identity(receipt_path, receipt_identity)
-            if (actual_receipt != expected_receipt
-                    or hashlib.sha256(actual_receipt).hexdigest() != receipt_sha256
-                    or _identity(receipt_path) != receipt_identity):
+            if (
+                actual_receipt != expected_receipt
+                or hashlib.sha256(actual_receipt).hexdigest() != receipt_sha256
+                or _identity(receipt_path) != receipt_identity
+            ):
                 raise RuntimeError("published receipt changed before transaction completion")
         except BaseException:
             _unlink_owned_fingerprint(receipt_path, receipt_fingerprint)
@@ -712,20 +778,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--preflight-only", action="store_true",
-                        help="validate identity/inventory and projected output without reading payloads")
-    parser.add_argument("--publish-hybrid-receipt-only", action="store_true",
-                        help="validate an existing four-role migration and publish its receipt")
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="validate identity/inventory and projected output without reading payloads",
+    )
+    parser.add_argument(
+        "--publish-hybrid-receipt-only",
+        action="store_true",
+        help="validate an existing four-role migration and publish its receipt",
+    )
     args = parser.parse_args(argv)
     if args.preflight_only and args.publish_hybrid_receipt_only:
         parser.error("receipt-only and preflight-only are mutually exclusive")
     if not args.preflight_only and args.output is None:
         parser.error("--output is required unless --preflight-only is used")
     try:
-        report = (preflight(args.source, args.output) if args.preflight_only else
-                  publish_hybrid_migration_receipt(args.source, args.output)
-                  if args.publish_hybrid_receipt_only else
-                  transcode(args.source, args.output))
+        report = (
+            preflight(args.source, args.output)
+            if args.preflight_only
+            else publish_hybrid_migration_receipt(args.source, args.output)
+            if args.publish_hybrid_receipt_only
+            else transcode(args.source, args.output)
+        )
     except (OSError, ValueError, RuntimeError) as error:
         raise SystemExit(str(error)) from error
     print(json.dumps(report, indent=2, sort_keys=True))

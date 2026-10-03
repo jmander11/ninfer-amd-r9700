@@ -63,7 +63,8 @@ def selective_specs() -> tuple[fp8_hybrid_inventory.TensorSpec, ...]:
     """Return and validate the exact production-P2048 selective scope."""
 
     actual = tuple(
-        spec for spec in fp8_hybrid_inventory.TENSOR_SPECS
+        spec
+        for spec in fp8_hybrid_inventory.TENSOR_SPECS
         if spec.name.startswith("text/layers/")
         and spec.format == fp8_hybrid_inventory.Q4
         and _role(spec.name) is not None
@@ -94,8 +95,7 @@ def _metrics(source: torch.Tensor, decoded: torch.Tensor) -> dict[str, float]:
     squared_error = float(torch.sum(error * error).item())
     squared_reference = float(torch.sum(source.to(torch.float64) ** 2).item())
     return {
-        "relative_l2": math.sqrt(squared_error / squared_reference)
-        if squared_reference else 0.0,
+        "relative_l2": math.sqrt(squared_error / squared_reference) if squared_reference else 0.0,
         "max_abs": float(torch.max(torch.abs(error)).item()) if error.numel() else 0.0,
         "squared_error": squared_error,
         "squared_reference": squared_reference,
@@ -109,20 +109,19 @@ def _mse_q4g128_decode(source: torch.Tensor) -> torch.Tensor:
     if columns <= 0 or columns % Q4G128_DIAGNOSTIC.group_size:
         raise ValueError("selective Q4G128 sampled width must be a positive multiple of 128")
     grouped = (
-        source.to(dtype=torch.float32).numpy()
-        .reshape(rows, columns // Q4G128_DIAGNOSTIC.group_size,
-                 Q4G128_DIAGNOSTIC.group_size)
+        source.to(dtype=torch.float32)
+        .numpy()
+        .reshape(rows, columns // Q4G128_DIAGNOSTIC.group_size, Q4G128_DIAGNOSTIC.group_size)
     )
     scales = mse_quantize._optimize_group_scales(grouped, Q4G128_DIAGNOSTIC)
-    codes = mse_quantize._codes(
-        grouped, scales, Q4G128_DIAGNOSTIC.qmin, Q4G128_DIAGNOSTIC.qmax
-    )
+    codes = mse_quantize._codes(grouped, scales, Q4G128_DIAGNOSTIC.qmin, Q4G128_DIAGNOSTIC.qmax)
     represented = codes.astype(np.float32) * scales.astype(np.float32)[..., None]
     return torch.from_numpy(represented.reshape(rows, columns))
 
 
-def measure(spec: fp8_hybrid_inventory.TensorSpec, indices: tuple[int, ...],
-            source: torch.Tensor) -> dict[str, object]:
+def measure(
+    spec: fp8_hybrid_inventory.TensorSpec, indices: tuple[int, ...], source: torch.Tensor
+) -> dict[str, object]:
     role = _role(spec.name)
     if role is None:
         raise ValueError(f"{spec.name}: outside selective Q4G128 scope")
@@ -160,12 +159,11 @@ def _aggregate(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     }
     for codec in ("q4g64_absmax", "q4g128_absmax", "q4g128_mse"):
         squared_error = sum(float(row["metrics"][codec]["squared_error"]) for row in rows)
-        squared_reference = sum(
-            float(row["metrics"][codec]["squared_reference"]) for row in rows
-        )
+        squared_reference = sum(float(row["metrics"][codec]["squared_reference"]) for row in rows)
         result[codec] = {
             "relative_l2": math.sqrt(squared_error / squared_reference)
-            if squared_reference else 0.0,
+            if squared_reference
+            else 0.0,
             "max_abs": max(float(row["metrics"][codec]["max_abs"]) for row in rows),
             "squared_error": squared_error,
             "squared_reference": squared_reference,
@@ -178,16 +176,21 @@ def _aggregate(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
         result["q4g128_mse"]["relative_l2"] / control if control else None
     )
     result["q4g128_mse_over_q4g128_absmax_relative_l2"] = (
-        result["q4g128_mse"]["relative_l2"]
-        / result["q4g128_absmax"]["relative_l2"]
-        if result["q4g128_absmax"]["relative_l2"] else None
+        result["q4g128_mse"]["relative_l2"] / result["q4g128_absmax"]["relative_l2"]
+        if result["q4g128_absmax"]["relative_l2"]
+        else None
     )
     return result
 
 
-def assemble_report(*, tensors: Sequence[dict[str, object]], source: Mapping[str, object],
-                    implementation: Mapping[str, str], command: Sequence[str],
-                    rows_per_tensor: int = ROWS_PER_TENSOR) -> dict[str, object]:
+def assemble_report(
+    *,
+    tensors: Sequence[dict[str, object]],
+    source: Mapping[str, object],
+    implementation: Mapping[str, str],
+    command: Sequence[str],
+    rows_per_tensor: int = ROWS_PER_TENSOR,
+) -> dict[str, object]:
     ordered = sorted(tensors, key=lambda row: str(row["name"]))
     aggregate = _aggregate(ordered)
     roles = {
@@ -195,8 +198,7 @@ def assemble_report(*, tensors: Sequence[dict[str, object]], source: Mapping[str
         for role in sorted(ROLE_SHAPES_AND_COUNTS)
     }
     ratios = {
-        role: float(value["q4g128_mse_over_q4g64_relative_l2"])
-        for role, value in roles.items()
+        role: float(value["q4g128_mse_over_q4g64_relative_l2"]) for role, value in roles.items()
     }
     ratio = float(aggregate["q4g128_mse_over_q4g64_relative_l2"])
     passed = ratio <= MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2 and all(
@@ -226,8 +228,7 @@ def assemble_report(*, tensors: Sequence[dict[str, object]], source: Mapping[str
         "aggregate": aggregate,
         "roles": roles,
         "decision": {
-            "maximum_candidate_over_control_relative_l2":
-                MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2,
+            "maximum_candidate_over_control_relative_l2": MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2,
             "aggregate_candidate_over_control_relative_l2": ratio,
             "role_candidate_over_control_relative_l2": ratios,
             "sampled_source_gate_pass": passed,
@@ -272,13 +273,17 @@ def validate_report(report: Mapping[str, object]) -> None:
             raise ValueError(f"{spec.name}: sampled element count differs")
         metrics = row.get("metrics")
         if not isinstance(metrics, dict) or set(metrics) != {
-            "q4g64_absmax", "q4g128_absmax", "q4g128_mse"
+            "q4g64_absmax",
+            "q4g128_absmax",
+            "q4g128_mse",
         }:
             raise ValueError(f"{spec.name}: metric set differs")
         references = set()
         for codec, values in metrics.items():
-            numeric = [float(values[key]) for key in
-                       ("relative_l2", "max_abs", "squared_error", "squared_reference")]
+            numeric = [
+                float(values[key])
+                for key in ("relative_l2", "max_abs", "squared_error", "squared_reference")
+            ]
             if not all(math.isfinite(value) and value >= 0 for value in numeric):
                 raise ValueError(f"{spec.name}: {codec} metrics are invalid")
             references.add(numeric[3])
@@ -317,9 +322,11 @@ def validate_report(report: Mapping[str, object]) -> None:
     expected_pass = ratio <= MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2 and all(
         value <= MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2 for value in role_ratios.values()
     )
-    if (decision.get("aggregate_candidate_over_control_relative_l2") != ratio
-            or decision.get("role_candidate_over_control_relative_l2") != role_ratios
-            or decision.get("sampled_source_gate_pass") is not expected_pass):
+    if (
+        decision.get("aggregate_candidate_over_control_relative_l2") != ratio
+        or decision.get("role_candidate_over_control_relative_l2") != role_ratios
+        or decision.get("sampled_source_gate_pass") is not expected_pass
+    ):
         raise ValueError("selective Q4G128 decision differs")
 
 
@@ -344,8 +351,9 @@ def _validate_provenance(report: Mapping[str, object], model_dir: Path) -> None:
         raise ValueError("selective Q4G128 report implementation provenance differs")
 
 
-def run_screen(model_dir: Path, output: Path, *, rows_per_tensor: int,
-               command: Sequence[str]) -> dict[str, object]:
+def run_screen(
+    model_dir: Path, output: Path, *, rows_per_tensor: int, command: Sequence[str]
+) -> dict[str, object]:
     if rows_per_tensor <= 0:
         raise ValueError("rows-per-tensor must be positive")
     if output.exists() or output.is_symlink():
@@ -394,13 +402,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--validate", type=Path)
     parser.add_argument("--rows-per-tensor", type=int, default=ROWS_PER_TENSOR)
     args = parser.parse_args(argv)
-    command = [sys.executable, "-m", __spec__.name if __spec__ else __name__,
-               *(list(argv) if argv is not None else sys.argv[1:])]
+    command = [
+        sys.executable,
+        "-m",
+        __spec__.name if __spec__ else __name__,
+        *(list(argv) if argv is not None else sys.argv[1:]),
+    ]
     if args.validate is not None:
         report = validate_file(args.validate, args.model_dir)
     else:
-        report = run_screen(args.model_dir, args.output,
-                            rows_per_tensor=args.rows_per_tensor, command=command)
+        report = run_screen(
+            args.model_dir, args.output, rows_per_tensor=args.rows_per_tensor, command=command
+        )
     print(json.dumps(report["decision"], sort_keys=True))
     return 0
 

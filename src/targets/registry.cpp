@@ -111,25 +111,24 @@ ConstructedTarget construct_registered(const EngineOptions& options, DeviceConte
     const ModelSamplingDefaults sampling_defaults = Target::sampling_defaults(identity.model_id);
 
     artifact::Binder binder(reader);
-    EngineOptions planned = options;
-    planned.model_id = identity.model_id;
-    planned.weights_id = identity.weights_id;
+    EngineOptions planned          = options;
+    planned.model_id               = identity.model_id;
+    planned.weights_id             = identity.weights_id;
     planned.artifact_file_identity = reader.file_identity();
-    auto load_plan        = Target::plan_load(binder, planned, weights_profile);
+    auto load_plan                 = Target::plan_load(binder, planned, weights_profile);
     auto sequence_planner = Target::make_sequence_planner(device, planned, weights_profile);
     const runtime::SequenceCapacityCurve curve = sequence_planner.capacity_curve();
-    const std::size_t preflight_runtime_bytes =
-        runtime_bytes_after_planned_weights(device,
-                                            load_plan.materialization().device_capacity_bytes);
+    const std::size_t preflight_runtime_bytes  = runtime_bytes_after_planned_weights(
+        device, load_plan.materialization().device_capacity_bytes);
     with_automatic_headroom_hint(options.kv_capacity, [&] {
         (void)runtime::resolve_kv_capacity(options.kv_capacity, curve, preflight_runtime_bytes);
     });
 
     std::future<std::unique_ptr<HostPinnedArena>> kv_ram_future;
     if (options.kv_ram_capacity_bytes != 0) {
-        const int device_index = device.device;
+        const int device_index      = device.device;
         const std::size_t ram_bytes = options.kv_ram_capacity_bytes;
-        kv_ram_future = std::async(std::launch::async, [device_index, ram_bytes] {
+        kv_ram_future               = std::async(std::launch::async, [device_index, ram_bytes] {
             HIP_CHECK(hipSetDevice(device_index));
             return std::make_unique<HostPinnedArena>(ram_bytes);
         });
@@ -152,13 +151,13 @@ ConstructedTarget construct_registered(const EngineOptions& options, DeviceConte
         sequence_plan.kv_capacity() != capacity_resolution.resolved_tokens) {
         throw std::logic_error("resolved KV capacity does not match the finalized target plan");
     }
-    auto loaded   = std::make_unique<Loaded>(std::move(model));
+    auto loaded = std::make_unique<Loaded>(std::move(model));
     std::unique_ptr<HostPinnedArena> kv_ram_arena;
     if (kv_ram_future.valid()) { kv_ram_arena = kv_ram_future.get(); }
     auto instance = with_automatic_headroom_hint(options.kv_capacity, [&] {
-        auto constructed = std::make_unique<Instance>(std::move(loaded), capacity_resolution,
-                                                      std::move(sequence_plan), device,
-                                                      std::move(kv_ram_arena));
+        auto constructed =
+            std::make_unique<Instance>(std::move(loaded), capacity_resolution,
+                                       std::move(sequence_plan), device, std::move(kv_ram_arena));
         device.synchronize();
         return constructed;
     });
@@ -208,11 +207,10 @@ ConstructedTarget construct_target(const EngineOptions& options, DeviceContext& 
     const auto load_start = Clock::now();
 
     artifact::Reader reader(options.artifact_path);
-    const auto& identity = reader.identity();
+    const auto& identity  = reader.identity();
     const auto target_key = registered_target_key(identity.model_id);
     if (target_key.has_value()) {
-        return construct_registered<qwen3_8_27b::Package, LoadedQwen3_8_27B,
-                                    Qwen3_8_27BInstance>(
+        return construct_registered<qwen3_8_27b::Package, LoadedQwen3_8_27B, Qwen3_8_27BInstance>(
             options, device, reader, load_start, *target_key);
     }
     throw std::runtime_error("artifact identity '" + identity.model_id + "/" + identity.weights_id +

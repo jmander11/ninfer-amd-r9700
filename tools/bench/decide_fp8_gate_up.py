@@ -176,9 +176,13 @@ def validate_qualifier(report: Mapping[str, object]) -> dict[str, float | int]:
 
 
 def decide(
-    *, qualifier: Mapping[str, object], hybrid: Mapping[str, object],
-    capacity: Mapping[str, object], benchmark: Mapping[str, object],
-    trace_gate_up_service_ns: int, provenance: Mapping[str, object]
+    *,
+    qualifier: Mapping[str, object],
+    hybrid: Mapping[str, object],
+    capacity: Mapping[str, object],
+    benchmark: Mapping[str, object],
+    trace_gate_up_service_ns: int,
+    provenance: Mapping[str, object],
 ) -> dict[str, object]:
     if hybrid.get("schema") != HYBRID_SCHEMA or capacity.get("schema") != CAPACITY_SCHEMA:
         raise ValueError("hybrid or capacity schema differs")
@@ -207,7 +211,9 @@ def decide(
 
     timing = validate_qualifier(qualifier)
     inventory = gate_up_inventory()
-    candidates = [item for item in hybrid.get("ranked_role_candidates", []) if item.get("role") == ROLE]
+    candidates = [
+        item for item in hybrid.get("ranked_role_candidates", []) if item.get("role") == ROLE
+    ]
     if len(candidates) != 1:
         raise ValueError("hybrid analysis lacks the unique gate/up role")
     candidate = candidates[0]
@@ -281,10 +287,9 @@ def decide(
     saving_ns = measured_q4_ns - projected_fp8_ns
     baseline_prefill = float(benchmark_tests[0]["prefill_seconds_mean"])
     baseline_total = float(benchmark_tests[0]["total_seconds_mean"])
-    if (
-        baseline_prefill != float(hybrid["model"]["baseline_prefill_seconds"])
-        or baseline_total != float(hybrid["model"]["baseline_total_seconds"])
-    ):
+    if baseline_prefill != float(
+        hybrid["model"]["baseline_prefill_seconds"]
+    ) or baseline_total != float(hybrid["model"]["baseline_total_seconds"]):
         raise ValueError("hybrid baseline differs from the supplied benchmark")
     projected_prefill = baseline_prefill - saving_ns / 1e9
     projected_total = baseline_total - saving_ns / 1e9
@@ -309,7 +314,9 @@ def decide(
             "cells": sorted(
                 capacity_cells,
                 key=lambda cell: (
-                    cell["prefill_chunk"], cell["kv_value_group"], cell["concurrency"]
+                    cell["prefill_chunk"],
+                    cell["kv_value_group"],
+                    cell["concurrency"],
                 ),
             ),
         },
@@ -382,10 +389,12 @@ def main() -> int:
         name: {"path": str(path), "sha256": expected[name]} for name, path in paths.items()
     }
     report = decide(
-        qualifier=loaded["qualifier"], hybrid=loaded["hybrid"],
-        capacity=loaded["capacity"], benchmark=benchmark,
+        qualifier=loaded["qualifier"],
+        hybrid=loaded["hybrid"],
+        capacity=loaded["capacity"],
+        benchmark=benchmark,
         trace_gate_up_service_ns=int(trace_gate_up[0]["q4_measured_service_ns"]),
-        provenance=provenance
+        provenance=provenance,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)

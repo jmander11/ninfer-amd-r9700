@@ -45,18 +45,25 @@ EMPTY_REGION_INFRASTRUCTURE = {
 }
 MAX_EMPTY_REGION_INFRASTRUCTURE_DISPATCHES = 112
 EXPECTED_WORKLOAD = {
-    "concurrency": 1, "prompt_tokens": 2048, "generated_tokens": 0,
-    "prefill_chunk": 4096, "draft_tokens": 0, "spec": "none",
-    "kv_cache_format": "fp8-k-int4-v", "kv_value_group": 16,
+    "concurrency": 1,
+    "prompt_tokens": 2048,
+    "generated_tokens": 0,
+    "prefill_chunk": 4096,
+    "draft_tokens": 0,
+    "spec": "none",
+    "kv_cache_format": "fp8-k-int4-v",
+    "kv_value_group": 16,
     "xattention_profile": "dense",
 }
 EXPECTED_CLAIMS = {
     "admissible": (
         "selected-region dispatch inventory and stage/operator service attribution for the exact "
-        "retained-production P2048 route"),
+        "retained-production P2048 route"
+    ),
     "not_admissible": (
         "profiled throughput, physical memory bandwidth, peak utilization, causal stall "
-        "attribution, or proof of practical-ceiling closure"),
+        "attribution, or proof of practical-ceiling closure"
+    ),
 }
 EXPECTED_LIMITATIONS = [
     "The retained 1904.339303 tok/s unprofiled authority owns throughput; rocprof durations are attribution-only.",
@@ -84,8 +91,12 @@ def _snapshot(path: Path, label: str) -> dict[str, Any]:
 
 
 def _load(path: Path, label: str) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"), parse_constant=lambda value: (
-        (_ for _ in ()).throw(ValueError(f"{label} contains non-finite JSON {value}"))))
+    value = json.loads(
+        path.read_text(encoding="utf-8"),
+        parse_constant=lambda value: (_ for _ in ()).throw(
+            ValueError(f"{label} contains non-finite JSON {value}")
+        ),
+    )
     if not isinstance(value, dict):
         raise ValueError(f"{label} is not a JSON object")
     return value
@@ -114,12 +125,19 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
     connection = sqlite3.connect(f"file:{database.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        objects = {row[0] for row in connection.execute(
-            "select name from sqlite_master where type in ('table','view')")}
+        objects = {
+            row[0]
+            for row in connection.execute(
+                "select name from sqlite_master where type in ('table','view')"
+            )
+        }
         process_table = _one_table(objects, "rocpd_info_process_")
         agent_table = _one_table(objects, "rocpd_info_agent_")
-        processes = list(connection.execute(
-            f'select nid, pid, command, environment, extdata from "{process_table}" order by id'))
+        processes = list(
+            connection.execute(
+                f'select nid, pid, command, environment, extdata from "{process_table}" order by id'
+            )
+        )
         if len(processes) != 1 or processes[0]["command"] != " ".join(command):
             raise ValueError("trace database process argv differs from the planned benchmark")
         environment = json.loads(processes[0]["environment"])
@@ -132,11 +150,11 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_MEMORY_COPY_TRACE": "1",
             "ROCPROF_SELECTED_REGIONS": "1",
-            "ROCPROFILER_REGISTER_LIBRARY":
-                "/opt/rocm/core-10.0/lib/librocprofiler-sdk.so.1.3.5",
+            "ROCPROFILER_REGISTER_LIBRARY": "/opt/rocm/core-10.0/lib/librocprofiler-sdk.so.1.3.5",
         }
         if not isinstance(environment, dict) or any(
-                environment.get(key) != value for key, value in expected_environment.items()):
+            environment.get(key) != value for key, value in expected_environment.items()
+        ):
             raise ValueError("trace database profiler environment differs from the plan")
         expected_extdata = {
             "output_path": str(root / "raw"),
@@ -147,41 +165,57 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
             "kernel_rename": False,
         }
         if not isinstance(extdata, dict) or any(
-                extdata.get(key) != value for key, value in expected_extdata.items()):
+            extdata.get(key) != value for key, value in expected_extdata.items()
+        ):
             raise ValueError("trace database profiler output metadata differs from the plan")
 
-        gpu_rows = list(connection.execute(
-            f'select nid, pid, absolute_index, logical_index, type_index, name, product_name, '
-            f'extdata from "{agent_table}" '
-            "where type='GPU' order by absolute_index"))
-        r9700 = [row for row in gpu_rows if row["name"] == EXPECTED_ARCH
-                 and row["product_name"] == EXPECTED_GPU]
+        gpu_rows = list(
+            connection.execute(
+                f"select nid, pid, absolute_index, logical_index, type_index, name, product_name, "
+                f'extdata from "{agent_table}" '
+                "where type='GPU' order by absolute_index"
+            )
+        )
+        r9700 = [
+            row
+            for row in gpu_rows
+            if row["name"] == EXPECTED_ARCH and row["product_name"] == EXPECTED_GPU
+        ]
         if len(r9700) != 1:
             raise ValueError("trace database lacks exactly one R9700/gfx1201 agent")
         if r9700[0]["logical_index"] != 1 or r9700[0]["type_index"] != 0:
             raise ValueError("R9700 agent indices are not logical=1/type=0")
         agent_data = json.loads(r9700[0]["extdata"])
-        if (not isinstance(agent_data, dict) or agent_data.get("cu_count") != 64
-                or agent_data.get("simd_count") != 128
-                or agent_data.get("wave_front_size") != 32):
+        if (
+            not isinstance(agent_data, dict)
+            or agent_data.get("cu_count") != 64
+            or agent_data.get("simd_count") != 128
+            or agent_data.get("wave_front_size") != 32
+        ):
             raise ValueError("R9700 agent topology is not 64 CU/128 SIMD/wave32")
         process_nid, process_pid = processes[0]["nid"], processes[0]["pid"]
         if any(row["nid"] != process_nid or row["pid"] != process_pid for row in gpu_rows):
             raise ValueError("GPU agent inventory is not owned by the traced process/node")
         r9700_index = r9700[0]["absolute_index"]
-        ownership = [tuple(row) for row in connection.execute(
-            "select nid, pid, agent_abs_index, agent_log_index, agent_type_index, agent_type, "
-            "count(*) calls from kernels group by 1,2,3,4,5,6")]
-        expected_ownership = [(process_nid, process_pid, r9700_index, 1, 0, "GPU",
-                               sum(row[-1] for row in ownership))]
+        ownership = [
+            tuple(row)
+            for row in connection.execute(
+                "select nid, pid, agent_abs_index, agent_log_index, agent_type_index, agent_type, "
+                "count(*) calls from kernels group by 1,2,3,4,5,6"
+            )
+        ]
+        expected_ownership = [
+            (process_nid, process_pid, r9700_index, 1, 0, "GPU", sum(row[-1] for row in ownership))
+        ]
         if ownership != expected_ownership:
             raise ValueError("one or more selected kernels did not execute on the R9700")
 
         regions = []
         controls = []
         for row in connection.execute(
-                'select nid, pid, category, name, start, "end", duration, extdata '
-                'from regions order by start'):
+            'select nid, pid, category, name, start, "end", duration, extdata '
+            "from regions order by start"
+        ):
             if row["nid"] != process_nid or row["pid"] != process_pid:
                 raise ValueError("trace marker is not owned by the traced process/node")
             begin, end, duration = int(row["start"]), int(row["end"]), int(row["duration"])
@@ -197,9 +231,11 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
             if not isinstance(message, str):
                 raise ValueError("trace region lacks a string message")
             regions.append((begin, end, message))
-        if (len(controls) != 2 or [row[2] for row in controls]
-                != ["roctxProfilerResume", "roctxProfilerPause"]
-                or any(json.loads(row[3]) != {} for row in controls)):
+        if (
+            len(controls) != 2
+            or [row[2] for row in controls] != ["roctxProfilerResume", "roctxProfilerPause"]
+            or any(json.loads(row[3]) != {} for row in controls)
+        ):
             raise ValueError("trace lacks exact profiler resume/pause control records")
         marker_counts: dict[str, int] = {}
         marker_payloads: dict[str, set[int]] = {}
@@ -243,16 +279,19 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
             raise ValueError("Text-prefill marker is not nested in the measured range")
         for begin, end, message in regions:
             family = message.rsplit(" payload=", 1)[0]
-            if family and family != "ninfer_bench_measured" and not (
-                    text[0][0] <= begin <= end <= text[0][1]):
+            if (
+                family
+                and family != "ninfer_bench_measured"
+                and not (text[0][0] <= begin <= end <= text[0][1])
+            ):
                 raise ValueError("prefill stage marker is not nested in the Text chunk")
         by_message = {message: (begin, end) for begin, end, message in regions if message}
         layer_ranges = []
         for layer in range(64):
-            kind = ("attention.prefill.layer.full" if layer in full_layers
-                    else "gdn.prefill.layer.gdn")
-            leaf = ("attention.prefill.attention" if layer in full_layers
-                    else "gdn.prefill.gdn")
+            kind = (
+                "attention.prefill.layer.full" if layer in full_layers else "gdn.prefill.layer.gdn"
+            )
+            leaf = "attention.prefill.attention" if layer in full_layers else "gdn.prefill.gdn"
             outer = by_message[f"ninfer.{kind} payload={layer}"]
             inner = by_message[f"ninfer.{leaf} payload={layer}"]
             post = by_message[f"ninfer.post-mixer.prefill.post_mixer payload={layer}"]
@@ -262,37 +301,61 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
         if any(left[1] > right[0] for left, right in zip(layer_ranges, layer_ranges[1:])):
             raise ValueError("layer marker ranges overlap or are not sequential")
 
-        kernel_rows = list(connection.execute(
-            'select nid, pid, dispatch_id, name, coalesce(region, "") region, start, "end", '
-            'duration from kernels'))
+        kernel_rows = list(
+            connection.execute(
+                'select nid, pid, dispatch_id, name, coalesce(region, "") region, start, "end", '
+                "duration from kernels"
+            )
+        )
         dispatch_ids = [row["dispatch_id"] for row in kernel_rows]
-        if (not dispatch_ids or any(type(value) is not int or value < 0 for value in dispatch_ids)
-                or len(set(dispatch_ids)) != len(dispatch_ids)):
+        if (
+            not dispatch_ids
+            or any(type(value) is not int or value < 0 for value in dispatch_ids)
+            or len(set(dispatch_ids)) != len(dispatch_ids)
+        ):
             raise ValueError("selected dispatch IDs are absent, invalid, or duplicated")
         for row in kernel_rows:
-            if (row["nid"] != process_nid or row["pid"] != process_pid
-                    or type(row["duration"]) is not int or row["duration"] <= 0
-                    or row["end"] - row["start"] != row["duration"]):
+            if (
+                row["nid"] != process_nid
+                or row["pid"] != process_pid
+                or type(row["duration"]) is not int
+                or row["duration"] <= 0
+                or row["end"] - row["start"] != row["duration"]
+            ):
                 raise ValueError("selected kernel process/timing identity is invalid")
-        infrastructure = [row for row in kernel_rows if not row["region"]
-                          and text[0][0] <= row["start"] < row["end"] <= text[0][1]]
-        crossing_unmarked = [row for row in kernel_rows if not row["region"]
-                             and row["start"] < text[0][1] and row["end"] > text[0][0]
-                             and row not in infrastructure]
+        infrastructure = [
+            row
+            for row in kernel_rows
+            if not row["region"] and text[0][0] <= row["start"] < row["end"] <= text[0][1]
+        ]
+        crossing_unmarked = [
+            row
+            for row in kernel_rows
+            if not row["region"]
+            and row["start"] < text[0][1]
+            and row["end"] > text[0][0]
+            and row not in infrastructure
+        ]
         if crossing_unmarked:
             raise ValueError("unmarked selected kernel crosses a Text-prefill boundary")
-        measured_other_unmarked = [row for row in kernel_rows if not row["region"]
-                                   and row not in infrastructure]
-        bad_infrastructure = sorted({row["name"] for row in infrastructure}
-                                    - EMPTY_REGION_INFRASTRUCTURE)
+        measured_other_unmarked = [
+            row for row in kernel_rows if not row["region"] and row not in infrastructure
+        ]
+        bad_infrastructure = sorted(
+            {row["name"] for row in infrastructure} - EMPTY_REGION_INFRASTRUCTURE
+        )
         infra_durations = [int(row["end"]) - int(row["start"]) for row in infrastructure]
         text_wall = text[0][1] - text[0][0]
-        if (bad_infrastructure
-                or len(infrastructure) > MAX_EMPTY_REGION_INFRASTRUCTURE_DISPATCHES
-                or any(duration > 20_000 for duration in infra_durations)
-                or sum(infra_durations) > 1_000_000
-                or sum(infra_durations) / text_wall > 0.001):
-            raise ValueError("unmarked selected kernels exceed the bounded infrastructure allowance")
+        if (
+            bad_infrastructure
+            or len(infrastructure) > MAX_EMPTY_REGION_INFRASTRUCTURE_DISPATCHES
+            or any(duration > 20_000 for duration in infra_durations)
+            or sum(infra_durations) > 1_000_000
+            or sum(infra_durations) / text_wall > 0.001
+        ):
+            raise ValueError(
+                "unmarked selected kernels exceed the bounded infrastructure allowance"
+            )
         for row in kernel_rows:
             if not (measured[0][0] <= row["start"] < row["end"] <= measured[0][1]):
                 raise ValueError("selected kernel is not fully inside the measured range")
@@ -301,31 +364,39 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
                 raise ValueError("selected kernel has an unexpected ROCTX association")
             if region and row["start"] < by_message[region][0]:
                 raise ValueError("selected kernel starts before its associated ROCTX marker")
-        copies = list(connection.execute(
-            'select nid, pid, start, "end", duration, coalesce(region_name, "") region '
-            "from memory_copies"))
+        copies = list(
+            connection.execute(
+                'select nid, pid, start, "end", duration, coalesce(region_name, "") region '
+                "from memory_copies"
+            )
+        )
         if copies:
             raise ValueError("exact retained P2048 selected region unexpectedly contains copies")
         return {
             "gpu_agents": [
-                {"absolute_index": row["absolute_index"], "architecture": row["name"],
-                 "product_name": row["product_name"],
-                 "logical_index": row["logical_index"], "type_index": row["type_index"]}
+                {
+                    "absolute_index": row["absolute_index"],
+                    "architecture": row["name"],
+                    "product_name": row["product_name"],
+                    "logical_index": row["logical_index"],
+                    "type_index": row["type_index"],
+                }
                 for row in gpu_rows
             ],
             "selected_kernel_owner": {
-                "absolute_index": r9700_index, "architecture": EXPECTED_ARCH,
-                "product_name": EXPECTED_GPU, "cu_count": 64, "simd_count": 128,
+                "absolute_index": r9700_index,
+                "architecture": EXPECTED_ARCH,
+                "product_name": EXPECTED_GPU,
+                "cu_count": 64,
+                "simd_count": 128,
                 "wave_front_size": 32,
             },
             "marker_inventory": marker_counts,
             "empty_region_infrastructure_dispatches": len(infrastructure),
             "empty_region_infrastructure_summed_duration_ns": sum(infra_durations),
             "empty_region_infrastructure_max_duration_ns": max(infra_durations, default=0),
-            "empty_region_infrastructure_text_wall_fraction": (
-                sum(infra_durations) / text_wall),
-            "empty_region_infrastructure_symbols": sorted(
-                {row["name"] for row in infrastructure}),
+            "empty_region_infrastructure_text_wall_fraction": (sum(infra_durations) / text_wall),
+            "empty_region_infrastructure_symbols": sorted({row["name"] for row in infrastructure}),
             "measured_other_unmarked_dispatches": len(measured_other_unmarked),
             "stage_attribution_complete": len(infrastructure) == 0,
         }
@@ -333,10 +404,12 @@ def _validate_database_contract(database: Path, command: list[str], root: Path) 
         connection.close()
 
 
-def _validate_unprofiled(authority: dict[str, Any], plan: dict[str, Any],
-                          snapshot: dict[str, Any]) -> None:
-    _match(plan.get("unprofiled_authority", {}).get("file"), snapshot,
-           "unprofiled timing authority")
+def _validate_unprofiled(
+    authority: dict[str, Any], plan: dict[str, Any], snapshot: dict[str, Any]
+) -> None:
+    _match(
+        plan.get("unprofiled_authority", {}).get("file"), snapshot, "unprofiled timing authority"
+    )
     decision = authority.get("decision")
     inputs = authority.get("input_identities")
     before, after = authority.get("power_before"), authority.get("power_after")
@@ -357,43 +430,53 @@ def _validate_unprofiled(authority: dict[str, Any], plan: dict[str, Any],
     ):
         raise ValueError("unprofiled authority is not the retained measured promotion result")
     milliseconds = decision.get("floor_diagnostic_candidate_prefill_median_ms")
-    if (isinstance(milliseconds, bool) or not isinstance(milliseconds, (int, float))
-            or not math.isfinite(milliseconds) or milliseconds <= 0):
+    if (
+        isinstance(milliseconds, bool)
+        or not isinstance(milliseconds, (int, float))
+        or not math.isfinite(milliseconds)
+        or milliseconds <= 0
+    ):
         raise ValueError("unprofiled authority lacks a finite positive P2048 median")
     tokens_per_second = 2048.0 / (float(milliseconds) / 1000.0)
-    if (milliseconds != expected.get("prefill_median_ms")
-            or tokens_per_second != expected.get("prefill_tok_s")):
+    if milliseconds != expected.get("prefill_median_ms") or tokens_per_second != expected.get(
+        "prefill_tok_s"
+    ):
         raise ValueError("unprofiled P2048 summary differs from its authority")
     artifact = inputs.get("artifact")
     corpus = inputs.get("corpus")
     candidate_binary = inputs.get("build_receipts", {}).get("candidate", {}).get("binary")
     if (
         not isinstance(artifact, dict)
-        or artifact.get("path") != str(Path(plan["artifact"]["path"]).relative_to(
-            Path(plan["repository_root"])))
+        or artifact.get("path")
+        != str(Path(plan["artifact"]["path"]).relative_to(Path(plan["repository_root"])))
         or artifact.get("file_size_bytes") != plan["artifact"]["file_size_bytes"]
         or artifact.get("sha256") != plan["artifact"]["sha256"]
         or artifact.get("weights_id") != plan["artifact"]["weights_id"]
         or not isinstance(corpus, dict)
-        or corpus.get("path") != str(Path(plan["corpus"]["path"]).relative_to(
-            Path(plan["repository_root"])))
+        or corpus.get("path")
+        != str(Path(plan["corpus"]["path"]).relative_to(Path(plan["repository_root"])))
         or corpus.get("file_size_bytes") != plan["corpus"]["file_size_bytes"]
         or corpus.get("sha256") != plan["corpus"]["sha256"]
         or not isinstance(candidate_binary, dict)
         or candidate_binary.get("file_size_bytes")
-            != plan["unprofiled_authority"]["prior_executable"]["file_size_bytes"]
+        != plan["unprofiled_authority"]["prior_executable"]["file_size_bytes"]
         or candidate_binary.get("sha256")
-            != plan["unprofiled_authority"]["prior_executable"]["sha256"]
+        != plan["unprofiled_authority"]["prior_executable"]["sha256"]
         or Path(str(candidate_binary.get("path", "")))
-            != Path(plan["unprofiled_authority"]["prior_executable"]["path"]).relative_to(
-                Path(plan["repository_root"]))
+        != Path(plan["unprofiled_authority"]["prior_executable"]["path"]).relative_to(
+            Path(plan["repository_root"])
+        )
     ):
         raise ValueError("unprofiled authority input identity differs from the planned route")
 
 
-def _validate_repair(repair_path: Path, plan_snapshot: dict[str, Any],
-                     plan_analyzer: dict[str, Any], current_analyzer: dict[str, Any],
-                     outputs: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _validate_repair(
+    repair_path: Path,
+    plan_snapshot: dict[str, Any],
+    plan_analyzer: dict[str, Any],
+    current_analyzer: dict[str, Any],
+    outputs: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     repair_snapshot = _snapshot(repair_path, "post-capture repair")
     repair = _load(Path(repair_snapshot["path"]), "post-capture repair")
     capture_root = Path(plan_snapshot["path"]).parent
@@ -403,8 +486,7 @@ def _validate_repair(repair_path: Path, plan_snapshot: dict[str, Any],
         repair.get("artifact_type") != "ninfer_r9700_retained_prefill_trace_analysis_repair"
         or repair.get("schema_version") != 1
         or repair.get("status") != "analysis_only_no_recapture"
-        or repair.get("cause")
-            != "absolute analyzer invocation lacked repository root on sys.path"
+        or repair.get("cause") != "absolute analyzer invocation lacked repository root on sys.path"
         or repair.get("capture_plan") != plan_snapshot
         or repair.get("capture_analyzer") != plan_analyzer
         or repair.get("repaired_analyzer") != current_analyzer
@@ -417,8 +499,7 @@ def _validate_repair(repair_path: Path, plan_snapshot: dict[str, Any],
     return repair_snapshot, repair
 
 
-def validate(plan_path: Path, root: Path,
-             repair_path: Path | None = None) -> dict[str, Any]:
+def validate(plan_path: Path, root: Path, repair_path: Path | None = None) -> dict[str, Any]:
     plan_snapshot = _snapshot(plan_path, "plan")
     plan = _load(Path(plan_snapshot["path"]), "plan")
     if (
@@ -430,7 +511,8 @@ def validate(plan_path: Path, root: Path,
         or plan.get("workload") != EXPECTED_WORKLOAD
         or plan.get("claims") != EXPECTED_CLAIMS
         or plan.get("limitations") != EXPECTED_LIMITATIONS
-        or plan.get("power_profile") != {
+        or plan.get("power_profile")
+        != {
             "path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
             "required_before_after": "auto",
         }
@@ -443,8 +525,10 @@ def validate(plan_path: Path, root: Path,
     identities = {}
     for label, key in (
         ("benchmark executable", "benchmark_executable"),
-        ("artifact", "artifact"), ("corpus", "corpus"),
-        ("profiler", "profiler"), ("legacy analyzer", "legacy_analyzer"),
+        ("artifact", "artifact"),
+        ("corpus", "corpus"),
+        ("profiler", "profiler"),
+        ("legacy analyzer", "legacy_analyzer"),
     ):
         identity = plan.get(key)
         if not isinstance(identity, dict) or not isinstance(identity.get("path"), str):
@@ -459,7 +543,8 @@ def validate(plan_path: Path, root: Path,
         raise ValueError("plan lacks capture-time analyzer identity")
     authority_identity = plan.get("unprofiled_authority", {}).get("file")
     if not isinstance(authority_identity, dict) or not isinstance(
-            authority_identity.get("path"), str):
+        authority_identity.get("path"), str
+    ):
         raise ValueError("plan lacks unprofiled timing authority")
     authority_snapshot = _snapshot(Path(authority_identity["path"]), "unprofiled authority")
     prior_identity = plan["unprofiled_authority"].get("prior_executable")
@@ -491,9 +576,12 @@ def validate(plan_path: Path, root: Path,
     repair_snapshot = None
     if plan_analyzer != current_analyzer:
         if repair_path is None:
-            raise ValueError("capture-time analyzer changed without a post-capture repair authority")
+            raise ValueError(
+                "capture-time analyzer changed without a post-capture repair authority"
+            )
         repair_snapshot, _ = _validate_repair(
-            repair_path, plan_snapshot, plan_analyzer, current_analyzer, captured_outputs)
+            repair_path, plan_snapshot, plan_analyzer, current_analyzer, captured_outputs
+        )
     elif repair_path is not None:
         raise ValueError("post-capture repair supplied although the capture analyzer is unchanged")
     identities["analyzer"] = current_analyzer
@@ -510,22 +598,54 @@ def validate(plan_path: Path, root: Path,
 
     command = plan.get("benchmark_command")
     profiler = plan.get("profiler_command")
-    if (not isinstance(command, list) or not all(isinstance(value, str) for value in command)
-            or not isinstance(profiler, list)
-            or not all(isinstance(value, str) for value in profiler)):
+    if (
+        not isinstance(command, list)
+        or not all(isinstance(value, str) for value in command)
+        or not isinstance(profiler, list)
+        or not all(isinstance(value, str) for value in profiler)
+    ):
         raise ValueError("plan command vectors are invalid")
     expected_profiler = [
-        identities["profiler"]["path"], "--selected-regions", "-f", "rocpd", "-d",
-        str(root / "raw"), "-o", "retained-production-p2048", "--marker-trace",
-        "--kernel-trace", "--memory-copy-trace", "--", *command,
+        identities["profiler"]["path"],
+        "--selected-regions",
+        "-f",
+        "rocpd",
+        "-d",
+        str(root / "raw"),
+        "-o",
+        "retained-production-p2048",
+        "--marker-trace",
+        "--kernel-trace",
+        "--memory-copy-trace",
+        "--",
+        *command,
     ]
     if profiler != expected_profiler:
         raise ValueError("profiler command differs from the bounded trace contract")
     expected_command = [
-        identities["benchmark_executable"]["path"], "--weights", identities["artifact"]["path"],
-        "--corpus", identities["corpus"]["path"], "--device", "0", "--concurrency", "1",
-        "-p", "2048", "--prefill-chunk", "4096", "--draft-tokens", "0", "--output",
-        "json", "--output-file", str(report_path), "-r", "1", "--warmup", "1",
+        identities["benchmark_executable"]["path"],
+        "--weights",
+        identities["artifact"]["path"],
+        "--corpus",
+        identities["corpus"]["path"],
+        "--device",
+        "0",
+        "--concurrency",
+        "1",
+        "-p",
+        "2048",
+        "--prefill-chunk",
+        "4096",
+        "--draft-tokens",
+        "0",
+        "--output",
+        "json",
+        "--output-file",
+        str(report_path),
+        "-r",
+        "1",
+        "--warmup",
+        "1",
         "--profile-measured",
     ]
     if command != expected_command:
@@ -546,17 +666,19 @@ def validate(plan_path: Path, root: Path,
         or report.get("environment", {}).get("architecture_name") != EXPECTED_ARCH
         or report.get("environment", {}).get("device_id") != 0
         or Path(str(report.get("artifact", {}).get("path", ""))).resolve()
-            != Path(identities["artifact"]["path"])
+        != Path(identities["artifact"]["path"])
         or report.get("artifact", {}).get("file_size_bytes")
-            != identities["artifact"]["file_size_bytes"]
+        != identities["artifact"]["file_size_bytes"]
         or report.get("load", {}).get("weights_id") != plan["artifact"]["weights_id"]
         or not isinstance(config, dict)
         or config.get("max_context") != 2048
-        or config.get("concurrency") != 1 or config.get("prefill_chunk") != 4096
+        or config.get("concurrency") != 1
+        or config.get("prefill_chunk") != 4096
         or config.get("kv_cache_format") != "fp8-k-int4-v"
         or config.get("kv_value_group") != 16
         or config.get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
-        or config.get("spec") != "none" or config.get("draft_tokens") != 0
+        or config.get("spec") != "none"
+        or config.get("draft_tokens") != 0
         or config.get("speculative_execution") is not False
         or config.get("dflash_verify_width_requested") != 0
         or config.get("dflash_verify_width") != 0
@@ -565,17 +687,19 @@ def validate(plan_path: Path, root: Path,
         or config.get("decode_path") != "device_graph"
         or config.get("decode_graph_prime") != {"primed": False, "output_tokens": 0}
         or config.get("q4_activation_bits") != 8
-        or config.get("q4_prefill_cta_profile")
-            != "m64n128-pingpong-n16-k16-scalar-base-production"
+        or config.get("q4_prefill_cta_profile") != "m64n128-pingpong-n16-k16-scalar-base-production"
         or config.get("w8_activation_bits") != 8
         or config.get("split512_enabled") is not True
         or config.get("decode_attention_profile") != "packed-t1to6-split512-t4tree-v1"
         or config.get("packed_decode_min_context") != 64
         or config.get("split512_min_context") != 8192
         or config.get("xattention_qualification") is not False
-        or config.get("repetitions") != 1 or config.get("warmup") != 1
-        or not isinstance(tests, list) or len(tests) != 1
-        or tests[0].get("kind") != "pp" or tests[0].get("n_prompt") != 2048
+        or config.get("repetitions") != 1
+        or config.get("warmup") != 1
+        or not isinstance(tests, list)
+        or len(tests) != 1
+        or tests[0].get("kind") != "pp"
+        or tests[0].get("n_prompt") != 2048
         or tests[0].get("n_gen") != 0
     ):
         raise ValueError("benchmark report is not the exact planned retained-prefill capture")
@@ -584,30 +708,46 @@ def validate(plan_path: Path, root: Path,
     prefill_tok_s = test.get("prefill_tok_s_mean")
     reps = test.get("reps")
     expected_speculative = {
-        "enabled": False, "draft_window": 0, "rounds": 0, "drafted_tokens": 0,
-        "accepted_tokens": 0, "fallback_steps": 0, "acceptance_rate": None,
-        "acceptance_length": None, "accepted_per_position": [],
+        "enabled": False,
+        "draft_window": 0,
+        "rounds": 0,
+        "drafted_tokens": 0,
+        "accepted_tokens": 0,
+        "fallback_steps": 0,
+        "acceptance_rate": None,
+        "acceptance_length": None,
+        "accepted_per_position": [],
     }
-    null_metrics = ("decode_output_tok_s_mean", "decode_output_tok_s_stddev",
-                    "decode_engine_tok_s_mean", "decode_engine_tok_s_stddev",
-                    "whole_output_tok_s_mean", "whole_output_tok_s_stddev",
-                    "decode_seconds_mean", "decode_seconds_stddev")
-    if (test.get("requested_output_tokens") != 1
-            or any(test.get(name) is not None for name in null_metrics)
-            or isinstance(prefill_seconds, bool)
-            or not isinstance(prefill_seconds, (int, float))
-            or not math.isfinite(prefill_seconds) or prefill_seconds <= 0
-            or isinstance(prefill_tok_s, bool)
-            or not isinstance(prefill_tok_s, (int, float))
-            or not math.isfinite(prefill_tok_s) or prefill_tok_s <= 0
-            or not math.isclose(prefill_tok_s, 2048.0 / prefill_seconds,
-                                rel_tol=1e-9, abs_tol=1e-9)
-            or not isinstance(reps, list) or len(reps) != 1
-            or test.get("speculative") != expected_speculative
-            or reps[0].get("generated_output_tokens") != 1
-            or reps[0].get("decode_output_tokens") is not None
-            or reps[0].get("decode_engine_tokens") is not None
-            or reps[0].get("speculative") != expected_speculative):
+    null_metrics = (
+        "decode_output_tok_s_mean",
+        "decode_output_tok_s_stddev",
+        "decode_engine_tok_s_mean",
+        "decode_engine_tok_s_stddev",
+        "whole_output_tok_s_mean",
+        "whole_output_tok_s_stddev",
+        "decode_seconds_mean",
+        "decode_seconds_stddev",
+    )
+    if (
+        test.get("requested_output_tokens") != 1
+        or any(test.get(name) is not None for name in null_metrics)
+        or isinstance(prefill_seconds, bool)
+        or not isinstance(prefill_seconds, (int, float))
+        or not math.isfinite(prefill_seconds)
+        or prefill_seconds <= 0
+        or isinstance(prefill_tok_s, bool)
+        or not isinstance(prefill_tok_s, (int, float))
+        or not math.isfinite(prefill_tok_s)
+        or prefill_tok_s <= 0
+        or not math.isclose(prefill_tok_s, 2048.0 / prefill_seconds, rel_tol=1e-9, abs_tol=1e-9)
+        or not isinstance(reps, list)
+        or len(reps) != 1
+        or test.get("speculative") != expected_speculative
+        or reps[0].get("generated_output_tokens") != 1
+        or reps[0].get("decode_output_tokens") is not None
+        or reps[0].get("decode_engine_tokens") is not None
+        or reps[0].get("speculative") != expected_speculative
+    ):
         raise ValueError("benchmark report timing/rep semantics are not exact P2048/G0")
     before = before_path.read_text(encoding="utf-8").strip()
     after = after_path.read_text(encoding="utf-8").strip()
@@ -619,24 +759,34 @@ def validate(plan_path: Path, root: Path,
     attribution = analyze(database_path, report_path)
     if (
         sum(row["calls"] for row in attribution["kernel_execution_categories"])
-            != aggregates["dispatch_count"]
-        or round(sum(row["independent_summed_duration_ms"]
-                     for row in attribution["kernel_execution_categories"]) * 1e6)
-            != aggregates["independent_device_service_time_ns"]
+        != aggregates["dispatch_count"]
+        or round(
+            sum(
+                row["independent_summed_duration_ms"]
+                for row in attribution["kernel_execution_categories"]
+            )
+            * 1e6
+        )
+        != aggregates["independent_device_service_time_ns"]
     ):
         raise ValueError("attribution does not conserve database dispatch count/service")
 
     final_snapshots = {
-        "plan": plan_snapshot, "benchmark_report": report_snapshot,
-        "database": database_snapshot, "power_before": before_snapshot,
-        "power_after": after_snapshot, "unprofiled_authority": authority_snapshot,
+        "plan": plan_snapshot,
+        "benchmark_report": report_snapshot,
+        "database": database_snapshot,
+        "power_before": before_snapshot,
+        "power_after": after_snapshot,
+        "unprofiled_authority": authority_snapshot,
         "prior_unprofiled_executable": prior_snapshot,
         **identities,
     }
     if repair_snapshot is not None:
         final_snapshots["post_capture_repair"] = repair_snapshot
     commands_identity = plan.get("commands")
-    if not isinstance(commands_identity, dict) or not isinstance(commands_identity.get("path"), str):
+    if not isinstance(commands_identity, dict) or not isinstance(
+        commands_identity.get("path"), str
+    ):
         raise ValueError("plan lacks commands identity")
     commands_snapshot = _snapshot(Path(commands_identity["path"]), "commands")
     _match(commands_identity, commands_snapshot, "commands")
@@ -652,8 +802,12 @@ def validate(plan_path: Path, root: Path,
         "inputs": final_snapshots,
         "workload": plan["workload"],
         "unprofiled_timing_authority": plan["unprofiled_authority"],
-        "power_profile": {"required": "auto", "before": before, "after": after,
-                          "endpoint_only": True},
+        "power_profile": {
+            "required": "auto",
+            "before": before,
+            "after": after,
+            "endpoint_only": True,
+        },
         "aggregates": aggregates,
         "database_contract": database_contract,
         "dispatches": dispatches,
@@ -690,8 +844,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError("evidence output differs from the immutable plan")
         result = validate(args.plan, args.root, args.repair)
         _publish(args.out, result)
-    except (OSError, sqlite3.Error, json.JSONDecodeError, KeyError, TypeError,
-            ValueError) as error:
+    except (OSError, sqlite3.Error, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
         raise SystemExit(str(error)) from error
     return 0
 

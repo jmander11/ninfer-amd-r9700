@@ -16,13 +16,13 @@ namespace ninfer::ops::r9700::linear {
 // value. Consumers publish the canonical BF16 quiet NaN for every output element of a flagged
 // token (the rows a nonfinite input would poison in unquantized arithmetic).
 struct Fp8ActivationWorkspace {
-    std::uint8_t* codes           = nullptr;
-    std::size_t code_bytes        = 0;
-    float* scales                 = nullptr;
-    std::size_t scale_bytes       = 0;
-    std::uint32_t* status         = nullptr;  // [tokens]
-    std::uint32_t tokens          = 0;
-    std::uint32_t columns         = 0;
+    std::uint8_t* codes          = nullptr;
+    std::size_t code_bytes       = 0;
+    float* scales                = nullptr;
+    std::size_t scale_bytes      = 0;
+    std::uint32_t* status        = nullptr; // [tokens]
+    std::uint32_t tokens         = 0;
+    std::uint32_t columns        = 0;
     std::uint32_t padded_columns = 0;
 };
 
@@ -40,13 +40,13 @@ struct Fp8ActivationQuantizeArgs {
     CacheWarm warm{};
 };
 
-[[nodiscard]] std::size_t fp8_activation_workspace_capacity_bytes(
-    std::uint32_t tokens, std::uint32_t columns) noexcept;
-[[nodiscard]] hipError_t
-fp8_bind_activation_workspace(void* storage, std::size_t storage_bytes, std::uint32_t tokens,
-                              std::uint32_t columns, Fp8ActivationWorkspace* out) noexcept;
-[[nodiscard]] hipError_t
-fp8_quantize_activation(const Fp8ActivationQuantizeArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] std::size_t fp8_activation_workspace_capacity_bytes(std::uint32_t tokens,
+                                                                  std::uint32_t columns) noexcept;
+[[nodiscard]] hipError_t fp8_bind_activation_workspace(void* storage, std::size_t storage_bytes,
+                                                       std::uint32_t tokens, std::uint32_t columns,
+                                                       Fp8ActivationWorkspace* out) noexcept;
+[[nodiscard]] hipError_t fp8_quantize_activation(const Fp8ActivationQuantizeArgs& args,
+                                                 hipStream_t stream) noexcept;
 
 // Fused producers (any T). Each quantizes exactly the BF16 tensor its unfused producer would
 // publish (which is never materialized):
@@ -60,11 +60,12 @@ struct Fp8NormalizedQuantizeArgs {
     float eps                  = 0.0F;
     bool unit_offset           = false;
     Fp8ActivationWorkspace workspace{};
-    hip_bfloat16* normalized   = nullptr;
+    hip_bfloat16* normalized = nullptr;
     CacheWarm warm{};
 };
-[[nodiscard]] hipError_t fp8_quantize_normalized_activation(
-    const Fp8NormalizedQuantizeArgs& args, hipStream_t stream) noexcept;
+
+[[nodiscard]] hipError_t fp8_quantize_normalized_activation(const Fp8NormalizedQuantizeArgs& args,
+                                                            hipStream_t stream) noexcept;
 
 struct Fp8GatedQuantizeArgs {
     const hip_bfloat16* gate = nullptr;
@@ -72,6 +73,7 @@ struct Fp8GatedQuantizeArgs {
     Fp8ActivationWorkspace workspace{};
     CacheWarm warm{};
 };
+
 [[nodiscard]] hipError_t fp8_quantize_gated_activation(const Fp8GatedQuantizeArgs& args,
                                                        hipStream_t stream) noexcept;
 
@@ -86,7 +88,9 @@ struct Fp8GatedRmsNormQuantizeArgs {
     Fp8ActivationWorkspace workspace{};
     CacheWarm warm{};
 };
-[[nodiscard]] hipError_t fp8_quantize_gated_rmsnorm_activation(
-    const Fp8GatedRmsNormQuantizeArgs& args, hipStream_t stream) noexcept;
+
+[[nodiscard]] hipError_t
+fp8_quantize_gated_rmsnorm_activation(const Fp8GatedRmsNormQuantizeArgs& args,
+                                      hipStream_t stream) noexcept;
 
 } // namespace ninfer::ops::r9700::linear

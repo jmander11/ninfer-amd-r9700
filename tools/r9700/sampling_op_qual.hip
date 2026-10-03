@@ -27,12 +27,12 @@
 namespace {
 
 constexpr int kPhysicalVocabulary = 248320;
-constexpr int kTokenDomain = 248320;
+constexpr int kTokenDomain        = 248320;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
 std::uint16_t bf16_rne_bits(float value) {
-    std::uint32_t word = std::bit_cast<std::uint32_t>(value);
+    std::uint32_t word           = std::bit_cast<std::uint32_t>(value);
     const std::uint32_t absolute = word & 0x7fffffffU;
     if ((absolute & 0x7f800000U) != 0x7f800000U) {
         word += 0x7fffU + ((word >> 16U) & 1U);
@@ -60,13 +60,12 @@ unsigned long long splitmix64(unsigned long long value) {
 }
 
 float uniform(unsigned long long seed, int position, int purpose) {
-    unsigned long long key = splitmix64(
-        seed ^ (static_cast<unsigned long long>(static_cast<unsigned int>(position)) *
-                0xD1B54A32D192ED03ULL));
+    unsigned long long key =
+        splitmix64(seed ^ (static_cast<unsigned long long>(static_cast<unsigned int>(position)) *
+                           0xD1B54A32D192ED03ULL));
     key = splitmix64(key ^
                      (static_cast<unsigned long long>(static_cast<unsigned int>(purpose)) << 21));
-    return static_cast<float>(static_cast<unsigned int>(key >> 40)) *
-           (1.0F / 16777216.0F);
+    return static_cast<float>(static_cast<unsigned int>(key >> 40)) * (1.0F / 16777216.0F);
 }
 
 struct OracleResult {
@@ -111,8 +110,8 @@ OracleResult oracle_sample(const hip_bfloat16* logits, int token_domain,
     candidates.resize(static_cast<std::size_t>(cap));
 
     std::vector<double> weight(static_cast<std::size_t>(cap));
-    const double maximum = static_cast<double>(candidates[0].first) /
-                           static_cast<double>(config.temperature);
+    const double maximum =
+        static_cast<double>(candidates[0].first) / static_cast<double>(config.temperature);
     double total = 0.0;
     for (int index = 0; index < cap; ++index) {
         weight[static_cast<std::size_t>(index)] =
@@ -121,12 +120,11 @@ OracleResult oracle_sample(const hip_bfloat16* logits, int token_domain,
                      maximum);
         total += weight[static_cast<std::size_t>(index)];
     }
-    const double min_threshold = config.min_p > 0.0F
-                                     ? static_cast<double>(config.min_p) * weight[0]
-                                     : -1.0;
+    const double min_threshold =
+        config.min_p > 0.0F ? static_cast<double>(config.min_p) * weight[0] : -1.0;
     const double top_p_target = static_cast<double>(config.top_p) * total;
-    double cumulative = 0.0;
-    int support_size = 0;
+    double cumulative         = 0.0;
+    int support_size          = 0;
     for (int index = 0; index < cap; ++index) {
         if (min_threshold >= 0.0 && weight[static_cast<std::size_t>(index)] < min_threshold) {
             break;
@@ -135,28 +133,28 @@ OracleResult oracle_sample(const hip_bfloat16* logits, int token_domain,
         support_size = index + 1;
         if (config.top_p < 1.0F && cumulative >= top_p_target) { break; }
     }
-    support_size = std::max(1, support_size);
+    support_size         = std::max(1, support_size);
     double support_total = 0.0;
     for (int index = 0; index < support_size; ++index) {
         support_total += weight[static_cast<std::size_t>(index)];
     }
-    const double goal = static_cast<double>(uniform(config.seed, position, purpose)) * support_total;
-    cumulative = 0.0;
-    int selected = candidates[static_cast<std::size_t>(support_size - 1)].second;
+    const double goal =
+        static_cast<double>(uniform(config.seed, position, purpose)) * support_total;
+    cumulative    = 0.0;
+    int selected  = candidates[static_cast<std::size_t>(support_size - 1)].second;
     double margin = std::numeric_limits<double>::infinity();
     OracleResult result;
     for (int index = 0; index < support_size; ++index) {
         const double previous = cumulative;
         cumulative += weight[static_cast<std::size_t>(index)];
-        margin = std::min(margin, std::min(std::abs(goal - previous),
-                                           std::abs(cumulative - goal)));
+        margin = std::min(margin, std::min(std::abs(goal - previous), std::abs(cumulative - goal)));
         result.support.push_back(candidates[static_cast<std::size_t>(index)].second);
         if (goal < cumulative) {
             selected = candidates[static_cast<std::size_t>(index)].second;
             break;
         }
     }
-    result.token = selected;
+    result.token           = selected;
     result.boundary_margin = margin;
     return result;
 }
@@ -183,13 +181,13 @@ std::vector<hip_bfloat16> make_logits(int rows, int physical_rows) {
         hip_bfloat16* column = result.data() + static_cast<std::size_t>(row) * physical_rows;
         for (int token = 0; token < physical_rows; ++token) {
             const int noise = (token * 17 + row * 31) % 997;
-            column[token] = bf16(-12.0F + static_cast<float>(noise) / 997.0F);
+            column[token]   = bf16(-12.0F + static_cast<float>(noise) / 997.0F);
         }
         // Top candidates are deliberately non-contiguous, cross 512-token partials, include an
         // exact BF16 tie, and include counted tokens whose penalty changes their rank.
         for (int rank = 0; rank < 28; ++rank) {
             const int token = 13 + rank * 7919 + row * 101;
-            column[token] = bf16(8.0F - static_cast<float>(rank) * 0.125F);
+            column[token]   = bf16(8.0F - static_cast<float>(rank) * 0.125F);
         }
         column[17 + row * 101] = bf16(8.0F); // lower-id tie wins before penalties.
     }
@@ -219,15 +217,15 @@ void qualify_batches(ninfer::DeviceContext& device) {
         std::vector<int> expected_counts = counts;
         for (int row = 0; row < rows; ++row) {
             positions[static_cast<std::size_t>(row)] = 4096 + row * 37;
-            SamplingConfig& config = configs[static_cast<std::size_t>(row)];
-            const bool greedy = rows > 1 && row == 0;
+            SamplingConfig& config                   = configs[static_cast<std::size_t>(row)];
+            const bool greedy                        = rows > 1 && row == 0;
             config.temperature = greedy ? 0.0F : 0.55F + static_cast<float>(row % 3) * 0.4F;
             constexpr int top_k_cases[] = {0, 1, 7, 19, 20, 27, -3, 11};
-            config.top_k = top_k_cases[row];
-            config.top_p = (row % 3 == 0) ? 0.0F : ((row % 3 == 1) ? 0.72F : 1.0F);
-            config.min_p = (row % 4 == 2) ? 0.35F : 0.0F;
-            config.presence_penalty = greedy ? 7.0F : ((row % 3 != 1) ? 0.35F : 0.0F);
-            config.frequency_penalty = greedy ? 9.0F : ((row % 3 != 0) ? 0.2F : 0.0F);
+            config.top_k                = top_k_cases[row];
+            config.top_p                = (row % 3 == 0) ? 0.0F : ((row % 3 == 1) ? 0.72F : 1.0F);
+            config.min_p                = (row % 4 == 2) ? 0.35F : 0.0F;
+            config.presence_penalty     = greedy ? 7.0F : ((row % 3 != 1) ? 0.35F : 0.0F);
+            config.frequency_penalty    = greedy ? 9.0F : ((row % 3 != 0) ? 0.2F : 0.0F);
             config.seed = 0x123456789abcdef0ULL + static_cast<unsigned long long>(row * 977 + rows);
             int* row_counts_device = static_cast<int*>(count_device.data()) +
                                      static_cast<std::size_t>(row) * kTokenDomain;
@@ -236,8 +234,8 @@ void qualify_batches(ninfer::DeviceContext& device) {
                     ? nullptr
                     : row_counts_device;
             std::vector<int> row_counts(static_cast<std::size_t>(kTokenDomain), 0);
-            const int counted = 13 + row * 101;
-            row_counts[static_cast<std::size_t>(counted)] = 3;
+            const int counted                                              = 13 + row * 101;
+            row_counts[static_cast<std::size_t>(counted)]                  = 3;
             counts[static_cast<std::size_t>(row) * kTokenDomain + counted] = 3;
             expected_counts[static_cast<std::size_t>(row) * kTokenDomain + counted] = 3;
         }
@@ -247,12 +245,11 @@ void qualify_batches(ninfer::DeviceContext& device) {
                 counts.begin() + static_cast<std::size_t>(row) * kTokenDomain,
                 counts.begin() + static_cast<std::size_t>(row + 1) * kTokenDomain);
             const std::vector<int>* oracle_counts =
-                configs[static_cast<std::size_t>(row)].token_counts == nullptr
-                    ? nullptr
-                    : &row_counts;
+                configs[static_cast<std::size_t>(row)].token_counts == nullptr ? nullptr
+                                                                               : &row_counts;
             oracle[static_cast<std::size_t>(row)] = oracle_sample(
-                logits.data() + static_cast<std::size_t>(row) * kPhysicalVocabulary,
-                kTokenDomain, configs[static_cast<std::size_t>(row)], oracle_counts,
+                logits.data() + static_cast<std::size_t>(row) * kPhysicalVocabulary, kTokenDomain,
+                configs[static_cast<std::size_t>(row)], oracle_counts,
                 positions[static_cast<std::size_t>(row)], ninfer::ops::kSamplePurposeDecode);
             if (configs[static_cast<std::size_t>(row)].temperature > 0.0F) {
                 if (oracle[static_cast<std::size_t>(row)].boundary_margin < 1.0e-5) {
@@ -282,7 +279,8 @@ void qualify_batches(ninfer::DeviceContext& device) {
         out_device.copy_to_host(actual.data(), actual.size() * sizeof(int));
         count_device.copy_to_host(actual_counts.data(), actual_counts.size() * sizeof(int));
         for (int row = 0; row < rows; ++row) {
-            if (actual[static_cast<std::size_t>(row)] != oracle[static_cast<std::size_t>(row)].token) {
+            if (actual[static_cast<std::size_t>(row)] !=
+                oracle[static_cast<std::size_t>(row)].token) {
                 std::ostringstream message;
                 message << "B=" << rows << " row=" << row << " sampled "
                         << actual[static_cast<std::size_t>(row)] << " but FP64 oracle selected "
@@ -299,21 +297,22 @@ void qualify_batches(ninfer::DeviceContext& device) {
 
 void qualify_rng_and_small_route(ninfer::DeviceContext& device) {
     constexpr int tokens = 257;
-    constexpr int rows = static_cast<int>(ninfer::kMaximumConcurrency);
+    constexpr int rows   = static_cast<int>(ninfer::kMaximumConcurrency);
     std::vector<hip_bfloat16> logits(static_cast<std::size_t>(tokens) * rows, bf16(-2.0F));
     std::vector<int> positions(rows);
     std::vector<ninfer::ops::SamplingConfig> configs(rows);
     std::vector<int> expected(rows);
     for (int row = 0; row < rows; ++row) {
-        positions[row] = -17 + row * 1009;
+        positions[row]           = -17 + row * 1009;
         configs[row].temperature = 1.0F;
-        configs[row].top_k = 2;
-        configs[row].seed = 424242ULL + static_cast<unsigned long long>(row);
+        configs[row].top_k       = 2;
+        configs[row].seed        = 424242ULL + static_cast<unsigned long long>(row);
         logits[static_cast<std::size_t>(row) * tokens + 3] = bf16(0.0F);
         logits[static_cast<std::size_t>(row) * tokens + 7] = bf16(0.0F);
         expected[row] = oracle_sample(logits.data() + static_cast<std::size_t>(row) * tokens,
                                       tokens, configs[row], nullptr, positions[row],
-                                      ninfer::ops::kSamplePurposeSpeculativeBonus).token;
+                                      ninfer::ops::kSamplePurposeSpeculativeBonus)
+                            .token;
     }
     ninfer::DeviceBuffer d_logits(logits.size() * sizeof(hip_bfloat16));
     ninfer::DeviceBuffer d_positions(positions.size() * sizeof(int));
@@ -322,14 +321,15 @@ void qualify_rng_and_small_route(ninfer::DeviceContext& device) {
     d_logits.copy_from_host(logits.data(), logits.size() * sizeof(hip_bfloat16));
     d_positions.copy_from_host(positions.data(), positions.size() * sizeof(int));
     d_configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
-    ninfer::DeviceArena workspace(ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows));
+    ninfer::DeviceArena workspace(
+        ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows));
     ninfer::Tensor logits_tensor(d_logits.data(), ninfer::DType::BF16, {tokens, rows});
     ninfer::Tensor out_tensor(d_out.data(), ninfer::DType::I32, {rows});
     ninfer::Tensor positions_tensor(d_positions.data(), ninfer::DType::I32, {rows});
     ninfer::ops::sample(logits_tensor, out_tensor, tokens,
                         static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()),
-                        positions_tensor, ninfer::ops::kSamplePurposeSpeculativeBonus,
-                        workspace, device.stream);
+                        positions_tensor, ninfer::ops::kSamplePurposeSpeculativeBonus, workspace,
+                        device.stream);
     device.synchronize();
     std::vector<int> actual(rows);
     d_out.copy_to_host(actual.data(), actual.size() * sizeof(int));
@@ -340,13 +340,13 @@ void qualify_p_less(ninfer::DeviceContext& device) {
     // Probability is the public contract, not a particular inverse-CDF traversal/RNG mapping.
     // Compare support and empirical frequencies to the full-domain FP64 oracle. Exact graph
     // replay for fixed public inputs is checked separately inside each case.
-    constexpr int rows = 4;
+    constexpr int rows  = 4;
     constexpr int draws = 256;
     for (int tokens : {127, 257, kTokenDomain}) {
         for (int fixture = 0; fixture < 5; ++fixture) {
             std::vector<hip_bfloat16> logits(static_cast<std::size_t>(tokens) * rows, bf16(-24));
             std::vector<std::uint32_t> masks(static_cast<std::size_t>((tokens + 31) / 32) * rows,
-                                            ~std::uint32_t{0});
+                                             ~std::uint32_t{0});
             const int words = (tokens + 31) / 32;
             std::vector<ninfer::ops::SamplingConfig> configs(rows);
             std::vector<sampling_reference::Distribution> references;
@@ -358,22 +358,32 @@ void qualify_p_less(ninfer::DeviceContext& device) {
                 // distinguish the epsilon-relaxed gate from the old collision-only rule.
                 if (fixture == 0 || fixture == 4)
                     for (int i = 0; i < 64; ++i) column[i] = bf16(0);
-                if (fixture == 1) { column[3] = bf16(0.125F); column[7] = bf16(0); }
-                if (fixture == 2) { column[3] = bf16(12); column[7] = bf16(0); }
+                if (fixture == 1) {
+                    column[3] = bf16(0.125F);
+                    column[7] = bf16(0);
+                }
+                if (fixture == 2) {
+                    column[3] = bf16(12);
+                    column[7] = bf16(0);
+                }
                 if (fixture == 3) std::fill(column, column + tokens, bf16(0));
-                auto& cfg = configs[row];
-                cfg.temperature = 1;
-                cfg.p_less = 1;
-                cfg.top_k = 1; cfg.top_p = 0.01F; cfg.min_p = 0.99F;
-                cfg.presence_penalty = 100; cfg.frequency_penalty = 100;
-                cfg.seed = 0x13579ULL + row;
+                auto& cfg             = configs[row];
+                cfg.temperature       = 1;
+                cfg.p_less            = 1;
+                cfg.top_k             = 1;
+                cfg.top_p             = 0.01F;
+                cfg.min_p             = 0.99F;
+                cfg.presence_penalty  = 100;
+                cfg.frequency_penalty = 100;
+                cfg.seed              = 0x13579ULL + row;
                 if (fixture == 2 || fixture == 3) cfg.typical_exclude = fixture == 2 ? 3 : 0;
                 if (fixture == 4) {
                     cfg.suppressed_token_count = 2;
-                    cfg.suppressed_tokens[0] = 0; cfg.suppressed_tokens[1] = 1;
+                    cfg.suppressed_tokens[0]   = 0;
+                    cfg.suppressed_tokens[1]   = 1;
                     for (int i = 0; i < tokens; ++i)
                         if ((i + row) % 3 == 0) masks[row * words + i / 32] &= ~(1U << (i % 32));
-                    cfg.typical_exclude = 2;
+                    cfg.typical_exclude     = 2;
                     cfg.allowed_token_words = masks.data() + row * words;
                 }
                 std::vector<double> represented(tokens);
@@ -391,20 +401,22 @@ void qualify_p_less(ninfer::DeviceContext& device) {
             for (int row = 0; row < rows; ++row) {
                 configs[row].token_counts = static_cast<int*>(d_counts.data()) + row * tokens;
                 if (fixture == 4)
-                    configs[row].allowed_token_words = static_cast<std::uint32_t*>(d_masks.data()) + row * words;
+                    configs[row].allowed_token_words =
+                        static_cast<std::uint32_t*>(d_masks.data()) + row * words;
             }
             d_configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
             ninfer::Tensor input(d_logits.data(), ninfer::DType::BF16, {tokens, rows});
             ninfer::Tensor output(d_out.data(), ninfer::DType::I32, {rows});
             ninfer::Tensor position(d_positions.data(), ninfer::DType::I32, {rows});
-            ninfer::DeviceArena workspace(std::max<std::size_t>(1,
-                ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows)));
+            ninfer::DeviceArena workspace(std::max<std::size_t>(
+                1, ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows)));
             const auto launch = [&] {
-                ninfer::ops::sample(input, output, tokens,
+                ninfer::ops::sample(
+                    input, output, tokens,
                     static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()), position,
                     ninfer::ops::kSamplePurposeDecode, workspace, device.stream);
             };
-            hipGraph_t graph = nullptr;
+            hipGraph_t graph          = nullptr;
             hipGraphExec_t executable = nullptr;
             HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
             launch();
@@ -414,20 +426,24 @@ void qualify_p_less(ninfer::DeviceContext& device) {
                 for (int row = 0; row < rows; ++row) positions[row] = 1009 * draw + row;
                 d_positions.copy_from_host(positions.data(), positions.size() * sizeof(int));
                 HIP_CHECK(hipMemsetAsync(d_out.data(), 0xff, rows * sizeof(int), device.stream));
-                if (draw % 2 == 0) launch();
-                else HIP_CHECK(hipGraphLaunch(executable, device.stream));
+                if (draw % 2 == 0)
+                    launch();
+                else
+                    HIP_CHECK(hipGraphLaunch(executable, device.stream));
                 device.synchronize();
                 d_out.copy_to_host(actual.data(), actual.size() * sizeof(int));
                 for (int row = 0; row < rows; ++row) {
                     const auto& reference = references[row];
-                    if (std::find(reference.ids.begin(), reference.ids.end(), actual[row]) == reference.ids.end())
-                        fail("p-less emitted outside independent support, V=" + std::to_string(tokens) +
-                             " fixture=" + std::to_string(fixture));
+                    if (std::find(reference.ids.begin(), reference.ids.end(), actual[row]) ==
+                        reference.ids.end())
+                        fail("p-less emitted outside independent support, V=" +
+                             std::to_string(tokens) + " fixture=" + std::to_string(fixture));
                     ++histogram[row * tokens + actual[row]];
                 }
                 if (draw == 0) {
                     previous = actual;
-                    HIP_CHECK(hipMemsetAsync(d_out.data(), 0xff, rows * sizeof(int), device.stream));
+                    HIP_CHECK(
+                        hipMemsetAsync(d_out.data(), 0xff, rows * sizeof(int), device.stream));
                     HIP_CHECK(hipGraphLaunch(executable, device.stream));
                     device.synchronize();
                     d_out.copy_to_host(actual.data(), actual.size() * sizeof(int));
@@ -439,13 +455,14 @@ void qualify_p_less(ninfer::DeviceContext& device) {
             HIP_CHECK(hipGraphDestroy(graph));
             std::vector<int> actual_counts(histogram.size());
             d_counts.copy_to_host(actual_counts.data(), actual_counts.size() * sizeof(int));
-            if (actual_counts != histogram) fail("p-less token counts not exactly once per publication");
+            if (actual_counts != histogram)
+                fail("p-less token counts not exactly once per publication");
             for (int row = 0; row < rows; ++row) {
                 const auto& reference = references[row];
-                int seen = 0;
+                int seen              = 0;
                 for (std::size_t i = 0; i < reference.ids.size(); ++i) {
-                    const double p = reference.probabilities[i];
-                    const double mean = (draws + 1) * p;
+                    const double p     = reference.probabilities[i];
+                    const double mean  = (draws + 1) * p;
                     const int observed = histogram[row * tokens + reference.ids[i]];
                     seen += observed > 0;
                     if (std::abs(observed - mean) > 7 * std::sqrt((draws + 1) * p * (1 - p)) + 2)
@@ -467,9 +484,9 @@ void qualify_eligibility_and_positions(ninfer::DeviceContext& device) {
         expected[column] = 5 + column;
         masks[column * 3 + expected[column] / 32] |= 1U << (expected[column] % 32);
         masks[column * 3] |= 1U;
-        logits[column * tokens] = bf16(100);
-        configs[column / per_row].suppressed_token_count = 1;
-        configs[column / per_row].suppressed_tokens[0] = 0;
+        logits[column * tokens]                               = bf16(100);
+        configs[column / per_row].suppressed_token_count      = 1;
+        configs[column / per_row].suppressed_tokens[0]        = 0;
         configs[column / per_row].allowed_token_column_stride = 3;
     }
     ninfer::DeviceBuffer dl(logits.size() * sizeof(logits[0])), dm(masks.size() * sizeof(masks[0]));
@@ -477,20 +494,24 @@ void qualify_eligibility_and_positions(ninfer::DeviceContext& device) {
     dl.copy_from_host(logits.data(), logits.size() * sizeof(logits[0]));
     dm.copy_from_host(masks.data(), masks.size() * sizeof(masks[0]));
     for (int row = 0; row < rows; ++row)
-        configs[row].allowed_token_words = static_cast<std::uint32_t*>(dm.data()) + row * per_row * 3;
+        configs[row].allowed_token_words =
+            static_cast<std::uint32_t*>(dm.data()) + row * per_row * 3;
     dc.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
     ninfer::Tensor input(dl.data(), ninfer::DType::BF16, {tokens, columns});
     ninfer::Tensor output(dout.data(), ninfer::DType::I32, {columns});
     ninfer::ops::argmax(input, output, tokens,
-        static_cast<const ninfer::ops::SamplingConfig*>(dc.data()), per_row, device.stream);
+                        static_cast<const ninfer::ops::SamplingConfig*>(dc.data()), per_row,
+                        device.stream);
     device.synchronize();
     std::vector<int> actual(columns);
     dout.copy_to_host(actual.data(), actual.size() * sizeof(int));
     if (actual != expected) fail("configured argmax lost suppression or per-column eligibility");
     // Ordinary truncated sampling must obey the same eligibility domain (p-less is off).
     for (auto& config : configs) {
-        config.temperature = 0.8F; config.top_k = 20;
-        config.top_p = 0.9F; config.min_p = 0.05F;
+        config.temperature = 0.8F;
+        config.top_k       = 20;
+        config.top_p       = 0.9F;
+        config.min_p       = 0.05F;
     }
     dc.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
     std::vector<int> sample_positions(rows, 32);
@@ -499,21 +520,22 @@ void qualify_eligibility_and_positions(ninfer::DeviceContext& device) {
     ninfer::Tensor sample_input(dl.data(), ninfer::DType::BF16, {tokens, rows});
     ninfer::Tensor sample_output(dout.data(), ninfer::DType::I32, {rows});
     ninfer::Tensor positions(dp.data(), ninfer::DType::I32, {rows});
-    ninfer::DeviceArena sample_workspace(std::max<std::size_t>(1,
-        ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows)));
+    ninfer::DeviceArena sample_workspace(std::max<std::size_t>(
+        1, ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows)));
     ninfer::ops::sample(sample_input, sample_output, tokens,
-        static_cast<const ninfer::ops::SamplingConfig*>(dc.data()), positions,
-        ninfer::ops::kSamplePurposeDecode, sample_workspace, device.stream);
+                        static_cast<const ninfer::ops::SamplingConfig*>(dc.data()), positions,
+                        ninfer::ops::kSamplePurposeDecode, sample_workspace, device.stream);
     device.synchronize();
     dout.copy_to_host(actual.data(), rows * sizeof(int));
     for (int row = 0; row < rows; ++row)
-        if (actual[row] != expected[row * per_row]) fail("truncated sampler lost eligibility/suppression");
+        if (actual[row] != expected[row * per_row])
+            fail("truncated sampler lost eligibility/suppression");
 
     constexpr int width = 259;
     std::vector<int> source(width * rows), delta{19, -23, 0, 111}, shifted(source.size());
     for (int row = 0; row < rows; ++row)
         for (int j = 0; j < width; ++j) {
-            source[row * width + j] = 1000 * row + j;
+            source[row * width + j]  = 1000 * row + j;
             shifted[row * width + j] = source[row * width + j] + delta[row];
         }
     ninfer::DeviceBuffer ds(source.size() * sizeof(int)), dd(delta.size() * sizeof(int));
@@ -521,21 +543,26 @@ void qualify_eligibility_and_positions(ninfer::DeviceContext& device) {
     dd.copy_from_host(delta.data(), delta.size() * sizeof(int));
     ninfer::Tensor s(ds.data(), ninfer::DType::I32, {width, rows});
     ninfer::Tensor d(dd.data(), ninfer::DType::I32, {rows});
-    hipGraph_t graph = nullptr; hipGraphExec_t executable = nullptr;
+    hipGraph_t graph          = nullptr;
+    hipGraphExec_t executable = nullptr;
     HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
     ninfer::ops::offset_i32_position_rows(s, d, s, device.stream);
     HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
     HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
     for (int replay = 0; replay < 2; ++replay) {
         ds.copy_from_host(source.data(), source.size() * sizeof(int));
-        if (replay == 0) ninfer::ops::offset_i32_position_rows(s, d, s, device.stream);
-        else HIP_CHECK(hipGraphLaunch(executable, device.stream));
+        if (replay == 0)
+            ninfer::ops::offset_i32_position_rows(s, d, s, device.stream);
+        else
+            HIP_CHECK(hipGraphLaunch(executable, device.stream));
         device.synchronize();
         std::vector<int> result(source.size());
         ds.copy_to_host(result.data(), result.size() * sizeof(int));
-        if (result != shifted) fail("row-position transform differs from independent integer oracle");
+        if (result != shifted)
+            fail("row-position transform differs from independent integer oracle");
     }
-    HIP_CHECK(hipGraphExecDestroy(executable)); HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(executable));
+    HIP_CHECK(hipGraphDestroy(graph));
 }
 
 void qualify_validation(ninfer::DeviceContext& device) {
@@ -544,8 +571,8 @@ void qualify_validation(ninfer::DeviceContext& device) {
     ninfer::Tensor output(nullptr, ninfer::DType::I32, {1});
     ninfer::Tensor position(nullptr, ninfer::DType::I32, {1});
     try {
-        ninfer::ops::sample(absent, output, 1, nullptr, position,
-                            ninfer::ops::kSamplePurposeDecode, workspace, device.stream);
+        ninfer::ops::sample(absent, output, 1, nullptr, position, ninfer::ops::kSamplePurposeDecode,
+                            workspace, device.stream);
         fail("sampling accepted null device pointers");
     } catch (const std::invalid_argument&) {}
     try {
@@ -561,16 +588,16 @@ void qualify_validation(ninfer::DeviceContext& device) {
 }
 
 void benchmark(ninfer::DeviceContext& device) {
-    constexpr int rows = static_cast<int>(ninfer::kMaximumConcurrency);
+    constexpr int rows               = static_cast<int>(ninfer::kMaximumConcurrency);
     std::vector<hip_bfloat16> logits = make_logits(rows, kPhysicalVocabulary);
     std::vector<int> positions(rows, 8192);
     std::vector<ninfer::ops::SamplingConfig> configs(rows);
     for (int row = 0; row < rows; ++row) {
         configs[row].temperature = 0.8F;
-        configs[row].top_k = 20;
-        configs[row].top_p = 0.9F;
-        configs[row].min_p = 0.05F;
-        configs[row].seed = static_cast<unsigned long long>(row + 1);
+        configs[row].top_k       = 20;
+        configs[row].top_p       = 0.9F;
+        configs[row].min_p       = 0.05F;
+        configs[row].seed        = static_cast<unsigned long long>(row + 1);
     }
     ninfer::DeviceBuffer d_logits(logits.size() * sizeof(hip_bfloat16));
     ninfer::DeviceBuffer d_positions(positions.size() * sizeof(int));
@@ -591,25 +618,24 @@ void benchmark(ninfer::DeviceContext& device) {
         for (int warmup = 0; warmup < 3; ++warmup) {
             ninfer::ops::sample(logits_tensor, out_tensor, kTokenDomain,
                                 static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()),
-                                positions_tensor, ninfer::ops::kSamplePurposeDecode,
-                                workspace, device.stream);
+                                positions_tensor, ninfer::ops::kSamplePurposeDecode, workspace,
+                                device.stream);
         }
         ninfer::DeviceEventTimer timer(device);
         timer.start();
         for (int repeat = 0; repeat < repeats; ++repeat) {
             ninfer::ops::sample(logits_tensor, out_tensor, kTokenDomain,
                                 static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()),
-                                positions_tensor, ninfer::ops::kSamplePurposeDecode,
-                                workspace, device.stream);
+                                positions_tensor, ninfer::ops::kSamplePurposeDecode, workspace,
+                                device.stream);
         }
         timer.record_stop();
         device.synchronize();
         std::cout << "timing: vocab=" << kTokenDomain << " B=" << active_rows
-                  << " positive_temperature_ms="
-                  << timer.elapsed_ms() / static_cast<float>(repeats)
+                  << " positive_temperature_ms=" << timer.elapsed_ms() / static_cast<float>(repeats)
                   << " workspace_bytes="
                   << ninfer::ops::sampling_workspace_capacity_bytes(kTokenDomain, active_rows,
-                                                                     active_rows)
+                                                                    active_rows)
                   << '\n';
     }
 }
@@ -619,16 +645,17 @@ void benchmark(ninfer::DeviceContext& device) {
 int main() {
     try {
         ninfer::DeviceContext device(select_r9700());
-        std::cout << "device: arch=" << device.props.gcnArchName << " wave="
-                  << device.props.warpSize << " vram_mib="
-                  << device.props.totalGlobalMem / (1024U * 1024U) << '\n';
+        std::cout << "device: arch=" << device.props.gcnArchName
+                  << " wave=" << device.props.warpSize
+                  << " vram_mib=" << device.props.totalGlobalMem / (1024U * 1024U) << '\n';
         qualify_validation(device);
         qualify_rng_and_small_route(device);
         qualify_batches(device);
         qualify_p_less(device);
         qualify_eligibility_and_positions(device);
         benchmark(device);
-        std::cout << "PASS: R9700 sampling B=1..8, exact token/count publication, FP64 probability oracle\n";
+        std::cout << "PASS: R9700 sampling B=1..8, exact token/count publication, FP64 probability "
+                     "oracle\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

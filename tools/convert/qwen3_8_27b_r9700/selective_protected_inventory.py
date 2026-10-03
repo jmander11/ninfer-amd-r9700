@@ -13,20 +13,28 @@ WEIGHTS_ID = "r9700-q4-selective-protected-n16k16-eval"
 RECIPE_ID = "r9700-q4-selective-protected-n16k16-v1"
 W8_NAMES = frozenset(("text/token_embedding", "text/output_head"))
 BF16_NAMES = frozenset(
-    [f"text/layers/{layer}/attention/{role}"
-     for layer in (3, 7, 11, 15, 19, 23) for role in ("query_key", "gate_value")]
+    [
+        f"text/layers/{layer}/attention/{role}"
+        for layer in (3, 7, 11, 15, 19, 23)
+        for role in ("query_key", "gate_value")
+    ]
     + [f"text/layers/{layer}/attention/output" for layer in (3, 7)]
     + ["text/layers/4/gdn/output"]
 )
 FP8_NAMES = frozenset(
     ["text/layers/11/attention/output"]
-    + [f"text/layers/{layer}/attention/{role}"
-       for layer in (27, 31, 51) for role in ("query_key", "gate_value")]
-    + [f"text/layers/{layer}/mlp/{role}"
-       for layer in (62, 63) for role in ("gate_up", "down")]
+    + [
+        f"text/layers/{layer}/attention/{role}"
+        for layer in (27, 31, 51)
+        for role in ("query_key", "gate_value")
+    ]
+    + [f"text/layers/{layer}/mlp/{role}" for layer in (62, 63) for role in ("gate_up", "down")]
 )
-CHANGED_FORMATS = {**dict.fromkeys(W8_NAMES, W8), **dict.fromkeys(BF16_NAMES, BF16),
-                   **dict.fromkeys(FP8_NAMES, F8E4M3_ROW_F32S)}
+CHANGED_FORMATS = {
+    **dict.fromkeys(W8_NAMES, W8),
+    **dict.fromkeys(BF16_NAMES, BF16),
+    **dict.fromkeys(FP8_NAMES, F8E4M3_ROW_F32S),
+}
 
 
 def _replace(spec):
@@ -50,13 +58,16 @@ TENSOR_ENCODED_BYTES = sum(FORMAT_ENCODED_BYTES.values())
 DEVICE_ARENA_BYTES = 0
 for _spec in TENSOR_SPECS:
     DEVICE_ARENA_BYTES = align_up(DEVICE_ARENA_BYTES, 256) + encoded_size(
-        _spec.layout, _spec.format, _spec.shape)
+        _spec.layout, _spec.format, _spec.shape
+    )
 
 
 def validate_inventory():
     base = {spec.name: spec for spec in q4_inventory.TENSOR_SPECS}
     if (len(W8_NAMES), len(BF16_NAMES), len(FP8_NAMES), len(CHANGED_FORMATS)) != (2, 15, 11, 28):
-        raise ValueError("selective-protected recipe must change exactly 2 W8 + 15 BF16 + 11 FP8 objects")
+        raise ValueError(
+            "selective-protected recipe must change exactly 2 W8 + 15 BF16 + 11 FP8 objects"
+        )
     if any(name not in base or base[name].format != q4_inventory.Q4 for name in CHANGED_FORMATS):
         raise ValueError("selective-protected replacement is not an existing Q4 matrix")
     if len(OBJECT_SPECS) != 1124 or len(TENSOR_SPECS) != 1118:

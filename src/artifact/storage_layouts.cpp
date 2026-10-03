@@ -165,7 +165,8 @@ std::uint64_t tensor_encoded_size(StorageLayout layout, NumericFormat format,
 
 RowSplitGeometry r9700_w8g32_n16k16_geometry(std::span<const std::uint64_t> shape) {
     if (shape.size() != 2 || shape[0] == 0 || shape[0] % 16 != 0 || shape[1] == 0) {
-        throw ArtifactError("r9700-w8g32-n16-k16-v1 requires positive rank-two shape and N divisible by 16");
+        throw ArtifactError(
+            "r9700-w8g32-n16-k16-v1 requires positive rank-two shape and N divisible by 16");
     }
     return row_split_geometry(NumericFormat::W8G32_F16S, shape);
 }
@@ -202,24 +203,23 @@ RowSplitGeometry r9700_q4g64_n16k16_geometry(std::span<const std::uint64_t> shap
             "r9700-q4g64-n16-k16-v1 requires a positive rank-two shape with N divisible by 16");
     }
     RowSplitGeometry out;
-    out.rows = shape[0];
-    out.columns = shape[1];
-    out.padded_columns = align_up(shape[1], kKAlignment, "padded K");
-    out.group_size = 64;
-    out.groups_per_row = out.padded_columns / 64;
+    out.rows                = shape[0];
+    out.columns             = shape[1];
+    out.padded_columns      = align_up(shape[1], kKAlignment, "padded K");
+    out.group_size          = 64;
+    out.groups_per_row      = out.padded_columns / 64;
     out.low_bytes_per_group = 32;
-    const auto groups = checked_mul(out.rows, out.groups_per_row, "physical group count");
-    out.low_plane_bytes = checked_mul(groups, 32, "Q4 code plane bytes");
-    out.high_plane_offset = align_up(out.low_plane_bytes, kTensorAlignment, "high plane offset");
-    out.scale_plane_offset = out.high_plane_offset;
-    out.scale_plane_bytes = checked_mul(groups, 2, "Q4 scale plane bytes");
-    out.encoded_bytes = checked_add(out.scale_plane_offset, out.scale_plane_bytes,
-                                    "tensor encoded size");
+    const auto groups       = checked_mul(out.rows, out.groups_per_row, "physical group count");
+    out.low_plane_bytes     = checked_mul(groups, 32, "Q4 code plane bytes");
+    out.high_plane_offset   = align_up(out.low_plane_bytes, kTensorAlignment, "high plane offset");
+    out.scale_plane_offset  = out.high_plane_offset;
+    out.scale_plane_bytes   = checked_mul(groups, 2, "Q4 scale plane bytes");
+    out.encoded_bytes =
+        checked_add(out.scale_plane_offset, out.scale_plane_bytes, "tensor encoded size");
     return out;
 }
 
-RowScaledGeometry row_scaled_geometry(NumericFormat format,
-                                      std::span<const std::uint64_t> shape) {
+RowScaledGeometry row_scaled_geometry(NumericFormat format, std::span<const std::uint64_t> shape) {
     if (format != NumericFormat::F8E4M3_ROW_F32S) {
         throw ArtifactError("row-scaled-k128-v1 requires F8E4M3_ROW_F32S");
     }
@@ -241,21 +241,24 @@ RowScaledGeometry row_scaled_geometry(NumericFormat format,
 
 CodebookGeometry r9700_fp8lut4_geometry(std::span<const std::uint64_t> shape) {
     if (shape.size() != 2 || shape[0] == 0 || shape[0] % 16 != 0 || shape[1] == 0) {
-        throw ArtifactError("r9700-fp8lut4-n16k64-v1 requires a positive rank-two shape with N % 16 == 0");
+        throw ArtifactError(
+            "r9700-fp8lut4-n16k64-v1 requires a positive rank-two shape with N % 16 == 0");
     }
     CodebookGeometry out;
-    out.rows               = shape[0];
-    out.columns            = shape[1];
-    out.padded_columns     = align_up(shape[1], kKAlignment, "padded K");
-    out.code_plane_bytes   = checked_mul(out.rows, out.padded_columns / 2, "FP8LUT4 code plane bytes");
-    out.group_plane_offset = align_up(out.code_plane_bytes, kTensorAlignment, "FP8LUT4 group offset");
+    out.rows           = shape[0];
+    out.columns        = shape[1];
+    out.padded_columns = align_up(shape[1], kKAlignment, "padded K");
+    out.code_plane_bytes =
+        checked_mul(out.rows, out.padded_columns / 2, "FP8LUT4 code plane bytes");
+    out.group_plane_offset =
+        align_up(out.code_plane_bytes, kTensorAlignment, "FP8LUT4 group offset");
     out.group_plane_bytes  = checked_mul(out.rows, out.padded_columns / 32, "FP8LUT4 group bytes");
-    out.scale_plane_offset = align_up(checked_add(out.group_plane_offset, out.group_plane_bytes,
-                                                  "FP8LUT4 group plane end"),
-                                      kTensorAlignment, "FP8LUT4 scale offset");
-    out.scale_plane_bytes  = checked_mul(out.rows, 4, "FP8LUT4 scale plane bytes");
-    out.encoded_bytes      = checked_add(out.scale_plane_offset, out.scale_plane_bytes,
-                                         "tensor encoded size");
+    out.scale_plane_offset = align_up(
+        checked_add(out.group_plane_offset, out.group_plane_bytes, "FP8LUT4 group plane end"),
+        kTensorAlignment, "FP8LUT4 scale offset");
+    out.scale_plane_bytes = checked_mul(out.rows, 4, "FP8LUT4 scale plane bytes");
+    out.encoded_bytes =
+        checked_add(out.scale_plane_offset, out.scale_plane_bytes, "tensor encoded size");
     return out;
 }
 

@@ -236,8 +236,8 @@ ninfer::PromptInput to_prompt_input(const GenerationRequest& request,
     input.options.add_vision_id         = false;
     input.options.tool_jsons            = effective_tool_jsons(request);
     input.options.output_json_schema    = request.output_json_schema;
-    input.options.require_tool_call = request.tool_choice.mode == ToolChoiceMode::Required ||
-                                      request.tool_choice.mode == ToolChoiceMode::Named;
+    input.options.require_tool_call     = request.tool_choice.mode == ToolChoiceMode::Required ||
+                                          request.tool_choice.mode == ToolChoiceMode::Named;
     apply_leading_system_prepend(input.messages, system_prepend);
     return input;
 }
@@ -245,8 +245,8 @@ ninfer::PromptInput to_prompt_input(const GenerationRequest& request,
 ninfer::RequestOptions to_request_options(const GenerationRequest& request,
                                           const ServeOptions& server) {
     ninfer::RequestOptions options;
-    options.execution.requested_output_tokens = static_cast<std::uint32_t>(request.max_tokens);
-    options.execution.allow_prefix_reuse      = server.allow_prefix_reuse;
+    options.execution.requested_output_tokens    = static_cast<std::uint32_t>(request.max_tokens);
+    options.execution.allow_prefix_reuse         = server.allow_prefix_reuse;
     options.execution.capture_context_checkpoint = request.capture_context_checkpoint;
     options.execution.sampling             = resolve_sampling_overrides(request.sampling, server);
     options.output.raw                     = false;

@@ -7,32 +7,32 @@
 namespace ninfer::ops::r9700::gdn_recurrence {
 namespace {
 
-constexpr int kDim = 128;
-constexpr int kQHeads = 16;
-constexpr int kValueHeads = 48;
-constexpr int kHeadsPerQ = kValueHeads / kQHeads;
-constexpr int kChunk = 64;
-constexpr int kWaves = 8;
-constexpr float kEpsilon = 1.0e-6F;
-constexpr int kKPitch = kDim + 8;    // FP16 [token][feature] rows
-constexpr int kTPitch = kChunk + 8;  // FP16 [feature][token], A and P rows
-constexpr int kDiagonalPitch = 24;   // FP16 diagonal-block rows
+constexpr int kDim           = 128;
+constexpr int kQHeads        = 16;
+constexpr int kValueHeads    = 48;
+constexpr int kHeadsPerQ     = kValueHeads / kQHeads;
+constexpr int kChunk         = 64;
+constexpr int kWaves         = 8;
+constexpr float kEpsilon     = 1.0e-6F;
+constexpr int kKPitch        = kDim + 8;   // FP16 [token][feature] rows
+constexpr int kTPitch        = kChunk + 8; // FP16 [feature][token], A and P rows
+constexpr int kDiagonalPitch = 24;         // FP16 diagonal-block rows
 
 using F16x8 = _Float16 __attribute__((ext_vector_type(8)));
 using F32x8 = float __attribute__((ext_vector_type(8)));
 
 struct ChunkShared {
-    _Float16 k[kChunk * kKPitch];          // normalized k, token-major
-    _Float16 k_transposed[kDim * kTPitch];  // normalized k, feature-major
-    _Float16 a[kChunk * kTPitch];           // strictly lower beta_i exp(b_i - b_j) k_i.k_j
-    _Float16 diagonal[kChunk * kDiagonalPitch];  // (I + A_II)^-1, row i, column i % 16
-    _Float16 p[kChunk * kTPitch];           // scale |q_i|^-1 exp(b_i - b_j) q_i.k_j, i >= j
-    float b[kChunk];                        // inclusive cumulative g within the chunk
-    float gamma[kChunk];                    // exp(b_i)
-    float beta_gamma[kChunk];               // beta_i exp(b_i)
+    _Float16 k[kChunk * kKPitch];               // normalized k, token-major
+    _Float16 k_transposed[kDim * kTPitch];      // normalized k, feature-major
+    _Float16 a[kChunk * kTPitch];               // strictly lower beta_i exp(b_i - b_j) k_i.k_j
+    _Float16 diagonal[kChunk * kDiagonalPitch]; // (I + A_II)^-1, row i, column i % 16
+    _Float16 p[kChunk * kTPitch];               // scale |q_i|^-1 exp(b_i - b_j) q_i.k_j, i >= j
+    float b[kChunk];                            // inclusive cumulative g within the chunk
+    float gamma[kChunk];                        // exp(b_i)
+    float beta_gamma[kChunk];                   // beta_i exp(b_i)
     float beta[kChunk];
-    float to_end[kChunk];                   // exp(b_last - b_j)
-    float query_scale[kChunk];              // scale / |q_i|
+    float to_end[kChunk];      // exp(b_last - b_j)
+    float query_scale[kChunk]; // scale / |q_i|
 };
 
 // Lower 16x16 tiles (I, J), J <= I, of the 64x64 intra-chunk matrices.
@@ -46,14 +46,15 @@ __device__ __forceinline__ F16x8 to_f16(const F32x8& value) {
     return result;
 }
 
-__device__ __forceinline__ F16x8 bf16x8_to_f16(const hip_bfloat16* source, bool valid, float scale) {
+__device__ __forceinline__ F16x8 bf16x8_to_f16(const hip_bfloat16* source, bool valid,
+                                               float scale) {
     uint4 raw{};
     if (valid) raw = *reinterpret_cast<const uint4*>(source);
     const unsigned words[4] = {raw.x, raw.y, raw.z, raw.w};
     F16x8 result;
 #pragma unroll
     for (int i = 0; i < 4; ++i) {
-        result[2 * i] = _Float16(__uint_as_float(words[i] << 16U) * scale);
+        result[2 * i]     = _Float16(__uint_as_float(words[i] << 16U) * scale);
         result[2 * i + 1] = _Float16(__uint_as_float(words[i] & 0xffff0000U) * scale);
     }
     return result;
@@ -61,10 +62,14 @@ __device__ __forceinline__ F16x8 bf16x8_to_f16(const hip_bfloat16* source, bool 
 
 // Sum over all 32 lanes: DPP row_xmask within each 16-lane row, then across the two rows.
 __device__ __forceinline__ float wave_sum(float value) {
-    value += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x161, 0xf, 0xf, false));
-    value += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x162, 0xf, 0xf, false));
-    value += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x164, 0xf, 0xf, false));
-    value += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x168, 0xf, 0xf, false));
+    value += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x161, 0xf, 0xf, false));
+    value += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x162, 0xf, 0xf, false));
+    value += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x164, 0xf, 0xf, false));
+    value += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x168, 0xf, 0xf, false));
     return value + __shfl_xor(value, 16, 32);
 }
 
@@ -76,10 +81,12 @@ __device__ __forceinline__ F32x8 wmma(const F16x8& a, const F16x8& b, const F32x
 // (lane & 15) and the reduction index as (lane >> 4) * 8 + e, so the S^T accumulator of wave w
 // (value rows 16w..16w+15, eight 16-key tiles) is directly the B operand of the next chunk's
 // K S^T and q S^T products.
-__global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
-    const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v, const float* g,
-    const float* beta, const float* state_in, float* state_out, hip_bfloat16* out, int width,
-    float scale) {
+__global__ __launch_bounds__(kWaves *
+                             32) void chunked_kernel(const hip_bfloat16* q, const hip_bfloat16* k,
+                                                     const hip_bfloat16* v, const float* g,
+                                                     const float* beta, const float* state_in,
+                                                     float* state_out, hip_bfloat16* out, int width,
+                                                     float scale) {
     __shared__ ChunkShared sh;
     const int head = blockIdx.x, query_head = head / kHeadsPerQ;
     const int tid = threadIdx.x, wave = tid / 32, lane = tid & 31;
@@ -104,33 +111,35 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
                 const int source = min(t0 + wave * 8 + r, width - 1);
                 const std::size_t base =
                     (std::size_t(source) * kQHeads + query_head) * kDim + 4 * lane;
-                key_raw[r] = *reinterpret_cast<const uint2*>(k + base);
+                key_raw[r]   = *reinterpret_cast<const uint2*>(k + base);
                 query_raw[r] = *reinterpret_cast<const uint2*>(q + base);
             }
             _Float16 transposed[4][8];
 #pragma unroll
             for (int r = 0; r < 8; ++r) {
-                const int i = wave * 8 + r;
+                const int i      = wave * 8 + r;
                 const float live = t0 + i < width ? 1.0F : 0.0F;
                 const uint2 kr = key_raw[r], qr = query_raw[r];
-                const float kv[4] = {__uint_as_float(kr.x << 16U), __uint_as_float(kr.x & 0xffff0000U),
-                                     __uint_as_float(kr.y << 16U), __uint_as_float(kr.y & 0xffff0000U)};
-                const float qv[4] = {__uint_as_float(qr.x << 16U), __uint_as_float(qr.x & 0xffff0000U),
-                                     __uint_as_float(qr.y << 16U), __uint_as_float(qr.y & 0xffff0000U)};
+                const float kv[4] = {
+                    __uint_as_float(kr.x << 16U), __uint_as_float(kr.x & 0xffff0000U),
+                    __uint_as_float(kr.y << 16U), __uint_as_float(kr.y & 0xffff0000U)};
+                const float qv[4] = {
+                    __uint_as_float(qr.x << 16U), __uint_as_float(qr.x & 0xffff0000U),
+                    __uint_as_float(qr.y << 16U), __uint_as_float(qr.y & 0xffff0000U)};
                 float key_sum = 0.0F, query_sum = 0.0F;
 #pragma unroll
                 for (int it = 0; it < 4; ++it) {
-                    key_sum = fmaf(kv[it], kv[it], key_sum);
+                    key_sum   = fmaf(kv[it], kv[it], key_sum);
                     query_sum = fmaf(qv[it], qv[it], query_sum);
                 }
-                key_sum = wave_sum(key_sum);
-                query_sum = wave_sum(query_sum);
+                key_sum                 = wave_sum(key_sum);
+                query_sum               = wave_sum(query_sum);
                 const float key_inverse = rsqrtf(key_sum + kEpsilon) * live;
 #pragma unroll
                 for (int it = 0; it < 4; ++it) {
-                    const _Float16 normalized = _Float16(kv[it] * key_inverse);
+                    const _Float16 normalized         = _Float16(kv[it] * key_inverse);
                     sh.k[i * kKPitch + 4 * lane + it] = normalized;
-                    transposed[it][r] = normalized;
+                    transposed[it][r]                 = normalized;
                 }
                 if (lane == 0) sh.query_scale[i] = rsqrtf(query_sum + kEpsilon) * scale * live;
             }
@@ -140,7 +149,8 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
                 F16x8 features;
 #pragma unroll
                 for (int r = 0; r < 8; ++r) features[r] = transposed[it][r];
-                *reinterpret_cast<F16x8*>(&sh.k_transposed[(4 * lane + it) * kTPitch + wave * 8]) = features;
+                *reinterpret_cast<F16x8*>(&sh.k_transposed[(4 * lane + it) * kTPitch + wave * 8]) =
+                    features;
             }
         }
         if (wave == kWaves - 1) {
@@ -148,29 +158,31 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
             const int t_even = t0 + 2 * lane, t_odd = t_even + 1;
             const float g0 = t_even < width ? g[std::size_t(t_even) * kValueHeads + head] : 0.0F;
             const float g1 = t_odd < width ? g[std::size_t(t_odd) * kValueHeads + head] : 0.0F;
-            float sum = g0 + g1;
+            float sum      = g0 + g1;
 #pragma unroll
             for (int w = 1; w < 32; w <<= 1) {
                 const float other = __shfl_up(sum, w, 32);
                 if (lane >= w) sum += other;
             }
             const float before = sum - g0 - g1;
-            sh.b[2 * lane] = before + g0;
+            sh.b[2 * lane]     = before + g0;
             sh.b[2 * lane + 1] = before + g0 + g1;
-            sh.beta[2 * lane] = t_even < width ? beta[std::size_t(t_even) * kValueHeads + head] : 0.0F;
-            sh.beta[2 * lane + 1] = t_odd < width ? beta[std::size_t(t_odd) * kValueHeads + head] : 0.0F;
+            sh.beta[2 * lane] =
+                t_even < width ? beta[std::size_t(t_even) * kValueHeads + head] : 0.0F;
+            sh.beta[2 * lane + 1] =
+                t_odd < width ? beta[std::size_t(t_odd) * kValueHeads + head] : 0.0F;
         }
         __syncthreads();
         if (tid < kChunk) {
-            const float gamma = expf(sh.b[tid]);
-            sh.gamma[tid] = gamma;
+            const float gamma  = expf(sh.b[tid]);
+            sh.gamma[tid]      = gamma;
             sh.beta_gamma[tid] = sh.beta[tid] * gamma;
-            sh.to_end[tid] = expf(sh.b[kChunk - 1] - sh.b[tid]);
+            sh.to_end[tid]     = expf(sh.b[kChunk - 1] - sh.b[tid]);
         }
         // A = KK^T and P = QK^T on the ten lower tiles each.
         for (int job = wave; job < 20; job += kWaves) {
             const int I = kLowerTiles[job % 10][0], J = kLowerTiles[job % 10][1];
-            const int ia = 16 * I + n;
+            const int ia         = 16 * I + n;
             const bool query_job = job >= 10;
             const hip_bfloat16* query_row =
                 q + (std::size_t(t0 + ia) * kQHeads + query_head) * kDim + 8 * half;
@@ -179,15 +191,16 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
             for (int ks = 0; ks < 8; ++ks) {
                 const F16x8 b_operand = *reinterpret_cast<const F16x8*>(
                     &sh.k[(16 * J + n) * kKPitch + 16 * ks + 8 * half]);
-                const F16x8 a_operand = query_job
-                    ? bf16x8_to_f16(query_row + 16 * ks, t0 + ia < width, 1.0F)
-                    : *reinterpret_cast<const F16x8*>(&sh.k[ia * kKPitch + 16 * ks + 8 * half]);
+                const F16x8 a_operand =
+                    query_job
+                        ? bf16x8_to_f16(query_row + 16 * ks, t0 + ia < width, 1.0F)
+                        : *reinterpret_cast<const F16x8*>(&sh.k[ia * kKPitch + 16 * ks + 8 * half]);
                 acc = wmma(a_operand, b_operand, acc);
             }
             const int j = 16 * J + n;
 #pragma unroll
             for (int e = 0; e < 8; ++e) {
-                const int i = 16 * I + 8 * half + e;
+                const int i       = 16 * I + 8 * half + e;
                 const float decay = expf(sh.b[i] - sh.b[j]);
                 if (query_job) {
                     sh.p[i * kTPitch + j] =
@@ -212,7 +225,8 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
                 x[i] = sum;
             }
 #pragma unroll
-            for (int i = 0; i < 16; ++i) sh.diagonal[(origin + i) * kDiagonalPitch + column] = _Float16(x[i]);
+            for (int i = 0; i < 16; ++i)
+                sh.diagonal[(origin + i) * kDiagonalPitch + column] = _Float16(x[i]);
         }
         __syncthreads();
         F16x8 state_operand[8];
@@ -226,19 +240,19 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
 #pragma unroll
             for (int e = 0; e < 8; ++e) {
                 // Padded tokens have beta 0; read a valid clamped token instead of branching.
-                const int token = 16 * I + 8 * half + e;
+                const int token  = 16 * I + 8 * half + e;
                 const int source = min(t0 + token, width - 1);
                 acc[e] = sh.beta[token] *
                          float(v[(std::size_t(source) * kValueHeads + head) * kDim + row]);
             }
-            const int token = 16 * I + n;
+            const int token       = 16 * I + n;
             const _Float16 factor = _Float16(-sh.beta_gamma[token]);
 #pragma unroll
             for (int t = 0; t < 8; ++t) {
-                F16x8 a_operand = *reinterpret_cast<const F16x8*>(
-                    &sh.k[token * kKPitch + 16 * t + 8 * half]);
+                F16x8 a_operand =
+                    *reinterpret_cast<const F16x8*>(&sh.k[token * kKPitch + 16 * t + 8 * half]);
                 a_operand = a_operand * factor;
-                acc = wmma(a_operand, state_operand[t], acc);
+                acc       = wmma(a_operand, state_operand[t], acc);
             }
             z[I] = to_f16(acc);
         }
@@ -254,7 +268,7 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
                 F16x8 a_operand = *reinterpret_cast<const F16x8*>(
                     &sh.a[(16 * I + n) * kTPitch + 16 * J + 8 * half]);
                 a_operand = -a_operand;
-                residual = wmma(a_operand, corrected[J], residual);
+                residual  = wmma(a_operand, corrected[J], residual);
             }
             const F16x8 diagonal = *reinterpret_cast<const F16x8*>(
                 &sh.diagonal[(16 * I + n) * kDiagonalPitch + 8 * half]);
@@ -263,8 +277,8 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
         // O = (scale Gamma q / |q|) S^T + P V'.
 #pragma unroll
         for (int I = 0; I < 4; ++I) {
-            const int token = 16 * I + n;
-            const bool valid = t0 + token < width;
+            const int token    = 16 * I + n;
+            const bool valid   = t0 + token < width;
             const float factor = sh.query_scale[token] * sh.gamma[token];
             const hip_bfloat16* query_row =
                 q + (std::size_t(t0 + token) * kQHeads + query_head) * kDim + 8 * half;
@@ -275,8 +289,8 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
             }
 #pragma unroll
             for (int J = 0; J <= I; ++J) {
-                const F16x8 a_operand = *reinterpret_cast<const F16x8*>(
-                    &sh.p[token * kTPitch + 16 * J + 8 * half]);
+                const F16x8 a_operand =
+                    *reinterpret_cast<const F16x8*>(&sh.p[token * kTPitch + 16 * J + 8 * half]);
                 acc = wmma(a_operand, corrected[J], acc);
             }
 #pragma unroll
@@ -313,7 +327,8 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
     for (int t = 0; t < 8; ++t)
 #pragma unroll
         for (int e = 0; e < 8; ++e)
-            state_out[(std::size_t(head) * kDim + row) * kDim + 16 * t + 8 * half + e] = state[t][e];
+            state_out[(std::size_t(head) * kDim + row) * kDim + 16 * t + 8 * half + e] =
+                state[t][e];
 }
 
 } // namespace
@@ -322,15 +337,15 @@ hipError_t prefill_chunked(const hip_bfloat16* query, const hip_bfloat16* key,
                            const hip_bfloat16* value, const float* g, const float* beta,
                            const float* state_in, float* state_out, hip_bfloat16* output,
                            std::int32_t width, float scale, hipStream_t stream) noexcept {
-    if (query == nullptr || key == nullptr || value == nullptr || g == nullptr ||
-        beta == nullptr || state_in == nullptr || state_out == nullptr || output == nullptr ||
+    if (query == nullptr || key == nullptr || value == nullptr || g == nullptr || beta == nullptr ||
+        state_in == nullptr || state_out == nullptr || output == nullptr ||
         width < kChunkedMinimumWidth || !std::isfinite(scale) || stream == nullptr ||
         reinterpret_cast<std::uintptr_t>(query) % 16U != 0U ||
         reinterpret_cast<std::uintptr_t>(key) % 16U != 0U) {
         return hipErrorInvalidValue;
     }
-    hipLaunchKernelGGL(chunked_kernel, dim3(kValueHeads), dim3(kWaves * 32), 0, stream, query,
-                       key, value, g, beta, state_in, state_out, output, width, scale);
+    hipLaunchKernelGGL(chunked_kernel, dim3(kValueHeads), dim3(kWaves * 32), 0, stream, query, key,
+                       value, g, beta, state_in, state_out, output, width, scale);
     return hipGetLastError();
 }
 

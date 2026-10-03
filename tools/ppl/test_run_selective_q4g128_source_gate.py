@@ -27,15 +27,19 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
             output, arms, comparison = self._paths(Path(temporary))
             output.mkdir()
             arms["q4g64-absmax"].write_text("partial")
-            with patch.object(runner, "OUTPUT", output), patch.object(
-                runner, "ARMS", arms), patch.object(runner, "COMPARISON", comparison
+            with (
+                patch.object(runner, "OUTPUT", output),
+                patch.object(runner, "ARMS", arms),
+                patch.object(runner, "COMPARISON", comparison),
             ):
                 with self.assertRaisesRegex(ValueError, "partial"):
                     runner.run()
             arms["q4g64-absmax"].unlink()
             (output / "foreign").write_text("x")
-            with patch.object(runner, "OUTPUT", output), patch.object(
-                runner, "ARMS", arms), patch.object(runner, "COMPARISON", comparison
+            with (
+                patch.object(runner, "OUTPUT", output),
+                patch.object(runner, "ARMS", arms),
+                patch.object(runner, "COMPARISON", comparison),
             ):
                 with self.assertRaisesRegex(ValueError, "unexpected"):
                     runner.run()
@@ -55,11 +59,14 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
                 comparison.write_text("{}")
                 return subprocess.CompletedProcess(command, 0)
 
-            with patch.object(runner, "OUTPUT", output), patch.object(
-                runner, "ARMS", arms), patch.object(runner, "COMPARISON", comparison
-            ), patch.object(runner, "_load_score"), patch.object(
-                runner, "validate_comparison", return_value={"pass": True}
-            ), patch.object(runner.subprocess, "run", side_effect=fake_run):
+            with (
+                patch.object(runner, "OUTPUT", output),
+                patch.object(runner, "ARMS", arms),
+                patch.object(runner, "COMPARISON", comparison),
+                patch.object(runner, "_load_score"),
+                patch.object(runner, "validate_comparison", return_value={"pass": True}),
+                patch.object(runner.subprocess, "run", side_effect=fake_run),
+            ):
                 self.assertEqual(runner.run(), 0)
             self.assertEqual(len(commands), 2)
             self.assertIn("q4g128-mse", commands[0])
@@ -73,11 +80,14 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
             for path in arms.values():
                 self._write_triplet(path)
             comparison.write_text("{}")
-            with patch.object(runner, "OUTPUT", output), patch.object(
-                runner, "ARMS", arms), patch.object(runner, "COMPARISON", comparison
-            ), patch.object(runner, "_load_score"), patch.object(
-                runner, "validate_comparison", return_value={"pass": False}
-            ), patch.object(runner.subprocess, "run") as execute:
+            with (
+                patch.object(runner, "OUTPUT", output),
+                patch.object(runner, "ARMS", arms),
+                patch.object(runner, "COMPARISON", comparison),
+                patch.object(runner, "_load_score"),
+                patch.object(runner, "validate_comparison", return_value={"pass": False}),
+                patch.object(runner.subprocess, "run") as execute,
+            ):
                 self.assertEqual(runner.run(), 1)
                 execute.assert_not_called()
 

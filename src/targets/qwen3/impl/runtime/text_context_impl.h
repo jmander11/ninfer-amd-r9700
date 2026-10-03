@@ -45,8 +45,8 @@ void copy_i32(const std::int32_t* source, Tensor& destination, hipStream_t strea
         destination.data == nullptr) {
         throw std::invalid_argument("copy_i32: invalid host source or I32 destination");
     }
-    HIP_CHECK(hipMemcpyAsync(destination.data, source, destination.bytes(),
-                            hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMemcpyAsync(destination.data, source, destination.bytes(), hipMemcpyHostToDevice,
+                             stream));
 }
 
 void require_tensor_shape(const Tensor& t, DType dtype, std::initializer_list<std::int32_t> shape,
@@ -130,7 +130,7 @@ private:
 void DFlashFeatureSink::begin(const Tensor& value) {
     const bool prefill = features != nullptr && positions != nullptr && batch_features == nullptr;
     const bool batch   = batch_features != nullptr && batch_lanes != nullptr &&
-                       batch_valid_columns != nullptr && batch_width > 0 && batch_size > 0;
+                         batch_valid_columns != nullptr && batch_width > 0 && batch_size > 0;
     if ((!prefill && !batch) || layers.empty()) {
         throw std::logic_error("DFlash feature sink is incomplete");
     }
@@ -176,8 +176,8 @@ void DFlashFeatureSink::capture_layer(int layer, const Tensor& value, hipStream_
     const std::size_t target_pitch  = static_cast<std::size_t>(features->nb[1]);
     auto* target                    = static_cast<std::byte*>(features->data) + index * width_bytes;
     HIP_CHECK(hipMemcpy2DAsync(target, target_pitch, value.data, source_pitch, width_bytes,
-                              static_cast<std::size_t>(active_tokens), hipMemcpyDeviceToDevice,
-                              stream));
+                               static_cast<std::size_t>(active_tokens), hipMemcpyDeviceToDevice,
+                               stream));
     captured_mask |= 1U << index;
 }
 
@@ -198,8 +198,8 @@ void DFlashFeatureSink::capture_positions(const Tensor& source, hipStream_t stre
         throw std::logic_error("DFlash feature positions are invalid");
     }
     HIP_CHECK(hipMemcpyAsync(positions->data, source.data,
-                            static_cast<std::size_t>(active_tokens) * sizeof(std::int32_t),
-                            hipMemcpyDeviceToDevice, stream));
+                             static_cast<std::size_t>(active_tokens) * sizeof(std::int32_t),
+                             hipMemcpyDeviceToDevice, stream));
 }
 
 void DFlashFeatureSink::consume_prefill_chunk(std::int32_t tokens) {
@@ -212,12 +212,10 @@ void DFlashFeatureSink::consume_prefill_chunk(std::int32_t tokens) {
 }
 
 TextContext::TextContext(DeviceContext& ctx, const LoadedModelData& weights,
-                         typename Variant::ExecutionState* linear_execution,
-                         WorkspaceArena& work, qwen3::PagedKVCacheView kv,
-                         LinearAttentionStatePool& state,
-                         qwen3::RoundState& io, Tensor& prefill_hidden,
-                         std::uint32_t prefill_chunk, std::uint32_t text_kv_base,
-                         qwen3::PagedKVCacheView mtp_kv,
+                         typename Variant::ExecutionState* linear_execution, WorkspaceArena& work,
+                         qwen3::PagedKVCacheView kv, LinearAttentionStatePool& state,
+                         qwen3::RoundState& io, Tensor& prefill_hidden, std::uint32_t prefill_chunk,
+                         std::uint32_t text_kv_base, qwen3::PagedKVCacheView mtp_kv,
                          const qwen3::PagedKVCache* batch_mtp_kv)
     : ctx_(ctx), weights_(weights), linear_execution_(linear_execution), work_(work), kv_(kv),
       mtp_kv_(mtp_kv), batch_mtp_kv_(batch_mtp_kv), state_(state), io_(io),
@@ -262,30 +260,32 @@ void TextContext::set_text_kv_transactions(
     text_kv_transactions_ = transactions;
 }
 
-void TextContext::set_prefill_text_kv_authority(
-    qwen3::PagedKVCache& cache, PagedKVAllocation& allocation,
-    qwen3::PagedKVPublication& publication, std::uint32_t* device_status) {
-    if (device_status == nullptr || !allocation.valid() ||
-        allocation.bound_row() < 0 || !allocation.belongs_to(cache.pool())) {
+void TextContext::set_prefill_text_kv_authority(qwen3::PagedKVCache& cache,
+                                                PagedKVAllocation& allocation,
+                                                qwen3::PagedKVPublication& publication,
+                                                std::uint32_t* device_status) {
+    if (device_status == nullptr || !allocation.valid() || allocation.bound_row() < 0 ||
+        !allocation.belongs_to(cache.pool())) {
         throw std::invalid_argument("Text prefill KV transaction authority is invalid");
     }
-    prefill_text_kv_cache_ = &cache;
-    prefill_text_kv_allocation_ = &allocation;
+    prefill_text_kv_cache_       = &cache;
+    prefill_text_kv_allocation_  = &allocation;
     prefill_text_kv_publication_ = &publication;
-    prefill_text_kv_status_ = device_status;
+    prefill_text_kv_status_      = device_status;
 }
 
-void TextContext::set_prefill_mtp_kv_authority(
-    qwen3::PagedKVCache& cache, PagedKVAllocation& allocation,
-    qwen3::PagedKVPublication& publication, std::uint32_t* device_status) {
+void TextContext::set_prefill_mtp_kv_authority(qwen3::PagedKVCache& cache,
+                                               PagedKVAllocation& allocation,
+                                               qwen3::PagedKVPublication& publication,
+                                               std::uint32_t* device_status) {
     if (device_status == nullptr || !allocation.valid() || allocation.bound_row() < 0 ||
         !allocation.belongs_to(cache.pool())) {
         throw std::invalid_argument("MTP prefill KV transaction authority is invalid");
     }
-    prefill_mtp_kv_cache_ = &cache;
-    prefill_mtp_kv_allocation_ = &allocation;
+    prefill_mtp_kv_cache_       = &cache;
+    prefill_mtp_kv_allocation_  = &allocation;
     prefill_mtp_kv_publication_ = &publication;
-    prefill_mtp_kv_status_ = device_status;
+    prefill_mtp_kv_status_      = device_status;
 }
 
 void TextContext::set_mtp_kv_transactions(
@@ -345,8 +345,8 @@ void TextContext::set_tree_verify(const Tensor* parent_index, const Tensor* ance
 }
 
 void TextContext::bind() {
-    using TargetMlp      = MlpWeights;
-    const auto bind_mlp  = [](const TargetMlp& source) { return MlpW{&source}; };
+    using TargetMlp     = MlpWeights;
+    const auto bind_mlp = [](const TargetMlp& source) { return MlpW{&source}; };
 
     embed_      = &weights_.token_embedding;
     final_norm_ = &weights_.final_norm;
@@ -363,15 +363,15 @@ void TextContext::bind() {
         }
         const auto& source = *weights_.mtp;
         mtp_               = MtpW{&source,
-                    &source.input_projection,
-                    &source.embedding_norm,
-                    &source.hidden_norm,
-                    &source.input_norm,
-                    &source.query_norm,
-                    &source.key_norm,
-                    &source.output,
-                    &source.post_attention_norm,
-                    &source.final_norm};
+                                  &source.input_projection,
+                                  &source.embedding_norm,
+                                  &source.hidden_norm,
+                                  &source.input_norm,
+                                  &source.query_norm,
+                                  &source.key_norm,
+                                  &source.output,
+                                  &source.post_attention_norm,
+                                  &source.final_norm};
     }
 
     for (int layer = 0; layer < kCfg.n_layers; ++layer) {
@@ -448,8 +448,8 @@ void TextContext::mtp_forward_stem(const Tensor* ids, const Tensor& hidden,
 
 void TextContext::mtp_forward_tail(Tensor& x, const Tensor& ah, const Tensor& positions,
                                    const Tensor& rope_positions, Tensor& mtp_hidden) {
-    hipStream_t s = ctx_.stream;
-    const int T    = x.ne[1];
+    hipStream_t s                     = ctx_.stream;
+    const int T                       = x.ne[1];
     const std::int32_t sequence_batch = active_sequence_batch_ != 0 ? active_sequence_batch_ : 1;
     const std::int32_t sequence_width = active_sequence_batch_ != 0 ? active_sequence_width_ : T;
     if (sequence_width <= 0 || sequence_width * sequence_batch != T ||
@@ -488,36 +488,36 @@ void TextContext::mtp_forward_tail(Tensor& x, const Tensor& ah, const Tensor& po
     Tensor rope_for_op = active_sequence_batch_ != 0 ? rope_positions.view({T}) : rope_positions;
     ops::rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, qn, kn, s);
 
-    Tensor attention_fp32 = results.attention_fp32.view({kCfg.head_dim, kCfg.n_q, T});
-    const auto* all_keys = static_cast<const hip_bfloat16*>(kn.data);
-    const auto* all_values = static_cast<const hip_bfloat16*>(v.data);
-    const auto* all_queries = static_cast<const hip_bfloat16*>(qn.data);
+    Tensor attention_fp32     = results.attention_fp32.view({kCfg.head_dim, kCfg.n_q, T});
+    const auto* all_keys      = static_cast<const hip_bfloat16*>(kn.data);
+    const auto* all_values    = static_cast<const hip_bfloat16*>(v.data);
+    const auto* all_queries   = static_cast<const hip_bfloat16*>(qn.data);
     const auto* all_positions = static_cast<const std::int32_t*>(positions.data);
-    auto* all_attention = static_cast<float*>(attention_fp32.data);
+    auto* all_attention       = static_cast<float*>(attention_fp32.data);
     const auto* all_active_counts =
         active_valid_columns_ == nullptr
             ? nullptr
             : static_cast<const std::int32_t*>(active_valid_columns_->data);
-    const std::size_t key_stride = static_cast<std::size_t>(kCfg.kv_size) * sequence_width;
+    const std::size_t key_stride   = static_cast<std::size_t>(kCfg.kv_size) * sequence_width;
     const std::size_t query_stride = static_cast<std::size_t>(kCfg.q_size) * sequence_width;
     for (std::int32_t sequence = 0; sequence < sequence_batch; ++sequence) {
         qwen3::PagedKVTransaction& transaction = *mtp_kv_transactions_[sequence];
-        const std::size_t key_offset = static_cast<std::size_t>(sequence) * key_stride;
-        const std::size_t query_offset = static_cast<std::size_t>(sequence) * query_stride;
+        const std::size_t key_offset           = static_cast<std::size_t>(sequence) * key_stride;
+        const std::size_t query_offset         = static_cast<std::size_t>(sequence) * query_stride;
         transaction.launch_append_layer(0, all_keys + key_offset, all_values + key_offset, s);
         Tensor query_panel(const_cast<hip_bfloat16*>(all_queries + query_offset), DType::BF16,
                            {kCfg.head_dim, kCfg.n_q, sequence_width});
         Tensor position_panel(
-            const_cast<std::int32_t*>(
-                all_positions + static_cast<std::size_t>(sequence) * sequence_width),
+            const_cast<std::int32_t*>(all_positions +
+                                      static_cast<std::size_t>(sequence) * sequence_width),
             DType::I32, {sequence_width});
         Tensor attention_panel(all_attention + query_offset, DType::FP32,
                                {kCfg.head_dim, kCfg.n_q, sequence_width});
         Tensor active_count;
         const Tensor* active_count_ptr = nullptr;
         if (all_active_counts != nullptr) {
-            active_count = Tensor(const_cast<std::int32_t*>(all_active_counts + sequence),
-                                  DType::I32, {1});
+            active_count =
+                Tensor(const_cast<std::int32_t*>(all_active_counts + sequence), DType::I32, {1});
             active_count_ptr = &active_count;
         }
         Variant::full_attention(query_panel, transaction.pending_layer_read(0), position_panel,
@@ -528,9 +528,9 @@ void TextContext::mtp_forward_tail(Tensor& x, const Tensor& ah, const Tensor& po
     ops::sigmoid_mul(gate, a, s);
 
     const auto post = workspace_recipe::mtp_post_attention<TextConfig>(work_, T);
-    Variant::mtp_attention_output(a.view({kCfg.q_size, T}), *mtp_.o_proj, x, work_, s,
-                                 packed_route_tokens(active_sequence_batch_,
-                                                     active_sequence_width_), linear_execution_);
+    Variant::mtp_attention_output(
+        a.view({kCfg.q_size, T}), *mtp_.o_proj, x, work_, s,
+        packed_route_tokens(active_sequence_batch_, active_sequence_width_), linear_execution_);
 
     Tensor mh = post.post_mixer_hidden;
     ops::rmsnorm(x, *mtp_.post_attn_norm, kCfg.rms_eps, true, mh, s);
@@ -538,8 +538,8 @@ void TextContext::mtp_forward_tail(Tensor& x, const Tensor& ah, const Tensor& po
     {
         auto post_mixer_scope = work_.scope();
         Variant::mtp_post_mixer(mh, mtp_.payload->post_mixer, x, work_, s,
-                                packed_route_tokens(active_sequence_batch_,
-                                                    active_sequence_width_), linear_execution_);
+                                packed_route_tokens(active_sequence_batch_, active_sequence_width_),
+                                linear_execution_);
     }
 
     Tensor flat_mtp_hidden = mtp_hidden.view({kCfg.hidden, T});
@@ -567,7 +567,7 @@ void TextContext::mtp_prefill_chunk(const Tensor& input_embeddings, const Tensor
         throw std::invalid_argument("MTP prefill chunk T must be in [1,prefill_chunk]");
     }
     roctx::ScopedRange mtp_prefill_range(roctx::Name::PrefillMtpChunk, roctx::Category::Mtp,
-                                        static_cast<std::uint64_t>(T));
+                                         static_cast<std::uint64_t>(T));
     require_tensor_shape(input_embeddings, DType::BF16, {kCfg.hidden, T},
                          "MTP prefill input embeddings");
     require_tensor_shape(hidden, DType::BF16, {kCfg.hidden, T}, "MTP prefill hidden");
@@ -596,9 +596,9 @@ void TextContext::mtp_prefill_chunk(const Tensor& input_embeddings, const Tensor
         *prefill_mtp_kv_allocation_, *prefill_mtp_kv_publication_,
         static_cast<const std::int32_t*>(positions.data), static_cast<std::size_t>(T),
         qwen3::PagedKVTransactionWorkspace{
-            .positions = nullptr,
+            .positions         = nullptr,
             .position_capacity = 0,
-            .status = prefill_mtp_kv_status_,
+            .status            = prefill_mtp_kv_status_,
         });
 
     hipStream_t s      = ctx_.stream;
@@ -625,19 +625,17 @@ void TextContext::mtp_prefill_chunk(const Tensor& input_embeddings, const Tensor
         Tensor kn = work_.alloc(DType::BF16, {kCfg.head_dim, kCfg.n_kv, T});
         ops::rmsnorm(k, *mtp_.k_norm, kCfg.rms_eps, true, kn, s);
         ops::rope(rope_positions, kCfg.rotary_dim, kCfg.rope_theta, kn, s);
-        mtp_transaction.launch_append_layer(
-            0, static_cast<const hip_bfloat16*>(kn.data),
-            static_cast<const hip_bfloat16*>(v.data), s);
+        mtp_transaction.launch_append_layer(0, static_cast<const hip_bfloat16*>(kn.data),
+                                            static_cast<const hip_bfloat16*>(v.data), s);
 
         if (final_chunk) {
             const std::size_t column_bytes =
                 static_cast<std::size_t>(kCfg.hidden) * dtype_size(DType::BF16);
-            const auto* x_src = static_cast<const unsigned char*>(x.data) +
-                                static_cast<std::size_t>(T - 1) * column_bytes;
+            const auto* x_src  = static_cast<const unsigned char*>(x.data) +
+                                 static_cast<std::size_t>(T - 1) * column_bytes;
             const auto* ah_src = static_cast<const unsigned char*>(ah.data) +
                                  static_cast<std::size_t>(T - 1) * column_bytes;
-            HIP_CHECK(
-                hipMemcpyAsync(x_last.data, x_src, column_bytes, hipMemcpyDeviceToDevice, s));
+            HIP_CHECK(hipMemcpyAsync(x_last.data, x_src, column_bytes, hipMemcpyDeviceToDevice, s));
             HIP_CHECK(
                 hipMemcpyAsync(ah_last.data, ah_src, column_bytes, hipMemcpyDeviceToDevice, s));
         }
@@ -661,7 +659,7 @@ void TextContext::mtp_prefill_chunk(const Tensor& input_embeddings, const Tensor
             for (int axis = 0; axis < 3; ++axis) {
                 const auto* src = static_cast<const std::int32_t*>(rope_positions.data) +
                                   static_cast<std::size_t>(axis) * T + (T - 1);
-                auto* dst = static_cast<std::int32_t*>(last_rope_position.data) + axis;
+                auto* dst       = static_cast<std::int32_t*>(last_rope_position.data) + axis;
                 HIP_CHECK(
                     hipMemcpyAsync(dst, src, sizeof(std::int32_t), hipMemcpyDeviceToDevice, s));
             }
@@ -669,8 +667,8 @@ void TextContext::mtp_prefill_chunk(const Tensor& input_embeddings, const Tensor
         ops::rope(last_rope_position, kCfg.rotary_dim, kCfg.rope_theta, qn, s);
 
         Tensor a_fp32 = work_.alloc(DType::FP32, {kCfg.head_dim, kCfg.n_q, 1});
-        Variant::full_attention(qn, mtp_transaction.pending_layer_read(0), last_position,
-                                a_fp32, work_, s);
+        Variant::full_attention(qn, mtp_transaction.pending_layer_read(0), last_position, a_fp32,
+                                work_, s);
         Tensor a = work_.alloc(DType::BF16, {kCfg.head_dim, kCfg.n_q, 1});
         ops::cast_fp32_to_bf16(a_fp32, a, s);
         const std::uint32_t expected_frontier =
@@ -720,8 +718,8 @@ void TextContext::proposal_argmax(const Tensor& hidden, Tensor& logits, Tensor& 
 
 void TextContext::mtp_forward_batch(const Tensor& ids, const Tensor& hidden,
                                     const Tensor& positions, Tensor& mtp_hidden, int logits_column,
-                                    Tensor* logits,
-                                    Tensor* draft_token, const Tensor* explicit_rope_positions,
+                                    Tensor* logits, Tensor* draft_token,
+                                    const Tensor* explicit_rope_positions,
                                     const Tensor* input_embeddings) {
     if (batch_mtp_kv_ == nullptr) { throw std::runtime_error("MTP forward is not enabled"); }
     const int T = ids.ne[0];
@@ -978,11 +976,11 @@ template <class Tap>
 void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_layer, Phase ph,
                            Tap& tap) {
     hipStream_t s = ctx_.stream;
-    const int T    = x.ne[1];
+    const int T   = x.ne[1];
     // A mixed unit's leading prefill-owner columns precede the uniform sequence batch.
     const std::int32_t mixed_columns    = mixed_prefill_columns_;
     const std::int32_t sequence_columns = T - mixed_columns;
-    const std::int32_t sequence_batch = active_sequence_batch_ != 0 ? active_sequence_batch_ : 1;
+    const std::int32_t sequence_batch   = active_sequence_batch_ != 0 ? active_sequence_batch_ : 1;
     const std::int32_t sequence_width =
         active_sequence_batch_ != 0 ? active_sequence_width_ : sequence_columns;
     if (sequence_width <= 0 || sequence_width * sequence_batch != sequence_columns ||
@@ -990,9 +988,9 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         throw std::logic_error("Text FP8-K/INT4-V transaction binding does not match columns");
     }
     if (mixed_columns != 0 &&
-        (mixed_columns < 0 || active_sequence_batch_ == 0 || mixed_prefill_transaction_ == nullptr ||
-         mixed_prefill_transaction_->position_count() !=
-             static_cast<std::size_t>(mixed_columns))) {
+        (mixed_columns < 0 || active_sequence_batch_ == 0 ||
+         mixed_prefill_transaction_ == nullptr ||
+         mixed_prefill_transaction_->position_count() != static_cast<std::size_t>(mixed_columns))) {
         throw std::logic_error("mixed Text prefill columns do not match their KV transaction");
     }
     const bool has_ancestor_masks =
@@ -1041,8 +1039,9 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         ops::rmsnorm(x, *w.input_norm, kCfg.rms_eps, true, h, s);
         if constexpr (traced_norm) tap.capture_attention_stage(text_layer, "norm_h", h, s);
         const std::int32_t route_tokens =
-            mixed_columns != 0 ? 0
-                               : packed_route_tokens(active_sequence_batch_, active_sequence_width_);
+            mixed_columns != 0
+                ? 0
+                : packed_route_tokens(active_sequence_batch_, active_sequence_width_);
         Variant::attention_projection(h, *w.projection, q_flat, gate_flat, k_flat, v_flat, ph,
                                       work_, s, route_tokens, linear_execution_, text_layer);
     }
@@ -1070,27 +1069,25 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
         ops::rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, qn, kn, s);
     } else {
-        ops::qk_norm_rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, q, k, *w.q_norm,
-                          *w.k_norm, kCfg.rms_eps, qn, kn, s);
+        ops::qk_norm_rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, q, k, *w.q_norm, *w.k_norm,
+                          kCfg.rms_eps, qn, kn, s);
     }
     if constexpr (requires { tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s); }) {
         tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s);
     }
 
-    Tensor attention_fp32 = results.attention_fp32.view({kCfg.head_dim, kCfg.n_q, T});
-    const auto* all_keys = static_cast<const hip_bfloat16*>(kn.data);
-    const auto* all_values = static_cast<const hip_bfloat16*>(v.data);
-    const auto* all_queries = static_cast<const hip_bfloat16*>(qn.data);
-    auto* all_attention = static_cast<float*>(attention_fp32.data);
+    Tensor attention_fp32     = results.attention_fp32.view({kCfg.head_dim, kCfg.n_q, T});
+    const auto* all_keys      = static_cast<const hip_bfloat16*>(kn.data);
+    const auto* all_values    = static_cast<const hip_bfloat16*>(v.data);
+    const auto* all_queries   = static_cast<const hip_bfloat16*>(qn.data);
+    auto* all_attention       = static_cast<float*>(attention_fp32.data);
     const auto* all_positions = static_cast<const std::int32_t*>(cache_positions.data);
     const auto* all_ancestor_masks =
-        has_ancestor_masks
-            ? static_cast<const std::int32_t*>(active_ancestor_mask_->data)
-            : nullptr;
+        has_ancestor_masks ? static_cast<const std::int32_t*>(active_ancestor_mask_->data)
+                           : nullptr;
     const auto* all_prefix_lengths =
-        has_prefix_lengths
-            ? static_cast<const std::int32_t*>(active_prefix_lengths_->data)
-            : nullptr;
+        has_prefix_lengths ? static_cast<const std::int32_t*>(active_prefix_lengths_->data)
+                           : nullptr;
     // Attention writes every live column of a panel; only its padded columns need zeros.
     const auto zero_padding = [&](std::int32_t column, std::int32_t panel_width,
                                   std::int32_t live_width) {
@@ -1099,51 +1096,49 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
             HIP_CHECK(hipMemsetAsync(
                 all_attention + query_offset + static_cast<std::size_t>(kCfg.q_size) * live_width,
                 0,
-                static_cast<std::size_t>(kCfg.q_size) * (panel_width - live_width) *
-                    sizeof(float),
+                static_cast<std::size_t>(kCfg.q_size) * (panel_width - live_width) * sizeof(float),
                 s));
         }
     };
     const auto query_panel = [&](std::int32_t column, std::int32_t live_width) {
-        return Tensor(const_cast<hip_bfloat16*>(all_queries +
-                                                static_cast<std::size_t>(kCfg.q_size) * column),
-                      DType::BF16, {kCfg.head_dim, kCfg.n_q, live_width});
+        return Tensor(
+            const_cast<hip_bfloat16*>(all_queries + static_cast<std::size_t>(kCfg.q_size) * column),
+            DType::BF16, {kCfg.head_dim, kCfg.n_q, live_width});
     };
     const auto position_panel = [&](std::int32_t column, std::int32_t live_width) {
-        return Tensor(const_cast<std::int32_t*>(all_positions + column), DType::I32,
-                      {live_width});
+        return Tensor(const_cast<std::int32_t*>(all_positions + column), DType::I32, {live_width});
     };
     const auto attention_panel = [&](std::int32_t column, std::int32_t live_width) {
-        return Tensor(all_attention + static_cast<std::size_t>(kCfg.q_size) * column,
-                      DType::FP32, {kCfg.head_dim, kCfg.n_q, live_width});
+        return Tensor(all_attention + static_cast<std::size_t>(kCfg.q_size) * column, DType::FP32,
+                      {kCfg.head_dim, kCfg.n_q, live_width});
     };
     // One sequence panel: `column` is its first aggregate column, `panel_width` its padded width
     // and `sequence` its packed-tree row (negative outside the uniform sequence batch).
     const auto attend = [&](qwen3::PagedKVTransaction& transaction, std::int32_t column,
                             std::int32_t panel_width, std::int32_t sequence) {
-        const auto live_width = static_cast<std::int32_t>(transaction.position_count());
+        const auto live_width        = static_cast<std::int32_t>(transaction.position_count());
         const std::size_t key_offset = static_cast<std::size_t>(kCfg.kv_size) * column;
         zero_padding(column, panel_width, live_width);
-        transaction.launch_append_layer(static_cast<std::uint32_t>(fidx),
-                                        all_keys + key_offset, all_values + key_offset, s);
+        transaction.launch_append_layer(static_cast<std::uint32_t>(fidx), all_keys + key_offset,
+                                        all_values + key_offset, s);
         const qwen3::PagedKVLayerRead cache_read =
             transaction.pending_layer_read(static_cast<std::uint32_t>(fidx));
-        Tensor queries = query_panel(column, live_width);
+        Tensor queries   = query_panel(column, live_width);
         Tensor positions = position_panel(column, live_width);
         Tensor attention = attention_panel(column, live_width);
         Tensor ancestor_panel;
         Tensor prefix_panel;
         const Tensor* ancestor_panel_ptr = nullptr;
-        const Tensor* prefix_panel_ptr = nullptr;
+        const Tensor* prefix_panel_ptr   = nullptr;
         if (has_ancestor_masks && sequence >= 0) {
             ancestor_panel = Tensor(
-                const_cast<std::int32_t*>(
-                    all_ancestor_masks + static_cast<std::size_t>(sequence) * sequence_width),
+                const_cast<std::int32_t*>(all_ancestor_masks +
+                                          static_cast<std::size_t>(sequence) * sequence_width),
                 DType::I32, {live_width});
-            prefix_panel = Tensor(
-                const_cast<std::int32_t*>(all_prefix_lengths + sequence), DType::I32, {1});
+            prefix_panel =
+                Tensor(const_cast<std::int32_t*>(all_prefix_lengths + sequence), DType::I32, {1});
             ancestor_panel_ptr = &ancestor_panel;
-            prefix_panel_ptr = &prefix_panel;
+            prefix_panel_ptr   = &prefix_panel;
         }
         if constexpr (requires {
                           tap.capture_attention_cache(text_layer, cache_read, ancestor_panel_ptr,
@@ -1185,8 +1180,8 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
                 static_cast<std::int32_t>(transactions[sequence]->position_count());
             zero_padding(column, sequence_width, live_widths[sequence]);
             const std::size_t key_offset = static_cast<std::size_t>(kCfg.kv_size) * column;
-            sequence_keys[sequence] = all_keys + key_offset;
-            sequence_values[sequence] = all_values + key_offset;
+            sequence_keys[sequence]      = all_keys + key_offset;
+            sequence_values[sequence]    = all_values + key_offset;
         }
         qwen3::PagedKVTransaction::launch_append_layers(
             std::span<qwen3::PagedKVTransaction* const>(transactions.data(), count),
@@ -1202,13 +1197,12 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
                 .cache_read =
                     transactions[sequence]->pending_layer_read(static_cast<std::uint32_t>(fidx)),
                 .cache_positions = position_panel(column, live_widths[sequence]),
-                .output = attention_panel(column, live_widths[sequence]),
+                .output          = attention_panel(column, live_widths[sequence]),
             };
             const Tensor* const causal = nullptr;
             if constexpr (requires {
-                              tap.capture_attention_cache(text_layer,
-                                                          sequences[sequence].cache_read, causal,
-                                                          causal, s);
+                              tap.capture_attention_cache(
+                                  text_layer, sequences[sequence].cache_read, causal, causal, s);
                           }) {
                 tap.capture_attention_cache(text_layer, sequences[sequence].cache_read, causal,
                                             causal, s);
@@ -1239,9 +1233,11 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
     constexpr bool traced_gate =
         requires { tap.capture_attention_stage(text_layer, "gated_attention", a, s); };
     if constexpr (!traced_gate) {
-        if (Variant::attention_gated_output_projection(gate_flat, attention_fp32, *w.o_proj, x,
-                                                       s, linear_execution_, text_layer)) {
-            if constexpr (requires { tap.capture_attention_stage(text_layer, "residual_x", x, s); }) {
+        if (Variant::attention_gated_output_projection(gate_flat, attention_fp32, *w.o_proj, x, s,
+                                                       linear_execution_, text_layer)) {
+            if constexpr (requires {
+                              tap.capture_attention_stage(text_layer, "residual_x", x, s);
+                          }) {
                 tap.capture_attention_stage(text_layer, "residual_x", x, s);
             }
             return;
@@ -1274,7 +1270,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         return;
     }
     hipStream_t s = ctx_.stream;
-    const int T    = x.ne[1];
+    const int T   = x.ne[1];
 
     const auto control = workspace_recipe::gdn_control<TextConfig>(work_, T);
     Tensor h           = control.hidden;
@@ -1282,12 +1278,12 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Tensor beta        = control.beta;
     // The ordinary prefill leaf owns the whole GDN front, including this normalization; so does
     // the verification record leaf unless the tap observes the normalized controls.
-    const bool prefill_front = Variant::gdn_input_projection_prefill_selected(ph);
+    const bool prefill_front    = Variant::gdn_input_projection_prefill_selected(ph);
     constexpr bool tap_controls = requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); };
-    const bool record_front = !tap_controls && ph == Phase::Verify &&
-                              gdn_state_action_ == GdnStateAction::RecordForReplay;
-    const bool snapshot_front = !tap_controls && ph == Phase::Verify && T == 1 &&
-                                gdn_state_action_ != GdnStateAction::RecordForReplay;
+    const bool record_front     = !tap_controls && ph == Phase::Verify &&
+                                  gdn_state_action_ == GdnStateAction::RecordForReplay;
+    const bool snapshot_front   = !tap_controls && ph == Phase::Verify && T == 1 &&
+                                  gdn_state_action_ != GdnStateAction::RecordForReplay;
     if (!prefill_front && !record_front && !snapshot_front) {
         Variant::gdn_norm_control_projection(x, *w.input_norm, kCfg.rms_eps, *w.projection, h, g,
                                              beta, s);
@@ -1296,11 +1292,11 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         }
     }
 
-    auto projection       = workspace_recipe::gdn_projection<TextConfig>(work_, T);
-    Tensor z              = projection.output_gate.view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
-    Tensor qc             = projection.query;
-    Tensor kc             = projection.key;
-    Tensor vc             = projection.value;
+    auto projection = workspace_recipe::gdn_projection<TextConfig>(work_, T);
+    Tensor z        = projection.output_gate.view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
+    Tensor qc       = projection.query;
+    Tensor kc       = projection.key;
+    Tensor vc       = projection.value;
     if (ph == Phase::Verify) {
         if (active_sequence_batch_ == 0 || active_linear_state_slots_ == nullptr) {
             throw std::logic_error(
@@ -1319,39 +1315,36 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         const Tensor valid = active_valid_columns_ != nullptr ? *active_valid_columns_ : Tensor{};
         GdnReplayRecordLayer persistent_records;
         GdnReplayRecordLayer live_records;
-        const bool pack_replay =
-            gdn_state_action_ == GdnStateAction::RecordForReplay && replay_records_ != nullptr &&
-            width != replay_records_->spec.width;
+        const bool pack_replay = gdn_state_action_ == GdnStateAction::RecordForReplay &&
+                                 replay_records_ != nullptr && width != replay_records_->spec.width;
         if (gdn_state_action_ == GdnStateAction::RecordForReplay) {
             if (replay_records_ == nullptr) {
                 throw std::logic_error("Replay-record GDN has no record storage");
             }
-            persistent_records = replay_records_->layer(gidx, active_sequence_row_,
-                                                        active_sequence_batch_);
-            live_records       = persistent_records;
+            persistent_records =
+                replay_records_->layer(gidx, active_sequence_row_, active_sequence_batch_);
+            live_records                                      = persistent_records;
             const std::optional<ops::GdnLayerFold> layer_fold = deferred_gdn_layer_fold(gidx);
             if (layer_fold && !record_front) ops::gdn_replay_fold_layer(*layer_fold, s);
             if (pack_replay) {
                 // LLD Capture/run: GDN requires record.ne[2]==q.ne[2]; pack only when they differ.
                 const GdnReplayRecordSpec& spec = replay_records_->spec;
-                live_records.conv = work_.alloc(DType::BF16, {spec.conv_channels, width,
-                                                              active_sequence_batch_});
-                live_records.key  = work_.alloc(
+                live_records.conv =
+                    work_.alloc(DType::BF16, {spec.conv_channels, width, active_sequence_batch_});
+                live_records.key = work_.alloc(
                     DType::BF16, {spec.key_dim, spec.qk_heads, width, active_sequence_batch_});
                 live_records.value = work_.alloc(
-                    DType::BF16,
-                    {spec.value_dim, spec.value_heads, width, active_sequence_batch_});
-                live_records.gate = work_.alloc(
-                    DType::FP32, {2, spec.value_heads, width, active_sequence_batch_});
+                    DType::BF16, {spec.value_dim, spec.value_heads, width, active_sequence_batch_});
+                live_records.gate =
+                    work_.alloc(DType::FP32, {2, spec.value_heads, width, active_sequence_batch_});
             }
             if (record_front) {
-                Variant::gdn_front_record(x, *w.input_norm, kCfg.rms_eps, *w.projection,
-                                          *w.conv1d, conv_states, valid,
-                                          *active_linear_state_slots_, projection_input, g, beta,
-                                          live_records.conv, query_output, key_output,
-                                          value_output, gate_output, ph, work_, s,
-                                          active_parent_index_, linear_execution_, text_layer,
-                                          layer_fold ? &*layer_fold : nullptr);
+                Variant::gdn_front_record(x, *w.input_norm, kCfg.rms_eps, *w.projection, *w.conv1d,
+                                          conv_states, valid, *active_linear_state_slots_,
+                                          projection_input, g, beta, live_records.conv,
+                                          query_output, key_output, value_output, gate_output, ph,
+                                          work_, s, active_parent_index_, linear_execution_,
+                                          text_layer, layer_fold ? &*layer_fold : nullptr);
             } else {
                 Variant::gdn_input_projection_record(
                     projection_input, *w.projection, *w.conv1d, conv_states, valid,
@@ -1384,10 +1377,12 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         Tensor o           = workspace_recipe::gdn_recurrent_output<TextConfig>(work_, T).view(
             {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
         Tensor& recurrent_states = state_.recurrent.at(static_cast<std::size_t>(gidx));
-        if constexpr (requires { tap.capture_gdn_recurrent_state_batch(
-                          text_layer, recurrent_states, *active_linear_state_slots_, s); }) {
-            tap.capture_gdn_recurrent_state_batch(
-                text_layer, recurrent_states, *active_linear_state_slots_, s);
+        if constexpr (requires {
+                          tap.capture_gdn_recurrent_state_batch(text_layer, recurrent_states,
+                                                                *active_linear_state_slots_, s);
+                      }) {
+            tap.capture_gdn_recurrent_state_batch(text_layer, recurrent_states,
+                                                  *active_linear_state_slots_, s);
         }
         Tensor q_batch =
             q_recurrent.view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, width, active_sequence_batch_});
@@ -1403,12 +1398,11 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
             // gdn_normalized_output. Same-stream launch keeps the pointer live
             // until this kernel completes.
             auto fold_scope = work_.scope();
-            ops::gated_delta_net_replay_record(q_batch, k_batch, v_batch, g_batch, beta_batch,
-                                               kGdnScale, recurrent_states, valid,
-                                               *active_linear_state_slots_, live_records.key,
-                                               live_records.value, live_records.gate, out_batch, s,
-                                               active_parent_index_, &work_,
-                                               Variant::gdn_recurrence_warm(*w.out_proj, T));
+            ops::gated_delta_net_replay_record(
+                q_batch, k_batch, v_batch, g_batch, beta_batch, kGdnScale, recurrent_states, valid,
+                *active_linear_state_slots_, live_records.key, live_records.value,
+                live_records.gate, out_batch, s, active_parent_index_, &work_,
+                Variant::gdn_recurrence_warm(*w.out_proj, T));
             if (pack_replay) {
                 qwen3::pack_replay_record_layer(persistent_records, live_records, s);
             }
@@ -1416,7 +1410,8 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
             ops::gated_delta_net_snapshot(q_batch, k_batch, v_batch, g_batch, beta_batch, kGdnScale,
                                           /*normalize_qk=*/true, recurrent_states, valid,
                                           *active_linear_state_slots_, *active_linear_state_slots_,
-                                          out_batch, s, Variant::gdn_recurrence_warm(*w.out_proj, T));
+                                          out_batch, s,
+                                          Variant::gdn_recurrence_warm(*w.out_proj, T));
         }
         if constexpr (requires { tap.capture_gdn_recurrence(text_layer, o, s); }) {
             tap.capture_gdn_recurrence(text_layer, o, s);
@@ -1426,11 +1421,10 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
             {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
         constexpr bool materialize_normalized =
             requires { tap.capture_gdn_normalized(text_layer, on, s); };
-        Variant::gdn_output_projection(o, *w.gdn_norm, z, kCfg.rms_eps, on,
-                                       materialize_normalized, *w.out_proj, x, ph, work_, s,
-                                       packed_route_tokens(active_sequence_batch_,
-                                                           active_sequence_width_),
-                                       linear_execution_, text_layer, active_ordinary_decode_);
+        Variant::gdn_output_projection(
+            o, *w.gdn_norm, z, kCfg.rms_eps, on, materialize_normalized, *w.out_proj, x, ph, work_,
+            s, packed_route_tokens(active_sequence_batch_, active_sequence_width_),
+            linear_execution_, text_layer, active_ordinary_decode_);
         if constexpr (materialize_normalized) { tap.capture_gdn_normalized(text_layer, on, s); }
         if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
             tap.capture_gdn_residual(text_layer, x, s);
@@ -1439,7 +1433,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     }
     const auto conv = workspace_recipe::gdn_prefill_conv<TextConfig>(work_, T);
     Tensor qkv      = conv.projected;
-    Tensor qkv_c = conv.convolved;
+    Tensor qkv_c    = conv.convolved;
     Tensor conv_state =
         state_.conv_slot(static_cast<std::uint32_t>(gidx), linear_state_current_slot_);
     if (prefill_front) {
@@ -1477,14 +1471,14 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
                       tap.capture_gdn_recurrent_state(text_layer, recurrent_state,
                                                       linear_state_current_slot_, s);
                   }) {
-        recurrent_state_trace = tap.capture_gdn_recurrent_state(
-            text_layer, recurrent_state, linear_state_current_slot_, s);
+        recurrent_state_trace = tap.capture_gdn_recurrent_state(text_layer, recurrent_state,
+                                                                linear_state_current_slot_, s);
     }
     if (recurrent_state_trace.destination.data != nullptr) {
-        ops::gated_delta_net_trace_prefix_state(
-            q_recurrent, k_recurrent, vv, g, beta, kGdnScale, /*normalize_qk=*/true,
-            recurrent_state, o, recurrent_state_trace.destination,
-            recurrent_state_trace.prefix_tokens, s);
+        ops::gated_delta_net_trace_prefix_state(q_recurrent, k_recurrent, vv, g, beta, kGdnScale,
+                                                /*normalize_qk=*/true, recurrent_state, o,
+                                                recurrent_state_trace.destination,
+                                                recurrent_state_trace.prefix_tokens, s);
     } else {
         ops::gated_delta_net(q_recurrent, k_recurrent, vv, g, beta, kGdnScale,
                              /*normalize_qk=*/true, recurrent_state, o, s);
@@ -1497,11 +1491,10 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
     constexpr bool materialize_normalized =
         requires { tap.capture_gdn_normalized(text_layer, on, s); };
-    Variant::gdn_output_projection(o, *w.gdn_norm, z, kCfg.rms_eps, on, materialize_normalized,
-                                   *w.out_proj, x, ph, work_, s,
-                                   packed_route_tokens(active_sequence_batch_,
-                                                       active_sequence_width_),
-                                   linear_execution_, text_layer, active_ordinary_decode_);
+    Variant::gdn_output_projection(
+        o, *w.gdn_norm, z, kCfg.rms_eps, on, materialize_normalized, *w.out_proj, x, ph, work_, s,
+        packed_route_tokens(active_sequence_batch_, active_sequence_width_), linear_execution_,
+        text_layer, active_ordinary_decode_);
     if constexpr (materialize_normalized) { tap.capture_gdn_normalized(text_layer, on, s); }
     if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
         tap.capture_gdn_residual(text_layer, x, s);
@@ -1511,8 +1504,8 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
 // Mixed unit: the owner's leading columns run the ordinary prefill recurrence on its current
 // state slot; the verify batch records ReplaySSM transitions exactly as gdn_mix's Verify path.
 void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int text_layer) {
-    hipStream_t s        = ctx_.stream;
-    const int T          = x.ne[1];
+    hipStream_t s            = ctx_.stream;
+    const int T              = x.ne[1];
     const std::int32_t owner = mixed_prefill_columns_;
     const std::int32_t width = active_sequence_width_;
     const std::int32_t batch = active_sequence_batch_;
@@ -1523,10 +1516,10 @@ void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int tex
         throw std::logic_error("mixed GDN requires an owner chunk and a chain record batch");
     }
     const std::int32_t verify = width * batch;
-    const auto control    = workspace_recipe::gdn_control<TextConfig>(work_, T);
-    auto projection       = workspace_recipe::gdn_projection<TextConfig>(work_, T);
-    Tensor& conv_states   = state_.conv.at(static_cast<std::size_t>(gidx));
-    Tensor owner_conv     =
+    const auto control        = workspace_recipe::gdn_control<TextConfig>(work_, T);
+    auto projection           = workspace_recipe::gdn_projection<TextConfig>(work_, T);
+    Tensor& conv_states       = state_.conv.at(static_cast<std::size_t>(gidx));
+    Tensor owner_conv =
         state_.conv_slot(static_cast<std::uint32_t>(gidx), linear_state_current_slot_);
     const Tensor valid = active_valid_columns_ != nullptr ? *active_valid_columns_ : Tensor{};
     const GdnReplayRecordLayer persistent_records =
@@ -1536,8 +1529,7 @@ void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int tex
     const bool pack_replay            = width != spec.width;
     if (pack_replay) {
         live_records.conv = work_.alloc(DType::BF16, {spec.conv_channels, width, batch});
-        live_records.key =
-            work_.alloc(DType::BF16, {spec.key_dim, spec.qk_heads, width, batch});
+        live_records.key  = work_.alloc(DType::BF16, {spec.key_dim, spec.qk_heads, width, batch});
         live_records.value =
             work_.alloc(DType::BF16, {spec.value_dim, spec.value_heads, width, batch});
         live_records.gate = work_.alloc(DType::FP32, {2, spec.value_heads, width, batch});
@@ -1548,21 +1540,21 @@ void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int tex
     if (const std::optional<ops::GdnLayerFold> layer_fold = deferred_gdn_layer_fold(gidx)) {
         ops::gdn_replay_fold_layer(*layer_fold, s);
     }
-    Variant::gdn_front_mixed(x, *w.input_norm, kCfg.rms_eps, *w.projection, *w.conv1d,
-                             owner_conv, conv_states, valid, *active_linear_state_slots_, owner,
-                             hidden, g, beta, live_records.conv, projection.query,
-                             projection.key, projection.value, projection.output_gate, work_, s,
-                             linear_execution_, text_layer);
+    Variant::gdn_front_mixed(x, *w.input_norm, kCfg.rms_eps, *w.projection, *w.conv1d, owner_conv,
+                             conv_states, valid, *active_linear_state_slots_, owner, hidden, g,
+                             beta, live_records.conv, projection.query, projection.key,
+                             projection.value, projection.output_gate, work_, s, linear_execution_,
+                             text_layer);
 
     Tensor o = workspace_recipe::gdn_recurrent_output<TextConfig>(work_, T);
     {
-        Tensor q_owner = projection.query.slice(1, 0, owner)
-                             .view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, owner});
+        Tensor q_owner =
+            projection.query.slice(1, 0, owner).view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, owner});
         Tensor k_owner =
             projection.key.slice(1, 0, owner).view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, owner});
-        Tensor v_owner = projection.value.slice(1, 0, owner)
-                             .view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, owner});
-        Tensor o_owner = o.slice(1, 0, owner).view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, owner});
+        Tensor v_owner =
+            projection.value.slice(1, 0, owner).view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, owner});
+        Tensor o_owner    = o.slice(1, 0, owner).view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, owner});
         Tensor g_owner    = g.slice(1, 0, owner);
         Tensor beta_owner = beta.slice(1, 0, owner);
         Tensor recurrent_state =
@@ -1571,24 +1563,22 @@ void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int tex
                              /*normalize_qk=*/true, recurrent_state, o_owner, s);
     }
     {
-        Tensor q_batch = projection.query.slice(1, owner, verify)
-                             .view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, width, batch});
-        Tensor k_batch = projection.key.slice(1, owner, verify)
-                             .view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, width, batch});
-        Tensor v_batch = projection.value.slice(1, owner, verify)
-                             .view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, width, batch});
+        Tensor q_batch    = projection.query.slice(1, owner, verify)
+                                .view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, width, batch});
+        Tensor k_batch    = projection.key.slice(1, owner, verify)
+                                .view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, width, batch});
+        Tensor v_batch    = projection.value.slice(1, owner, verify)
+                                .view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, width, batch});
         Tensor g_batch    = g.slice(1, owner, verify).view({kCfg.gdn_v_heads, width, batch});
         Tensor beta_batch = beta.slice(1, owner, verify).view({kCfg.gdn_v_heads, width, batch});
-        Tensor out_batch  = o.slice(1, owner, verify)
-                               .view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, width, batch});
+        Tensor out_batch =
+            o.slice(1, owner, verify).view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, width, batch});
         Tensor& recurrent_states = state_.recurrent.at(static_cast<std::size_t>(gidx));
         auto fold_scope          = work_.scope();
-        ops::gated_delta_net_replay_record(q_batch, k_batch, v_batch, g_batch, beta_batch,
-                                           kGdnScale, recurrent_states, valid,
-                                           *active_linear_state_slots_, live_records.key,
-                                           live_records.value, live_records.gate, out_batch, s,
-                                           nullptr, &work_,
-                                           Variant::gdn_recurrence_warm(*w.out_proj, T));
+        ops::gated_delta_net_replay_record(
+            q_batch, k_batch, v_batch, g_batch, beta_batch, kGdnScale, recurrent_states, valid,
+            *active_linear_state_slots_, live_records.key, live_records.value, live_records.gate,
+            out_batch, s, nullptr, &work_, Variant::gdn_recurrence_warm(*w.out_proj, T));
         if (pack_replay) { qwen3::pack_replay_record_layer(persistent_records, live_records, s); }
     }
 
@@ -1601,15 +1591,14 @@ void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int tex
                                    false);
 }
 
-void TextContext::mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x,
-                           int text_layer, Phase ph) {
+void TextContext::mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x, int text_layer,
+                           Phase ph) {
     hipStream_t s = ctx_.stream;
-    const int T    = x.ne[1];
-    Tensor h       = workspace_recipe::post_mixer_hidden<TextConfig>(work_, T);
+    const int T   = x.ne[1];
+    Tensor h      = workspace_recipe::post_mixer_hidden<TextConfig>(work_, T);
 
-    Variant::post_mixer(*post_norm, kCfg.rms_eps, h, *m.payload, x, ph, work_, s,
-                        linear_execution_, text_layer,
-                        active_ordinary_decode_);
+    Variant::post_mixer(*post_norm, kCfg.rms_eps, h, *m.payload, x, ph, work_, s, linear_execution_,
+                        text_layer, active_ordinary_decode_);
 }
 
 template <class Tap>
@@ -1644,12 +1633,12 @@ void TextContext::run_layers(Tensor& x, Phase ph, Tap& tap) {
             const int gidx       = ModelConfig::gdn_idx(layer);
             const GdnLayerW& gdn = gdn_.at(static_cast<std::size_t>(gidx));
             roctx::ScopedRange layer_range(prefill ? roctx::Name::PrefillLayerGdn
-                                                  : roctx::Name::VerifyLayerGdn,
-                                          roctx::Category::Gdn, static_cast<std::uint64_t>(layer));
+                                                   : roctx::Name::VerifyLayerGdn,
+                                           roctx::Category::Gdn, static_cast<std::uint64_t>(layer));
             {
                 roctx::ScopedRange mixer_range(
-                    prefill ? roctx::Name::PrefillGdn : roctx::Name::VerifyGdn, roctx::Category::Gdn,
-                    static_cast<std::uint64_t>(layer));
+                    prefill ? roctx::Name::PrefillGdn : roctx::Name::VerifyGdn,
+                    roctx::Category::Gdn, static_cast<std::uint64_t>(layer));
                 auto mixer_scope = work_.scope();
                 gdn_mix(gdn, x, gidx, layer, ph, tap);
             }
@@ -1756,7 +1745,7 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
         }
         const bool is_last = finalize_at_end && (t0 + len == T);
         roctx::ScopedRange chunk_range(roctx::Name::PrefillChunk, roctx::Category::Prefill,
-                                      static_cast<std::uint64_t>(len));
+                                       static_cast<std::uint64_t>(len));
 
         {
             std::vector<std::int32_t> local_scatter_indices;
@@ -1788,12 +1777,11 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                 *prefill_text_kv_allocation_, *prefill_text_kv_publication_,
                 static_cast<const std::int32_t*>(positions.data), static_cast<std::size_t>(len),
                 qwen3::PagedKVTransactionWorkspace{
-                    .positions = nullptr,
+                    .positions         = nullptr,
                     .position_capacity = 0,
-                    .status = prefill_text_kv_status_,
+                    .status            = prefill_text_kv_status_,
                 }));
-            std::array<qwen3::PagedKVTransaction*, 1> text_kv_binding{
-                &*text_kv_transaction};
+            std::array<qwen3::PagedKVTransaction*, 1> text_kv_binding{&*text_kv_transaction};
             ScopedValue<std::span<qwen3::PagedKVTransaction* const>> scoped_text_kv(
                 text_kv_transactions_, text_kv_binding);
 
@@ -1818,9 +1806,9 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
             ScopedPositions scoped_rope(active_rope_positions_, rope_positions);
             Tensor x = roots.residual;
             // The window carries the id after the chunk for the shifted MTP embedding.
-            auto prompt_rows = prompt_embedding_->acquire(prompt.subspan(
-                prompt_t0, std::min<std::size_t>(static_cast<std::size_t>(len) + 1U,
-                                                 prompt.size() - prompt_t0)));
+            auto prompt_rows = prompt_embedding_->acquire(
+                prompt.subspan(prompt_t0, std::min<std::size_t>(static_cast<std::size_t>(len) + 1U,
+                                                                prompt.size() - prompt_t0)));
             ops::embedding(prompt_rows.view().slots.slice(0, 0, len), prompt_rows.view().table, x,
                            s);
             if (!prepare_mtp_prompt) { prompt_rows.end(); }
@@ -1840,15 +1828,15 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
             if (trace_fresh || trace_append) {
                 copy_i32(ids.data() + t0, ids_device, s);
                 layer_boundary_trace::Session trace(
-                    {.role       = trace_fresh ? layer_boundary_trace::Role::TextFresh
-                                               : layer_boundary_trace::Role::TextAppend,
-                     .width      = len,
-                     .batch      = 1,
-                     .column     = len - 1,
-                     .frontier   = 129,
-                     .ids        = &ids_device,
-                     .positions  = &positions,
-                     .rope       = &rope_positions},
+                    {.role      = trace_fresh ? layer_boundary_trace::Role::TextFresh
+                                              : layer_boundary_trace::Role::TextAppend,
+                     .width     = len,
+                     .batch     = 1,
+                     .column    = len - 1,
+                     .frontier  = 129,
+                     .ids       = &ids_device,
+                     .positions = &positions,
+                     .rope      = &rope_positions},
                     s);
                 layer_boundary_trace::CompositeTap<Tap> combined{tap, trace};
                 combined.begin(x);
@@ -1858,8 +1846,7 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                 if constexpr (Tap::enabled) { tap.begin(x); }
                 run_layers(x, Phase::Prefill, tap);
             }
-            const std::uint32_t expected_frontier =
-                static_cast<std::uint32_t>(base_i + t0 + len);
+            const std::uint32_t expected_frontier = static_cast<std::uint32_t>(base_i + t0 + len);
             if (text_kv_transaction->commit() != expected_frontier) {
                 throw std::logic_error("Text prefill KV transaction published a wrong frontier");
             }
@@ -1876,8 +1863,8 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                 Tensor last_xf = xf.slice(1, len - 1, 1);
                 Tensor logits  = matrix_window(io_.logits, 1);
                 run_linear(last_xf, *lm_head_, logits, s);
-                prefill_tail_trace::capture_if_enabled(base, static_cast<std::uint32_t>(T),
-                                                       last_xf, logits, kCfg.token_domain, s);
+                prefill_tail_trace::capture_if_enabled(base, static_cast<std::uint32_t>(T), last_xf,
+                                                       logits, kCfg.token_domain, s);
                 // Set io_.pos to the bonus token's absolute position (base + T) before picking so
                 // the sampler RNG is keyed by it (prefill purpose keeps it distinct from the first
                 // decode step, which reuses the same io_.pos).
@@ -1921,8 +1908,8 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                         Tensor shifted_indices = workspace_recipe::visual_scatter_indices(
                             work_, static_cast<std::int32_t>(overlap.size()));
                         qwen3::detail::scatter_shifted_visual_embeddings(
-                            mtp_input_embeddings, vision_chunk.embeddings, overlap,
-                            shifted_indices, s);
+                            mtp_input_embeddings, vision_chunk.embeddings, overlap, shifted_indices,
+                            s);
                     }
                 }
                 if (is_last && mtp_proposal_extent_ != 0) {
@@ -1938,23 +1925,22 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                     Tensor ar_a = io_.mtp->ar_hidden;
                     Tensor ar_b = work_.alloc(DType::BF16, {kCfg.hidden, 1});
                     for (int i = 1; i < static_cast<int>(mtp_proposal_extent_); ++i) {
-                        Tensor prev_token     = io_.mtp->draft_tokens.slice(0, i - 1, 1);
-                        Tensor next_token     = io_.mtp->draft_tokens.slice(0, i, 1);
-                        const bool from_a     = (i % 2) == 1;
-                        Tensor& src_hidden    = from_a ? ar_a : ar_b;
-                        Tensor& dst_hidden    = from_a ? ar_b : ar_a;
+                        Tensor prev_token   = io_.mtp->draft_tokens.slice(0, i - 1, 1);
+                        Tensor next_token   = io_.mtp->draft_tokens.slice(0, i, 1);
+                        const bool from_a   = (i % 2) == 1;
+                        Tensor& src_hidden  = from_a ? ar_a : ar_b;
+                        Tensor& dst_hidden  = from_a ? ar_b : ar_a;
                         auto ar_transaction = prefill_mtp_kv_cache_->begin_device_append(
                             *prefill_mtp_kv_allocation_, *prefill_mtp_kv_publication_,
                             static_cast<const std::int32_t*>(ar_position.data), 1U,
-                            qwen3::PagedKVTransactionWorkspace{
-                                .status = prefill_mtp_kv_status_});
+                            qwen3::PagedKVTransactionWorkspace{.status = prefill_mtp_kv_status_});
                         std::array<qwen3::PagedKVTransaction*, 1> ar_binding{&ar_transaction};
                         ScopedValue<std::span<qwen3::PagedKVTransaction* const>> scoped_mtp_kv(
                             mtp_kv_transactions_, ar_binding);
-                        mtp_forward_ar_step(prev_token, src_hidden, ar_position, dst_hidden,
-                                            logits, next_token);
-                        const std::uint32_t expected = retained_mtp_frontier +
-                                                       static_cast<std::uint32_t>(i);
+                        mtp_forward_ar_step(prev_token, src_hidden, ar_position, dst_hidden, logits,
+                                            next_token);
+                        const std::uint32_t expected =
+                            retained_mtp_frontier + static_cast<std::uint32_t>(i);
                         if (ar_transaction.commit() != expected) {
                             throw std::logic_error(
                                 "MTP prefill AR transaction published a wrong frontier");
@@ -1963,12 +1949,12 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                     }
                     if (((mtp_proposal_extent_ - 1) % 2) == 1) {
                         HIP_CHECK(hipMemcpyAsync(ar_a.data, ar_b.data, ar_a.bytes(),
-                                                hipMemcpyDeviceToDevice, s));
+                                                 hipMemcpyDeviceToDevice, s));
                     }
                     if (prefill_mtp_kv_publication_->valid_frontier != retained_mtp_frontier) {
-                        prefill_mtp_kv_cache_->truncate_publication(
-                            *prefill_mtp_kv_allocation_, *prefill_mtp_kv_publication_,
-                            retained_mtp_frontier);
+                        prefill_mtp_kv_cache_->truncate_publication(*prefill_mtp_kv_allocation_,
+                                                                    *prefill_mtp_kv_publication_,
+                                                                    retained_mtp_frontier);
                     }
                 } else {
                     mtp_prefill_chunk(mtp_input_embeddings, xf, positions, rope_positions, false,
@@ -2000,7 +1986,8 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
 
     // Stage the next chunk's prompt rows while this chunk executes; the host would otherwise
     // only wait below. The next chunk reuses them if its window is a prefix of these ids.
-    const std::size_t next_prompt_token = static_cast<std::size_t>(base) + static_cast<std::size_t>(t0);
+    const std::size_t next_prompt_token =
+        static_cast<std::size_t>(base) + static_cast<std::size_t>(t0);
     if (next_prompt_token < prompt.size()) {
         prompt_embedding_->prefetch(prompt.subspan(
             next_prompt_token,
@@ -2028,6 +2015,7 @@ struct MixedFeatureTap {
         prefill.begin(x.slice(1, 0, owner_columns));
         verify.begin(x.slice(1, owner_columns, x.ne[1] - owner_columns));
     }
+
     void capture_layer(int layer, const Tensor& x, hipStream_t stream) {
         prefill.capture_layer(layer, x.slice(1, 0, owner_columns), stream);
         verify.capture_layer(layer, x.slice(1, owner_columns, x.ne[1] - owner_columns), stream);
@@ -2039,11 +2027,11 @@ struct MixedFeatureTap {
 PrefillChunkResult TextContext::mixed_prefill_verify(
     const MixedPrefillSlice& slice, DFlashFeatureSink& prefill_sink, const Tensor& ids,
     const Tensor& cache_positions, const Tensor& rope_positions, const Tensor& valid_columns,
-    const Tensor& kv_table_rows, const Tensor& linear_state_slots, Tensor& hidden,
-    Tensor& logits, Tensor& target_tokens, DFlashFeatureSink& verify_sink,
+    const Tensor& kv_table_rows, const Tensor& linear_state_slots, Tensor& hidden, Tensor& logits,
+    Tensor& target_tokens, DFlashFeatureSink& verify_sink,
     std::optional<qwen3::PagedKVTransaction>& owner_transaction, std::uint32_t& owner_frontier) {
-    hipStream_t s            = ctx_.stream;
-    const std::uint32_t base = text_kv_base_;
+    hipStream_t s                     = ctx_.stream;
+    const std::uint32_t base          = text_kv_base_;
     const std::span<const int> prompt = slice.prompt;
     if (prefill_text_kv_cache_ == nullptr || prefill_text_kv_allocation_ == nullptr ||
         prefill_text_kv_publication_ == nullptr || prefill_text_kv_status_ == nullptr ||
@@ -2056,7 +2044,7 @@ PrefillChunkResult TextContext::mixed_prefill_verify(
         throw std::invalid_argument("mixed prefill chunk is outside the prompt");
     }
     // The owner's extent follows prefill_impl: stop at the rewrite checkpoint and split frontiers.
-    auto len = static_cast<std::uint32_t>(slice.nominal_length);
+    auto len                          = static_cast<std::uint32_t>(slice.nominal_length);
     const std::int64_t checkpoint_abs = prefill_rewrite_checkpoint_frontier_;
     if (checkpoint_abs > static_cast<std::int64_t>(base) &&
         checkpoint_abs < static_cast<std::int64_t>(base) + len) {
@@ -2088,18 +2076,18 @@ PrefillChunkResult TextContext::mixed_prefill_verify(
     rope_delta_ = 0;
     ops::set_i32_scalar(io_.rope_delta, 0, s);
 
-    Tensor x              = work_.alloc(DType::BF16, {kCfg.hidden, T});
-    Tensor positions      = work_.alloc(DType::I32, {T});
-    Tensor rope_all       = work_.alloc(DType::I32, {T});
+    Tensor x               = work_.alloc(DType::BF16, {kCfg.hidden, T});
+    Tensor positions       = work_.alloc(DType::I32, {T});
+    Tensor rope_all        = work_.alloc(DType::I32, {T});
     Tensor owner_positions = positions.slice(0, 0, owner);
     Tensor owner_rope      = rope_all.slice(0, 0, owner);
     ops::fill_i32_positions(owner_positions, static_cast<std::int32_t>(base), s);
     ops::fill_i32_positions(owner_rope, static_cast<std::int32_t>(base), s);
-    HIP_CHECK(hipMemcpyAsync(static_cast<std::int32_t*>(positions.data) + owner,
-                             cache_positions.data, static_cast<std::size_t>(verify) * sizeof(std::int32_t),
-                             hipMemcpyDeviceToDevice, s));
-    HIP_CHECK(hipMemcpyAsync(static_cast<std::int32_t*>(rope_all.data) + owner,
-                             rope_positions.data, static_cast<std::size_t>(verify) * sizeof(std::int32_t),
+    HIP_CHECK(hipMemcpyAsync(
+        static_cast<std::int32_t*>(positions.data) + owner, cache_positions.data,
+        static_cast<std::size_t>(verify) * sizeof(std::int32_t), hipMemcpyDeviceToDevice, s));
+    HIP_CHECK(hipMemcpyAsync(static_cast<std::int32_t*>(rope_all.data) + owner, rope_positions.data,
+                             static_cast<std::size_t>(verify) * sizeof(std::int32_t),
                              hipMemcpyDeviceToDevice, s));
 
     owner_transaction.emplace(prefill_text_kv_cache_->begin_device_append(
@@ -2130,7 +2118,7 @@ PrefillChunkResult TextContext::mixed_prefill_verify(
         ScopedValue<std::int32_t> width_binding(active_sequence_width_, width);
         ScopedValue<std::int32_t> owner_binding(mixed_prefill_columns_, owner);
         ScopedValue<qwen3::PagedKVTransaction*> owner_kv(mixed_prefill_transaction_,
-                                                          &*owner_transaction);
+                                                         &*owner_transaction);
         MixedFeatureTap tap{prefill_sink, verify_sink, owner};
         tap.begin(x);
         run_layers(x, Phase::Prefill, tap);
@@ -2144,8 +2132,8 @@ PrefillChunkResult TextContext::mixed_prefill_verify(
     Tensor xf = matrix_window(prefill_hidden_, owner);
     ops::rmsnorm(x.slice(1, 0, owner), *final_norm_, kCfg.rms_eps, true, xf, s);
     if (is_last) {
-        Tensor last_xf       = xf.slice(1, owner - 1, 1);
-        Tensor owner_logits  = matrix_window(io_.logits, 1);
+        Tensor last_xf      = xf.slice(1, owner - 1, 1);
+        Tensor owner_logits = matrix_window(io_.logits, 1);
         run_linear(last_xf, *lm_head_, owner_logits, s);
         const auto total = static_cast<std::int32_t>(prompt.size());
         ops::set_i32_scalar(io_.pos, total, s);

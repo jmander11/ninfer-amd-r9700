@@ -102,9 +102,7 @@ def test_failed_writer_leaves_no_partial_destination_or_staging_file(tmp_path):
     spec = ResourceSpec("frontend/tokenizer.json", "raw-bytes-v1", 2)
 
     with pytest.raises(ArtifactError, match="has 1 bytes; expected 2"):
-        with ArtifactWriter(
-            path, ArtifactIdentity("test-model", "candidate"), [spec]
-        ) as writer:
+        with ArtifactWriter(path, ArtifactIdentity("test-model", "candidate"), [spec]) as writer:
             writer.write(spec.name, b"{")
 
     assert not path.exists()

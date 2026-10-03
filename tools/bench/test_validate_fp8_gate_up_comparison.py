@@ -18,8 +18,10 @@ def report(fp8: list[float], q4: list[float]) -> dict[str, object]:
         "artifact_type": "ninfer_r9700_fp8_gate_up_comparison",
         "schema_version": 2,
         "provenance": {
-            "source_root": "/source", "source_sha256": "a" * 64,
-            "executable_path": "/build/qual", "executable_sha256": "b" * 64,
+            "source_root": "/source",
+            "source_sha256": "a" * 64,
+            "executable_path": "/build/qual",
+            "executable_sha256": "b" * 64,
         },
         "hardware": {
             "ordinal": 0,
@@ -75,8 +77,11 @@ def report(fp8: list[float], q4: list[float]) -> dict[str, object]:
         "current_q4_implementation_poor_vs_fp8": ratio > 1.0,
         "direct_weight_binding": True,
         "represented_format_axis_oracle": {
-            "probe_count": 9, "tokens": [0, 17, 2047], "rows": [0, 12345, 34815],
-            "fp8_max_bf16_steps": 1, "q4_max_bf16_steps": 2,
+            "probe_count": 9,
+            "tokens": [0, 17, 2047],
+            "rows": [0, 12345, 34815],
+            "fp8_max_bf16_steps": 1,
+            "q4_max_bf16_steps": 2,
         },
         "outer_vector_scales": True,
         "nonfinite_status_poisoning": True,

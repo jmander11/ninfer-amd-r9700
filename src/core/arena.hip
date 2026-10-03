@@ -72,11 +72,10 @@ void* allocate_registered_host(std::size_t capacity_bytes, std::size_t& mapping_
     (void)::madvise(mapping, mapping_bytes, MADV_NOHUGEPAGE);
 #endif
 
-    const std::size_t requested_workers =
-        1 + (mapping_bytes - 1) / kHostPrefaultBytesPerWorker;
-    const std::size_t worker_count = std::min(kMaximumHostPrefaultWorkers, requested_workers);
-    const std::size_t page_count       = mapping_bytes / page_size;
-    const std::size_t pages_per_worker = 1 + (page_count - 1) / worker_count;
+    const std::size_t requested_workers = 1 + (mapping_bytes - 1) / kHostPrefaultBytesPerWorker;
+    const std::size_t worker_count      = std::min(kMaximumHostPrefaultWorkers, requested_workers);
+    const std::size_t page_count        = mapping_bytes / page_size;
+    const std::size_t pages_per_worker  = 1 + (page_count - 1) / worker_count;
     try {
         std::vector<std::jthread> workers;
         workers.reserve(worker_count);
@@ -95,8 +94,7 @@ void* allocate_registered_host(std::size_t capacity_bytes, std::size_t& mapping_
         throw;
     }
 
-    const hipError_t registration =
-        hipHostRegister(mapping, mapping_bytes, hipHostRegisterDefault);
+    const hipError_t registration = hipHostRegister(mapping, mapping_bytes, hipHostRegisterDefault);
     if (registration != hipSuccess) {
         (void)::munmap(mapping, mapping_bytes);
         mapping_bytes = 0;
@@ -126,22 +124,23 @@ DeviceBuffer::DeviceBuffer(std::size_t size_bytes) : bytes(size_bytes) {
 DeviceBuffer::~DeviceBuffer() { free_device(p); }
 
 DeviceBuffer::DeviceBuffer(DeviceBuffer&& other) noexcept : p(other.p), bytes(other.bytes) {
-    other.p = nullptr;
+    other.p     = nullptr;
     other.bytes = 0;
 }
 
 DeviceBuffer& DeviceBuffer::operator=(DeviceBuffer&& other) noexcept {
     if (this != &other) {
         free_device(p);
-        p = other.p;
-        bytes = other.bytes;
-        other.p = nullptr;
+        p           = other.p;
+        bytes       = other.bytes;
+        other.p     = nullptr;
         other.bytes = 0;
     }
     return *this;
 }
 
-void DeviceBuffer::require_range(std::size_t offset, std::size_t count, const char* operation) const {
+void DeviceBuffer::require_range(std::size_t offset, std::size_t count,
+                                 const char* operation) const {
     if (offset > bytes || count > bytes - offset) {
         throw std::out_of_range(std::string(operation) + " exceeds device buffer");
     }
@@ -159,8 +158,8 @@ void DeviceBuffer::fill(int value) {
 void DeviceBuffer::copy_from_host(const void* source, std::size_t count, std::size_t offset) {
     require_range(offset, count, "host-to-device copy");
     if (count == 0) { return; }
-    const hipError_t error = hipMemcpy(static_cast<std::uint8_t*>(p) + offset, source, count,
-                                       hipMemcpyHostToDevice);
+    const hipError_t error =
+        hipMemcpy(static_cast<std::uint8_t*>(p) + offset, source, count, hipMemcpyHostToDevice);
     if (error != hipSuccess) { allocation_error("hipMemcpy host-to-device", error); }
     // Settle the null stream before callers submit consumers on non-blocking streams.
     const hipError_t settled = hipStreamSynchronize(nullptr);
@@ -186,7 +185,9 @@ void DeviceBuffer::fill_async(int value, hipStream_t stream) {
 void DeviceBuffer::copy_from_host_async(const void* source, std::size_t count, hipStream_t stream,
                                         std::size_t offset) {
     require_range(offset, count, "async host-to-device copy");
-    if (stream == nullptr) { throw std::invalid_argument("async host-to-device copy requires a stream"); }
+    if (stream == nullptr) {
+        throw std::invalid_argument("async host-to-device copy requires a stream");
+    }
     if (count != 0) {
         const hipError_t error = hipMemcpyAsync(static_cast<std::uint8_t*>(p) + offset, source,
                                                 count, hipMemcpyHostToDevice, stream);
@@ -197,10 +198,13 @@ void DeviceBuffer::copy_from_host_async(const void* source, std::size_t count, h
 void DeviceBuffer::copy_to_host_async(void* destination, std::size_t count, hipStream_t stream,
                                       std::size_t offset) const {
     require_range(offset, count, "async device-to-host copy");
-    if (stream == nullptr) { throw std::invalid_argument("async device-to-host copy requires a stream"); }
+    if (stream == nullptr) {
+        throw std::invalid_argument("async device-to-host copy requires a stream");
+    }
     if (count != 0) {
-        const hipError_t error = hipMemcpyAsync(destination, static_cast<const std::uint8_t*>(p) + offset,
-                                                count, hipMemcpyDeviceToHost, stream);
+        const hipError_t error =
+            hipMemcpyAsync(destination, static_cast<const std::uint8_t*>(p) + offset, count,
+                           hipMemcpyDeviceToHost, stream);
         if (error != hipSuccess) { allocation_error("hipMemcpyAsync device-to-host", error); }
     }
 }
@@ -237,22 +241,22 @@ DeviceArena::~DeviceArena() {
 DeviceArena::DeviceArena(DeviceArena&& other) noexcept
     : base_(other.base_), capacity_(other.capacity_), offset_(other.offset_), peak_(other.peak_),
       owns_(other.owns_) {
-    other.base_ = nullptr;
+    other.base_     = nullptr;
     other.capacity_ = other.offset_ = other.peak_ = 0;
-    other.owns_ = true;
+    other.owns_                                   = true;
 }
 
 DeviceArena& DeviceArena::operator=(DeviceArena&& other) noexcept {
     if (this != &other) {
         if (owns_) { free_device(base_); }
-        base_ = other.base_;
-        capacity_ = other.capacity_;
-        offset_ = other.offset_;
-        peak_ = other.peak_;
-        owns_ = other.owns_;
-        other.base_ = nullptr;
+        base_           = other.base_;
+        capacity_       = other.capacity_;
+        offset_         = other.offset_;
+        peak_           = other.peak_;
+        owns_           = other.owns_;
+        other.base_     = nullptr;
         other.capacity_ = other.offset_ = other.peak_ = 0;
-        other.owns_ = true;
+        other.owns_                                   = true;
     }
     return *this;
 }
@@ -270,21 +274,24 @@ DeviceSpan DeviceArena::alloc_bytes(std::size_t bytes, std::size_t align) {
     if (address > std::numeric_limits<std::uintptr_t>::max() - (align - 1U)) {
         throw std::overflow_error("arena alignment overflow");
     }
-    const std::uintptr_t aligned = (address + align - 1U) & ~static_cast<std::uintptr_t>(align - 1U);
+    const std::uintptr_t aligned =
+        (address + align - 1U) & ~static_cast<std::uintptr_t>(align - 1U);
     const std::size_t next = static_cast<std::size_t>(aligned - base);
     if (next > capacity_ || bytes > capacity_ - next) { throw std::bad_alloc(); }
     offset_ = next + bytes;
-    peak_ = std::max(peak_, offset_);
+    peak_   = std::max(peak_, offset_);
     return {reinterpret_cast<void*>(aligned), bytes};
 }
 
-Tensor DeviceArena::alloc(DType dtype, std::initializer_list<std::int32_t> shape, std::size_t align) {
+Tensor DeviceArena::alloc(DType dtype, std::initializer_list<std::int32_t> shape,
+                          std::size_t align) {
     Tensor view(nullptr, dtype, shape);
     const DeviceSpan storage = alloc_bytes(view.bytes(), align);
     return Tensor(storage.data, dtype, shape);
 }
 
 DeviceArena::Scope DeviceArena::scope() noexcept { return Scope(*this); }
+
 void DeviceArena::reset() noexcept { offset_ = 0; }
 
 PinnedHostBuffer::PinnedHostBuffer(std::size_t size_bytes, std::size_t alignment) {
@@ -296,13 +303,14 @@ PinnedHostBuffer::PinnedHostBuffer(std::size_t size_bytes, std::size_t alignment
         throw std::overflow_error("PinnedHostBuffer allocation size overflow");
     }
 
-    void* ptr             = nullptr;
+    void* ptr            = nullptr;
     const hipError_t err = hipHostMalloc(&ptr, size_bytes + alignment - 1);
     if (err != hipSuccess) {
         if (err == hipErrorMemoryAllocation) {
             const hipError_t pending = hipGetLastError();
             if (pending != hipSuccess && pending != hipErrorMemoryAllocation) {
-                throw std::runtime_error(arena_error_message("hipHostMalloc pending error", pending));
+                throw std::runtime_error(
+                    arena_error_message("hipHostMalloc pending error", pending));
             }
             throw std::bad_alloc();
         }
@@ -310,9 +318,9 @@ PinnedHostBuffer::PinnedHostBuffer(std::size_t size_bytes, std::size_t alignment
     }
 
     const auto address = reinterpret_cast<std::uintptr_t>(ptr);
-    allocation_ = ptr;
-    data_ = reinterpret_cast<void*>((address + alignment - 1) & ~(alignment - 1));
-    bytes_ = size_bytes;
+    allocation_        = ptr;
+    data_              = reinterpret_cast<void*>((address + alignment - 1) & ~(alignment - 1));
+    bytes_             = size_bytes;
 }
 
 PinnedHostBuffer::~PinnedHostBuffer() { free_pinned(allocation_); }
@@ -320,8 +328,8 @@ PinnedHostBuffer::~PinnedHostBuffer() { free_pinned(allocation_); }
 PinnedHostBuffer::PinnedHostBuffer(PinnedHostBuffer&& other) noexcept
     : allocation_(other.allocation_), data_(other.data_), bytes_(other.bytes_) {
     other.allocation_ = nullptr;
-    other.data_ = nullptr;
-    other.bytes_ = 0;
+    other.data_       = nullptr;
+    other.bytes_      = 0;
 }
 
 PinnedHostBuffer& PinnedHostBuffer::operator=(PinnedHostBuffer&& other) noexcept {
@@ -329,12 +337,12 @@ PinnedHostBuffer& PinnedHostBuffer::operator=(PinnedHostBuffer&& other) noexcept
 
     free_pinned(allocation_);
     allocation_ = other.allocation_;
-    data_ = other.data_;
-    bytes_ = other.bytes_;
+    data_       = other.data_;
+    bytes_      = other.bytes_;
 
     other.allocation_ = nullptr;
-    other.data_ = nullptr;
-    other.bytes_ = 0;
+    other.data_       = nullptr;
+    other.bytes_      = 0;
     return *this;
 }
 
@@ -345,22 +353,25 @@ HostPinnedArena::HostPinnedArena(std::size_t capacity_bytes) : capacity_(capacit
 }
 
 HostPinnedArena::~HostPinnedArena() { free_registered_host(base_, mapping_bytes_); }
+
 HostPinnedArena::HostPinnedArena(HostPinnedArena&& other) noexcept
-    : base_(other.base_), capacity_(other.capacity_), used_(other.used_), mapping_bytes_(other.mapping_bytes_), free_(std::move(other.free_)),
+    : base_(other.base_), capacity_(other.capacity_), used_(other.used_),
+      mapping_bytes_(other.mapping_bytes_), free_(std::move(other.free_)),
       live_(std::move(other.live_)) {
-    other.base_ = nullptr;
+    other.base_     = nullptr;
     other.capacity_ = other.used_ = other.mapping_bytes_ = 0;
 }
+
 HostPinnedArena& HostPinnedArena::operator=(HostPinnedArena&& other) noexcept {
     if (this != &other) {
         free_registered_host(base_, mapping_bytes_);
-        base_ = other.base_;
-        capacity_ = other.capacity_;
-        used_ = other.used_;
-        mapping_bytes_ = other.mapping_bytes_;
-        free_ = std::move(other.free_);
-        live_ = std::move(other.live_);
-        other.base_ = nullptr;
+        base_           = other.base_;
+        capacity_       = other.capacity_;
+        used_           = other.used_;
+        mapping_bytes_  = other.mapping_bytes_;
+        free_           = std::move(other.free_);
+        live_           = std::move(other.live_);
+        other.base_     = nullptr;
         other.capacity_ = other.used_ = other.mapping_bytes_ = 0;
     }
     return *this;
@@ -372,19 +383,18 @@ void* HostPinnedArena::try_alloc(std::size_t bytes, std::size_t align) {
     }
     if (bytes == 0) { throw std::invalid_argument("pinned arena allocation must be nonzero"); }
     for (std::size_t index = 0; index < free_.size(); ++index) {
-        const Span span = free_[index];
+        const Span span              = free_[index];
         const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(base_) + span.offset;
-        const std::uintptr_t aligned = (address + align - 1U) & ~static_cast<std::uintptr_t>(align - 1U);
+        const std::uintptr_t aligned =
+            (address + align - 1U) & ~static_cast<std::uintptr_t>(align - 1U);
         const std::size_t lead = static_cast<std::size_t>(aligned - address);
         if (lead > span.bytes || bytes > span.bytes - lead) { continue; }
         const std::size_t offset = span.offset + lead;
-        const std::size_t tail = span.bytes - lead - bytes;
+        const std::size_t tail   = span.bytes - lead - bytes;
         // N live blocks separate at most N+1 free spans. Prepare all metadata
         // before mutating the free list, and reserve for allocation-free release.
         const std::size_t spans = live_.size() + 2;
-        if (free_.capacity() < spans) {
-            free_.reserve(std::max(spans, free_.capacity() * 2));
-        }
+        if (free_.capacity() < spans) { free_.reserve(std::max(spans, free_.capacity() * 2)); }
         void* result = static_cast<std::uint8_t*>(base_) + offset;
         if (!live_.emplace(result, Span{offset, bytes}).second) {
             throw std::logic_error("pinned arena allocation overlaps a live block");

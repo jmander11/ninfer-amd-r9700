@@ -54,19 +54,20 @@ constexpr Bound kLatencyBounds[] = {
 };
 // Decode seconds per output token: 500 tok/s down to 4 tok/s.
 constexpr Bound kInterTokenBounds[] = {
-    {0.002, "0.002"}, {0.003, "0.003"},   {0.004, "0.004"}, {0.005, "0.005"}, {0.006, "0.006"},
-    {0.008, "0.008"}, {0.01, "0.01"},     {0.0125, "0.0125"}, {0.015, "0.015"}, {0.02, "0.02"},
-    {0.025, "0.025"}, {0.03, "0.03"},     {0.04, "0.04"},   {0.05, "0.05"},   {0.075, "0.075"},
+    {0.002, "0.002"}, {0.003, "0.003"}, {0.004, "0.004"},   {0.005, "0.005"}, {0.006, "0.006"},
+    {0.008, "0.008"}, {0.01, "0.01"},   {0.0125, "0.0125"}, {0.015, "0.015"}, {0.02, "0.02"},
+    {0.025, "0.025"}, {0.03, "0.03"},   {0.04, "0.04"},     {0.05, "0.05"},   {0.075, "0.075"},
     {0.1, "0.1"},     {0.25, "0.25"},
 };
 constexpr Bound kTokenBounds[] = {
-    {32, "32"},       {64, "64"},       {128, "128"},     {256, "256"},       {512, "512"},
-    {1024, "1024"},   {2048, "2048"},   {4096, "4096"},   {8192, "8192"},     {16384, "16384"},
+    {32, "32"},       {64, "64"},       {128, "128"},       {256, "256"},       {512, "512"},
+    {1024, "1024"},   {2048, "2048"},   {4096, "4096"},     {8192, "8192"},     {16384, "16384"},
     {32768, "32768"}, {65536, "65536"}, {131072, "131072"}, {262144, "262144"},
 };
 constexpr Bound kDecodeRateBounds[] = {
-    {5, "5"},     {10, "10"},   {25, "25"},   {50, "50"},   {75, "75"},   {100, "100"}, {150, "150"},
-    {200, "200"}, {250, "250"}, {300, "300"}, {400, "400"}, {500, "500"}, {750, "750"}, {1000, "1000"},
+    {5, "5"},     {10, "10"},   {25, "25"},   {50, "50"},     {75, "75"},
+    {100, "100"}, {150, "150"}, {200, "200"}, {250, "250"},   {300, "300"},
+    {400, "400"}, {500, "500"}, {750, "750"}, {1000, "1000"},
 };
 // Prefill runs at thousands of tokens per second.
 constexpr Bound kPrefillRateBounds[] = {
@@ -75,7 +76,8 @@ constexpr Bound kPrefillRateBounds[] = {
     {12500, "12500"}, {15000, "15000"}, {20000, "20000"}, {30000, "30000"},
 };
 constexpr Bound kCountBounds[] = {
-    {1, "1"}, {2, "2"}, {3, "3"}, {4, "4"}, {5, "5"}, {6, "6"}, {8, "8"}, {10, "10"}, {12, "12"}, {15, "15"},
+    {1, "1"}, {2, "2"}, {3, "3"},   {4, "4"},   {5, "5"},
+    {6, "6"}, {8, "8"}, {10, "10"}, {12, "12"}, {15, "15"},
 };
 
 template <const auto& Bounds>
@@ -98,8 +100,9 @@ struct Histogram {
 
     void observe(double value) noexcept {
         if (!std::isfinite(value)) { return; }
-        const auto it = std::lower_bound(bounds.begin(), bounds.end(), value,
-                                         [](const Bound& bound, double v) { return bound.value < v; });
+        const auto it =
+            std::lower_bound(bounds.begin(), bounds.end(), value,
+                             [](const Bound& bound, double v) { return bound.value < v; });
         ++buckets[static_cast<std::size_t>(it - bounds.begin())];
         sum += value;
         ++count;
@@ -116,9 +119,9 @@ using CountHistogram       = Histogram<kCountBounds>;
 // ---------------------------------------------------------------------------
 // Closed label vocabularies. Array order is the storage index.
 
-constexpr const char* kProtocols[] = {"openai_chat", "openai_responses", "anthropic_messages"};
-constexpr const char* kResults[]   = {"cancelled", "error", "rejected", "success"};
-constexpr const char* kBools[]     = {"false", "true"};
+constexpr const char* kProtocols[]   = {"openai_chat", "openai_responses", "anthropic_messages"};
+constexpr const char* kResults[]     = {"cancelled", "error", "rejected", "success"};
+constexpr const char* kBools[]       = {"false", "true"};
 constexpr std::size_t kProtocolCount = std::size(kProtocols);
 constexpr std::size_t kResultCount   = std::size(kResults);
 static_assert(static_cast<std::size_t>(MetricsProtocol::AnthropicMessages) + 1 == kProtocolCount);
@@ -137,14 +140,15 @@ enum Phase : std::size_t {
     kPhaseHttpTail,
     kPhaseCount,
 };
+
 constexpr const char* kPhases[kPhaseCount] = {"prepare_cpu", "media_wait", "media_fetch", "queue",
                                               "copy_hold",   "vision",     "prefill",     "decode",
                                               "recovery",    "http_tail"};
 
-constexpr const char* kFinishReasons[] = {"none",        "output_limit", "context_capacity",
-                                          "stop_token",  "stop_string",  "cancelled",
-                                          "tool_calls",  "unknown"};
-constexpr const char* kPrefixPaths[] = {
+constexpr const char* kFinishReasons[] = {"none",       "output_limit", "context_capacity",
+                                          "stop_token", "stop_string",  "cancelled",
+                                          "tool_calls", "unknown"};
+constexpr const char* kPrefixPaths[]   = {
     "full_reset",
     "append_frontier",
     "restore_turn_checkpoint",
@@ -153,10 +157,11 @@ constexpr const char* kPrefixPaths[] = {
     "restore_turn_rollback",
     "unknown",
 };
-constexpr const char* kPrefixSources[] = {"none", "vram_resident", "host_ram", "host_disk", "unknown"};
+constexpr const char* kPrefixSources[] = {"none", "vram_resident", "host_ram", "host_disk",
+                                          "unknown"};
 constexpr const char* kRecoveryKinds[] = {
-    "cycle_exclusion", "retry_triggered", "retry_started",
-    "retry_prefill_complete", "finished", "exhausted",
+    "cycle_exclusion",        "retry_triggered", "retry_started",
+    "retry_prefill_complete", "finished",        "exhausted",
 };
 // Direct causes carried verbatim by non-exhausted events.
 constexpr const char* kDirectRecoveryCauses[] = {
@@ -164,9 +169,18 @@ constexpr const char* kDirectRecoveryCauses[] = {
     "tool_calls",      "output_limit",       "context_capacity",    "stop",
 };
 constexpr const char* kRecoveryCauses[] = {
-    "reasoning_cycle", "repeated_reasoning", "duplicate_tool_call", "cancelled",
-    "tool_calls",      "output_limit",       "context_capacity",    "stop",
-    "retry_budget",    "output_budget",      "prologue",            "lane_rebuild",
+    "reasoning_cycle",
+    "repeated_reasoning",
+    "duplicate_tool_call",
+    "cancelled",
+    "tool_calls",
+    "output_limit",
+    "context_capacity",
+    "stop",
+    "retry_budget",
+    "output_budget",
+    "prologue",
+    "lane_rebuild",
     "other",
 };
 constexpr const char* kApiErrorCodes[] = {
@@ -230,17 +244,18 @@ constexpr const char* kApiErrorCodes[] = {
 };
 constexpr const char* kTiers[]   = {"disk", "ram"};
 constexpr const char* kCopyOps[] = {"h2d", "load", "save"};
-constexpr const char* kMethods[] = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "other"};
+constexpr const char* kMethods[] = {"DELETE", "GET",  "HEAD", "OPTIONS",
+                                    "PATCH",  "POST", "PUT",  "other"};
 
-constexpr std::size_t kFinishCount   = std::size(kFinishReasons);
-constexpr std::size_t kPathCount     = std::size(kPrefixPaths);
-constexpr std::size_t kSourceCount   = std::size(kPrefixSources);
-constexpr std::size_t kKindCount     = std::size(kRecoveryKinds);
-constexpr std::size_t kCauseCount    = std::size(kRecoveryCauses);
-constexpr std::size_t kApiCodeCount  = std::size(kApiErrorCodes);
-constexpr std::size_t kTierCount     = std::size(kTiers);
-constexpr std::size_t kCopyOpCount   = std::size(kCopyOps);
-constexpr std::size_t kMethodCount   = std::size(kMethods);
+constexpr std::size_t kFinishCount  = std::size(kFinishReasons);
+constexpr std::size_t kPathCount    = std::size(kPrefixPaths);
+constexpr std::size_t kSourceCount  = std::size(kPrefixSources);
+constexpr std::size_t kKindCount    = std::size(kRecoveryKinds);
+constexpr std::size_t kCauseCount   = std::size(kRecoveryCauses);
+constexpr std::size_t kApiCodeCount = std::size(kApiErrorCodes);
+constexpr std::size_t kTierCount    = std::size(kTiers);
+constexpr std::size_t kCopyOpCount  = std::size(kCopyOps);
+constexpr std::size_t kMethodCount  = std::size(kMethods);
 
 constexpr HttpRouteClass kRoutes[] = {
     {"health", "/health"},
@@ -268,9 +283,10 @@ constexpr std::size_t kRouteCount = std::size(kRoutes);
     }
     throw "route is not in kRoutes";
 }
-constexpr std::size_t kModelIdRoute       = route_slot("/v1/models/{id}");
-constexpr std::size_t kResponseIdRoute    = route_slot("/v1/responses/{id}");
-constexpr std::size_t kResponseItemsRoute = route_slot("/v1/responses/{id}/input_items");
+
+constexpr std::size_t kModelIdRoute        = route_slot("/v1/models/{id}");
+constexpr std::size_t kResponseIdRoute     = route_slot("/v1/responses/{id}");
+constexpr std::size_t kResponseItemsRoute  = route_slot("/v1/responses/{id}/input_items");
 constexpr std::size_t kResponseCancelRoute = route_slot("/v1/responses/{id}/cancel");
 
 // Index of `value` in `names`, or `fallback` when absent.
@@ -330,29 +346,29 @@ template <std::size_t N>
 // Stored state.
 
 struct Startup {
-    double max_context                = 0;
-    double prefill_chunk              = 0;
-    double pending_timeout_seconds    = 0;
-    double default_max_tokens         = 0;
-    double dflash_verify_width        = 0;
-    double configured_draft_tokens    = 0;
-    double load_seconds               = 0;
-    double device_graph_allowance_bytes = 0;
-    double device_graph_observed_bytes  = 0;
-    double arena_weights              = 0;
-    double arena_sequence             = 0;
-    double arena_workspace            = 0;
-    double arena_request_transient    = 0;
+    double max_context                          = 0;
+    double prefill_chunk                        = 0;
+    double pending_timeout_seconds              = 0;
+    double default_max_tokens                   = 0;
+    double dflash_verify_width                  = 0;
+    double configured_draft_tokens              = 0;
+    double load_seconds                         = 0;
+    double device_graph_allowance_bytes         = 0;
+    double device_graph_observed_bytes          = 0;
+    double arena_weights                        = 0;
+    double arena_sequence                       = 0;
+    double arena_workspace                      = 0;
+    double arena_request_transient              = 0;
     double device_total_bytes                   = 0;
     double device_available_after_weights_bytes = 0;
     double device_runtime_reservation_bytes     = 0;
     double device_kv_payload_bytes              = 0;
     double device_available_after_startup_bytes = 0;
-    double start_time_unix_s          = 0;
-    double max_concurrency            = 0;
-    double max_pending_requests       = 0;
-    double response_max_records       = 0;
-    double response_max_bytes         = 0;
+    double start_time_unix_s                    = 0;
+    double max_concurrency                      = 0;
+    double max_pending_requests                 = 0;
+    double response_max_records                 = 0;
+    double response_max_bytes                   = 0;
     // Sorted by key.
     std::vector<std::pair<const char*, std::string>> engine_labels;
     std::vector<std::pair<const char*, std::string>> build_labels;
@@ -385,10 +401,10 @@ struct Series {
 
     std::uint64_t prefix_reuse[kPathCount][kSourceCount]{};
     std::array<std::uint64_t, kSourceCount> prefix_hit_tokens{};
-    std::uint64_t prefix_query_tokens          = 0;
-    std::uint64_t checkpoint_restored_tokens   = 0;
-    std::uint64_t checkpoint_captured_tokens   = 0;
-    std::uint64_t checkpoint_capture_requests  = 0;
+    std::uint64_t prefix_query_tokens         = 0;
+    std::uint64_t checkpoint_restored_tokens  = 0;
+    std::uint64_t checkpoint_captured_tokens  = 0;
+    std::uint64_t checkpoint_capture_requests = 0;
 
     std::uint64_t speculative_rounds          = 0;
     std::uint64_t speculative_draft_tokens    = 0;
@@ -411,7 +427,9 @@ void observe_terminal_recovery(Series& series, const ninfer::GenerationRecoveryS
     series.recovery_cycle_exclusions += stats.cycle_exclusions;
     series.recovery_discarded_reasoning_tokens += stats.discarded_reasoning_tokens;
     series.recovery_discarded_tool_calls += stats.discarded_tool_calls;
-    if (stats.attempts > 0) { series.recovery_attempts.observe(static_cast<double>(stats.attempts)); }
+    if (stats.attempts > 0) {
+        series.recovery_attempts.observe(static_cast<double>(stats.attempts));
+    }
 }
 
 void observe_success(Series& series, std::size_t protocol, const GenerationOutcome& outcome) {
@@ -421,8 +439,10 @@ void observe_success(Series& series, std::size_t protocol, const GenerationOutco
     const int decode_tokens =
         decode_eval_tokens(outcome.completion_tokens, metrics.recovery.prefill_samples);
     if (metrics.decode_seconds > 0.0 && decode_tokens > 0) {
-        series.inter_token[protocol].observe(metrics.decode_seconds / static_cast<double>(decode_tokens));
-        series.output_tokens_per_second.observe(static_cast<double>(decode_tokens) / metrics.decode_seconds);
+        series.inter_token[protocol].observe(metrics.decode_seconds /
+                                             static_cast<double>(decode_tokens));
+        series.output_tokens_per_second.observe(static_cast<double>(decode_tokens) /
+                                                metrics.decode_seconds);
     }
     const double phases[kPhaseCount] = {
         metrics.prepare_cpu_seconds,
@@ -457,17 +477,18 @@ void observe_success(Series& series, std::size_t protocol, const GenerationOutco
     if (outcome.reasoning_tokens > 0) {
         series.reasoning_tokens.observe(static_cast<double>(outcome.reasoning_tokens));
     }
-    const int computed =
-        prefill_eval_tokens(outcome.prompt_tokens, static_cast<int>(metrics.prefix_cache_hit_tokens));
+    const int computed = prefill_eval_tokens(outcome.prompt_tokens,
+                                             static_cast<int>(metrics.prefix_cache_hit_tokens));
     if (computed >= 0) { series.computed_prefill_tokens.observe(static_cast<double>(computed)); }
     if (metrics.prefill_tail_tok_s > 0.0) {
         series.prefill_tokens_per_second.observe(metrics.prefill_tail_tok_s);
     } else if (metrics.prefill_seconds > 0.0 && computed > 0) {
-        series.prefill_tokens_per_second.observe(static_cast<double>(computed) / metrics.prefill_seconds);
+        series.prefill_tokens_per_second.observe(static_cast<double>(computed) /
+                                                 metrics.prefill_seconds);
     }
 
-    const char* reason = outcome.tool_calls.empty() ? finish_reason_name(outcome.finish_reason)
-                                                     : "tool_calls";
+    const char* reason =
+        outcome.tool_calls.empty() ? finish_reason_name(outcome.finish_reason) : "tool_calls";
     ++series.finish_reason[index_of(kFinishReasons, reason, kFinishCount - 1)];
     series.tool_calls += outcome.tool_calls.size();
     series.ignored_tool_markup += outcome.ignored_qwen_tool_call_names.size();
@@ -500,7 +521,8 @@ void observe_success(Series& series, std::size_t protocol, const GenerationOutco
         series.speculative_rounds_by_k[k - 1] += metrics.speculative_rounds_per_draft[k];
     }
     if (metrics.speculative_live_draft_tokens > 0) {
-        series.speculative_live_k.observe(static_cast<double>(metrics.speculative_live_draft_tokens));
+        series.speculative_live_k.observe(
+            static_cast<double>(metrics.speculative_live_draft_tokens));
     }
 }
 
@@ -598,7 +620,8 @@ public:
     }
 
     template <const auto& Bounds>
-    void histogram(std::string_view name, std::string_view help, const Histogram<Bounds>& histogram) {
+    void histogram(std::string_view name, std::string_view help,
+                   const Histogram<Bounds>& histogram) {
         family(name, help, "histogram");
         this->histogram("", histogram);
     }
@@ -619,7 +642,8 @@ private:
     std::string_view name_;
 };
 
-[[nodiscard]] std::string info_labels(const std::vector<std::pair<const char*, std::string>>& labels) {
+[[nodiscard]] std::string
+info_labels(const std::vector<std::pair<const char*, std::string>>& labels) {
     std::string out;
     for (const auto& [key, value] : labels) {
         if (!out.empty()) { out.push_back(','); }
@@ -657,8 +681,10 @@ std::string render_text(const MetricsSnapshotData& data) {
     w.family("ninfer_build_info", "HIP toolchain and device identity.", "gauge");
     w.sample(info_labels(startup.build_labels), std::uint64_t{1});
     w.gauge("ninfer_max_context_tokens", "Configured max context tokens.", startup.max_context);
-    w.gauge("ninfer_prefill_chunk_tokens", "Configured prefill chunk tokens.", startup.prefill_chunk);
-    w.gauge("ninfer_pending_timeout_seconds", "Pending FIFO timeout.", startup.pending_timeout_seconds);
+    w.gauge("ninfer_prefill_chunk_tokens", "Configured prefill chunk tokens.",
+            startup.prefill_chunk);
+    w.gauge("ninfer_pending_timeout_seconds", "Pending FIFO timeout.",
+            startup.pending_timeout_seconds);
     w.gauge("ninfer_default_max_tokens", "Default max output tokens.", startup.default_max_tokens);
     w.gauge("ninfer_dflash_verify_width", "DFlash verify width. 0 is automatic.",
             startup.dflash_verify_width);
@@ -683,14 +709,15 @@ std::string render_text(const MetricsSnapshotData& data) {
     w.sample(R"(kind="total")", startup.device_total_bytes);
     w.gauge("ninfer_server_start_time_seconds", "Server attach time as unix seconds.",
             startup.start_time_unix_s);
-    w.gauge("ninfer_scheduler_max_concurrency", "Configured resident requests.", startup.max_concurrency);
+    w.gauge("ninfer_scheduler_max_concurrency", "Configured resident requests.",
+            startup.max_concurrency);
     w.gauge("ninfer_scheduler_max_pending_requests", "Configured pending FIFO depth.",
             startup.max_pending_requests);
 
     w.family("ninfer_http_requests_total", "HTTP requests by route.", "counter");
     for (const auto& [key, value] : series.http_requests) {
-        const HttpRouteClass& route = kRoutes[key >> 24];
-        const std::uint32_t status  = key & 0xFFFFU;
+        const HttpRouteClass& route   = kRoutes[key >> 24];
+        const std::uint32_t status    = key & 0xFFFFU;
         const std::string status_text = status == 0 ? std::string("other") : std::to_string(status);
         w.sample(label_text({{"method", kMethods[(key >> 16) & 0xFFU]},
                              {"protocol", route.protocol},
@@ -718,12 +745,13 @@ std::string render_text(const MetricsSnapshotData& data) {
             for (std::size_t result = 0; result < kResultCount; ++result) {
                 for (std::size_t thinking = 0; thinking < 2; ++thinking) {
                     for (std::size_t tools = 0; tools < 2; ++tools) {
-                        w.sample(label_text({{"protocol", kProtocols[protocol]},
-                                             {"result", kResults[result]},
-                                             {"stream", kBools[stream]},
-                                             {"thinking", kBools[thinking]},
-                                             {"tools", kBools[tools]}}),
-                                 series.generation_requests[protocol][stream][result][thinking][tools]);
+                        w.sample(
+                            label_text({{"protocol", kProtocols[protocol]},
+                                        {"result", kResults[result]},
+                                        {"stream", kBools[stream]},
+                                        {"thinking", kBools[thinking]},
+                                        {"tools", kBools[tools]}}),
+                            series.generation_requests[protocol][stream][result][thinking][tools]);
                     }
                 }
             }
@@ -737,8 +765,8 @@ std::string render_text(const MetricsSnapshotData& data) {
     };
     per_protocol("ninfer_generation_ttft_seconds", "Time to first token.", series.ttft);
     per_protocol("ninfer_generation_e2e_seconds", "Engine end to end seconds.", series.e2e);
-    per_protocol("ninfer_generation_inter_token_latency_seconds", "Decode seconds per output token.",
-                 series.inter_token);
+    per_protocol("ninfer_generation_inter_token_latency_seconds",
+                 "Decode seconds per output token.", series.inter_token);
     w.family("ninfer_generation_phase_seconds", "Closed generation phase seconds.", "histogram");
     for (std::size_t i = 0; i < kPhaseCount; ++i) {
         w.histogram(label_text({{"phase", kPhases[i]}}), series.phase[i]);
@@ -746,11 +774,13 @@ std::string render_text(const MetricsSnapshotData& data) {
     w.family("ninfer_generation_kv_copy_seconds", "Per-request KV copy seconds.", "histogram");
     for (std::size_t tier = 0; tier < kTierCount; ++tier) {
         for (std::size_t op = 0; op < kCopyOpCount; ++op) {
-            w.histogram(label_text({{"op", kCopyOps[op]}, {"tier", kTiers[tier]}}), series.kv_copy[tier][op]);
+            w.histogram(label_text({{"op", kCopyOps[op]}, {"tier", kTiers[tier]}}),
+                        series.kv_copy[tier][op]);
         }
     }
     w.histogram("ninfer_generation_prompt_tokens", "Prompt tokens.", series.prompt_tokens);
-    w.histogram("ninfer_generation_completion_tokens", "Completion tokens.", series.completion_tokens);
+    w.histogram("ninfer_generation_completion_tokens", "Completion tokens.",
+                series.completion_tokens);
     w.histogram("ninfer_generation_reasoning_tokens", "Reasoning tokens.", series.reasoning_tokens);
     w.histogram("ninfer_generation_computed_prefill_tokens", "Prompt tokens excluding prefix hits.",
                 series.computed_prefill_tokens);
@@ -765,8 +795,8 @@ std::string render_text(const MetricsSnapshotData& data) {
     w.counter("ninfer_generation_tool_calls_total", "Returned tool calls.", series.tool_calls);
     w.counter("ninfer_generation_ignored_tool_markup_total", "Ignored undeclared tool markup.",
               series.ignored_tool_markup);
-    w.counter("ninfer_generation_media_requests_total", "Generation attempts whose prompt had media.",
-              series.media_requests);
+    w.counter("ninfer_generation_media_requests_total",
+              "Generation attempts whose prompt had media.", series.media_requests);
     w.family("ninfer_token_count_requests_total", "Token-count requests.", "counter");
     for (std::size_t i = 0; i < kProtocolCount; ++i) {
         w.sample(label_text({{"protocol", kProtocols[i]}}), series.token_count_requests[i]);
@@ -787,12 +817,13 @@ std::string render_text(const MetricsSnapshotData& data) {
     w.counter("ninfer_engine_decode_rounds_total", "Decode batch executions.", stats.decode_rounds);
     w.counter("ninfer_engine_decode_row_rounds_total", "Decode rows across batches.",
               stats.decode_row_rounds);
-    w.family("ninfer_gpu_kv_pages",
-             "Device KV page groups by pool (main FP8-K/INT4-V Text, spec paged speculative) and state.",
-             "gauge");
+    w.family(
+        "ninfer_gpu_kv_pages",
+        "Device KV page groups by pool (main FP8-K/INT4-V Text, spec paged speculative) and state.",
+        "gauge");
     constexpr const char* kPools[]      = {"main", "spec"};
     constexpr const char* kPageStates[] = {"capacity", "entitled", "free", "mapped"};
-    const std::uint32_t pages[2][4] = {
+    const std::uint32_t pages[2][4]     = {
         {stats.gpu_kv_main_capacity_pages, stats.gpu_kv_main_entitled_pages,
          stats.gpu_kv_main_free_pages, stats.gpu_kv_main_mapped_pages},
         {stats.gpu_kv_spec_capacity_pages, stats.gpu_kv_spec_entitled_pages,
@@ -806,7 +837,8 @@ std::string render_text(const MetricsSnapshotData& data) {
     }
     w.family("ninfer_gpu_kv_capacity_tokens", "GPU KV token capacity by pool.", "gauge");
     for (std::size_t pool = 0; pool < 2; ++pool) {
-        w.sample(label_text({{"pool", kPools[pool]}}), std::uint64_t{pages[pool][0]} * kKvPageTokens);
+        w.sample(label_text({{"pool", kPools[pool]}}),
+                 std::uint64_t{pages[pool][0]} * kKvPageTokens);
     }
     w.gauge("ninfer_kv_ram_capacity_bytes", "Host RAM prefix cache capacity.",
             std::uint64_t{stats.kv_ram_capacity_bytes});
@@ -816,7 +848,8 @@ std::string render_text(const MetricsSnapshotData& data) {
             std::uint64_t{stats.kv_ram_entry_count});
     w.counter("ninfer_kv_ram_captures_total", "Host RAM prefix captures.", stats.kv_ram_captures);
     w.counter("ninfer_kv_ram_restores_total", "Host RAM prefix restores.", stats.kv_ram_restores);
-    w.counter("ninfer_kv_ram_evictions_total", "Host RAM prefix evictions.", stats.kv_ram_evictions);
+    w.counter("ninfer_kv_ram_evictions_total", "Host RAM prefix evictions.",
+              stats.kv_ram_evictions);
     w.counter("ninfer_kv_ram_drops_total", "Host RAM prefix drops.", stats.kv_ram_drops);
     w.counter("ninfer_kv_ram_save_seconds_total", "Host RAM prefix save seconds.",
               stats.kv_ram_save_seconds);
@@ -850,14 +883,15 @@ std::string render_text(const MetricsSnapshotData& data) {
     }
     w.family("ninfer_prefix_cache_hit_tokens_total", "Prefix hit tokens by source.", "counter");
     for (std::size_t source = 0; source < kSourceCount; ++source) {
-        w.sample(label_text({{"source", kPrefixSources[source]}}), series.prefix_hit_tokens[source]);
+        w.sample(label_text({{"source", kPrefixSources[source]}}),
+                 series.prefix_hit_tokens[source]);
     }
     w.counter("ninfer_prefix_cache_query_tokens_total", "Prefix query tokens.",
               series.prefix_query_tokens);
-    w.counter("ninfer_context_checkpoint_restored_tokens_total", "Context checkpoint tokens restored.",
-              series.checkpoint_restored_tokens);
-    w.counter("ninfer_context_checkpoint_captured_tokens_total", "Context checkpoint tokens captured.",
-              series.checkpoint_captured_tokens);
+    w.counter("ninfer_context_checkpoint_restored_tokens_total",
+              "Context checkpoint tokens restored.", series.checkpoint_restored_tokens);
+    w.counter("ninfer_context_checkpoint_captured_tokens_total",
+              "Context checkpoint tokens captured.", series.checkpoint_captured_tokens);
     w.counter("ninfer_context_checkpoint_capture_requests_total",
               "Requests that asked for a context checkpoint.", series.checkpoint_capture_requests);
 
@@ -868,8 +902,8 @@ std::string render_text(const MetricsSnapshotData& data) {
               series.speculative_accepted_tokens);
     w.counter("ninfer_speculative_fallback_steps_total", "Speculative fallback steps.",
               series.speculative_fallback_steps);
-    w.family("ninfer_speculative_accepted_tokens_position_total", "Accepted draft tokens by position.",
-             "counter");
+    w.family("ninfer_speculative_accepted_tokens_position_total",
+             "Accepted draft tokens by position.", "counter");
     for (std::size_t position = 0; position < kMaxDraftTokens; ++position) {
         w.sample(label_text({{"position", std::to_string(position)}}),
                  series.speculative_accepted_by_position[position]);
@@ -883,13 +917,15 @@ std::string render_text(const MetricsSnapshotData& data) {
     w.family("ninfer_recovery_events_total", "Published recovery events.", "counter");
     for (std::size_t kind = 0; kind < kKindCount; ++kind) {
         for (std::size_t cause = 0; cause < kCauseCount; ++cause) {
-            w.sample(label_text({{"cause", kRecoveryCauses[cause]}, {"kind", kRecoveryKinds[kind]}}),
-                     series.recovery_events[kind][cause]);
+            w.sample(
+                label_text({{"cause", kRecoveryCauses[cause]}, {"kind", kRecoveryKinds[kind]}}),
+                series.recovery_events[kind][cause]);
         }
     }
-    w.counter("ninfer_recovery_cycle_exclusions_total", "True cycle exclusions on terminal requests.",
-              series.recovery_cycle_exclusions);
-    w.counter("ninfer_recovery_discarded_reasoning_tokens_total", "Reasoning tokens discarded by recovery.",
+    w.counter("ninfer_recovery_cycle_exclusions_total",
+              "True cycle exclusions on terminal requests.", series.recovery_cycle_exclusions);
+    w.counter("ninfer_recovery_discarded_reasoning_tokens_total",
+              "Reasoning tokens discarded by recovery.",
               series.recovery_discarded_reasoning_tokens);
     w.counter("ninfer_recovery_discarded_tool_calls_total", "Tool calls discarded by recovery.",
               series.recovery_discarded_tool_calls);
@@ -902,7 +938,8 @@ std::string render_text(const MetricsSnapshotData& data) {
             static_cast<std::uint64_t>(data.inputs.response_bytes));
     w.gauge("ninfer_response_store_max_records", "Response store record cap.",
             startup.response_max_records);
-    w.gauge("ninfer_response_store_max_bytes", "Response store byte cap.", startup.response_max_bytes);
+    w.gauge("ninfer_response_store_max_bytes", "Response store byte cap.",
+            startup.response_max_bytes);
     return w.take();
 }
 
@@ -943,7 +980,7 @@ Json render_json(const MetricsSnapshotData& data) {
     Json build = Json::object();
     for (const auto& [key, value] : startup.build_labels) { build[key] = value; }
 
-    Json gpu_kv = Json::object();
+    Json gpu_kv                     = Json::object();
     const std::uint32_t pools[2][4] = {
         {stats.gpu_kv_main_capacity_pages, stats.gpu_kv_main_entitled_pages,
          stats.gpu_kv_main_mapped_pages, stats.gpu_kv_main_free_pages},
@@ -984,7 +1021,9 @@ Json render_json(const MetricsSnapshotData& data) {
     }
 
     Json finish = Json::object();
-    for (std::size_t i = 0; i < kFinishCount; ++i) { finish[kFinishReasons[i]] = series.finish_reason[i]; }
+    for (std::size_t i = 0; i < kFinishCount; ++i) {
+        finish[kFinishReasons[i]] = series.finish_reason[i];
+    }
     std::uint64_t requests_total = 0;
     for (const auto& by_stream : series.generation_requests) {
         for (const auto& by_result : by_stream) {
@@ -1093,8 +1132,8 @@ Json render_json(const MetricsSnapshotData& data) {
 
 } // namespace
 
-MetricsSnapshot::MetricsSnapshot()                                 = default;
-MetricsSnapshot::~MetricsSnapshot()                                = default;
+MetricsSnapshot::MetricsSnapshot()                                      = default;
+MetricsSnapshot::~MetricsSnapshot()                                     = default;
 MetricsSnapshot::MetricsSnapshot(MetricsSnapshot&&) noexcept            = default;
 MetricsSnapshot& MetricsSnapshot::operator=(MetricsSnapshot&&) noexcept = default;
 
@@ -1105,6 +1144,7 @@ std::string MetricsSnapshot::prometheus_text() const {
 std::string MetricsSnapshot::json() const { return data_ ? render_json(*data_).dump() : "{}"; }
 
 ServeMetrics::ServeMetrics() : state_(std::make_unique<ServeMetricsState>()) {}
+
 ServeMetrics::~ServeMetrics() = default;
 
 void ServeMetrics::attach(const ServeOptions& options, const ninfer::LoadSummary& load,
@@ -1121,9 +1161,9 @@ void ServeMetrics::attach(const ServeOptions& options, const ninfer::LoadSummary
     startup->device_graph_allowance_bytes =
         static_cast<double>(memory.device_graph_allowance_bytes);
     startup->device_graph_observed_bytes = static_cast<double>(memory.device_graph_observed_bytes);
-    startup->arena_weights           = static_cast<double>(memory.weights.capacity_bytes);
-    startup->arena_sequence          = static_cast<double>(memory.sequence.capacity_bytes);
-    startup->arena_workspace         = static_cast<double>(memory.workspace.capacity_bytes);
+    startup->arena_weights               = static_cast<double>(memory.weights.capacity_bytes);
+    startup->arena_sequence              = static_cast<double>(memory.sequence.capacity_bytes);
+    startup->arena_workspace             = static_cast<double>(memory.workspace.capacity_bytes);
     startup->arena_request_transient = static_cast<double>(memory.request_transient.capacity_bytes);
     startup->device_total_bytes      = static_cast<double>(environment.total_device_memory_bytes);
     startup->device_available_after_weights_bytes =
@@ -1139,7 +1179,7 @@ void ServeMetrics::attach(const ServeOptions& options, const ninfer::LoadSummary
     startup->max_pending_requests = options.max_pending_requests;
     startup->response_max_records = static_cast<double>(options.response_store_max_records);
     startup->response_max_bytes   = static_cast<double>(options.response_store_max_bytes);
-    const char* checkpoints = "default";
+    const char* checkpoints       = "default";
     if (options.context_checkpoint_marks.has_value()) {
         checkpoints = options.context_checkpoint_marks->empty() ? "off" : "custom";
     }
@@ -1160,7 +1200,8 @@ void ServeMetrics::attach(const ServeOptions& options, const ninfer::LoadSummary
         {"greedy", yn(options.greedy)},
         {"kv_cache_format", "fp8-k-int4-v"},
         {"kv_capacity_mode", kv_capacity_mode_name(memory.kv_capacity_mode)},
-        {"kv_disk_compress", options.kv_disk_compress == ninfer::KvDiskCompress::Zstd ? "zstd" : "off"},
+        {"kv_disk_compress",
+         options.kv_disk_compress == ninfer::KvDiskCompress::Zstd ? "zstd" : "off"},
         {"kv_value_group", std::to_string(NINFER_R9700_KV_VALUE_GROUP)},
         {"model_id", std::string(model_id)},
         {"p_less", yn(options.sampling_overrides.p_less)},
@@ -1203,9 +1244,10 @@ void ServeMetrics::observe_generation(const GenerationObservation& observation) 
 }
 
 void ServeMetrics::observe_recovery_event(const ninfer::RecoveryEvent& event) {
-    const std::size_t kind  = recovery_kind_index(event.kind);
-    const std::size_t cause = index_of(
-        kRecoveryCauses, prometheus_recovery_cause(kRecoveryKinds[kind], event.cause), kCauseCount - 1);
+    const std::size_t kind = recovery_kind_index(event.kind);
+    const std::size_t cause =
+        index_of(kRecoveryCauses, prometheus_recovery_cause(kRecoveryKinds[kind], event.cause),
+                 kCauseCount - 1);
     std::lock_guard lock(state_->mutex);
     ++state_->series.recovery_events[kind][cause];
 }
@@ -1224,8 +1266,8 @@ void ServeMetrics::observe_http(std::string_view path, std::string_view method, 
 }
 
 void ServeMetrics::observe_api_error(std::string_view code) {
-    const std::size_t index = index_of(kApiErrorCodes, code.empty() ? "unnamed" : code,
-                                       kApiCodeCount - 1);
+    const std::size_t index =
+        index_of(kApiErrorCodes, code.empty() ? "unnamed" : code, kApiCodeCount - 1);
     std::lock_guard lock(state_->mutex);
     ++state_->series.api_errors[index];
 }

@@ -15,9 +15,9 @@
 namespace ninfer::ops::detail::gated_delta_net {
 namespace {
 
-constexpr int kStateDim = fold::kStateDim;
-constexpr int kWaveSize = fold::kWaveSize;
-constexpr int kWavesPerBlock = fold::kItemThreads / fold::kWaveSize;
+constexpr int kStateDim       = fold::kStateDim;
+constexpr int kWaveSize       = fold::kWaveSize;
+constexpr int kWavesPerBlock  = fold::kItemThreads / fold::kWaveSize;
 constexpr int kValuesPerBlock = fold::kValuesPerItem;
 
 static_assert(sizeof(GdnReplayFoldKernelRow) == 80);
@@ -28,9 +28,9 @@ static_assert(std::is_trivially_copyable_v<GdnReplayFoldKernelRows>);
 
 template <int Layers, int QkHeads, int ValueHeads, int ConvChannels>
 struct FoldGeometry {
-    static constexpr int kLayers = Layers;
-    static constexpr int kQkHeads = QkHeads;
-    static constexpr int kValueHeads = ValueHeads;
+    static constexpr int kLayers       = Layers;
+    static constexpr int kQkHeads      = QkHeads;
+    static constexpr int kValueHeads   = ValueHeads;
     static constexpr int kConvChannels = ConvChannels;
     static_assert(QkHeads == fold::kQkHeads && ValueHeads == fold::kValueHeads &&
                   ConvChannels == fold::kConvChannels);
@@ -48,32 +48,36 @@ struct FoldAccess {
 };
 
 template <class Geometry>
-__global__ __launch_bounds__(kWaveSize * kWavesPerBlock, 2)
-void replay_fold_kernel(FoldAccess access) {
-    const std::int32_t batch = static_cast<std::int32_t>(blockIdx.y);
-    const std::int32_t layer_tile = static_cast<std::int32_t>(blockIdx.z);
-    const std::int32_t layer = layer_tile / fold::kStateTiles;
-    const std::int32_t state_tile = layer_tile % fold::kStateTiles;
-    const std::int32_t value_head = static_cast<std::int32_t>(blockIdx.x);
+__global__ __launch_bounds__(kWaveSize* kWavesPerBlock,
+                             2) void replay_fold_kernel(FoldAccess access) {
+    const std::int32_t batch             = static_cast<std::int32_t>(blockIdx.y);
+    const std::int32_t layer_tile        = static_cast<std::int32_t>(blockIdx.z);
+    const std::int32_t layer             = layer_tile / fold::kStateTiles;
+    const std::int32_t state_tile        = layer_tile % fold::kStateTiles;
+    const std::int32_t value_head        = static_cast<std::int32_t>(blockIdx.x);
     const GdnReplayFoldKernelRow& source = access.rows.row[batch];
-    const std::int32_t columns = source.path_length >= 0 ? source.path_length : source.commit_columns;
+    const std::int32_t columns =
+        source.path_length >= 0 ? source.path_length : source.commit_columns;
     if (columns == 0) { return; }
-    const fold::Row row{.record_row = batch, .slot = source.linear_state_slot, .columns = columns,
-                        .path_length = source.path_length, .path = source.path};
+    const fold::Row row{.record_row  = batch,
+                        .slot        = source.linear_state_slot,
+                        .columns     = columns,
+                        .path_length = source.path_length,
+                        .path        = source.path};
     __shared__ float key[kStateDim];
     __shared__ float reduction[kStateDim];
-    fold::fold_item(access.planes, layer, row,
-                    access.recurrent_layer0 + static_cast<std::int64_t>(layer) *
-                                                  access.recurrent_layer_stride,
-                    access.conv_layer0 + static_cast<std::int64_t>(layer) * access.conv_layer_stride,
-                    value_head, state_tile,
-                    static_cast<int>(threadIdx.y) * kWaveSize + static_cast<int>(threadIdx.x), true,
-                    key, reduction, [] { __syncthreads(); });
+    fold::fold_item(
+        access.planes, layer, row,
+        access.recurrent_layer0 + static_cast<std::int64_t>(layer) * access.recurrent_layer_stride,
+        access.conv_layer0 + static_cast<std::int64_t>(layer) * access.conv_layer_stride,
+        value_head, state_tile,
+        static_cast<int>(threadIdx.y) * kWaveSize + static_cast<int>(threadIdx.x), true, key,
+        reduction, [] { __syncthreads(); });
 }
 
 // One layer's deferred fold (ops::gdn_replay_fold_layer): one 128-thread item per CTA.
-__global__ __launch_bounds__(fold::kItemThreads)
-void replay_fold_layer_kernel(fold::LayerArgs args) {
+__global__
+__launch_bounds__(fold::kItemThreads) void replay_fold_layer_kernel(fold::LayerArgs args) {
     __shared__ float key[1][kStateDim];
     __shared__ float reduction[1][kStateDim];
     fold::fold_layer_cta<fold::kItemThreads>(r9700::persistent::LaunchCta{}, args, blockIdx.x, key,
@@ -98,8 +102,7 @@ void launch_fixed(const GdnReplayRecords& records, LinearAttentionStateAllLayers
     };
     const dim3 grid(static_cast<unsigned>(Geometry::kValueHeads),
                     static_cast<unsigned>(active_rows),
-                    static_cast<unsigned>(Geometry::kLayers *
-                                          (kStateDim / kValuesPerBlock)));
+                    static_cast<unsigned>(Geometry::kLayers * (kStateDim / kValuesPerBlock)));
     const dim3 block(kWaveSize, kWavesPerBlock, 1);
     hipLaunchKernelGGL((replay_fold_kernel<Geometry>), grid, block, 0, stream, access);
     HIP_CHECK(hipGetLastError());
@@ -121,10 +124,10 @@ void launch_replay_fold(const GdnReplayRecords& records, LinearAttentionStateAll
 }
 
 void launch_replay_fold_layer(const fold::LayerArgs& args, hipStream_t stream) {
-    hipLaunchKernelGGL(replay_fold_layer_kernel,
-                       dim3(static_cast<unsigned>(args.batch) *
-                            fold::layer_ctas_per_row(fold::kItemThreads)),
-                       dim3(fold::kItemThreads), 0, stream, args);
+    hipLaunchKernelGGL(
+        replay_fold_layer_kernel,
+        dim3(static_cast<unsigned>(args.batch) * fold::layer_ctas_per_row(fold::kItemThreads)),
+        dim3(fold::kItemThreads), 0, stream, args);
     HIP_CHECK(hipGetLastError());
 }
 

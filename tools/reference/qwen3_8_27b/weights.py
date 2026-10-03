@@ -77,9 +77,7 @@ def estimate_fixed_bytes(
     if not text and not mtp:
         return 0
     kv_layers = (CFG.full_layers if text else 0) + (1 if mtp else 0)
-    kv_per_layer_token = CFG.kv_heads * (
-        CFG.head_dim + CFG.head_dim // 2 + CFG.head_dim // 16 * 2
-    )
+    kv_per_layer_token = CFG.kv_heads * (CFG.head_dim + CFG.head_dim // 2 + CFG.head_dim // 16 * 2)
     kv = capacity * kv_layers * kv_per_layer_token
     if text:
         ssm = CFG.gdn_layers * CFG.gdn_v_heads * CFG.gdn_k_dim * CFG.gdn_v_dim * 4
@@ -254,9 +252,7 @@ class WeightStore:
         if cached is not None:
             return cached
         if self.device.type == "cpu":
-            host = torch.frombuffer(
-                bytearray(self.binding.payload(block)), dtype=torch.uint8
-            )
+            host = torch.frombuffer(bytearray(self.binding.payload(block)), dtype=torch.uint8)
             payload = host
         else:
             payload = self._stream_tensor(block)
@@ -271,13 +267,9 @@ class WeightStore:
         representation = self.representation(block)
         if block.layout == "contiguous-le-v1":
             source = (
-                self._upload(block)
-                if representation == "decoded"
-                else self._stream_tensor(block)
+                self._upload(block) if representation == "decoded" else self._stream_tensor(block)
             )
-            decoded = decode_direct(
-                source, block.format, block.shape, device=self.device
-            )
+            decoded = decode_direct(source, block.format, block.shape, device=self.device)
             # A streamed CPU direct tensor would otherwise retain the mmap
             # through torch.frombuffer after this call.  The decoded words are
             # the result, so give that result independent storage.
@@ -285,15 +277,18 @@ class WeightStore:
                 decoded = decoded.clone()
         else:
             source = (
-                self._upload(block)
-                if representation == "packed"
-                else self._stream_tensor(block)
+                self._upload(block) if representation == "packed" else self._stream_tensor(block)
             )
             if block.layout == "r9700-q4g64-n16-k16-v1":
                 decoded = dequantize_q4_n16k16(source, block.shape, device=self.device)
             else:
-                decoded = dequantize_row_split(source, block.format, block.shape,
-                                               device=self.device, compiled=self.compile_codec)
+                decoded = dequantize_row_split(
+                    source,
+                    block.format,
+                    block.shape,
+                    device=self.device,
+                    compiled=self.compile_codec,
+                )
         if representation == "decoded":
             self._decoded[block.tensor_id] = decoded
         return decoded
@@ -324,7 +319,8 @@ class WeightStore:
         )
         if block.layout == "r9700-q4g64-n16-k16-v1":
             return dequantize_q4_n16k16_rows(
-                source, block.shape, range(value.row_begin, value.row_end), device=self.device)
+                source, block.shape, range(value.row_begin, value.row_end), device=self.device
+            )
         geometry = row_split_geometry(block.format, block.shape)
         planes = split_row_planes(source, geometry, value.row_begin, value.row_count)
         return dequantize_row_split(
@@ -384,9 +380,7 @@ class WeightStore:
             absolute = tuple(row_begin + row for row in relative)
 
         if self.representation(block) == "decoded":
-            indices = torch.as_tensor(
-                absolute, dtype=torch.long, device=self.device
-            )
+            indices = torch.as_tensor(absolute, dtype=torch.long, device=self.device)
             return self._decode_block(block).index_select(0, indices)
         source = (
             self._upload(block)
@@ -395,9 +389,13 @@ class WeightStore:
         )
         if block.layout == "r9700-q4g64-n16-k16-v1":
             return dequantize_q4_n16k16_rows(
-                source, block.shape,
-                absolute.detach().cpu().tolist() if isinstance(absolute, torch.Tensor) else absolute,
-                device=self.device)
+                source,
+                block.shape,
+                absolute.detach().cpu().tolist()
+                if isinstance(absolute, torch.Tensor)
+                else absolute,
+                device=self.device,
+            )
         geometry = row_split_geometry(block.format, block.shape)
         planes = gather_row_planes(source, geometry, absolute)
         return dequantize_row_split(
@@ -425,9 +423,7 @@ class WeightStore:
                 yield (
                     local_begin,
                     local_end,
-                    decoded[
-                        row_begin + local_begin : row_begin + local_end
-                    ],
+                    decoded[row_begin + local_begin : row_begin + local_end],
                 )
             return
 
@@ -441,13 +437,21 @@ class WeightStore:
             count = local_end - local_begin
             if block.layout == "r9700-q4g64-n16-k16-v1":
                 decoded = dequantize_q4_n16k16_rows(
-                    source, block.shape,
-                    range(row_begin + local_begin, row_begin + local_end), device=self.device)
+                    source,
+                    block.shape,
+                    range(row_begin + local_begin, row_begin + local_end),
+                    device=self.device,
+                )
             else:
                 geometry = row_split_geometry(block.format, block.shape)
                 planes = split_row_planes(source, geometry, row_begin + local_begin, count)
-                decoded = dequantize_row_split(planes, block.format, (count, block.shape[1]),
-                                               device=self.device, compiled=self.compile_codec)
+                decoded = dequantize_row_split(
+                    planes,
+                    block.format,
+                    (count, block.shape[1]),
+                    device=self.device,
+                    compiled=self.compile_codec,
+                )
             yield local_begin, local_end, decoded
 
     def close(self) -> None:

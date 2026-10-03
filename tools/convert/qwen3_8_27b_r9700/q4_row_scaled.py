@@ -74,25 +74,22 @@ def error_metrics(source: torch.Tensor, decoded: torch.Tensor) -> dict[str, floa
     return {
         "squared_error": squared_error,
         "squared_reference": squared_reference,
-        "relative_l2": math.sqrt(squared_error / squared_reference)
-        if squared_reference else 0.0,
+        "relative_l2": math.sqrt(squared_error / squared_reference) if squared_reference else 0.0,
         "max_abs": float(difference.abs().max().item()) if difference.numel() else 0.0,
     }
 
 
 def compare_sample(source: torch.Tensor) -> dict[str, dict[str, float] | float | None]:
-    grouped = error_metrics(
-        source, quantize_dequantize(source, group_size=GROUP_SIZE)
-    )
+    grouped = error_metrics(source, quantize_dequantize(source, group_size=GROUP_SIZE))
     row = error_metrics(source, quantize_dequantize(source, group_size=None))
     return {
         "q4g64": grouped,
         "q4_row_scaled": row,
         "ratios": {
             "relative_l2": row["relative_l2"] / grouped["relative_l2"]
-            if grouped["relative_l2"] else None,
-            "max_abs": row["max_abs"] / grouped["max_abs"]
-            if grouped["max_abs"] else None,
+            if grouped["relative_l2"]
+            else None,
+            "max_abs": row["max_abs"] / grouped["max_abs"] if grouped["max_abs"] else None,
         },
     }
 

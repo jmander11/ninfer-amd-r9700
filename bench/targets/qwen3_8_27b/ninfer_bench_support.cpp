@@ -259,15 +259,14 @@ std::uint32_t BenchTest::required_context(const SpeculativeOptions& spec) const 
     const std::uint64_t prompt =
         static_cast<std::uint64_t>(kind == TestKind::Decode ? kDecodeSeedTokens : n_prompt);
     const std::uint64_t decode = static_cast<std::uint64_t>(has_decode() ? n_gen : 0);
-    std::uint64_t margin = 0;
+    std::uint64_t margin       = 0;
     if (spec.draft_tokens != 0 && spec.backend == SpeculativeBackend::Mtp) {
         margin = 2ULL * spec.draft_tokens;
     } else if (spec.draft_tokens != 0 && spec.backend == SpeculativeBackend::DFlash) {
         // 27B DFlash2 is chain W=k+1. An explicit dflash_verify_width wins. Two
         // verify-widths of headroom cover the transient uncommitted round state.
-        const std::uint32_t width = spec.dflash_verify_width != 0
-                                       ? spec.dflash_verify_width
-                                       : spec.draft_tokens + 1U;
+        const std::uint32_t width =
+            spec.dflash_verify_width != 0 ? spec.dflash_verify_width : spec.draft_tokens + 1U;
         margin = 2ULL * width;
     }
     return checked_context(prompt + decode + margin, "benchmark context requirement");
@@ -310,15 +309,17 @@ std::string usage_text(std::string_view program) {
         << "                              prefix-reuse seed so prefill/decode do not interleave\n"
         << "                              benchmark requests use a fixed non-expiring long-run\n"
         << "                              pending deadline; the product default is unchanged\n"
-         << "  --spec <mtp|dflash>       speculative backend (default: mtp); dflash requires\n"
-         << "                              the artifact to contain dflash/ objects\n"
-         << "  --draft-tokens <0..7>     speculative draft window: mtp [0,5] (0 = none),\n"
-         << "                              dflash [1,7] (default: 0)\n"
-         << "  --adaptive-draft            pick live K in {3,4,5} by locking E[Y]/T(k,C,L); requires --spec mtp|dflash\n"
-         << "  --dflash-verify-width <0|2..8> DFlash chain width; 0 = K+1; explicit width\n"
-         << "                              must equal K+1 (dflash only)\n"
-         << "  --lm-head-draft             use the optimized proposal head; requires --draft-tokens\n"
-         << "                              greater than zero\n"
+        << "  --spec <mtp|dflash>       speculative backend (default: mtp); dflash requires\n"
+        << "                              the artifact to contain dflash/ objects\n"
+        << "  --draft-tokens <0..7>     speculative draft window: mtp [0,5] (0 = none),\n"
+        << "                              dflash [1,7] (default: 0)\n"
+        << "  --adaptive-draft            pick live K in {3,4,5} by locking E[Y]/T(k,C,L); "
+           "requires --spec mtp|dflash\n"
+        << "  --dflash-verify-width <0|2..8> DFlash chain width; 0 = K+1; explicit width\n"
+        << "                              must equal K+1 (dflash only)\n"
+        << "  --lm-head-draft             use the optimized proposal head; requires "
+           "--draft-tokens\n"
+        << "                              greater than zero\n"
         << "  --device <id>               HIP device ordinal (default: 0)\n"
         << "  --no-device-graph           use eager decode\n"
         << "  --profile-measured          bracket one measured repetition as a profiler region\n"
@@ -405,13 +406,11 @@ BenchOptions parse_args(int argc, char** argv) {
             }
             options.contention = parsed.front();
         } else if (arg == "--contention-lanes") {
-            options.contention_lanes =
-                static_cast<std::uint32_t>(parse_positive(value("--contention-lanes"),
-                                                          "contention-lanes"));
+            options.contention_lanes = static_cast<std::uint32_t>(
+                parse_positive(value("--contention-lanes"), "contention-lanes"));
         } else if (arg == "--contention-context") {
-            options.contention_context =
-                static_cast<std::uint32_t>(parse_positive(value("--contention-context"),
-                                                          "contention-context"));
+            options.contention_context = static_cast<std::uint32_t>(
+                parse_positive(value("--contention-context"), "contention-context"));
         } else if (arg == "--concurrency") {
             options.concurrency = parse_u32(value("--concurrency"), "concurrency");
             if (options.concurrency > kMaximumConcurrency) {
@@ -437,7 +436,8 @@ BenchOptions parse_args(int argc, char** argv) {
             options.dflash_verify_width =
                 parse_u32(value("--dflash-verify-width"), "dflash-verify-width", true);
             if (options.dflash_verify_width > kMaxDFlashVerifyWidth) {
-                throw std::invalid_argument("--dflash-verify-width must be 0 or chain K+1 in [2,8]");
+                throw std::invalid_argument(
+                    "--dflash-verify-width must be 0 or chain K+1 in [2,8]");
             }
         } else if (arg == "--lm-head-draft") {
             options.proposal_head = ProposalHead::Optimized;
@@ -496,8 +496,7 @@ BenchOptions parse_args(int argc, char** argv) {
         throw std::invalid_argument("--adaptive-draft requires an active speculative backend");
     }
     if (options.proposal_head == ProposalHead::Optimized && options.draft_tokens == 0) {
-        throw std::invalid_argument(
-            "--lm-head-draft requires --draft-tokens greater than zero");
+        throw std::invalid_argument("--lm-head-draft requires --draft-tokens greater than zero");
     }
     if (options.retain_token_ids && options.output != OutputFormat::Json) {
         throw std::invalid_argument("--retain-token-ids requires --output json");
@@ -553,7 +552,7 @@ std::uint32_t resolve_max_context(const std::vector<BenchTest>& tests,
     std::string driver;
     bool has_decode = false;
     for (const BenchTest& test : tests) {
-        const std::uint32_t base = test.required_context(spec);
+        const std::uint32_t base      = test.required_context(spec);
         const std::uint32_t candidate = checked_context(
             static_cast<std::uint64_t>(base) +
                 (isolate_prompt_decode && test.kind == TestKind::PrefillDecode ? 1ULL : 0ULL),
@@ -629,15 +628,16 @@ std::vector<TokenId> prompt_slice(const std::vector<TokenId>& corpus, int n_prom
 std::string decode_path_name(bool use_device_graph, const SpeculativeOptions& spec) {
     const std::string suffix = use_device_graph ? "device_graph" : "eager";
     if (spec.draft_tokens == 0) { return suffix; }
-    const std::string kind =
-        spec.backend == SpeculativeBackend::DFlash ? "dflash" : "mtp";
+    const std::string kind = spec.backend == SpeculativeBackend::DFlash ? "dflash" : "mtp";
     return kind + "_" + suffix;
 }
 
 std::uint32_t resolved_dflash_verify_width(std::uint32_t draft_tokens,
                                            std::uint32_t requested_width) {
     if (draft_tokens == 0) { return 0; }
-    if (draft_tokens > kMaxDFlashDraftTokens) { throw std::invalid_argument("DFlash2 requires K in [1,7]"); }
+    if (draft_tokens > kMaxDFlashDraftTokens) {
+        throw std::invalid_argument("DFlash2 requires K in [1,7]");
+    }
     if (requested_width != 0 && requested_width != draft_tokens + 1) {
         throw std::invalid_argument("DFlash2 requires chain W=K+1");
     }
@@ -656,9 +656,12 @@ std::uint32_t decode_graph_prime_required_context(const SpeculativeOptions& spec
 
 std::string speculative_backend_name(SpeculativeBackend backend) {
     switch (backend) {
-        case SpeculativeBackend::None: return "none";
-        case SpeculativeBackend::Mtp: return "mtp";
-        case SpeculativeBackend::DFlash: return "dflash";
+    case SpeculativeBackend::None:
+        return "none";
+    case SpeculativeBackend::Mtp:
+        return "mtp";
+    case SpeculativeBackend::DFlash:
+        return "dflash";
     }
     return "none";
 }
@@ -680,12 +683,10 @@ std::vector<double> prefill_tok_s_series(const TestResult& result) {
     std::vector<double> out;
     if (!result.test.has_prefill()) { return out; }
     for (const RepTiming& rep : result.reps) {
-        const double seconds = result.test.kind == TestKind::Prefill
-                                   ? rep.wave_seconds
-                                   : rep.timings.prefill_seconds;
+        const double seconds =
+            result.test.kind == TestKind::Prefill ? rep.wave_seconds : rep.timings.prefill_seconds;
         if (seconds > 0.0) {
-            out.push_back(static_cast<double>(result.test.n_prompt) * result.concurrency /
-                          seconds);
+            out.push_back(static_cast<double>(result.test.n_prompt) * result.concurrency / seconds);
         }
     }
     return out;
@@ -706,9 +707,10 @@ std::vector<double> prefill_active_tok_s_series(const TestResult& result) {
 RepTiming fold_lane_results(const std::vector<GenerationResult>& generated,
                             std::uint32_t expected_per_lane) {
     RepTiming timing;
-    timing.timings                 = generated.front().timings;
-    timing.speculative             = generated.front().speculative;
-    timing.generated_output_tokens = expected_per_lane * static_cast<std::uint32_t>(generated.size());
+    timing.timings     = generated.front().timings;
+    timing.speculative = generated.front().speculative;
+    timing.generated_output_tokens =
+        expected_per_lane * static_cast<std::uint32_t>(generated.size());
     timing.generated_token_ids_by_lane.reserve(generated.size());
     for (const GenerationResult& lane : generated) {
         timing.generated_token_ids_by_lane.push_back(lane.generated_token_ids);
@@ -726,7 +728,8 @@ RepTiming fold_lane_results(const std::vector<GenerationResult>& generated,
             std::max(timing.timings.total_seconds, result.timings.total_seconds);
         const SpeculativeStats& in = result.speculative;
         timing.speculative.enabled = timing.speculative.enabled || in.enabled;
-        timing.speculative.draft_window = std::max(timing.speculative.draft_window, in.draft_window);
+        timing.speculative.draft_window =
+            std::max(timing.speculative.draft_window, in.draft_window);
         timing.speculative.rounds += in.rounds;
         timing.speculative.drafted_tokens += in.drafted_tokens;
         timing.speculative.accepted_tokens += in.accepted_tokens;
@@ -783,7 +786,7 @@ std::vector<double> whole_output_tok_s_series(const TestResult& result) {
     return out;
 }
 
-template <double GenerationTimings::*Field>
+template <double GenerationTimings::* Field>
 std::vector<double> timing_series(const TestResult& result) {
     std::vector<double> out;
     out.reserve(result.reps.size());
@@ -840,14 +843,12 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << "  corpus:     " << env.corpus_path << " (" << env.corpus_tokens << " tokens)\n"
         << "  config:     max_context=" << env.max_context << " prefill_chunk=" << env.prefill_chunk
         << " kv_format=fp8-k-int4-v concurrency=" << env.concurrency
-        << " pending_timeout_ms=" << env.pending_timeout_ms
-        << " pending_deadline=unbounded"
+        << " pending_timeout_ms=" << env.pending_timeout_ms << " pending_deadline=unbounded"
         << " q4_activation_bits=" << ninfer::ops::r9700::linear::kQ4ActivationBits
         << " q4_activation_profile=" << ninfer::ops::r9700::linear::kQ4ActivationProfile
         << " q4_prefill_gate_up_a4="
         << (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false")
-        << " q4_prefill_cta_profile="
-        << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile
+        << " q4_prefill_cta_profile=" << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile
         << " dflash_small_t_candidate="
         << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
         << " dflash_mlp_down_t5_candidate="
@@ -855,19 +856,16 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << " text_p129_wmma_tail_candidate="
         << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false")
         << " w8_activation_bits=" << ninfer::ops::r9700::linear::kW8ActivationBits
-        << " split512_enabled="
-        << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false")
+        << " split512_enabled=" << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false")
         << " decode_attention_profile=packed-t1to6-split512-t4tree-v1"
-        << " packed_decode_min_context="
-        << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext
-        << " split512_min_context="
-        << ninfer::ops::r9700::kv::kSplit512MinimumContext
+        << " packed_decode_min_context=" << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext
+        << " split512_min_context=" << ninfer::ops::r9700::kv::kSplit512MinimumContext
         << " spec=" << speculative_backend_name(env.speculative_backend)
-        << " k=" << env.draft_tokens
-        << " proposal_head=" << proposal_head_name(env.proposal_head)
-        << " decode_path=" << decode_path_name(
-            env.use_device_graph, SpeculativeOptions{env.speculative_backend, env.draft_tokens,
-                                                   env.proposal_head, env.dflash_verify_width})
+        << " k=" << env.draft_tokens << " proposal_head=" << proposal_head_name(env.proposal_head)
+        << " decode_path="
+        << decode_path_name(env.use_device_graph,
+                            SpeculativeOptions{env.speculative_backend, env.draft_tokens,
+                                               env.proposal_head, env.dflash_verify_width})
         << " graph_prime="
         << (env.decode_graph_primed
                 ? std::to_string(env.decode_graph_prime_output_tokens) + " outputs"
@@ -876,7 +874,7 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
 
     constexpr std::size_t cols                   = 10;
     const std::array<std::string, cols> headings = {
-        "test",           "n_prompt", "n_gen",         "prefill t/s", "active pp t/s",
+        "test",           "n_prompt",       "n_gen",    "prefill t/s",   "active pp t/s",
         "decode out t/s", "decode eng t/s", "spec acc", "spec round/fb", "work peak"};
     std::vector<std::array<std::string, cols>> rows;
     for (const TestResult& result : results) {
@@ -967,83 +965,75 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
         << ",\n"
         << "    \"kv_capacity_headroom_bytes\": " << env.memory.kv_capacity_headroom_bytes << ",\n"
         << "    \"planned_slack_bytes\": " << env.memory.planned_slack_bytes << ",\n"
-        << "    \"device_graph_allowance_bytes\": " << env.memory.device_graph_allowance_bytes << ",\n"
-        << "    \"device_graph_observed_bytes\": " << env.memory.device_graph_observed_bytes << ",\n"
+        << "    \"device_graph_allowance_bytes\": " << env.memory.device_graph_allowance_bytes
+        << ",\n"
+        << "    \"device_graph_observed_bytes\": " << env.memory.device_graph_observed_bytes
+        << ",\n"
         << "    \"kv_payload_bytes\": " << env.memory.kv_payload_bytes << "\n"
         << "  },\n"
         << "  \"config\": {\n"
         << "    \"max_context\": " << env.max_context << ",\n"
-         << "    \"prefill_chunk\": " << env.prefill_chunk << ",\n"
-         << "    \"kv_cache_format\": \"fp8-k-int4-v\",\n"
-         << "    \"kv_value_group\": "
-         << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup << ",\n"
-         << "    \"kv_plane_layouts\": {\"key\": \""
-         << ninfer::targets::qwen3::detail::kR9700TextKVKeyPlaneLayoutName
-         << "\", \"value\": \""
-         << ninfer::targets::qwen3::detail::kR9700TextKVValuePlaneLayoutName
-         << "\", \"value_scale\": \""
-         << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName
-         << "\"},\n"
-         << "    \"q4_activation_bits\": "
-         << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
-         << "    \"q4_activation_profile\": \""
-         << ninfer::ops::r9700::linear::kQ4ActivationProfile << "\",\n"
-         << "    \"q4_prefill_gate_up_a4\": "
-         << (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false") << ",\n"
-         << "    \"q4_prefill_cta_profile\": \""
-         << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << "\",\n"
-         << "    \"dflash_small_t_candidate\": "
-         << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
-         << ",\n"
-         << "    \"dflash_mlp_down_t5_candidate\": "
-         << (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" : "false")
-         << ",\n"
-          << "    \"text_p129_wmma_tail_candidate\": "
-          << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false")
-         << ",\n"
-         << "    \"w8_activation_bits\": "
-         << ninfer::ops::r9700::linear::kW8ActivationBits << ",\n"
-         << "    \"split512_enabled\": "
-         << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false") << ",\n"
-         << "    \"decode_attention_profile\": \"packed-t1to6-split512-t4tree-v1\",\n"
-         << "    \"packed_decode_min_context\": "
-         << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext << ",\n"
-         << "    \"split512_min_context\": "
-         << ninfer::ops::r9700::kv::kSplit512MinimumContext << ",\n"
+        << "    \"prefill_chunk\": " << env.prefill_chunk << ",\n"
+        << "    \"kv_cache_format\": \"fp8-k-int4-v\",\n"
+        << "    \"kv_value_group\": " << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup
+        << ",\n"
+        << "    \"kv_plane_layouts\": {\"key\": \""
+        << ninfer::targets::qwen3::detail::kR9700TextKVKeyPlaneLayoutName << "\", \"value\": \""
+        << ninfer::targets::qwen3::detail::kR9700TextKVValuePlaneLayoutName
+        << "\", \"value_scale\": \""
+        << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName << "\"},\n"
+        << "    \"q4_activation_bits\": " << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
+        << "    \"q4_activation_profile\": \"" << ninfer::ops::r9700::linear::kQ4ActivationProfile
+        << "\",\n"
+        << "    \"q4_prefill_gate_up_a4\": "
+        << (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false") << ",\n"
+        << "    \"q4_prefill_cta_profile\": \"" << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile
+        << "\",\n"
+        << "    \"dflash_small_t_candidate\": "
+        << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false") << ",\n"
+        << "    \"dflash_mlp_down_t5_candidate\": "
+        << (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" : "false")
+        << ",\n"
+        << "    \"text_p129_wmma_tail_candidate\": "
+        << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false") << ",\n"
+        << "    \"w8_activation_bits\": " << ninfer::ops::r9700::linear::kW8ActivationBits << ",\n"
+        << "    \"split512_enabled\": "
+        << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false") << ",\n"
+        << "    \"decode_attention_profile\": \"packed-t1to6-split512-t4tree-v1\",\n"
+        << "    \"packed_decode_min_context\": "
+        << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext << ",\n"
+        << "    \"split512_min_context\": " << ninfer::ops::r9700::kv::kSplit512MinimumContext
+        << ",\n"
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
-         << "    \"xattention_qualification\": true,\n"
-         << "    \"xattention_profile\": \"b128-s"
-         << ninfer::ops::r9700::kv::kXAttentionStride << "-tau"
-         << ninfer::ops::r9700::kv::kXAttentionTauPermille << "\",\n"
-         << "    \"xattention_find_block\": "
-         << ninfer::ops::r9700::kv::kXAttentionFindBlockSize << ",\n"
-         << "    \"xattention_stride\": "
-         << ninfer::ops::r9700::kv::kXAttentionStride << ",\n"
-         << "    \"xattention_tau_permille\": "
-         << ninfer::ops::r9700::kv::kXAttentionTauPermille << ",\n"
+        << "    \"xattention_qualification\": true,\n"
+        << "    \"xattention_profile\": \"b128-s" << ninfer::ops::r9700::kv::kXAttentionStride
+        << "-tau" << ninfer::ops::r9700::kv::kXAttentionTauPermille << "\",\n"
+        << "    \"xattention_find_block\": " << ninfer::ops::r9700::kv::kXAttentionFindBlockSize
+        << ",\n"
+        << "    \"xattention_stride\": " << ninfer::ops::r9700::kv::kXAttentionStride << ",\n"
+        << "    \"xattention_tau_permille\": " << ninfer::ops::r9700::kv::kXAttentionTauPermille
+        << ",\n"
 #else
-         << "    \"xattention_qualification\": false,\n"
+        << "    \"xattention_qualification\": false,\n"
 #endif
-         << "    \"concurrency\": " << env.concurrency << ",\n"
-         << "    \"pending_timeout_ms\": " << env.pending_timeout_ms << ",\n"
-         << "    \"pending_deadline\": \"unbounded\",\n"
-         << "    \"spec\": \"" << speculative_backend_name(env.speculative_backend) << "\",\n"
-         << "    \"draft_tokens\": " << env.draft_tokens << ",\n"
-         << "    \"speculative_execution\": "
-         << (env.draft_tokens == 0 ? "false" : "true") << ",\n"
-         << "    \"dflash_verify_width_requested\": " << env.dflash_verify_width_requested
-         << ",\n"
-         << "    \"dflash_verify_width\": " << env.dflash_verify_width << ",\n"
-         << "    \"proposal_head\": \"" << proposal_head_name(env.proposal_head) << "\",\n"
-         << "    \"use_device_graph\": " << (env.use_device_graph ? "true" : "false") << ",\n"
-         << "    \"retain_token_ids\": " << (env.retain_token_ids ? "true" : "false") << ",\n"
-         << "    \"isolate_prompt_decode\": "
-         << (env.isolate_prompt_decode ? "true" : "false") << ",\n"
-         << "    \"decode_path\": \"" << decode_path_name(
-                   env.use_device_graph, SpeculativeOptions{env.speculative_backend, env.draft_tokens,
-                                                          env.proposal_head,
-                                                          env.dflash_verify_width})
-         << "\",\n"
+        << "    \"concurrency\": " << env.concurrency << ",\n"
+        << "    \"pending_timeout_ms\": " << env.pending_timeout_ms << ",\n"
+        << "    \"pending_deadline\": \"unbounded\",\n"
+        << "    \"spec\": \"" << speculative_backend_name(env.speculative_backend) << "\",\n"
+        << "    \"draft_tokens\": " << env.draft_tokens << ",\n"
+        << "    \"speculative_execution\": " << (env.draft_tokens == 0 ? "false" : "true") << ",\n"
+        << "    \"dflash_verify_width_requested\": " << env.dflash_verify_width_requested << ",\n"
+        << "    \"dflash_verify_width\": " << env.dflash_verify_width << ",\n"
+        << "    \"proposal_head\": \"" << proposal_head_name(env.proposal_head) << "\",\n"
+        << "    \"use_device_graph\": " << (env.use_device_graph ? "true" : "false") << ",\n"
+        << "    \"retain_token_ids\": " << (env.retain_token_ids ? "true" : "false") << ",\n"
+        << "    \"isolate_prompt_decode\": " << (env.isolate_prompt_decode ? "true" : "false")
+        << ",\n"
+        << "    \"decode_path\": \""
+        << decode_path_name(env.use_device_graph,
+                            SpeculativeOptions{env.speculative_backend, env.draft_tokens,
+                                               env.proposal_head, env.dflash_verify_width})
+        << "\",\n"
         << "    \"decode_graph_prime\": {\"primed\": "
         << (env.decode_graph_primed ? "true" : "false")
         << ", \"output_tokens\": " << env.decode_graph_prime_output_tokens << "},\n"
@@ -1133,7 +1123,8 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
 std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult>& results) {
     std::ostringstream out;
     out << "label,kind,n_prompt,n_gen,target,weights_id,max_context,prefill_chunk,concurrency,"
-           "spec,draft_tokens,dflash_verify_width_requested,dflash_verify_width,proposal_head,decode_path,kv_cache_format,"
+           "spec,draft_tokens,dflash_verify_width_requested,dflash_verify_width,proposal_head,"
+           "decode_path,kv_cache_format,"
            "kv_value_group,kv_key_plane_layout,kv_value_plane_layout,"
            "kv_value_scale_plane_layout,q4_activation_bits,q4_activation_profile,"
            "q4_prefill_gate_up_a4,q4_prefill_cta_profile,"
@@ -1167,51 +1158,47 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
         out << result.test.label << ',' << kind_string(result.test.kind) << ','
             << result.test.n_prompt << ',' << result.test.n_gen << ',' << env.load.target << ','
             << env.load.weights_id << ',' << env.max_context << ',' << env.prefill_chunk << ','
-            << env.concurrency << ','
-            << speculative_backend_name(env.speculative_backend) << ',' << env.draft_tokens << ','
-            << env.dflash_verify_width_requested << ',' << env.dflash_verify_width << ','
-            << proposal_head_name(env.proposal_head) << ','
+            << env.concurrency << ',' << speculative_backend_name(env.speculative_backend) << ','
+            << env.draft_tokens << ',' << env.dflash_verify_width_requested << ','
+            << env.dflash_verify_width << ',' << proposal_head_name(env.proposal_head) << ','
             << decode_path_name(env.use_device_graph,
-                               SpeculativeOptions{env.speculative_backend, env.draft_tokens,
-                                                  env.proposal_head, env.dflash_verify_width})
-            << ','
-            << "fp8-k-int4-v," << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup << ','
-            << ninfer::targets::qwen3::detail::kR9700TextKVKeyPlaneLayoutName << ','
+                                SpeculativeOptions{env.speculative_backend, env.draft_tokens,
+                                                   env.proposal_head, env.dflash_verify_width})
+            << ',' << "fp8-k-int4-v," << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup
+            << ',' << ninfer::targets::qwen3::detail::kR9700TextKVKeyPlaneLayoutName << ','
             << ninfer::targets::qwen3::detail::kR9700TextKVValuePlaneLayoutName << ','
             << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName << ','
             << ninfer::ops::r9700::linear::kQ4ActivationBits << ','
             << ninfer::ops::r9700::linear::kQ4ActivationProfile << ','
             << (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false") << ','
             << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << ','
-            << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
-            << ','
+            << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false") << ','
             << (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" : "false")
-            << ','
-            << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false") << ','
+            << ',' << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false") << ','
             << ninfer::ops::r9700::linear::kW8ActivationBits << ','
             << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false") << ','
             << "packed-t1to6-split512-t4tree-v1,"
             << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext << ','
-            << ninfer::ops::r9700::kv::kSplit512MinimumContext << ','
-            << env.memory.kv_payload_bytes << ','
-            << env.load.host_to_device_bytes << ',' << env.memory.weights.capacity_bytes << ','
-            << env.memory.sequence.capacity_bytes << ',' << env.memory.workspace.capacity_bytes
-            << ',' << env.memory.request_transient.capacity_bytes << ','
+            << ninfer::ops::r9700::kv::kSplit512MinimumContext << ',' << env.memory.kv_payload_bytes
+            << ',' << env.load.host_to_device_bytes << ',' << env.memory.weights.capacity_bytes
+            << ',' << env.memory.sequence.capacity_bytes << ','
+            << env.memory.workspace.capacity_bytes << ','
+            << env.memory.request_transient.capacity_bytes << ','
             << env.memory.device_graph_allowance_bytes << ',' << result.workspace_peak_bytes << ','
             << result.workspace_allocator_peak_bytes << ',' << spec.rounds << ','
             << spec.fallback_steps << ',' << acceptance << ',' << result.reps.size() << ','
             << mean(prefill_tok_s_series(result)) << ',' << stddev(prefill_tok_s_series(result))
             << ',' << mean(prefill_active_tok_s_series(result)) << ','
-            << stddev(prefill_active_tok_s_series(result))
-            << ',' << mean(decode_output_tok_s_series(result)) << ','
+            << stddev(prefill_active_tok_s_series(result)) << ','
+            << mean(decode_output_tok_s_series(result)) << ','
             << stddev(decode_output_tok_s_series(result)) << ','
             << mean(decode_engine_tok_s_series(result)) << ','
             << stddev(decode_engine_tok_s_series(result)) << ','
             << mean(whole_output_tok_s_series(result)) << ','
-            << stddev(whole_output_tok_s_series(result)) << ','
-            << mean(prepare_time_series(result)) << ',' << mean(prefill_time_series(result)) << ','
-            << mean(decode_time_series(result)) << ',' << mean(total_time_series(result)) << ','
-            << mean(wave_time_series(result)) << '\n';
+            << stddev(whole_output_tok_s_series(result)) << ',' << mean(prepare_time_series(result))
+            << ',' << mean(prefill_time_series(result)) << ',' << mean(decode_time_series(result))
+            << ',' << mean(total_time_series(result)) << ',' << mean(wave_time_series(result))
+            << '\n';
     }
     return out.str();
 }

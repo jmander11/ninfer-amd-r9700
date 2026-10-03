@@ -16,13 +16,16 @@ using DFlashFullBF16LayerView = ops::BidirectionalGqaBF16ContextView;
 
 class DFlashFullBF16Cache {
 public:
-    DFlashFullBF16Cache(DeviceSpan backing,
-                        const DFlashPersistentLayout::FullBF16Layout& layout);
+    DFlashFullBF16Cache(DeviceSpan backing, const DFlashPersistentLayout::FullBF16Layout& layout);
 
     [[nodiscard]] std::uint32_t layers() const noexcept { return layers_; }
+
     [[nodiscard]] std::uint32_t max_context() const noexcept { return max_context_; }
+
     [[nodiscard]] PagedKVPool& pool() noexcept { return pool_; }
+
     [[nodiscard]] const PagedKVPool& pool() const noexcept { return pool_; }
+
     [[nodiscard]] DFlashFullBF16LayerView layer_view(std::uint32_t layer) const;
 
 private:

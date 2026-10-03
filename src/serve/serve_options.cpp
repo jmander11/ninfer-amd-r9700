@@ -103,9 +103,11 @@ std::string serve_usage_text(const char* argv0) {
            "[--kv-disk-capacity off|N] [--kv-disk-location PATH] [--kv-disk-compress off|zstd] "
            "[--max-concurrency 1..8] [--no-generation-recovery] "
            "[--max-pending-requests N] [--pending-timeout-ms N] "
-           "[--prefill-chunk N] [--mixed-forward auto|N] [--mixed-forward-rounds N] [--log-stats-interval-ms N] [--device N] "
+           "[--prefill-chunk N] [--mixed-forward auto|N] [--mixed-forward-rounds N] "
+           "[--log-stats-interval-ms N] [--device N] "
            "[--max-request-mib N] [--request-log-jsonl FILE] "
-           "[--response-store-location DIR] [--response-store-max-records N] [--response-store-max-mib N] "
+           "[--response-store-location DIR] [--response-store-max-records N] "
+           "[--response-store-max-mib N] "
            "[--spec mtp|dflash --draft-tokens N] "
            "[--adaptive-draft] [--dflash-verify-width N] [--dflash-p-less-draft-temperature T] "
            "[--default-max-tokens N] "
@@ -123,18 +125,23 @@ std::string serve_usage_text(const char* argv0) {
            "       --max-request-mib defaults to 384 and is enforced before JSON parsing\n"
            "       --request-log-jsonl appends full-precision server/request records\n"
            "       --model-id overrides the artifact identity.model_id reported by the server\n"
-           "       Responses history is memory-only by default; --response-store-location persists it\n"
+           "       Responses history is memory-only by default; --response-store-location persists "
+           "it\n"
            "       Response history defaults to 1024 records / 256 MiB\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
-           "       --kv-capacity auto sizes KV from all free GPU memory except --kv-capacity-headroom "
+           "       --kv-capacity auto sizes KV from all free GPU memory except "
+           "--kv-capacity-headroom "
            "MiB (default " +
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +
            "); raise it when a desktop or other process shares the GPU\n"
-           "       --kv-ram-capacity sets pinned host KV prefix-cache capacity in MiB (default off)\n"
-           "       --kv-disk-capacity sets SSD KV prefix-cache unique-object capacity in MiB (default off)\n"
+           "       --kv-ram-capacity sets pinned host KV prefix-cache capacity in MiB (default "
+           "off)\n"
+           "       --kv-disk-capacity sets SSD KV prefix-cache unique-object capacity in MiB "
+           "(default off)\n"
            "       --kv-disk-location is required iff --kv-disk-capacity is enabled\n"
-           "       --kv-disk-compress applies zstd-1 to new GDN/hidden/cyclic writes (default off)\n"
+           "       --kv-disk-compress applies zstd-1 to new GDN/hidden/cyclic writes (default "
+           "off)\n"
            "       --no-prefix-reuse disables compatible-prefix caching (enabled by default)\n"
            "       --context-checkpoints off disables the automatic prefill ladder; a,b,c replaces "
            "the default marks (requires --spec mtp or dflash). Marks at or above --max-context "
@@ -207,8 +214,7 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--kv-disk-location") {
             options.kv_disk_location = require_value("--kv-disk-location");
         } else if (arg == "--kv-disk-compress") {
-            options.kv_disk_compress =
-                parse_kv_disk_compress(require_value("--kv-disk-compress"));
+            options.kv_disk_compress = parse_kv_disk_compress(require_value("--kv-disk-compress"));
         } else if (arg == "--no-generation-recovery") {
             options.generation_recovery = false;
         } else if (arg == "--max-concurrency") {
@@ -283,9 +289,9 @@ ServeOptions parse_serve_options(int argc, char** argv) {
                 parse_float_in(require_value("--dflash-p-less-draft-temperature"),
                                "dflash-p-less-draft-temperature", 0.0f, 2.0f);
         } else if (arg == "--dflash-verify-width") {
-            options.speculative.dflash_verify_width = static_cast<std::uint32_t>(
-                parse_nonnegative_int(require_value("--dflash-verify-width"),
-                                      "dflash-verify-width"));
+            options.speculative.dflash_verify_width =
+                static_cast<std::uint32_t>(parse_nonnegative_int(
+                    require_value("--dflash-verify-width"), "dflash-verify-width"));
         } else if (arg == "--default-max-tokens") {
             options.default_max_tokens =
                 parse_nonnegative_int(require_value("--default-max-tokens"), "default-max-tokens");

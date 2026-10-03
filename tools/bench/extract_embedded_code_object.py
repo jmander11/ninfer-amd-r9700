@@ -27,12 +27,25 @@ def _snapshot(path: Path, label: str) -> tuple[Path, int, str, int, int, int, in
         digest = hashlib.file_digest(source, "sha256").hexdigest()
         after = os.fstat(source.fileno())
     current = resolved.stat()
-    identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mode,
-                              value.st_mtime_ns, value.st_ctime_ns)
+    identity = lambda value: (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mode,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
     if identity(before) != identity(after) or identity(after) != identity(current):
         raise ValueError(f"{label} changed while being snapshotted")
-    return (resolved, after.st_size, digest, after.st_dev, after.st_ino,
-            after.st_mode, after.st_mtime_ns)
+    return (
+        resolved,
+        after.st_size,
+        digest,
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_mtime_ns,
+    )
 
 
 def _require_private_regular(path: Path, source: Path, label: str) -> None:
@@ -81,7 +94,7 @@ def _select_device_code_object(fatbin: bytes, code_symbol: str) -> tuple[bytes, 
                 cursor += 24
                 if identifier_size > 4096 or cursor + identifier_size > len(fatbin):
                     raise ValueError
-                identifier = fatbin[cursor:cursor + identifier_size].decode("utf-8")
+                identifier = fatbin[cursor : cursor + identifier_size].decode("utf-8")
                 cursor += identifier_size
                 start, end = position + offset, position + offset + size
                 # Clang represents the host member as a legal zero-sized entry. Device
@@ -90,9 +103,7 @@ def _select_device_code_object(fatbin: bytes, code_symbol: str) -> tuple[bytes, 
                     raise ValueError
                 entries.append((identifier, start, end))
             ordered_extents = sorted((start, end) for _, start, end in entries)
-            if any(left[1] > right[0] for left, right in zip(
-                ordered_extents, ordered_extents[1:]
-            )):
+            if any(left[1] > right[0] for left, right in zip(ordered_extents, ordered_extents[1:])):
                 raise ValueError
         except (UnicodeDecodeError, ValueError, struct.error):
             position += len(OFFLOAD_MAGIC)
@@ -140,13 +151,19 @@ def extract(
     selected_objcopy = objcopy_snapshot[0]
 
     output_absolute.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".extract-hip-fatbin.",
-                                     dir=output_absolute.parent) as directory:
+    with tempfile.TemporaryDirectory(
+        prefix=".extract-hip-fatbin.", dir=output_absolute.parent
+    ) as directory:
         temporary_root = Path(directory)
         section = temporary_root / "embedded.hip_fatbin"
         rewritten_elf = temporary_root / "discarded-output.elf"
-        command = [str(selected_objcopy), "--dump-section", f".hip_fatbin={section}",
-                   str(source), str(rewritten_elf)]
+        command = [
+            str(selected_objcopy),
+            "--dump-section",
+            f".hip_fatbin={section}",
+            str(source),
+            str(rewritten_elf),
+        ]
         try:
             runner(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except subprocess.CalledProcessError as error:
@@ -211,7 +228,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         result = extract(
-            args.executable, args.out, objcopy=args.objcopy, code_symbol=args.code_symbol,
+            args.executable,
+            args.out,
+            objcopy=args.objcopy,
+            code_symbol=args.code_symbol,
         )
     except (OSError, TypeError, ValueError) as error:
         raise SystemExit(str(error)) from error

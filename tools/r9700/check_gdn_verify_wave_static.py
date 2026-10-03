@@ -27,15 +27,16 @@ def metadata(text: str, symbol_fragment: str) -> tuple[int, int, int, int]:
     name = re.search(rf"(?m)^\s*\.name:\s+.*{re.escape(symbol_fragment)}.*$", text)
     if name is None:
         fail(f"missing metadata name: {symbol_fragment}")
-    groups = list(re.finditer(r"(?m)^\s*\.group_segment_fixed_size:\s+(\d+)\s*$",
-                              text[:name.start()]))
+    groups = list(
+        re.finditer(r"(?m)^\s*\.group_segment_fixed_size:\s+(\d+)\s*$", text[: name.start()])
+    )
     if not groups:
         fail(f"missing group_segment_fixed_size: {symbol_fragment}")
     values = [int(groups[-1].group(1))]
-    block = text[name.end():]
+    block = text[name.end() :]
     next_name = re.search(r"(?m)^\s*\.name:", block)
     if next_name is not None:
-        block = block[:next_name.start()]
+        block = block[: next_name.start()]
     for field in ("private_segment_fixed_size", "sgpr_count", "vgpr_count"):
         match = re.search(rf"(?m)^\s*\.{field}:\s+(\d+)\s*$", block)
         if match is None:

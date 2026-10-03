@@ -29,13 +29,24 @@ QUALIFICATIONS = {
 def identity(path: Path) -> dict[str, object]:
     resolved = path.resolve(strict=True)
     with resolved.open("rb") as source:
-        return {"path": str(resolved), "bytes": resolved.stat().st_size,
-                "sha256": hashlib.file_digest(source, "sha256").hexdigest()}
+        return {
+            "path": str(resolved),
+            "bytes": resolved.stat().st_size,
+            "sha256": hashlib.file_digest(source, "sha256").hexdigest(),
+        }
 
 
-def prepare(qualifier: Path, admission_report: Path, report: Path, trace_dir: Path,
-            capture_dir: Path, capture_library: Path, plan_path: Path,
-            rocprofv3: Path, qualification: str = "gate_up") -> dict[str, object]:
+def prepare(
+    qualifier: Path,
+    admission_report: Path,
+    report: Path,
+    trace_dir: Path,
+    capture_dir: Path,
+    capture_library: Path,
+    plan_path: Path,
+    rocprofv3: Path,
+    qualification: str = "gate_up",
+) -> dict[str, object]:
     try:
         profile = QUALIFICATIONS[qualification]
     except KeyError as error:
@@ -50,19 +61,37 @@ def prepare(qualifier: Path, admission_report: Path, report: Path, trace_dir: Pa
     plan_path = plan_path.absolute()
     if report == trace_dir or trace_dir in report.parents or report in trace_dir.parents:
         raise ValueError("qualifier report and profiler output tree must be disjoint")
-    if (capture_dir == trace_dir or trace_dir in capture_dir.parents or
-            capture_dir in trace_dir.parents):
+    if (
+        capture_dir == trace_dir
+        or trace_dir in capture_dir.parents
+        or capture_dir in trace_dir.parents
+    ):
         raise ValueError("code-object capture and profiler output trees must be disjoint")
-    for path, label in ((report, "report"), (trace_dir, "trace directory"),
-                        (capture_dir, "capture directory"),
-                        (plan_path, "plan")):
+    for path, label in (
+        (report, "report"),
+        (trace_dir, "trace directory"),
+        (capture_dir, "capture directory"),
+        (plan_path, "plan"),
+    ):
         if os.path.lexists(path):
             raise ValueError(f"refusing to reuse existing {label}: {path}")
-    command = ["/usr/bin/env", f"LD_PRELOAD={capture_id['path']}",
-               f"NINFER_CODE_OBJECT_CAPTURE_DIR={capture_dir}",
-               profiler_id["path"], "-d", str(trace_dir), "-o", profile["output_stem"],
-               "-f", "rocpd", "--kernel-trace", "--", qualifier_id["path"],
-               "--output", str(report)]
+    command = [
+        "/usr/bin/env",
+        f"LD_PRELOAD={capture_id['path']}",
+        f"NINFER_CODE_OBJECT_CAPTURE_DIR={capture_dir}",
+        profiler_id["path"],
+        "-d",
+        str(trace_dir),
+        "-o",
+        profile["output_stem"],
+        "-f",
+        "rocpd",
+        "--kernel-trace",
+        "--",
+        qualifier_id["path"],
+        "--output",
+        str(report),
+    ]
     plan = {
         "schema": profile["plan_schema"],
         "qualification": qualification,
@@ -98,9 +127,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--rocprofv3", type=Path, default=Path("/opt/rocm/bin/rocprofv3"))
     parser.add_argument("--qualification", choices=tuple(QUALIFICATIONS), default="gate_up")
     args = parser.parse_args(argv)
-    plan = prepare(args.qualifier, args.admission_report, args.report, args.trace_dir,
-                   args.capture_dir, args.capture_library, args.plan, args.rocprofv3,
-                   args.qualification)
+    plan = prepare(
+        args.qualifier,
+        args.admission_report,
+        args.report,
+        args.trace_dir,
+        args.capture_dir,
+        args.capture_library,
+        args.plan,
+        args.rocprofv3,
+        args.qualification,
+    )
     print(shlex.join(plan["command"]))
     return 0
 

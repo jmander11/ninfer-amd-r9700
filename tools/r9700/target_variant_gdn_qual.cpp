@@ -29,38 +29,38 @@ using ninfer::Weight;
 using ninfer::WorkspaceArena;
 using Variant = ninfer::targets::qwen3_8_27b::detail::Variant;
 
-static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
-    4U, 1U, QType::Q4G64_F16S, QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(4U, 1U, QType::Q4G64_F16S,
+                                                                QType::Q4G64_F16S));
 
-static_assert(Variant::gdn_input_projection_prefill_selected(
-    ninfer::targets::qwen3::TextPhase::Prefill));
-static_assert(!Variant::gdn_input_projection_prefill_selected(
-    ninfer::targets::qwen3::TextPhase::Verify));
-static_assert(Variant::ExecutionState::gdn_q4_pair_t1_selected(
-    8U, 1U, QType::Q4G64_F16S, QType::Q4G64_F16S));
-static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
-    8U, 2U, QType::Q4G64_F16S, QType::Q4G64_F16S));
-static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
-    8U, 3U, QType::Q4G64_F16S, QType::Q4G64_F16S));
-static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
-    8U, 4U, QType::Q4G64_F16S, QType::Q4G64_F16S));
-static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
-    8U, 1U, QType::W8G32_F16S, QType::Q4G64_F16S));
-static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
-    8U, 1U, QType::Q4G64_F16S, QType::W8G32_F16S));
-constexpr std::int32_t kHidden = 5120;
-constexpr std::int32_t kQueryRows = 2048;
-constexpr std::int32_t kKeyRows = 2048;
-constexpr std::int32_t kValueRows = 6144;
-constexpr std::int32_t kChannels = kQueryRows + kKeyRows + kValueRows;
+static_assert(
+    Variant::gdn_input_projection_prefill_selected(ninfer::targets::qwen3::TextPhase::Prefill));
+static_assert(
+    !Variant::gdn_input_projection_prefill_selected(ninfer::targets::qwen3::TextPhase::Verify));
+static_assert(Variant::ExecutionState::gdn_q4_pair_t1_selected(8U, 1U, QType::Q4G64_F16S,
+                                                               QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(8U, 2U, QType::Q4G64_F16S,
+                                                                QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(8U, 3U, QType::Q4G64_F16S,
+                                                                QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(8U, 4U, QType::Q4G64_F16S,
+                                                                QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(8U, 1U, QType::W8G32_F16S,
+                                                                QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(8U, 1U, QType::Q4G64_F16S,
+                                                                QType::W8G32_F16S));
+constexpr std::int32_t kHidden     = 5120;
+constexpr std::int32_t kQueryRows  = 2048;
+constexpr std::int32_t kKeyRows    = 2048;
+constexpr std::int32_t kValueRows  = 6144;
+constexpr std::int32_t kChannels   = kQueryRows + kKeyRows + kValueRows;
 constexpr std::int32_t kValueZRows = 2 * kValueRows;
-constexpr std::int32_t kGroup = 32;
+constexpr std::int32_t kGroup      = 32;
 constexpr std::uint16_t kScaleBits = 0x3000U; // IEEE FP16 0.125
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
 std::uint16_t bf16_rne_bits(float value) {
-    std::uint32_t word = std::bit_cast<std::uint32_t>(value);
+    std::uint32_t word           = std::bit_cast<std::uint32_t>(value);
     const std::uint32_t absolute = word & 0x7fffffffU;
     if ((absolute & 0x7f800000U) != 0x7f800000U) {
         word += 0x7fffU + ((word >> 16U) & 1U);
@@ -80,21 +80,22 @@ float bf16_float(hip_bfloat16 value) {
     return std::bit_cast<float>(static_cast<std::uint32_t>(value.data) << 16U);
 }
 
-std::pair<int, float> represented_a8g32(const std::vector<hip_bfloat16>& input,
-                                       std::size_t token, std::int32_t column) {
+std::pair<int, float> represented_a8g32(const std::vector<hip_bfloat16>& input, std::size_t token,
+                                        std::int32_t column) {
     const std::int32_t group_base = column / kGroup * kGroup;
-    float maximum = 0.0F;
+    float maximum                 = 0.0F;
     for (std::int32_t lane = 0; lane < kGroup; ++lane) {
-        maximum = std::max(maximum, std::abs(bf16_float(
-            input[token * kHidden + static_cast<std::size_t>(group_base + lane)])));
+        maximum = std::max(
+            maximum, std::abs(bf16_float(
+                         input[token * kHidden + static_cast<std::size_t>(group_base + lane)])));
     }
     if (maximum == 0.0F) return {0, 0.0F};
-    _Float16 half_scale = static_cast<_Float16>(maximum / 127.0F);
+    _Float16 half_scale      = static_cast<_Float16>(maximum / 127.0F);
     std::uint16_t scale_bits = std::bit_cast<std::uint16_t>(half_scale);
     if (scale_bits == 0U) scale_bits = 1U;
     const float scale = static_cast<float>(std::bit_cast<_Float16>(scale_bits));
     const float value = bf16_float(input[token * kHidden + static_cast<std::size_t>(column)]);
-    const int code = std::clamp(static_cast<int>(std::nearbyint(value / scale)), -127, 127);
+    const int code    = std::clamp(static_cast<int>(std::nearbyint(value / scale)), -127, 127);
     return {code, scale};
 }
 
@@ -124,17 +125,16 @@ struct SparseW8 {
             fail("invalid sparse W8 fixture geometry");
         }
         std::vector<std::int8_t> host_codes(static_cast<std::size_t>(rows) * columns, 0);
-        std::vector<std::uint16_t> host_scales(static_cast<std::size_t>(rows) *
-                                                   (columns / kGroup),
+        std::vector<std::uint16_t> host_scales(static_cast<std::size_t>(rows) * (columns / kGroup),
                                                0);
         for (std::int32_t row = 0; row < rows; ++row) {
             const std::int32_t column =
                 static_cast<std::int32_t>((static_cast<std::uint64_t>(row) * 37U + seed * 19U) %
                                           static_cast<std::uint32_t>(columns));
-            const std::int8_t code = static_cast<std::int8_t>(
-                (row & 1) == 0 ? 1 + row % 7 : -(1 + row % 7));
-            selected_column[static_cast<std::size_t>(row)] = column;
-            selected_code[static_cast<std::size_t>(row)] = code;
+            const std::int8_t code =
+                static_cast<std::int8_t>((row & 1) == 0 ? 1 + row % 7 : -(1 + row % 7));
+            selected_column[static_cast<std::size_t>(row)]               = column;
+            selected_code[static_cast<std::size_t>(row)]                 = code;
             host_codes[static_cast<std::size_t>(row) * columns + column] = code;
             host_scales[static_cast<std::size_t>(row) * (columns / kGroup) + column / kGroup] =
                 kScaleBits;
@@ -142,24 +142,24 @@ struct SparseW8 {
         upload(codes, host_codes);
         upload(scales, host_scales);
 
-        view.qtype = QType::W8G32_F16S;
-        view.layout = QuantLayout::RowSplit;
-        view.scale_dtype = DType::FP16;
-        view.group = kGroup;
-        view.group_size = kGroup;
-        view.ndim = 2;
-        view.n = rows;
-        view.k = columns;
-        view.shape[0] = rows;
-        view.shape[1] = columns;
+        view.qtype           = QType::W8G32_F16S;
+        view.layout          = QuantLayout::RowSplit;
+        view.scale_dtype     = DType::FP16;
+        view.group           = kGroup;
+        view.group_size      = kGroup;
+        view.ndim            = 2;
+        view.n               = rows;
+        view.k               = columns;
+        view.shape[0]        = rows;
+        view.shape[1]        = columns;
         view.padded_shape[0] = rows;
         view.padded_shape[1] = columns;
-        view.qdata = codes.data();
-        view.qdata_bytes = codes.size();
-        view.scales = scales.data();
-        view.scale_bytes = scales.size();
-        view.payload = codes.data();
-        view.payload_bytes = codes.size() + scales.size();
+        view.qdata           = codes.data();
+        view.qdata_bytes     = codes.size();
+        view.scales          = scales.data();
+        view.scale_bytes     = scales.size();
+        view.payload         = codes.data();
+        view.payload_bytes   = codes.size() + scales.size();
     }
 
     hip_bfloat16 project(const std::vector<hip_bfloat16>& input, std::size_t column,
@@ -246,8 +246,7 @@ struct OracleOutputs {
 };
 
 OracleOutputs oracle_conv(const std::vector<hip_bfloat16>& input, const SparseW8& query_key,
-                          const SparseW8& value_z,
-                          const std::vector<hip_bfloat16>& conv_weight,
+                          const SparseW8& value_z, const std::vector<hip_bfloat16>& conv_weight,
                           const std::vector<hip_bfloat16>& state,
                           const std::vector<std::int32_t>& valid,
                           const std::vector<std::int32_t>& initial_slots,
@@ -267,8 +266,8 @@ OracleOutputs oracle_conv(const std::vector<hip_bfloat16>& input, const SparseW8
 
     const auto projected = [&](std::size_t column, std::int32_t channel) {
         return channel < kQueryRows + kKeyRows
-            ? query_key.project(input, column, channel)
-            : value_z.project(input, column, channel - kQueryRows - kKeyRows);
+                   ? query_key.project(input, column, channel)
+                   : value_z.project(input, column, channel - kQueryRows - kKeyRows);
     };
     for (std::int32_t b = 0; b < batch; ++b) {
         for (std::int32_t channel = 0; channel < kChannels; ++channel) {
@@ -277,8 +276,7 @@ OracleOutputs oracle_conv(const std::vector<hip_bfloat16>& input, const SparseW8
                 kChannels;
             const float checkpoint0 = bf16_float(state[state_base + channel]);
             const float checkpoint1 = bf16_float(state[state_base + kChannels + channel]);
-            const float checkpoint2 =
-                bf16_float(state[state_base + 2U * kChannels + channel]);
+            const float checkpoint2 = bf16_float(state[state_base + 2U * kChannels + channel]);
             std::vector<float> saved0(static_cast<std::size_t>(width));
             std::vector<float> saved1(static_cast<std::size_t>(width));
             std::vector<float> saved2(static_cast<std::size_t>(width));
@@ -304,13 +302,12 @@ OracleOutputs oracle_conv(const std::vector<hip_bfloat16>& input, const SparseW8
                 const hip_bfloat16 p = projected(column, channel);
                 if (record != nullptr) { (*record)[column * kChannels + channel] = p; }
                 const float current = bf16_float(p);
-                float sum = std::fma(bf16_float(conv_weight[channel]), h0, 0.0F);
+                float sum           = std::fma(bf16_float(conv_weight[channel]), h0, 0.0F);
                 sum = std::fma(bf16_float(conv_weight[kChannels + channel]), h1, sum);
                 sum = std::fma(bf16_float(conv_weight[2 * kChannels + channel]), h2, sum);
-                sum = std::fma(bf16_float(conv_weight[3 * kChannels + channel]), current,
-                               sum);
-                const double result = static_cast<double>(sum) /
-                    (1.0 + std::exp(-static_cast<double>(sum)));
+                sum = std::fma(bf16_float(conv_weight[3 * kChannels + channel]), current, sum);
+                const double result =
+                    static_cast<double>(sum) / (1.0 + std::exp(-static_cast<double>(sum)));
                 if (channel < kQueryRows) {
                     output.query[column * kQueryRows + channel] = result;
                 } else if (channel < kQueryRows + kKeyRows) {
@@ -321,15 +318,16 @@ OracleOutputs oracle_conv(const std::vector<hip_bfloat16>& input, const SparseW8
                 saved0[static_cast<std::size_t>(token)] = h1;
                 saved1[static_cast<std::size_t>(token)] = h2;
                 saved2[static_cast<std::size_t>(token)] = current;
-                sequential0 = h1;
-                sequential1 = h2;
-                sequential2 = current;
+                sequential0                             = h1;
+                sequential1                             = h2;
+                sequential2                             = current;
                 if (snapshots != nullptr && snapshot_bases != nullptr) {
                     const std::size_t destination =
                         (static_cast<std::size_t>((*snapshot_bases)[static_cast<std::size_t>(b)]) +
-                         token) * 3U * kChannels;
-                    (*snapshots)[destination + channel] = bf16(h1);
-                    (*snapshots)[destination + kChannels + channel] = bf16(h2);
+                         token) *
+                        3U * kChannels;
+                    (*snapshots)[destination + channel]                  = bf16(h1);
+                    (*snapshots)[destination + kChannels + channel]      = bf16(h2);
                     (*snapshots)[destination + 2U * kChannels + channel] = bf16(current);
                 }
             }
@@ -350,32 +348,32 @@ void compare_outputs(const Outputs& actual, const OracleOutputs& expected, const
 }
 
 void qualify(hipStream_t stream) {
-    constexpr std::int32_t width = 4;
-    constexpr std::int32_t batch = 2;
-    constexpr std::int32_t tokens = width * batch;
+    constexpr std::int32_t width       = 4;
+    constexpr std::int32_t batch       = 2;
+    constexpr std::int32_t tokens      = width * batch;
     constexpr std::int32_t state_slots = 16;
     std::vector<hip_bfloat16> input(static_cast<std::size_t>(tokens) * kHidden);
     for (std::size_t index = 0; index < input.size(); ++index) {
         const auto wave = static_cast<std::int32_t>((index * 31U + 17U) % 97U) - 48;
-        input[index] = bf16(static_cast<float>(wave == 0 ? 1 : wave) / 64.0F);
+        input[index]    = bf16(static_cast<float>(wave == 0 ? 1 : wave) / 64.0F);
     }
     SparseW8 query_key(kQueryRows + kKeyRows, kHidden, tokens, 3U);
     SparseW8 value_z(kValueZRows, kHidden, tokens, 7U);
     Variant::GdnProjectionWeights weights{};
     weights.input_projection.query_key = query_key.view;
-    weights.input_projection.value_z = value_z.view;
+    weights.input_projection.value_z   = value_z.view;
 
     std::vector<hip_bfloat16> conv_weight(static_cast<std::size_t>(kChannels) * 4U);
     for (std::int32_t channel = 0; channel < kChannels; ++channel) {
-        conv_weight[channel] = bf16(0.25F);
-        conv_weight[kChannels + channel] = bf16(-0.125F);
+        conv_weight[channel]                 = bf16(0.25F);
+        conv_weight[kChannels + channel]     = bf16(-0.125F);
         conv_weight[2 * kChannels + channel] = bf16(0.0625F);
         conv_weight[3 * kChannels + channel] = bf16(0.5F);
     }
     std::vector<hip_bfloat16> state(static_cast<std::size_t>(state_slots) * 3U * kChannels);
     for (std::size_t index = 0; index < state.size(); ++index) {
         const auto wave = static_cast<std::int32_t>((index * 13U + 5U) % 37U) - 18;
-        state[index] = bf16(static_cast<float>(wave) / 64.0F);
+        state[index]    = bf16(static_cast<float>(wave) / 64.0F);
     }
     const std::vector<std::int32_t> valid{4, 2};
     const std::vector<std::int32_t> initial{0, 1};
@@ -409,12 +407,12 @@ void qualify(hipStream_t stream) {
         oracle_conv(input, query_key, value_z, conv_weight, state, valid, initial, nullptr, width,
                     batch, &expected_snapshots, &bases, nullptr);
     upload(d_state, state);
-    const std::size_t fallback_linear_bytes = ninfer::ops::linear_workspace_capacity_bytes(
-        QType::W8G32_F16S, tokens, kHidden);
+    const std::size_t fallback_linear_bytes =
+        ninfer::ops::linear_workspace_capacity_bytes(QType::W8G32_F16S, tokens, kHidden);
     const std::size_t snapshot_leaf_bytes =
         Variant::gdn_input_projection_snapshot_workspace_capacity_bytes(
-        Variant::WeightsProfile::R9700W8G32Candidate,
-        ninfer::targets::qwen3::TextPhase::Verify, batch, width, width);
+            Variant::WeightsProfile::R9700W8G32Candidate, ninfer::targets::qwen3::TextPhase::Verify,
+            batch, width, width);
     // Production supplies this activation storage through ExecutionState. The direct leaf
     // qualifier intentionally exercises the null-execution fallback, so its local arena owns it.
     const std::size_t snapshot_bytes = snapshot_leaf_bytes + fallback_linear_bytes;
@@ -441,21 +439,19 @@ void qualify(hipStream_t stream) {
     upload(d_state, state);
     const std::size_t record_leaf_bytes =
         Variant::gdn_input_projection_record_workspace_capacity_bytes(
-        Variant::WeightsProfile::R9700W8G32Candidate,
-        ninfer::targets::qwen3::TextPhase::Verify, batch, width, width);
+            Variant::WeightsProfile::R9700W8G32Candidate, ninfer::targets::qwen3::TextPhase::Verify,
+            batch, width, width);
     const std::size_t record_bytes = record_leaf_bytes + fallback_linear_bytes;
     WorkspaceArena record_workspace(record_bytes);
     Variant::gdn_input_projection_record(
-        hidden, weights, conv, states, valid_view, initial_view, record,
-        record_outputs.query_view, record_outputs.key_view, record_outputs.value_view,
-        record_outputs.gate_view, ninfer::targets::qwen3::TextPhase::Verify, record_workspace,
-        stream, &parent_view);
+        hidden, weights, conv, states, valid_view, initial_view, record, record_outputs.query_view,
+        record_outputs.key_view, record_outputs.value_view, record_outputs.gate_view,
+        ninfer::targets::qwen3::TextPhase::Verify, record_workspace, stream, &parent_view);
     HIP_CHECK(hipStreamSynchronize(stream));
     compare_outputs(record_outputs, record_oracle, "Variant record");
     require_exact(download<hip_bfloat16>(d_record), expected_record,
                   "Variant represented projection record");
-    require_exact(download<hip_bfloat16>(d_state), state,
-                  "Variant replay checkpoint immutability");
+    require_exact(download<hip_bfloat16>(d_state), state, "Variant replay checkpoint immutability");
     if (record_workspace.peak_used() != record_bytes) {
         fail("Variant record workspace query does not match observed peak");
     }
@@ -463,8 +459,8 @@ void qualify(hipStream_t stream) {
     bool rejected = false;
     try {
         (void)Variant::gdn_input_projection_record_workspace_capacity_bytes(
-            Variant::WeightsProfile::R9700W8G32Candidate,
-            ninfer::targets::qwen3::TextPhase::Verify, batch, 1, 1);
+            Variant::WeightsProfile::R9700W8G32Candidate, ninfer::targets::qwen3::TextPhase::Verify,
+            batch, 1, 1);
     } catch (const std::invalid_argument&) { rejected = true; }
     if (!rejected) { fail("Variant record workspace admitted width one"); }
 }

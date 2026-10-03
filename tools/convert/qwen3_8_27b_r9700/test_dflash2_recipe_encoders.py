@@ -9,8 +9,10 @@ from tools.convert.qwen3.common.inventory import tensor_spec
 from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes as recipes
 
 
-@unittest.skipUnless(importlib.util.find_spec("torch") and importlib.util.find_spec("numpy"),
-                     "CPU Torch and NumPy are required for real encoder qualification")
+@unittest.skipUnless(
+    importlib.util.find_spec("torch") and importlib.util.find_spec("numpy"),
+    "CPU Torch and NumPy are required for real encoder qualification",
+)
 class DFlash2RecipeEncodersTest(unittest.TestCase):
     def test_cpu_encoders_match_represented_source_oracle(self) -> None:
         import torch

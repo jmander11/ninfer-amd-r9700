@@ -17,7 +17,7 @@
 namespace {
 
 constexpr int kDimensions = 1152;
-constexpr int kRows = 2304;
+constexpr int kRows       = 2304;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
@@ -27,7 +27,7 @@ std::vector<hip_bfloat16> make_table() {
     std::vector<hip_bfloat16> result(static_cast<std::size_t>(kDimensions) * kRows);
     for (std::size_t index = 0; index < result.size(); ++index) {
         const int code = static_cast<int>((index * 37U + index / kDimensions * 11U) % 251U) - 125;
-        result[index] = hip_bfloat16(static_cast<float>(code) / 96.0F);
+        result[index]  = hip_bfloat16(static_cast<float>(code) / 96.0F);
     }
     return result;
 }
@@ -38,14 +38,14 @@ void run_case(const std::vector<hip_bfloat16>& table, int patches, hipStream_t s
     std::vector<float> weights(static_cast<std::size_t>(4) * patches);
     for (std::size_t index = 0; index < x.size(); ++index) {
         const int code = static_cast<int>((index * 19U + 7U) % 191U) - 95;
-        x[index] = hip_bfloat16(static_cast<float>(code) / 32.0F);
+        x[index]       = hip_bfloat16(static_cast<float>(code) / 32.0F);
     }
     for (int patch = 0; patch < patches; ++patch) {
         float normalizer = 0.0F;
         for (int corner = 0; corner < 4; ++corner) {
             const std::size_t control = static_cast<std::size_t>(patch) * 4 + corner;
-            indices[control] = (patch * 37 + corner * 101 + 11) % kRows;
-            weights[control] = static_cast<float>(((patch + 3) * (corner + 5)) % 17 + 2);
+            indices[control]          = (patch * 37 + corner * 101 + 11) % kRows;
+            weights[control]          = static_cast<float>(((patch + 3) * (corner + 5)) % 17 + 2);
             normalizer += weights[control];
         }
         for (int corner = 0; corner < 4; ++corner) {
@@ -57,8 +57,8 @@ void run_case(const std::vector<hip_bfloat16>& table, int patches, hipStream_t s
     std::vector<double> oracle(x.size());
     for (int patch = 0; patch < patches; ++patch) {
         for (int dimension = 0; dimension < kDimensions; ++dimension) {
-            double value = static_cast<double>(represented(x[static_cast<std::size_t>(patch) *
-                                                              kDimensions + dimension]));
+            double value = static_cast<double>(
+                represented(x[static_cast<std::size_t>(patch) * kDimensions + dimension]));
             for (int corner = 0; corner < 4; ++corner) {
                 const std::size_t control = static_cast<std::size_t>(patch) * 4 + corner;
                 value += static_cast<double>(represented(
@@ -86,7 +86,7 @@ void run_case(const std::vector<hip_bfloat16>& table, int patches, hipStream_t s
     ninfer::ops::vision_pos_embed_add(table_tensor, index_tensor, weight_tensor, x_tensor, stream);
     d_x.copy_from_host_async(original_x.data(), d_x.size(), stream);
     hipEvent_t begin = nullptr;
-    hipEvent_t end = nullptr;
+    hipEvent_t end   = nullptr;
     HIP_CHECK(hipEventCreate(&begin));
     HIP_CHECK(hipEventCreate(&end));
     HIP_CHECK(hipEventRecord(begin, stream));
@@ -99,12 +99,12 @@ void run_case(const std::vector<hip_bfloat16>& table, int patches, hipStream_t s
     HIP_CHECK(hipEventDestroy(end));
 
     d_x.copy_to_host(x.data(), d_x.size());
-    double squared_error = 0.0;
+    double squared_error  = 0.0;
     double squared_oracle = 0.0;
-    double max_abs = 0.0;
+    double max_abs        = 0.0;
     for (std::size_t index = 0; index < x.size(); ++index) {
         const double actual = represented(x[index]);
-        const double error = actual - oracle[index];
+        const double error  = actual - oracle[index];
         squared_error += error * error;
         squared_oracle += oracle[index] * oracle[index];
         max_abs = std::max(max_abs, std::abs(error));

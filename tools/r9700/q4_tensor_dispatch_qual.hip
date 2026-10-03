@@ -24,13 +24,13 @@
 
 namespace {
 
-constexpr bool kMixed = ninfer::ops::r9700::linear::kQ4PrefillA4Families != 0U;
-std::uint32_t gTokens = kMixed ? 129 : 3;
-std::uint32_t kRows = kMixed ? 34816 : 32;
-std::uint32_t kColumns = kMixed ? 5120 : 192;
-std::uint32_t kPaddedColumns = kMixed ? 5120 : 256;
+constexpr bool kMixed          = ninfer::ops::r9700::linear::kQ4PrefillA4Families != 0U;
+std::uint32_t gTokens          = kMixed ? 129 : 3;
+std::uint32_t kRows            = kMixed ? 34816 : 32;
+std::uint32_t kColumns         = kMixed ? 5120 : 192;
+std::uint32_t kPaddedColumns   = kMixed ? 5120 : 256;
 constexpr std::uint32_t kGroup = 64;
-std::uint32_t gActiveBits = kMixed ? 4 : ninfer::ops::r9700::linear::kQ4ActivationBits;
+std::uint32_t gActiveBits      = kMixed ? 4 : ninfer::ops::r9700::linear::kQ4ActivationBits;
 
 // The mixed evaluator exercises the real gate/up geometry and its first tail
 // width. Sample complete independent FP64 dot products at tile/shape boundaries;
@@ -38,13 +38,15 @@ std::uint32_t gActiveBits = kMixed ? 4 : ninfer::ops::r9700::linear::kQ4Activati
 bool oracle_position(std::uint32_t token, std::uint32_t row) {
     if (!kMixed) return true;
     const bool selected_token = token == 0 || token == 1 || token == 15 || token == 16 ||
-        token == 63 || token == 64 || token == 127 || token == 128 ||
-        token == gTokens/2 || token + 2 == gTokens || token + 1 == gTokens;
-    return selected_token && (row < 32 || (row >= kRows/2 && row < kRows/2+32) || row >= kRows-32);
+                                token == 63 || token == 64 || token == 127 || token == 128 ||
+                                token == gTokens / 2 || token + 2 == gTokens ||
+                                token + 1 == gTokens;
+    return selected_token &&
+           (row < 32 || (row >= kRows / 2 && row < kRows / 2 + 32) || row >= kRows - 32);
 }
 
 std::uint32_t oracle_positions() {
-    if (!kMixed) return gTokens*kRows;
+    if (!kMixed) return gTokens * kRows;
     std::uint32_t count = 0;
     for (std::uint32_t token = 0; token < gTokens; ++token)
         if (oracle_position(token, 0)) count += 96;
@@ -66,11 +68,21 @@ std::string json_escape(std::string_view value) {
     std::ostringstream out;
     for (const unsigned char character : value) {
         switch (character) {
-        case '\"': out << "\\\""; break;
-        case '\\': out << "\\\\"; break;
-        case '\n': out << "\\n"; break;
-        case '\r': out << "\\r"; break;
-        case '\t': out << "\\t"; break;
+        case '\"':
+            out << "\\\"";
+            break;
+        case '\\':
+            out << "\\\\";
+            break;
+        case '\n':
+            out << "\\n";
+            break;
+        case '\r':
+            out << "\\r";
+            break;
+        case '\t':
+            out << "\\t";
+            break;
         default:
             if (character < 0x20U) {
                 out << "\\u" << std::hex << std::setw(4) << std::setfill('0')
@@ -94,7 +106,7 @@ hipDeviceProp_t select_r9700() {
         if (candidate.integrated == 0 && std::string_view(candidate.gcnArchName) == "gfx1201" &&
             candidate.warpSize == 32) {
             if (selected >= 0) fail("expected exactly one discrete wave32 gfx1201 device");
-            selected = ordinal;
+            selected   = ordinal;
             properties = candidate;
         }
     }
@@ -107,16 +119,14 @@ std::uint16_t half_bits(float value) {
     return std::bit_cast<std::uint16_t>(static_cast<_Float16>(value));
 }
 
-float half_value(std::uint16_t bits) {
-    return static_cast<float>(std::bit_cast<_Float16>(bits));
-}
+float half_value(std::uint16_t bits) { return static_cast<float>(std::bit_cast<_Float16>(bits)); }
 
 void set_q4(std::vector<std::uint8_t>& packed, std::size_t index, int code) {
-    const unsigned shift = static_cast<unsigned>((index & 1U) * 4U);
+    const unsigned shift    = static_cast<unsigned>((index & 1U) * 4U);
     const std::uint8_t mask = static_cast<std::uint8_t>(0x0fU << shift);
-    packed[index >> 1U] = static_cast<std::uint8_t>(
-        (packed[index >> 1U] & static_cast<std::uint8_t>(~mask)) |
-        ((static_cast<unsigned>(code) & 0x0fU) << shift));
+    packed[index >> 1U] =
+        static_cast<std::uint8_t>((packed[index >> 1U] & static_cast<std::uint8_t>(~mask)) |
+                                  ((static_cast<unsigned>(code) & 0x0fU) << shift));
 }
 
 int get_q4(const std::vector<std::uint8_t>& packed, std::size_t index) {
@@ -130,43 +140,39 @@ struct HostActivation {
 };
 
 HostActivation quantize_activation(const std::vector<hip_bfloat16>& input) {
-    const int maximum_code =
-        gActiveBits == 8 ? 127 : 7;
-    const int minimum_code =
-        gActiveBits == 8 ? -127 : -8;
+    const int maximum_code = gActiveBits == 8 ? 127 : 7;
+    const int minimum_code = gActiveBits == 8 ? -127 : -8;
     HostActivation result{
         std::vector<int>(static_cast<std::size_t>(gTokens) * kPaddedColumns),
-        std::vector<std::uint16_t>(static_cast<std::size_t>(gTokens) *
-                                   (kPaddedColumns / kGroup))};
+        std::vector<std::uint16_t>(static_cast<std::size_t>(gTokens) * (kPaddedColumns / kGroup))};
     for (std::uint32_t token = 0; token < gTokens; ++token) {
         for (std::uint32_t group = 0; group < kPaddedColumns / kGroup; ++group) {
             float maximum = 0.0F;
             for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
                 const std::uint32_t column = group * kGroup + lane;
-                const float value = column < kColumns
-                                        ? static_cast<float>(input[
-                                              static_cast<std::size_t>(token) * kColumns + column])
-                                        : 0.0F;
+                const float value =
+                    column < kColumns
+                        ? static_cast<float>(
+                              input[static_cast<std::size_t>(token) * kColumns + column])
+                        : 0.0F;
                 maximum = std::max(maximum, std::abs(value));
             }
-            std::uint16_t scale_bits =
-                maximum == 0.0F ? 0U : half_bits(maximum / maximum_code);
+            std::uint16_t scale_bits = maximum == 0.0F ? 0U : half_bits(maximum / maximum_code);
             if (maximum != 0.0F && scale_bits == 0U) scale_bits = 1U;
             const float scale = half_value(scale_bits);
-            result.scales[static_cast<std::size_t>(token) *
-                              (kPaddedColumns / kGroup) +
-                          group] = scale_bits;
+            result.scales[static_cast<std::size_t>(token) * (kPaddedColumns / kGroup) + group] =
+                scale_bits;
             for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
                 const std::uint32_t column = group * kGroup + lane;
-                const float value = column < kColumns
-                                        ? static_cast<float>(input[
-                                              static_cast<std::size_t>(token) * kColumns + column])
-                                        : 0.0F;
+                const float value =
+                    column < kColumns
+                        ? static_cast<float>(
+                              input[static_cast<std::size_t>(token) * kColumns + column])
+                        : 0.0F;
                 result.codes[static_cast<std::size_t>(token) * kPaddedColumns + column] =
-                    scale_bits == 0U
-                        ? 0
-                        : std::clamp(static_cast<int>(std::nearbyint(value / scale)),
-                                     minimum_code, maximum_code);
+                    scale_bits == 0U ? 0
+                                     : std::clamp(static_cast<int>(std::nearbyint(value / scale)),
+                                                  minimum_code, maximum_code);
             }
         }
     }
@@ -181,21 +187,15 @@ struct HostWeights {
 HostWeights make_weights() {
     HostWeights result{
         std::vector<std::uint8_t>(static_cast<std::size_t>(kRows) * kPaddedColumns / 2U),
-        std::vector<std::uint16_t>(static_cast<std::size_t>(kRows) *
-                                   (kPaddedColumns / kGroup))};
+        std::vector<std::uint16_t>(static_cast<std::size_t>(kRows) * (kPaddedColumns / kGroup))};
     for (std::uint32_t row = 0; row < kRows; ++row) {
         for (std::uint32_t group = 0; group < kPaddedColumns / kGroup; ++group) {
             const bool padding = group * kGroup >= kColumns;
             result.scales[static_cast<std::size_t>(row) * (kPaddedColumns / kGroup) + group] =
-                padding ? 0U : half_bits((1.0F + static_cast<float>((row + group) % 4U)) /
-                                         128.0F);
+                padding ? 0U : half_bits((1.0F + static_cast<float>((row + group) % 4U)) / 128.0F);
             for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
-                const int code = padding
-                                     ? 0
-                                     : static_cast<int>((row * 11U + group * 5U +
-                                                         lane * 7U) &
-                                                        15U) -
-                                           8;
+                const int code =
+                    padding ? 0 : static_cast<int>((row * 11U + group * 5U + lane * 7U) & 15U) - 8;
                 set_q4(result.codes,
                        static_cast<std::size_t>(row) * kPaddedColumns + group * kGroup + lane,
                        code);
@@ -218,7 +218,7 @@ std::vector<hip_bfloat16> make_input() {
 }
 
 std::vector<hip_bfloat16> quantized_reference(const HostActivation& activation,
-                                 const HostWeights& weights) {
+                                              const HostWeights& weights) {
     std::vector<hip_bfloat16> output(static_cast<std::size_t>(gTokens) * kRows);
     for (std::uint32_t token = 0; token < gTokens; ++token) {
         for (std::uint32_t row = 0; row < kRows; ++row) {
@@ -234,13 +234,11 @@ std::vector<hip_bfloat16> quantized_reference(const HostActivation& activation,
                     dot += activation.codes[activation_index] * get_q4(weights.codes, weight_index);
                 }
                 const double activation_scale = half_value(
-                    activation.scales[static_cast<std::size_t>(token) *
-                                          (kPaddedColumns / kGroup) +
+                    activation.scales[static_cast<std::size_t>(token) * (kPaddedColumns / kGroup) +
                                       group]);
                 const double weight_scale = half_value(
-                    weights.scales[static_cast<std::size_t>(row) *
-                                       (kPaddedColumns / kGroup) +
-                                   group]);
+                    weights
+                        .scales[static_cast<std::size_t>(row) * (kPaddedColumns / kGroup) + group]);
                 sum = std::fma(static_cast<double>(dot), activation_scale * weight_scale, sum);
             }
             output[static_cast<std::size_t>(token) * kRows + row] =
@@ -254,32 +252,33 @@ std::vector<hip_bfloat16> quantized_reference(const HostActivation& activation,
 // exact decoded stored weights. It does not quantize the input or reproduce the
 // device reduction. The separate quantized reference above checks codec/dispatch.
 std::pair<double, double> logical_oracle(const std::vector<hip_bfloat16>& input,
-                                       const HostWeights& weights,
-                                       std::uint32_t token, std::uint32_t row) {
+                                         const HostWeights& weights, std::uint32_t token,
+                                         std::uint32_t row) {
     double sum = 0.0, budget = 0.0;
     const double max_code = gActiveBits == 8 ? 127.0 : 7.0;
-    for (std::uint32_t group = 0; group < kPaddedColumns/kGroup; ++group) {
-        const double scale = half_value(weights.scales[row*(kPaddedColumns/kGroup)+group]);
+    for (std::uint32_t group = 0; group < kPaddedColumns / kGroup; ++group) {
+        const double scale = half_value(weights.scales[row * (kPaddedColumns / kGroup) + group]);
         double max_input = 0.0, weight_l1 = 0.0;
         for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
-            const auto column = group*kGroup+lane;
-            const double x = column < kColumns ? static_cast<float>(input[token*kColumns+column]) : 0.0;
-            const double w = get_q4(weights.codes, row*kPaddedColumns+column)*scale;
-            sum += x*w;
+            const auto column = group * kGroup + lane;
+            const double x =
+                column < kColumns ? static_cast<float>(input[token * kColumns + column]) : 0.0;
+            const double w = get_q4(weights.codes, row * kPaddedColumns + column) * scale;
+            sum += x * w;
             max_input = std::max(max_input, std::abs(x));
             weight_l1 += std::abs(w);
         }
         // Bound nearest-code error plus FP16 scale representation at this
         // finite, normal-scale fixture; no observed output determines the bound.
-        budget += weight_l1*max_input*(0.5/max_code+0.002);
+        budget += weight_l1 * max_input * (0.5 / max_code + 0.002);
     }
-    return {sum, budget*1.01+std::abs(sum)*0.004+1e-4};
+    return {sum, budget * 1.01 + std::abs(sum) * 0.004 + 1e-4};
 }
 
 void write_json(const std::filesystem::path& path, bool passed, const std::string& failure,
-                const hipDeviceProp_t& device, std::size_t workspace_bytes,
-                bool workspace_rewound, std::uint64_t maximum_bf16_steps,
-                bool status_poisoned, double maximum_logical_error) {
+                const hipDeviceProp_t& device, std::size_t workspace_bytes, bool workspace_rewound,
+                std::uint64_t maximum_bf16_steps, bool status_poisoned,
+                double maximum_logical_error) {
     const auto parent = path.parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
     std::ofstream out(path, std::ios::trunc);
@@ -291,20 +290,17 @@ void write_json(const std::filesystem::path& path, bool passed, const std::strin
         << "  \"artifact_profiles\": [\"qwen3.8-27b/r9700-q4g64-n16k16-eval\", "
            "\"qwen3.8-27b/r9700-q4-w8-n16k16-eval\", "
            "\"qwen3.8-27b/r9700-q4-w8-mse-n16k16-eval\"],\n"
-        << "  \"q4_activation_bits\": "
-        << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
+        << "  \"q4_activation_bits\": " << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
         << "  \"active_q4_activation_bits\": " << gActiveBits << ",\n"
         << "  \"oracle_positions\": " << oracle_positions() << ",\n"
         << "  \"shape\": {\"tokens\": " << gTokens << ", \"rows\": " << kRows
-        << ", \"columns\": " << kColumns << ", \"padded_columns\": "
-        << kPaddedColumns << "},\n"
+        << ", \"columns\": " << kColumns << ", \"padded_columns\": " << kPaddedColumns << "},\n"
         << "  \"workspace_bytes\": " << workspace_bytes << ",\n"
-        << "  \"workspace_rewound_after_dispatch\": "
-        << (workspace_rewound ? "true" : "false") << ",\n"
+        << "  \"workspace_rewound_after_dispatch\": " << (workspace_rewound ? "true" : "false")
+        << ",\n"
         << "  \"maximum_bf16_steps\": " << maximum_bf16_steps << ",\n"
         << "  \"maximum_public_input_oracle_abs_error\": " << maximum_logical_error << ",\n"
-        << "  \"asynchronous_status_nan\": " << (status_poisoned ? "true" : "false")
-        << ",\n"
+        << "  \"asynchronous_status_nan\": " << (status_poisoned ? "true" : "false") << ",\n"
         << "  \"hardware\": {\"architecture\": \"" << json_escape(device.gcnArchName)
         << "\", \"wave_size\": " << device.warpSize << "},\n"
         << "  \"toolchain\": {\"compiler\": \"" << json_escape(__VERSION__)
@@ -318,52 +314,67 @@ void write_json(const std::filesystem::path& path, bool passed, const std::strin
 
 int main(int argc, char** argv) {
     if (argc < 3 || argc % 2 != 1 || std::string_view(argv[1]) != "--out-json") {
-        std::cerr << "usage: q4_tensor_dispatch_qual --out-json PATH [--tokens T] [--shape gate-up|down|attn-q|attn-kv|gdn-in|out]\n";
+        std::cerr << "usage: q4_tensor_dispatch_qual --out-json PATH [--tokens T] [--shape "
+                     "gate-up|down|attn-q|attn-kv|gdn-in|out]\n";
         return 2;
     }
     const std::filesystem::path path(argv[2]);
     hipDeviceProp_t device{};
-    std::size_t workspace_bytes = 0;
-    bool workspace_rewound = false;
+    std::size_t workspace_bytes      = 0;
+    bool workspace_rewound           = false;
     std::uint64_t maximum_bf16_steps = 0;
-    bool status_poisoned = false;
-    double maximum_logical_error = 0.0;
+    bool status_poisoned             = false;
+    double maximum_logical_error     = 0.0;
     try {
         unsigned required_family = 1;
         for (int arg = 3; arg < argc; arg += 2) {
             if (!kMixed) fail("shape/token overrides require a mixed build");
             if (std::string_view(argv[arg]) == "--shape") {
-                const std::string_view shape(argv[arg+1]);
+                const std::string_view shape(argv[arg + 1]);
                 kColumns = kPaddedColumns = 5120;
-                if (shape == "gate-up") { kRows = 34816; required_family = 1; }
-                else if (shape == "down") {
-                    kRows = 5120; kColumns = kPaddedColumns = 17408; required_family = 2;
-                } else if (shape == "attn-q") { kRows = 4096; required_family = 3; }
-                else if (shape == "attn-kv") { kRows = 7168; required_family = 3; }
-                else if (shape == "gdn-in") { kRows = 12288; required_family = 3; }
-                else if (shape == "out") {
-                    kRows = 5120; kColumns = kPaddedColumns = 6144; required_family = 3;
-                } else fail("unknown qualification shape");
+                if (shape == "gate-up") {
+                    kRows           = 34816;
+                    required_family = 1;
+                } else if (shape == "down") {
+                    kRows    = 5120;
+                    kColumns = kPaddedColumns = 17408;
+                    required_family           = 2;
+                } else if (shape == "attn-q") {
+                    kRows           = 4096;
+                    required_family = 3;
+                } else if (shape == "attn-kv") {
+                    kRows           = 7168;
+                    required_family = 3;
+                } else if (shape == "gdn-in") {
+                    kRows           = 12288;
+                    required_family = 3;
+                } else if (shape == "out") {
+                    kRows    = 5120;
+                    kColumns = kPaddedColumns = 6144;
+                    required_family           = 3;
+                } else
+                    fail("unknown qualification shape");
                 continue;
             }
             if (std::string_view(argv[arg]) != "--tokens") fail("unknown option");
             std::size_t consumed = 0;
-            const auto value = std::stoul(argv[arg+1], &consumed);
-            if (consumed != std::string_view(argv[arg+1]).size() || value == 0 || value > 4096)
+            const auto value     = std::stoul(argv[arg + 1], &consumed);
+            if (consumed != std::string_view(argv[arg + 1]).size() || value == 0 || value > 4096)
                 fail("qualification tokens must be in [1,4096]");
             gTokens = static_cast<std::uint32_t>(value);
         }
         // Independent shape-family expectation, not the production dispatch predicate.
         if (kMixed) {
-            const auto family = ninfer::ops::r9700::linear::kQ4PrefillA4Families;
-            const bool selected = family <= 3 ? family >= required_family :
-                (kRows == 7168 || (family == 5 && required_family == 1));
-            gActiveBits = gTokens > 128U && selected ? 4U : 8U;
+            const auto family   = ninfer::ops::r9700::linear::kQ4PrefillA4Families;
+            const bool selected = family <= 3
+                                      ? family >= required_family
+                                      : (kRows == 7168 || (family == 5 && required_family == 1));
+            gActiveBits         = gTokens > 128U && selected ? 4U : 8U;
         }
-        device = select_r9700();
-        const std::vector<hip_bfloat16> input = make_input();
-        const HostWeights weights = make_weights();
-        const HostActivation activation = quantize_activation(input);
+        device                                   = select_r9700();
+        const std::vector<hip_bfloat16> input    = make_input();
+        const HostWeights weights                = make_weights();
+        const HostActivation activation          = quantize_activation(input);
         const std::vector<hip_bfloat16> expected = quantized_reference(activation, weights);
         ninfer::DeviceBuffer d_input(input.size() * sizeof(hip_bfloat16));
         ninfer::DeviceBuffer d_weight_codes(weights.codes.size());
@@ -381,7 +392,8 @@ int main(int argc, char** argv) {
                     weights.scales[row * groups + group];
                 for (std::size_t byte = 0; byte < 32; ++byte) {
                     const std::size_t destination =
-                        ((((row / 16) * groups + group) * 4 + byte / 8) * 16 + row % 16) * 8 + byte % 8;
+                        ((((row / 16) * groups + group) * 4 + byte / 8) * 16 + row % 16) * 8 +
+                        byte % 8;
                     tiled_codes[destination] = weights.codes[(row * groups + group) * 32 + byte];
                 }
             }
@@ -390,36 +402,34 @@ int main(int argc, char** argv) {
         d_weight_scales.copy_from_host(tiled_scales.data(), d_weight_scales.size());
 
         ninfer::Tensor x(d_input.data(), ninfer::DType::BF16,
-                         {static_cast<std::int32_t>(kColumns),
-                          static_cast<std::int32_t>(gTokens)});
-        ninfer::Tensor output(d_output.data(), ninfer::DType::BF16,
-                              {static_cast<std::int32_t>(kRows),
-                               static_cast<std::int32_t>(gTokens)});
+                         {static_cast<std::int32_t>(kColumns), static_cast<std::int32_t>(gTokens)});
+        ninfer::Tensor output(
+            d_output.data(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kRows), static_cast<std::int32_t>(gTokens)});
         ninfer::Weight weight{};
-        weight.payload = d_weight_codes.data();
-        weight.payload_bytes = weights.codes.size() +
-                               weights.scales.size() * sizeof(std::uint16_t);
-        weight.qdata = d_weight_codes.data();
-        weight.qdata_bytes = weights.codes.size();
-        weight.scales = d_weight_scales.data();
-        weight.scale_bytes = weights.scales.size() * sizeof(std::uint16_t);
-        weight.qtype = ninfer::QType::Q4G64_F16S;
+        weight.payload       = d_weight_codes.data();
+        weight.payload_bytes = weights.codes.size() + weights.scales.size() * sizeof(std::uint16_t);
+        weight.qdata         = d_weight_codes.data();
+        weight.qdata_bytes   = weights.codes.size();
+        weight.scales        = d_weight_scales.data();
+        weight.scale_bytes   = weights.scales.size() * sizeof(std::uint16_t);
+        weight.qtype         = ninfer::QType::Q4G64_F16S;
         weight.group_size = weight.group = kGroup;
-        weight.layout = ninfer::QuantLayout::Q4N16K16;
-        weight.scale_dtype = ninfer::DType::FP16;
-        weight.ndim = 2;
+        weight.layout                    = ninfer::QuantLayout::Q4N16K16;
+        weight.scale_dtype               = ninfer::DType::FP16;
+        weight.ndim                      = 2;
         weight.n = weight.shape[0] = weight.padded_shape[0] = kRows;
         weight.k = weight.shape[1] = kColumns;
-        weight.padded_shape[1] = kPaddedColumns;
+        weight.padded_shape[1]     = kPaddedColumns;
 
-        workspace_bytes = ninfer::ops::linear_workspace_capacity_bytes(
-            ninfer::QType::Q4G64_F16S, gTokens, kColumns);
+        workspace_bytes = ninfer::ops::linear_workspace_capacity_bytes(ninfer::QType::Q4G64_F16S,
+                                                                       gTokens, kColumns);
         const std::size_t expected_workspace =
             ninfer::ops::r9700::linear::kQ4ActivationBits == 8
-                ? ninfer::ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
-                      gTokens, kColumns)
-                : ninfer::ops::r9700::linear::q4g64_activation_workspace_capacity_bytes(
-                      gTokens, kColumns);
+                ? ninfer::ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(gTokens,
+                                                                                          kColumns)
+                : ninfer::ops::r9700::linear::q4g64_activation_workspace_capacity_bytes(gTokens,
+                                                                                        kColumns);
         if (workspace_bytes != expected_workspace) fail("compile-selected workspace mismatch");
         ninfer::WorkspaceArena workspace(workspace_bytes);
         ninfer::ops::linear(x, weight, output, workspace, nullptr);
@@ -432,35 +442,34 @@ int main(int argc, char** argv) {
         d_output.copy_to_host(actual.data(), d_output.size());
         for (std::size_t index = 0; index < actual.size(); ++index) {
             if (!std::isfinite(static_cast<float>(actual[index]))) fail("nonfinite Tensor output");
-            if (!oracle_position(index/kRows, index%kRows)) continue;
-            const auto [reference, tolerance] = logical_oracle(input, weights, index/kRows, index%kRows);
-            const double error = std::abs(static_cast<float>(actual[index])-reference);
+            if (!oracle_position(index / kRows, index % kRows)) continue;
+            const auto [reference, tolerance] =
+                logical_oracle(input, weights, index / kRows, index % kRows);
+            const double error    = std::abs(static_cast<float>(actual[index]) - reference);
             maximum_logical_error = std::max(maximum_logical_error, error);
-            if (error > tolerance) fail("Tensor output exceeds public-input FP64 quantization bound");
+            if (error > tolerance)
+                fail("Tensor output exceeds public-input FP64 quantization bound");
             const std::uint64_t steps = actual[index].data > expected[index].data
                                             ? actual[index].data - expected[index].data
                                             : expected[index].data - actual[index].data;
-            maximum_bf16_steps = std::max(maximum_bf16_steps, steps);
+            maximum_bf16_steps        = std::max(maximum_bf16_steps, steps);
             if (steps > 2U) fail("compile-selected Tensor output differs from quantized reference");
         }
 
         std::vector<hip_bfloat16> invalid = input;
-        invalid[0].data = 0x7f80U;
+        invalid[0].data                   = 0x7f80U;
         d_input.copy_from_host(invalid.data(), d_input.size());
         ninfer::ops::linear(x, weight, output, workspace, nullptr);
         HIP_CHECK(hipDeviceSynchronize());
         d_output.copy_to_host(actual.data(), d_output.size());
-        status_poisoned = std::all_of(actual.begin(), actual.end(), [](hip_bfloat16 value) {
-            return value.data == 0x7fc1U;
-        });
+        status_poisoned = std::all_of(actual.begin(), actual.end(),
+                                      [](hip_bfloat16 value) { return value.data == 0x7fc1U; });
         if (!status_poisoned || workspace.used() != 0U) {
             fail("compile-selected Tensor path silently consumed nonfinite activation");
         }
-        write_json(path, true, {}, device, workspace_bytes, workspace_rewound,
-                   maximum_bf16_steps,
+        write_json(path, true, {}, device, workspace_bytes, workspace_rewound, maximum_bf16_steps,
                    status_poisoned, maximum_logical_error);
-        std::cout << "Q4 Tensor/WorkspaceArena A"
-                  << gActiveBits
+        std::cout << "Q4 Tensor/WorkspaceArena A" << gActiveBits
                   << ": PASS workspace_bytes=" << workspace_bytes
                   << " max_bf16_steps=" << maximum_bf16_steps << '\n';
         return 0;
@@ -468,8 +477,7 @@ int main(int argc, char** argv) {
         try {
             write_json(path, false, error.what(), device, workspace_bytes, workspace_rewound,
                        maximum_bf16_steps, status_poisoned, maximum_logical_error);
-        } catch (...) {
-        }
+        } catch (...) {}
         std::cerr << "Q4 Tensor/WorkspaceArena qualifier: FAIL: " << error.what() << '\n';
         return 1;
     }

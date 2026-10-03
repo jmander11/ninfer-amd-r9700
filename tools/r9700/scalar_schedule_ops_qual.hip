@@ -23,13 +23,13 @@
 
 namespace {
 
-constexpr std::int32_t kVocabPhysical = 248320;
-constexpr std::int32_t kVocabValid = 248077;
+constexpr std::int32_t kVocabPhysical  = 248320;
+constexpr std::int32_t kVocabValid     = 248077;
 constexpr std::int32_t kDflashFeatures = 25600;
-constexpr std::int32_t kDflashWidth = 16;
-constexpr std::int32_t kMaxBatch = static_cast<std::int32_t>(ninfer::kMaximumConcurrency);
-constexpr std::size_t kGuardBytes = 256;
-constexpr std::uint8_t kGuard = 0xA7;
+constexpr std::int32_t kDflashWidth    = 16;
+constexpr std::int32_t kMaxBatch       = static_cast<std::int32_t>(ninfer::kMaximumConcurrency);
+constexpr std::size_t kGuardBytes      = 256;
+constexpr std::uint8_t kGuard          = 0xA7;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
@@ -48,13 +48,16 @@ public:
         QUAL_HIP_CHECK(hipMalloc(&storage_, bytes_ + 2 * kGuardBytes));
         QUAL_HIP_CHECK(hipMemset(storage_, kGuard, bytes_ + 2 * kGuardBytes));
     }
-    GuardedDeviceBytes(const GuardedDeviceBytes&) = delete;
+
+    GuardedDeviceBytes(const GuardedDeviceBytes&)            = delete;
     GuardedDeviceBytes& operator=(const GuardedDeviceBytes&) = delete;
+
     ~GuardedDeviceBytes() { (void)hipFree(storage_); }
 
     [[nodiscard]] void* data() const noexcept {
         return static_cast<std::byte*>(storage_) + kGuardBytes;
     }
+
     [[nodiscard]] std::size_t bytes() const noexcept { return bytes_; }
 
     template <typename T>
@@ -79,14 +82,16 @@ public:
         QUAL_HIP_CHECK(hipMemcpy(prefix.data(), storage_, kGuardBytes, hipMemcpyDeviceToHost));
         QUAL_HIP_CHECK(hipMemcpy(suffix.data(), static_cast<const std::byte*>(data()) + bytes_,
                                  kGuardBytes, hipMemcpyDeviceToHost));
-        if (!std::all_of(prefix.begin(), prefix.end(), [](std::uint8_t value) { return value == kGuard; }) ||
-            !std::all_of(suffix.begin(), suffix.end(), [](std::uint8_t value) { return value == kGuard; })) {
+        if (!std::all_of(prefix.begin(), prefix.end(),
+                         [](std::uint8_t value) { return value == kGuard; }) ||
+            !std::all_of(suffix.begin(), suffix.end(),
+                         [](std::uint8_t value) { return value == kGuard; })) {
             fail(std::string(label) + " guard modified");
         }
     }
 
 private:
-    void* storage_ = nullptr;
+    void* storage_     = nullptr;
     std::size_t bytes_ = 0;
 };
 
@@ -136,7 +141,7 @@ void select_r9700() {
 template <typename Launch>
 double timed_us(hipStream_t stream, int warmup, int iterations, Launch&& launch) {
     hipEvent_t begin = nullptr;
-    hipEvent_t end = nullptr;
+    hipEvent_t end   = nullptr;
     QUAL_HIP_CHECK(hipEventCreate(&begin));
     QUAL_HIP_CHECK(hipEventCreate(&end));
     for (int iteration = 0; iteration < warmup; ++iteration) { launch(); }
@@ -151,24 +156,27 @@ double timed_us(hipStream_t stream, int warmup, int iterations, Launch&& launch)
     return static_cast<double>(milliseconds) * 1000.0 / iterations;
 }
 
-std::vector<hip_bfloat16> bf16_fixture(std::size_t count, std::uint32_t seed,
-                                       float scale = 1.0F) {
+std::vector<hip_bfloat16> bf16_fixture(std::size_t count, std::uint32_t seed, float scale = 1.0F) {
     std::vector<hip_bfloat16> values(count);
     std::uint32_t state = seed;
     for (std::size_t index = 0; index < count; ++index) {
-        state = state * 1664525U + 1013904223U;
+        state            = state * 1664525U + 1013904223U;
         const float unit = static_cast<float>((state >> 8U) & 0xffffU) / 32768.0F - 1.0F;
-        values[index] = hip_bfloat16(unit * scale);
+        values[index]    = hip_bfloat16(unit * scale);
     }
     return values;
 }
 
 void qualify_add_bias(hipStream_t stream) {
-    struct Shape { std::int32_t features; std::int32_t rows; };
+    struct Shape {
+        std::int32_t features;
+        std::int32_t rows;
+    };
+
     constexpr Shape shapes[]{{1152, 1}, {3456, 64}, {4304, 257}, {1153, 3}};
     double production_us = 0.0;
     for (const Shape shape : shapes) {
-        auto bias = bf16_fixture(shape.features, 17U + shape.features, 2.0F);
+        auto bias  = bf16_fixture(shape.features, 17U + shape.features, 2.0F);
         auto input = bf16_fixture(static_cast<std::size_t>(shape.features) * shape.rows,
                                   71U + shape.rows, 8.0F);
         std::vector<double> oracle(input.size());
@@ -198,9 +206,8 @@ void qualify_add_bias(hipStream_t stream) {
         d_bias.verify_guards("add_bias bias");
         d_input.verify_guards("add_bias output");
         if (shape.features == 4304) {
-            production_us = timed_us(stream, 10, 100, [&] {
-                ninfer::ops::add_bias(bias_tensor, input_tensor, stream);
-            });
+            production_us = timed_us(
+                stream, 10, 100, [&] { ninfer::ops::add_bias(bias_tensor, input_tensor, stream); });
         }
     }
     std::cout << "add_bias PASS D4304x257_us=" << production_us << '\n';
@@ -208,17 +215,16 @@ void qualify_add_bias(hipStream_t stream) {
 
 void qualify_nll(hipStream_t stream) {
     constexpr std::int32_t columns = 64;
-    auto logits = bf16_fixture(static_cast<std::size_t>(kVocabPhysical) * columns,
-                               0x9137U, 8.0F);
+    auto logits = bf16_fixture(static_cast<std::size_t>(kVocabPhysical) * columns, 0x9137U, 8.0F);
     std::vector<std::int32_t> targets(columns);
     std::vector<double> oracle(columns);
     for (std::int32_t column = 0; column < columns; ++column) {
         const std::size_t base = static_cast<std::size_t>(column) * kVocabPhysical;
-        targets[column] = (column * 7919 + 17) % kVocabValid;
-        double maximum = -std::numeric_limits<double>::infinity();
+        targets[column]        = (column * 7919 + 17) % kVocabValid;
+        double maximum         = -std::numeric_limits<double>::infinity();
         for (std::int32_t row = 0; row < kVocabValid; ++row) {
-            maximum = std::max(maximum,
-                               static_cast<double>(static_cast<float>(logits[base + row])));
+            maximum =
+                std::max(maximum, static_cast<double>(static_cast<float>(logits[base + row])));
         }
         double sum = 0.0;
         for (std::int32_t row = 0; row < kVocabValid; ++row) {
@@ -234,15 +240,13 @@ void qualify_nll(hipStream_t stream) {
     d_logits.upload(logits);
     d_targets.upload(targets);
     d_output.fill(0xCD);
-    ninfer::Tensor logits_tensor(d_logits.data(), ninfer::DType::BF16,
-                                 {kVocabPhysical, columns});
+    ninfer::Tensor logits_tensor(d_logits.data(), ninfer::DType::BF16, {kVocabPhysical, columns});
     ninfer::Tensor targets_tensor(d_targets.data(), ninfer::DType::I32, {columns});
     ninfer::Tensor output_tensor(d_output.data(), ninfer::DType::FP32, {columns});
-    ninfer::ops::nll_from_logits(logits_tensor, targets_tensor, output_tensor, kVocabValid,
-                                 stream);
+    ninfer::ops::nll_from_logits(logits_tensor, targets_tensor, output_tensor, kVocabValid, stream);
     QUAL_HIP_CHECK(hipStreamSynchronize(stream));
     const auto actual = d_output.download<float>();
-    double max_abs = 0.0;
+    double max_abs    = 0.0;
     for (std::size_t index = 0; index < actual.size(); ++index) {
         max_abs = std::max(max_abs, std::abs(static_cast<double>(actual[index]) - oracle[index]));
     }
@@ -256,8 +260,8 @@ void qualify_nll(hipStream_t stream) {
         ninfer::ops::nll_from_logits(logits_tensor, targets_tensor, output_tensor, kVocabValid,
                                      stream);
     });
-    std::cout << "nll_from_logits PASS V248077x64_max_abs=" << max_abs
-              << " time_us=" << elapsed << '\n';
+    std::cout << "nll_from_logits PASS V248077x64_max_abs=" << max_abs << " time_us=" << elapsed
+              << '\n';
 }
 
 void qualify_masked_block(hipStream_t stream) {
@@ -276,7 +280,7 @@ void qualify_masked_block(hipStream_t stream) {
                 lengths[row] = row == batch - 1
                                    ? std::numeric_limits<std::int32_t>::max() - (width - 1)
                                    : 27 + row * 101;
-                valid[row] = 1 + ((row * 5 + width) % width);
+                valid[row]   = 1 + ((row * 5 + width) % width);
             }
             d_anchors.upload(anchors);
             d_lengths.upload(lengths);
@@ -291,12 +295,12 @@ void qualify_masked_block(hipStream_t stream) {
             ninfer::ops::prepare_masked_block(t_anchors, t_lengths, t_valid, kVocabValid, t_ids,
                                               t_positions, stream);
             QUAL_HIP_CHECK(hipStreamSynchronize(stream));
-            const auto ids = d_ids.download<std::int32_t>();
-            const auto positions = d_positions.download<std::int32_t>();
+            const auto ids              = d_ids.download<std::int32_t>();
+            const auto positions        = d_positions.download<std::int32_t>();
             const auto logical_elements = static_cast<std::size_t>(width * batch);
             for (std::int32_t row = 0; row < batch; ++row) {
                 for (std::int32_t column = 0; column < width; ++column) {
-                    const std::size_t index = static_cast<std::size_t>(row * width + column);
+                    const std::size_t index        = static_cast<std::size_t>(row * width + column);
                     const std::int32_t expected_id = column == 0 ? anchors[row] : kVocabValid;
                     const std::int32_t expected_position =
                         lengths[row] + std::min(column, valid[row] - 1);
@@ -306,17 +310,15 @@ void qualify_masked_block(hipStream_t stream) {
                     }
                 }
             }
-            const std::int32_t ids_sentinel = static_cast<std::int32_t>(0xCDCDCDCDU);
+            const std::int32_t ids_sentinel       = static_cast<std::int32_t>(0xCDCDCDCDU);
             const std::int32_t positions_sentinel = static_cast<std::int32_t>(0xEFEFEFEFU);
             for (std::size_t index = logical_elements; index < ids.size(); ++index) {
                 if (ids[index] != ids_sentinel || positions[index] != positions_sentinel) {
                     fail("prepare_masked_block wrote beyond logical output");
                 }
             }
-            require_exact(d_anchors.download<std::int32_t>(), anchors,
-                          "masked immutable anchors");
-            require_exact(d_lengths.download<std::int32_t>(), lengths,
-                          "masked immutable lengths");
+            require_exact(d_anchors.download<std::int32_t>(), anchors, "masked immutable anchors");
+            require_exact(d_lengths.download<std::int32_t>(), lengths, "masked immutable lengths");
             require_exact(d_valid.download<std::int32_t>(), valid,
                           "masked immutable valid columns");
         }
@@ -342,7 +344,7 @@ std::vector<hip_bfloat16> bit_fixture(std::size_t count, std::uint32_t seed) {
     std::vector<hip_bfloat16> values(count);
     std::uint32_t state = seed;
     for (std::size_t index = 0; index < count; ++index) {
-        state = state * 1103515245U + 12345U;
+        state              = state * 1103515245U + 12345U;
         values[index].data = static_cast<std::uint16_t>((state >> 16U) ^ index);
     }
     return values;
@@ -350,13 +352,15 @@ std::vector<hip_bfloat16> bit_fixture(std::size_t count, std::uint32_t seed) {
 
 void qualify_ragged_prefix(hipStream_t stream) {
     constexpr std::int32_t capacity = kMaxBatch;
-    const std::size_t source_count = static_cast<std::size_t>(kDflashFeatures) * kDflashWidth * capacity;
-    const std::size_t output_count = static_cast<std::size_t>(kDflashFeatures) * kDflashWidth * kMaxBatch;
+    const std::size_t source_count =
+        static_cast<std::size_t>(kDflashFeatures) * kDflashWidth * capacity;
+    const std::size_t output_count =
+        static_cast<std::size_t>(kDflashFeatures) * kDflashWidth * kMaxBatch;
     const auto source = bit_fixture(source_count, 0x51EDC0DEU);
     // A fixed non-identity lane permutation and distinct starts for every row.
     std::vector<std::int32_t> lanes(kMaxBatch), starts(kMaxBatch);
     for (std::int32_t row = 0; row < kMaxBatch; ++row) {
-        lanes[row] = (row * 3 + kMaxBatch - 1) % kMaxBatch;
+        lanes[row]  = (row * 3 + kMaxBatch - 1) % kMaxBatch;
         starts[row] = 100 + row * 101;
     }
     std::vector<std::int32_t> ends(kMaxBatch);
@@ -368,7 +372,7 @@ void qualify_ragged_prefix(hipStream_t stream) {
     std::vector<std::int32_t> expected_counts(kMaxBatch);
     for (std::int32_t batch = 0; batch < kMaxBatch; ++batch) {
         const std::int32_t count = ends[batch] - starts[batch];
-        expected_counts[batch] = count;
+        expected_counts[batch]   = count;
         for (std::int32_t column = 0; column < kDflashWidth; ++column) {
             const std::size_t out_base =
                 static_cast<std::size_t>(batch * kDflashWidth + column) * kDflashFeatures;
@@ -405,11 +409,10 @@ void qualify_ragged_prefix(hipStream_t stream) {
     ninfer::Tensor t_ends(d_ends.data(), ninfer::DType::I32, {kMaxBatch});
     ninfer::Tensor t_output(d_output.data(), ninfer::DType::BF16,
                             {kDflashFeatures, kDflashWidth, kMaxBatch});
-    ninfer::Tensor t_positions(d_positions.data(), ninfer::DType::I32,
-                               {kDflashWidth, kMaxBatch});
+    ninfer::Tensor t_positions(d_positions.data(), ninfer::DType::I32, {kDflashWidth, kMaxBatch});
     ninfer::Tensor t_counts(d_counts.data(), ninfer::DType::I32, {kMaxBatch});
-    ninfer::ops::prepare_ragged_prefix(t_source, t_lanes, t_starts, t_ends, t_output,
-                                       t_positions, t_counts, stream);
+    ninfer::ops::prepare_ragged_prefix(t_source, t_lanes, t_starts, t_ends, t_output, t_positions,
+                                       t_counts, stream);
     QUAL_HIP_CHECK(hipStreamSynchronize(stream));
     require_bf16_bits(d_output.download<hip_bfloat16>(), expected, "ragged prefix values");
     require_exact(d_positions.download<std::int32_t>(), expected_positions,

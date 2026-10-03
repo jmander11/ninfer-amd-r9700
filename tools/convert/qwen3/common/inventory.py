@@ -84,8 +84,13 @@ def tensor_spec(
 ) -> TensorSpec:
     """Build a tensor spec with the canonical layout for its numeric format."""
 
-    layout = (CONTIGUOUS_LAYOUT if numeric_format in DIRECT_FORMATS else
-              Q4_LAYOUT if numeric_format == Q4 else ROW_SPLIT_LAYOUT)
+    layout = (
+        CONTIGUOUS_LAYOUT
+        if numeric_format in DIRECT_FORMATS
+        else Q4_LAYOUT
+        if numeric_format == Q4
+        else ROW_SPLIT_LAYOUT
+    )
     return TensorSpec(name=name, shape=shape, format=numeric_format, layout=layout)
 
 

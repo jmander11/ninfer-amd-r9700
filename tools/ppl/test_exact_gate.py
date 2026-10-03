@@ -285,9 +285,16 @@ class ApplyBaselineTest(unittest.TestCase):
 
 class CompiledProfileIdentityTest(unittest.TestCase):
     def write_cell(
-        self, path: Path, *, scheme: str, group: int, skip_tokens: int = 128,
-        q4_activation_bits: int = 8, w8_activation_bits: int = 8,
-        fp8_qk_wmma: bool = True, xattention: bool = False,
+        self,
+        path: Path,
+        *,
+        scheme: str,
+        group: int,
+        skip_tokens: int = 128,
+        q4_activation_bits: int = 8,
+        w8_activation_bits: int = 8,
+        fp8_qk_wmma: bool = True,
+        xattention: bool = False,
     ) -> None:
         path.write_text(
             json.dumps(
@@ -350,8 +357,17 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_group):
                 with self.assertRaisesRegex(SystemExit, "kv_value_group=16"):
                     run.run_cell(
-                        Path("ninfer-ppl-g32"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g32", "decode", "half", 257, 4096, 0, cell_path, [],
+                        Path("ninfer-ppl-g32"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g32",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
                         "candidate",
                     )
 
@@ -364,8 +380,17 @@ class CompiledProfileIdentityTest(unittest.TestCase):
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_matching_group):
                 cell = run.run_cell(
-                    Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                    "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
                     "candidate",
                 )
             self.assertEqual(cell["kv_value_group"], 16)
@@ -382,12 +407,22 @@ class CompiledProfileIdentityTest(unittest.TestCase):
                 cell_path.with_suffix(".nllf32").write_bytes(struct.pack("<f", 1.0))
                 cell_path.with_suffix(".argmaxi32").write_bytes(struct.pack("<i", 1))
 
-            with mock.patch.object(run, "validate_cell_report"), mock.patch.object(
-                run.subprocess, "run", side_effect=publish
-            ) as execute:
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                mock.patch.object(run.subprocess, "run", side_effect=publish) as execute,
+            ):
                 cell = run.run_cell(
-                    Path("reference.py"), Path("source"), Path("corpus.ids"),
-                    run.BASELINE, "prefill", "half", 4, 4096, 0, cell_path, [],
+                    Path("reference.py"),
+                    Path("source"),
+                    Path("corpus.ids"),
+                    run.BASELINE,
+                    "prefill",
+                    "half",
+                    4,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
                     run.BF16_WEIGHTS_ID,
                 )
             command = execute.call_args.args[0]
@@ -403,8 +438,9 @@ class CompiledProfileIdentityTest(unittest.TestCase):
         self.assertIn("torch.version", command[2])
 
         failed = subprocess.CompletedProcess([], 1, "", "ModuleNotFoundError: torch")
-        with mock.patch.object(run.subprocess, "run", return_value=failed), self.assertRaisesRegex(
-            SystemExit, "requires a ROCm PyTorch environment"
+        with (
+            mock.patch.object(run.subprocess, "run", return_value=failed),
+            self.assertRaisesRegex(SystemExit, "requires a ROCm PyTorch environment"),
         ):
             run.preflight_python_scorer(Path("reference.py"))
 
@@ -421,8 +457,17 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_layout):
                 with self.assertRaisesRegex(SystemExit, "kv_plane_layouts"):
                     run.run_cell(
-                        Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
+                        Path("ninfer-ppl-g16"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g16",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
                         "candidate",
                     )
 
@@ -431,16 +476,24 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             cell_path = Path(directory) / "cell.json"
 
             def write_wrong_width(*_args, **_kwargs) -> None:
-                self.write_cell(
-                    cell_path, scheme="r9700-g16", group=16, q4_activation_bits=4
-                )
+                self.write_cell(cell_path, scheme="r9700-g16", group=16, q4_activation_bits=4)
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_width):
                 with self.assertRaisesRegex(SystemExit, "expected compiled A8"):
                     run.run_cell(
-                        Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
-                        "candidate", 8,
+                        Path("ninfer-ppl-g16"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g16",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
+                        "candidate",
+                        8,
                     )
 
     def test_candidate_rejects_mislabeled_w8_activation_width(self) -> None:
@@ -448,16 +501,26 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             cell_path = Path(directory) / "cell.json"
 
             def write_wrong_width(*_args, **_kwargs) -> None:
-                self.write_cell(
-                    cell_path, scheme="r9700-g16", group=16, w8_activation_bits=16
-                )
+                self.write_cell(cell_path, scheme="r9700-g16", group=16, w8_activation_bits=16)
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_width):
                 with self.assertRaisesRegex(SystemExit, "w8_activation_bits=16"):
                     run.run_cell(
-                        Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
-                        "candidate", 8, 8, True,
+                        Path("ninfer-ppl-g16"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g16",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
+                        "candidate",
+                        8,
+                        8,
+                        True,
                     )
 
     def test_candidate_rejects_mislabeled_fp8_qk_profile(self) -> None:
@@ -465,16 +528,26 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             cell_path = Path(directory) / "cell.json"
 
             def write_wrong_profile(*_args, **_kwargs) -> None:
-                self.write_cell(
-                    cell_path, scheme="r9700-g16", group=16, fp8_qk_wmma=False
-                )
+                self.write_cell(cell_path, scheme="r9700-g16", group=16, fp8_qk_wmma=False)
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_profile):
                 with self.assertRaisesRegex(SystemExit, "split512_enabled=False"):
                     run.run_cell(
-                        Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
-                        "candidate", 8, 8, True,
+                        Path("ninfer-ppl-g16"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g16",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
+                        "candidate",
+                        8,
+                        8,
+                        True,
                     )
 
     def test_candidate_rejects_stale_fp8_qk_classifier(self) -> None:
@@ -490,9 +563,21 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             with mock.patch.object(run.subprocess, "run", side_effect=write_stale_classifier):
                 with self.assertRaisesRegex(SystemExit, "split512_min_context=1"):
                     run.run_cell(
-                        Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
-                        "candidate", 8, 8, True,
+                        Path("ninfer-ppl-g16"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g16",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
+                        "candidate",
+                        8,
+                        8,
+                        True,
                     )
 
     def test_candidate_requires_compile_bound_xattention_identity(self) -> None:
@@ -500,23 +585,43 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             cell_path = Path(directory) / "cell.json"
 
             def write_xattention(*_args, **_kwargs) -> None:
-                self.write_cell(
-                    cell_path, scheme="r9700-g16", group=16, xattention=True
-                )
+                self.write_cell(cell_path, scheme="r9700-g16", group=16, xattention=True)
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_xattention):
                 cell = run.run_cell(
-                    Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                    "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
-                    "candidate", 8, 8, True, "b128-s16-tau900",
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                    8,
+                    8,
+                    True,
+                    "b128-s16-tau900",
                 )
             self.assertEqual(cell["xattention_profile"], "b128-s16-tau900")
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_xattention):
                 with self.assertRaisesRegex(SystemExit, "xattention_qualification=True"):
                     run.run_cell(
-                        Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
+                        Path("ninfer-ppl-g16"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g16",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
                         "candidate",
                     )
 
@@ -529,8 +634,17 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             with mock.patch.object(run.subprocess, "run", side_effect=write_stale_dense):
                 with self.assertRaisesRegex(SystemExit, "dense report retains XAttention fields"):
                     run.run_cell(
-                        Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
+                        Path("ninfer-ppl-g16"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g16",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
                         "candidate",
                     )
 
@@ -539,15 +653,22 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             cell_path = Path(directory) / "cell.json"
 
             def write_wrong_skip(*_args, **_kwargs) -> None:
-                self.write_cell(
-                    cell_path, scheme="r9700-g16", group=16, skip_tokens=127
-                )
+                self.write_cell(cell_path, scheme="r9700-g16", group=16, skip_tokens=127)
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_skip):
                 with self.assertRaisesRegex(SystemExit, "skip_tokens=127"):
                     run.run_cell(
-                        Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
-                        "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
+                        Path("ninfer-ppl-g16"),
+                        Path("model.ninfer"),
+                        Path("corpus.ids"),
+                        "r9700-g16",
+                        "decode",
+                        "half",
+                        257,
+                        4096,
+                        0,
+                        cell_path,
+                        [],
                         "candidate",
                     )
 
@@ -585,7 +706,9 @@ class CampaignInputProvenanceTest(unittest.TestCase):
             },
             separators=(",", ":"),
         ).encode()
-        path.write_bytes(run.NINFER_PREFIX.pack(run.NINFER_MAGIC, len(directory)) + directory + tail)
+        path.write_bytes(
+            run.NINFER_PREFIX.pack(run.NINFER_MAGIC, len(directory)) + directory + tail
+        )
 
     def write_corpus(self, root: Path, text: str) -> Path:
         path = root / "corpus.ids"
@@ -636,7 +759,8 @@ class CampaignInputProvenanceTest(unittest.TestCase):
                 "recipe_id": decision.recipe_id,
                 "source": {"index_sha256": "1" * 64, "ranking_sha256": "2" * 64},
                 "artifact": {
-                    "path": str(artifact.resolve()), "bytes": artifact.stat().st_size,
+                    "path": str(artifact.resolve()),
+                    "bytes": artifact.stat().st_size,
                     "sha256": artifact_sha256,
                 },
                 "candidate": {
@@ -655,8 +779,10 @@ class CampaignInputProvenanceTest(unittest.TestCase):
                     "transcoder": {"sha256": "6" * 64},
                 },
             }
-            with (mock.patch.object(run, "_validate_n16_migration_ancestry"),
-                  self.assertRaisesRegex(SystemExit, "receipt is missing")):
+            with (
+                mock.patch.object(run, "_validate_n16_migration_ancestry"),
+                self.assertRaisesRegex(SystemExit, "receipt is missing"),
+            ):
                 run.inspect_candidate_artifact(artifact)
             receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
             with mock.patch.object(run, "_validate_n16_migration_ancestry"):
@@ -671,8 +797,10 @@ class CampaignInputProvenanceTest(unittest.TestCase):
             receipt_target.write_bytes(receipt_bytes)
             receipt_path.unlink()
             receipt_path.symlink_to(receipt_target)
-            with (mock.patch.object(run, "_validate_n16_migration_ancestry"),
-                  self.assertRaisesRegex(SystemExit, "regular file")):
+            with (
+                mock.patch.object(run, "_validate_n16_migration_ancestry"),
+                self.assertRaisesRegex(SystemExit, "regular file"),
+            ):
                 run.inspect_candidate_artifact(artifact)
             receipt_path.unlink()
             receipt_path.write_bytes(receipt_bytes)
@@ -684,8 +812,10 @@ class CampaignInputProvenanceTest(unittest.TestCase):
                 run.require_fp8_hybrid_candidate({"weights_id": "different"})
             receipt["candidate"]["selection_sha256"] = "4" * 64
             receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-            with (mock.patch.object(run, "_validate_n16_migration_ancestry"),
-                  self.assertRaisesRegex(SystemExit, "selection authority differs")):
+            with (
+                mock.patch.object(run, "_validate_n16_migration_ancestry"),
+                self.assertRaisesRegex(SystemExit, "selection authority differs"),
+            ):
                 run.inspect_candidate_artifact(artifact)
 
     def test_corpus_manifest_hash_decimal_domain_and_count_are_enforced(self) -> None:
@@ -702,9 +832,7 @@ class CampaignInputProvenanceTest(unittest.TestCase):
 class ExecutionParityTest(unittest.TestCase):
     def write_sidecars(self, path: Path, nlls: list[float], argmax: list[int]) -> None:
         path.with_suffix(".nllf32").write_bytes(struct.pack("<" + "f" * len(nlls), *nlls))
-        path.with_suffix(".argmaxi32").write_bytes(
-            struct.pack("<" + "i" * len(argmax), *argmax)
-        )
+        path.with_suffix(".argmaxi32").write_bytes(struct.pack("<" + "i" * len(argmax), *argmax))
 
     def test_sidecar_parity_gates_both_nll_and_exact_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -722,7 +850,6 @@ class ExecutionParityTest(unittest.TestCase):
             self.write_sidecars(second, [1.0, 2.0], [10, 99])
             self.assertFalse(run.sidecar_parity(first, second, max_abs_nll=0.02)["pass"])
 
-
     def test_schedule_comparison_reports_flips_without_gating_on_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -730,9 +857,7 @@ class ExecutionParityTest(unittest.TestCase):
             decode = root / "decode.json"
             self.write_sidecars(prefill, [1.0, 2.0, 3.0], [10, 11, 12])
             self.write_sidecars(decode, [1.01, 1.98, 3.12], [10, 99, 98])
-            comparison = run.schedule_sidecar_comparison(
-                prefill, decode, max_abs_nll=0.13
-            )
+            comparison = run.schedule_sidecar_comparison(prefill, decode, max_abs_nll=0.13)
             self.assertTrue(comparison["pass"])
             self.assertTrue(comparison["complete_finite_aligned"])
             self.assertFalse(comparison["argmax_identity_is_gate"])
@@ -775,24 +900,45 @@ class HybridExecutionGateTest(unittest.TestCase):
 
     def payload(self) -> dict:
         base = {
-            "scheme": "r9700-g16", "prompt_tokens": run.DEFAULT_TOKENS,
-            "schedule": "decode", "pass": True, "quality_eligible": True,
+            "scheme": "r9700-g16",
+            "prompt_tokens": run.DEFAULT_TOKENS,
+            "schedule": "decode",
+            "pass": True,
+            "quality_eligible": True,
         }
         return {
             "artifact_type": run.CAMPAIGN_ARTIFACT_TYPE,
             "schema_version": run.CAMPAIGN_SCHEMA_VERSION,
             "required_candidate_identity": "fp8-hybrid-selection-authority",
-            "lengths": [run.DEFAULT_TOKENS], "schedules": ["decode"],
-            "spec": "mtp", "draft_tokens": 3,
-            "execution_parity_max_abs_nll": 0.0, "pass": True,
+            "lengths": [run.DEFAULT_TOKENS],
+            "schedules": ["decode"],
+            "spec": "mtp",
+            "draft_tokens": 3,
+            "execution_parity_max_abs_nll": 0.0,
+            "pass": True,
             "cells": [
                 {**base, "spec": "mtp", "draft_tokens": 3, "device_graph": True},
-                {**base, "spec": "mtp", "draft_tokens": 3, "device_graph": False,
-                 "device_graph_parity": self.parity()},
-                {**base, "spec": "none", "draft_tokens": 0, "device_graph": True,
-                 "spec_parity": self.parity()},
-                {**base, "spec": "mtp", "draft_tokens": 4, "device_graph": True,
-                 "draft_window_parity": self.parity()},
+                {
+                    **base,
+                    "spec": "mtp",
+                    "draft_tokens": 3,
+                    "device_graph": False,
+                    "device_graph_parity": self.parity(),
+                },
+                {
+                    **base,
+                    "spec": "none",
+                    "draft_tokens": 0,
+                    "device_graph": True,
+                    "spec_parity": self.parity(),
+                },
+                {
+                    **base,
+                    "spec": "mtp",
+                    "draft_tokens": 4,
+                    "device_graph": True,
+                    "draft_window_parity": self.parity(),
+                },
             ],
         }
 
@@ -837,21 +983,26 @@ class CampaignOrchestrationTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
 
     def test_two_schedules_require_explicit_measured_nll_bound(self) -> None:
-        argv = [
-            "run.py", "--bf16-reference-weights", "missing", "--quality-tier", "accuracy"
-        ]
-        with mock.patch.object(sys, "argv", argv), self.assertRaisesRegex(
-            SystemExit, "schedule-parity-max-abs-nll is required"
+        argv = ["run.py", "--bf16-reference-weights", "missing", "--quality-tier", "accuracy"]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            self.assertRaisesRegex(SystemExit, "schedule-parity-max-abs-nll is required"),
         ):
             run.main()
 
     def test_single_schedule_does_not_require_schedule_nll_bound(self) -> None:
         argv = [
-            "run.py", "--bf16-reference-weights", "missing", "--quality-tier", "accuracy",
-            "--schedule", "prefill",
+            "run.py",
+            "--bf16-reference-weights",
+            "missing",
+            "--quality-tier",
+            "accuracy",
+            "--schedule",
+            "prefill",
         ]
-        with mock.patch.object(sys, "argv", argv), self.assertRaisesRegex(
-            SystemExit, "independent BF16 scorer not found"
+        with (
+            mock.patch.object(sys, "argv", argv),
+            self.assertRaisesRegex(SystemExit, "independent BF16 scorer not found"),
         ):
             run.main()
 
@@ -867,28 +1018,42 @@ class CampaignOrchestrationTest(unittest.TestCase):
             output = root / "must-not-exist"
             argv = [
                 "run.py",
-                "--bf16-reference-weights", str(source),
-                "--bf16-reference-ppl-bin", str(scorer),
-                "--ids", str(ids),
-                "--profiles", "bf16-reference",
-                "--schedule", "prefill", "--spec", "none", "--no-extras",
-                "--quality-tier", "accuracy", "--allow-ungated",
-                "--reuse-bf16-campaign", str(root / "invalid-campaign.json"),
-                "--bf16-repeat-comparison", str(root / "invalid-repeat.json"),
-                "--out", str(output),
+                "--bf16-reference-weights",
+                str(source),
+                "--bf16-reference-ppl-bin",
+                str(scorer),
+                "--ids",
+                str(ids),
+                "--profiles",
+                "bf16-reference",
+                "--schedule",
+                "prefill",
+                "--spec",
+                "none",
+                "--no-extras",
+                "--quality-tier",
+                "accuracy",
+                "--allow-ungated",
+                "--reuse-bf16-campaign",
+                str(root / "invalid-campaign.json"),
+                "--bf16-repeat-comparison",
+                str(root / "invalid-repeat.json"),
+                "--out",
+                str(output),
             ]
-            with mock.patch.object(sys, "argv", argv), mock.patch.object(
-                run, "validate_weights_input"
-            ), mock.patch.object(
-                run, "preflight_python_scorer"
-            ), mock.patch.object(
-                run, "ensure_corpus"
-            ), mock.patch.object(
-                run, "validate_corpus", return_value={}
-            ), mock.patch.object(
-                run, "validate_bf16_repeat_comparison",
-                side_effect=SystemExit("invalid reuse authority"),
-            ), self.assertRaisesRegex(SystemExit, "invalid reuse authority"):
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(run, "validate_weights_input"),
+                mock.patch.object(run, "preflight_python_scorer"),
+                mock.patch.object(run, "ensure_corpus"),
+                mock.patch.object(run, "validate_corpus", return_value={}),
+                mock.patch.object(
+                    run,
+                    "validate_bf16_repeat_comparison",
+                    side_effect=SystemExit("invalid reuse authority"),
+                ),
+                self.assertRaisesRegex(SystemExit, "invalid reuse authority"),
+            ):
                 run.main()
             self.assertFalse(output.exists())
 
@@ -901,19 +1066,36 @@ class CampaignOrchestrationTest(unittest.TestCase):
             scorer.write_text("fixture", encoding="utf-8")
             output = root / "must-not-exist"
             argv = [
-                "run.py", "--bf16-reference-weights", str(source),
-                "--bf16-reference-ppl-bin", str(scorer),
-                "--profiles", "bf16-reference", "--schedule", "prefill",
-                "--spec", "none", "--no-extras", "--quality-tier", "accuracy",
-                "--allow-ungated", "--out", str(output),
+                "run.py",
+                "--bf16-reference-weights",
+                str(source),
+                "--bf16-reference-ppl-bin",
+                str(scorer),
+                "--profiles",
+                "bf16-reference",
+                "--schedule",
+                "prefill",
+                "--spec",
+                "none",
+                "--no-extras",
+                "--quality-tier",
+                "accuracy",
+                "--allow-ungated",
+                "--out",
+                str(output),
             ]
-            with mock.patch.object(sys, "argv", argv), mock.patch.object(
-                run, "validate_weights_input"
-            ), mock.patch.object(
-                run.subprocess, "run", return_value=subprocess.CompletedProcess(
-                    [], 1, stdout="", stderr="ModuleNotFoundError: No module named 'torch'"
-                )
-            ) as probe, self.assertRaisesRegex(SystemExit, "requires a ROCm PyTorch"):
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(run, "validate_weights_input"),
+                mock.patch.object(
+                    run.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        [], 1, stdout="", stderr="ModuleNotFoundError: No module named 'torch'"
+                    ),
+                ) as probe,
+                self.assertRaisesRegex(SystemExit, "requires a ROCm PyTorch"),
+            ):
                 run.main()
             probe.assert_called_once()
             self.assertEqual(probe.call_args.args[0][:2], [sys.executable, "-c"])
@@ -934,8 +1116,7 @@ class CampaignOrchestrationTest(unittest.TestCase):
             cell_path = root / "dense" / "4.prefill.bf16-reference.json"
             cell_path.parent.mkdir()
             source_shards = {
-                f"model-{part:05d}-of-{run.SOURCE_SHARD_COUNT:05d}.safetensors":
-                    f"{part:064x}"
+                f"model-{part:05d}-of-{run.SOURCE_SHARD_COUNT:05d}.safetensors": f"{part:064x}"
                 for part in range(1, run.SOURCE_SHARD_COUNT + 1)
             }
             raw = {
@@ -982,10 +1163,25 @@ class CampaignOrchestrationTest(unittest.TestCase):
             cell_path.with_suffix(".nllf32").write_bytes(struct.pack("<f", 1.0))
             cell_path.with_suffix(".argmaxi32").write_bytes(struct.pack("<i", 7))
             command = [
-                str(scorer), "--weights", str(source), "--ids", str(ids),
-                "--scheme", run.BASELINE, "--schedule", "prefill", "--skip", "half",
-                "--tokens", "4", "--prefill-chunk", "4096", "--device", "0",
-                "--out-json", str(cell_path),
+                str(scorer),
+                "--weights",
+                str(source),
+                "--ids",
+                str(ids),
+                "--scheme",
+                run.BASELINE,
+                "--schedule",
+                "prefill",
+                "--skip",
+                "half",
+                "--tokens",
+                "4",
+                "--prefill-chunk",
+                "4096",
+                "--device",
+                "0",
+                "--out-json",
+                str(cell_path),
             ]
             cell = {
                 **raw,
@@ -997,27 +1193,34 @@ class CampaignOrchestrationTest(unittest.TestCase):
             artifact = {"weights_id": "weights", "sha256": "c" * 64}
             corpus = {"path": str(ids.resolve()), "ids_sha256": "d" * 64}
             scorer_identity = {
-                "path": str(scorer.resolve()), "bytes": scorer.stat().st_size,
+                "path": str(scorer.resolve()),
+                "bytes": scorer.stat().st_size,
                 "sha256": run.file_sha256(scorer),
             }
             candidate_cells = []
             for profile in ("r9700-g16", "r9700-g32"):
                 candidate_path = root / "dense" / f"4.prefill.{profile}.json"
                 candidate_raw = {
-                    "scheme": profile, "prompt_tokens": 4, "skip_tokens": 2,
-                    "tokens_scored": 1, "argmax_tokens": 1, "non_finite": 0,
+                    "scheme": profile,
+                    "prompt_tokens": 4,
+                    "skip_tokens": 2,
+                    "tokens_scored": 1,
+                    "argmax_tokens": 1,
+                    "non_finite": 0,
                     "mean_nll": 1.0,
                 }
                 candidate_path.write_text(json.dumps(candidate_raw), encoding="utf-8")
                 candidate_path.with_suffix(".nllf32").write_bytes(struct.pack("<f", 1.0))
                 candidate_path.with_suffix(".argmaxi32").write_bytes(struct.pack("<i", 7))
-                candidate_cells.append({
-                    **candidate_raw,
-                    "command": ["candidate-scorer", "--out-json", str(candidate_path)],
-                    "nll_sha256": run.file_sha256(candidate_path.with_suffix(".nllf32")),
-                    "argmax_sha256": run.file_sha256(candidate_path.with_suffix(".argmaxi32")),
-                    "complete_finite_aligned": True,
-                })
+                candidate_cells.append(
+                    {
+                        **candidate_raw,
+                        "command": ["candidate-scorer", "--out-json", str(candidate_path)],
+                        "nll_sha256": run.file_sha256(candidate_path.with_suffix(".nllf32")),
+                        "argmax_sha256": run.file_sha256(candidate_path.with_suffix(".argmaxi32")),
+                        "complete_finite_aligned": True,
+                    }
+                )
             campaign = root / "dense" / "results.json"
             campaign_payload = {
                 "artifact_type": run.CAMPAIGN_ARTIFACT_TYPE,
@@ -1035,11 +1238,13 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 "draft_tokens": 0,
                 "quality_tier": "capacity-speed",
                 "gates": {
-                    "r9700-g16": math.log(1.05), "r9700-g32": math.log(1.05),
+                    "r9700-g16": math.log(1.05),
+                    "r9700-g32": math.log(1.05),
                 },
                 "terrible_nll": run.TERRIBLE_NLL,
                 "weights_inputs": {
-                    run.BASELINE: str(source), "r9700-g16": str(candidate),
+                    run.BASELINE: str(source),
+                    "r9700-g16": str(candidate),
                     "r9700-g32": str(candidate),
                 },
                 "scorers": {
@@ -1061,9 +1266,15 @@ class CampaignOrchestrationTest(unittest.TestCase):
             }
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
             options = dict(
-                bf16_weights=source, bf16_scorer=scorer, scorer_identity=scorer_identity,
-                ids=ids, corpus_provenance=corpus,
-                lengths=[4], skip="half", prefill_chunk=4096, device=0,
+                bf16_weights=source,
+                bf16_scorer=scorer,
+                scorer_identity=scorer_identity,
+                ids=ids,
+                corpus_provenance=corpus,
+                lengths=[4],
+                skip="half",
+                prefill_chunk=4096,
+                device=0,
             )
             with mock.patch.object(run, "validate_cell_report"):
                 reused = run.load_reused_bf16_cells(campaign, **options)
@@ -1074,13 +1285,30 @@ class CampaignOrchestrationTest(unittest.TestCase):
             # scorer. The loader still checks its actual report and sidecars.
             output = root / "reused-output"
             argv = [
-                "run.py", "--bf16-reference-weights", str(source),
-                "--bf16-reference-ppl-bin", str(scorer), "--ids", str(ids),
-                "--profiles", run.BASELINE, "--tokens", "4",
-                "--schedule", "prefill", "--spec", "none", "--no-extras",
-                "--quality-tier", "accuracy", "--reuse-bf16-campaign", str(campaign),
-                "--bf16-repeat-comparison", str(root / "repeat.json"),
-                "--out", str(output),
+                "run.py",
+                "--bf16-reference-weights",
+                str(source),
+                "--bf16-reference-ppl-bin",
+                str(scorer),
+                "--ids",
+                str(ids),
+                "--profiles",
+                run.BASELINE,
+                "--tokens",
+                "4",
+                "--schedule",
+                "prefill",
+                "--spec",
+                "none",
+                "--no-extras",
+                "--quality-tier",
+                "accuracy",
+                "--reuse-bf16-campaign",
+                str(campaign),
+                "--bf16-repeat-comparison",
+                str(root / "repeat.json"),
+                "--out",
+                str(output),
             ]
             with (
                 mock.patch.object(sys, "argv", argv),
@@ -1088,7 +1316,8 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 mock.patch.object(run, "validate_cell_report"),
                 mock.patch.object(run, "validate_bf16_repeat_comparison", return_value={}),
                 mock.patch.object(
-                    run.subprocess, "run",
+                    run.subprocess,
+                    "run",
                     side_effect=AssertionError("retained BF16 must not execute a subprocess"),
                 ) as execute,
                 mock.patch.dict(sys.modules, {"torch": None}),
@@ -1112,7 +1341,9 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 mock.patch.object(run, "validate_corpus", return_value=corpus),
                 mock.patch.object(run, "validate_cell_report"),
                 mock.patch.object(run, "validate_bf16_repeat_comparison", return_value={}),
-                mock.patch.object(run.subprocess, "run", side_effect=AssertionError("no BF16 rerun")),
+                mock.patch.object(
+                    run.subprocess, "run", side_effect=AssertionError("no BF16 rerun")
+                ),
             ):
                 self.assertEqual(run.main(), 0)
             decoded = json.loads((decode_output / "results.json").read_text())
@@ -1128,14 +1359,25 @@ class CampaignOrchestrationTest(unittest.TestCase):
             paired_argv.remove("--no-extras")
             paired_argv[paired_argv.index("--profiles") + 1] = f"{run.BASELINE},r9700-g16"
             paired_argv[paired_argv.index("--out") + 1] = str(paired_output)
-            paired_argv += ["--g16-weights", str(candidate), "--g16-ppl-bin", str(scorer),
-                            "--gate", "r9700-g16=0.02"]
+            paired_argv += [
+                "--g16-weights",
+                str(candidate),
+                "--g16-ppl-bin",
+                str(scorer),
+                "--gate",
+                "r9700-g16=0.02",
+            ]
 
             def candidate_execution(*args):
                 self.assertEqual(args[3], "r9700-g16")
                 self.assertEqual(args[4], "decode")
                 output_path = args[9]
-                value = {**candidate_raw, "scheme": "r9700-g16", "schedule": "decode", "ppl": math.e}
+                value = {
+                    **candidate_raw,
+                    "scheme": "r9700-g16",
+                    "schedule": "decode",
+                    "ppl": math.e,
+                }
                 output_path.write_text(json.dumps(value))
                 output_path.with_suffix(".nllf32").write_bytes(struct.pack("<f", 1.0))
                 output_path.with_suffix(".argmaxi32").write_bytes(struct.pack("<i", 7))
@@ -1147,7 +1389,9 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 mock.patch.object(run, "validate_cell_report"),
                 mock.patch.object(run, "validate_bf16_repeat_comparison", return_value={}),
                 mock.patch.object(run, "inspect_candidate_artifact", return_value=artifact),
-                mock.patch.object(run, "run_cell", side_effect=candidate_execution) as execute_candidate,
+                mock.patch.object(
+                    run, "run_cell", side_effect=candidate_execution
+                ) as execute_candidate,
             ):
                 self.assertEqual(run.main(), 0)
             self.assertEqual(execute_candidate.call_count, 2)
@@ -1173,8 +1417,9 @@ class CampaignOrchestrationTest(unittest.TestCase):
             self.assertEqual(set(reused), {4})
             campaign_payload["cells"][0]["command"][12] = "8"
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "command differs"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "command differs"),
             ):
                 run.load_reused_bf16_cells(campaign, **options)
             campaign_payload["cells"][0]["command"][12] = "4"
@@ -1185,8 +1430,9 @@ class CampaignOrchestrationTest(unittest.TestCase):
             self.assertEqual(set(reused), {4})
             campaign_payload["lengths"] = [8]
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "every requested length"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "every requested length"),
             ):
                 run.load_reused_bf16_cells(campaign, **options)
             campaign_payload["lengths"] = [4]
@@ -1194,26 +1440,29 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 "ROCBLAS_DEFAULT_ATOMICS_MODE"
             ] = "1"
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "deterministic execution environment"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "deterministic execution environment"),
             ):
                 run.load_reused_bf16_cells(campaign, **options)
-            campaign_payload["cells"][0]["execution_provenance"] = (
-                bf16_execution_provenance()
-            )
+            campaign_payload["cells"][0]["execution_provenance"] = bf16_execution_provenance()
             campaign_payload["xattention_profile"] = "b128-s16-tau900"
             campaign_payload["quality_tier"] = "accuracy"
             campaign_payload["gates"] = {
-                "r9700-g16": math.log(1.02), "r9700-g32": math.log(1.02),
+                "r9700-g16": math.log(1.02),
+                "r9700-g32": math.log(1.02),
             }
             campaign_payload["pass"] = False
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
             with mock.patch.object(run, "validate_cell_report"):
                 reused = run.load_reused_bf16_cells(campaign, **options)
             self.assertEqual(set(reused), {4})
-            self.assertEqual(reused[4][0]["reused_bf16_campaign"]["sha256"], run.file_sha256(campaign))
+            self.assertEqual(
+                reused[4][0]["reused_bf16_campaign"]["sha256"], run.file_sha256(campaign)
+            )
             campaign_payload["candidate_artifact"] = {
-                "weights_id": "different-recipe", "sha256": "9" * 64
+                "weights_id": "different-recipe",
+                "sha256": "9" * 64,
             }
             campaign_payload["weights_inputs"]["r9700-g16"] = "/different/g16.ninfer"
             campaign_payload["weights_inputs"]["r9700-g32"] = "/different/g32.ninfer"
@@ -1223,38 +1472,41 @@ class CampaignOrchestrationTest(unittest.TestCase):
             self.assertEqual(set(reused), {4})
             campaign_payload["prefill_chunk"] = 2048
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "prefill_chunk"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "prefill_chunk"),
             ):
                 run.load_reused_bf16_cells(campaign, **options)
             campaign_payload["prefill_chunk"] = 4096
             campaign_payload["weights_inputs"][run.BASELINE] = "/different/bf16-source"
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "source path differs"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "source path differs"),
             ):
                 run.load_reused_bf16_cells(campaign, **options)
             campaign_payload["weights_inputs"][run.BASELINE] = str(source)
-            campaign_payload["scorers"][run.BASELINE] = {
-                **scorer_identity, "sha256": "8" * 64
-            }
+            campaign_payload["scorers"][run.BASELINE] = {**scorer_identity, "sha256": "8" * 64}
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "scorer identity differs"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "scorer identity differs"),
             ):
                 run.load_reused_bf16_cells(campaign, **options)
             campaign_payload["scorers"][run.BASELINE] = scorer_identity
             campaign.write_text(json.dumps(campaign_payload), encoding="utf-8")
             retained_raw = cell_path.read_text(encoding="utf-8")
             cell_path.write_text("{}", encoding="utf-8")
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "raw scorer fields differ"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "raw scorer fields differ"),
             ):
                 run.load_reused_bf16_cells(campaign, **options)
             cell_path.write_text(retained_raw, encoding="utf-8")
             cell_path.with_suffix(".nllf32").write_bytes(struct.pack("<f", 2.0))
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "sidecar hashes do not match"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "sidecar hashes do not match"),
             ):
                 run.load_reused_bf16_cells(campaign, **options)
 
@@ -1270,19 +1522,40 @@ class CampaignOrchestrationTest(unittest.TestCase):
             cell_path = root / "old" / "4.prefill.r9700-g16.json"
             cell_path.parent.mkdir()
             raw = {field: 0 for field in run.CANDIDATE_SCORER_REPORT_FIELDS}
-            raw.update({
-                "scheme": "r9700-g16", "prompt_tokens": 4, "skip_tokens": 2,
-                "tokens_scored": 1, "argmax_tokens": 1, "non_finite": 0,
-                "mean_nll": 1.25,
-            })
+            raw.update(
+                {
+                    "scheme": "r9700-g16",
+                    "prompt_tokens": 4,
+                    "skip_tokens": 2,
+                    "tokens_scored": 1,
+                    "argmax_tokens": 1,
+                    "non_finite": 0,
+                    "mean_nll": 1.25,
+                }
+            )
             cell_path.write_text(json.dumps(raw), encoding="utf-8")
             cell_path.with_suffix(".nllf32").write_bytes(struct.pack("<f", 1.25))
             cell_path.with_suffix(".argmaxi32").write_bytes(struct.pack("<i", 7))
             command = [
-                str(scorer), "--weights", str(weights), "--ids", str(ids),
-                "--scheme", "r9700-g16", "--schedule", "prefill", "--skip", "half",
-                "--tokens", "4", "--prefill-chunk", "4096", "--device", "0",
-                "--out-json", str(cell_path),
+                str(scorer),
+                "--weights",
+                str(weights),
+                "--ids",
+                str(ids),
+                "--scheme",
+                "r9700-g16",
+                "--schedule",
+                "prefill",
+                "--skip",
+                "half",
+                "--tokens",
+                "4",
+                "--prefill-chunk",
+                "4096",
+                "--device",
+                "0",
+                "--out-json",
+                str(cell_path),
             ]
             cell = {
                 **raw,
@@ -1293,7 +1566,8 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 "quality_eligible": False,
             }
             scorer_identity = {
-                "path": str(scorer.resolve()), "bytes": scorer.stat().st_size,
+                "path": str(scorer.resolve()),
+                "bytes": scorer.stat().st_size,
                 "sha256": run.file_sha256(scorer),
             }
             candidate_artifact = {"weights_id": "candidate", "sha256": "a" * 64}
@@ -1333,9 +1607,14 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 scorer_provenance={"r9700-g16": scorer_identity},
                 ids=ids,
                 corpus_provenance=corpus,
-                lengths=[4], skip="half", prefill_chunk=4096, device=0,
-                expected_q4_activation_bits=8, expected_w8_activation_bits=8,
-                expected_fp8_qk_wmma=True, expected_xattention_profile="dense",
+                lengths=[4],
+                skip="half",
+                prefill_chunk=4096,
+                device=0,
+                expected_q4_activation_bits=8,
+                expected_w8_activation_bits=8,
+                expected_fp8_qk_wmma=True,
+                expected_xattention_profile="dense",
             )
             with mock.patch.object(run, "validate_cell_report"):
                 reused = run.load_reused_candidate_cells(campaign, **options)
@@ -1357,13 +1636,16 @@ class CampaignOrchestrationTest(unittest.TestCase):
                     "g32_path": str(weights.resolve()),
                 },
                 "profile_weights": {
-                    "r9700-g16": weights, "r9700-g32": weights,
+                    "r9700-g16": weights,
+                    "r9700-g32": weights,
                 },
                 "profile_bins": {
-                    "r9700-g16": scorer, "r9700-g32": scorer,
+                    "r9700-g16": scorer,
+                    "r9700-g32": scorer,
                 },
                 "scorer_provenance": {
-                    "r9700-g16": scorer_identity, "r9700-g32": scorer_identity,
+                    "r9700-g16": scorer_identity,
+                    "r9700-g32": scorer_identity,
                 },
                 "lengths": [4, 5],
                 "allow_partial": True,
@@ -1372,19 +1654,19 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 partial = run.load_reused_candidate_cells(campaign, **partial_options)
             self.assertEqual(set(partial), {("r9700-g16", 4)})
 
-            payload["scorers"]["r9700-g16"] = {
-                **scorer_identity, "sha256": "c" * 64
-            }
+            payload["scorers"]["r9700-g16"] = {**scorer_identity, "sha256": "c" * 64}
             campaign.write_text(json.dumps(payload), encoding="utf-8")
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "scorer identity differs"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "scorer identity differs"),
             ):
                 run.load_reused_candidate_cells(campaign, **options)
             payload["scorers"]["r9700-g16"] = scorer_identity
             campaign.write_text(json.dumps(payload), encoding="utf-8")
             cell_path.with_suffix(".nllf32").write_bytes(struct.pack("<f", 2.0))
-            with mock.patch.object(run, "validate_cell_report"), self.assertRaisesRegex(
-                SystemExit, "sidecar hashes do not match"
+            with (
+                mock.patch.object(run, "validate_cell_report"),
+                self.assertRaisesRegex(SystemExit, "sidecar hashes do not match"),
             ):
                 run.load_reused_candidate_cells(campaign, **options)
 
@@ -1467,8 +1749,7 @@ class CampaignOrchestrationTest(unittest.TestCase):
                             "source_config_sha256": "a" * 64,
                             "source_index_sha256": "b" * 64,
                             "source_shards_sha256": {
-                                f"model-{part:05d}-of-{run.SOURCE_SHARD_COUNT:05d}.safetensors":
-                                    f"{part:064x}"
+                                f"model-{part:05d}-of-{run.SOURCE_SHARD_COUNT:05d}.safetensors": f"{part:064x}"
                                 for part in range(1, run.SOURCE_SHARD_COUNT + 1)
                             },
                             "source_tensor_count": run.SOURCE_TENSOR_COUNT,
@@ -1482,24 +1763,36 @@ class CampaignOrchestrationTest(unittest.TestCase):
 
             argv = [
                 "run.py",
-                "--bf16-reference-weights", str(source),
-                "--bf16-reference-ppl-bin", str(scorer),
-                "--g16-ppl-bin", str(scorer),
-                "--g32-ppl-bin", str(scorer),
-                "--g16-weights", str(candidate),
-                "--g32-weights", str(candidate),
-                "--ids", str(corpus),
-                "--gate", "r9700-g16=0.02",
-                "--gate", "r9700-g32=0.02",
-                "--quality-tier", "accuracy",
-                "--schedule-parity-max-abs-nll", "0.0",
+                "--bf16-reference-weights",
+                str(source),
+                "--bf16-reference-ppl-bin",
+                str(scorer),
+                "--g16-ppl-bin",
+                str(scorer),
+                "--g32-ppl-bin",
+                str(scorer),
+                "--g16-weights",
+                str(candidate),
+                "--g32-weights",
+                str(candidate),
+                "--ids",
+                str(corpus),
+                "--gate",
+                "r9700-g16=0.02",
+                "--gate",
+                "r9700-g32=0.02",
+                "--quality-tier",
+                "accuracy",
+                "--schedule-parity-max-abs-nll",
+                "0.0",
                 "--no-position-extras",
-                "--out", str(output),
+                "--out",
+                str(output),
             ]
-            with mock.patch.object(sys, "argv", argv), mock.patch.object(
-                run, "preflight_python_scorer"
-            ), mock.patch.object(
-                run, "run_cell", side_effect=fake_run_cell
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(run, "preflight_python_scorer"),
+                mock.patch.object(run, "run_cell", side_effect=fake_run_cell),
             ):
                 self.assertEqual(run.main(), 0)
 
@@ -1510,9 +1803,7 @@ class CampaignOrchestrationTest(unittest.TestCase):
             self.assertEqual(result["quality_tier"], "accuracy")
             self.assertEqual(result["w8_activation_bits"], 8)
             self.assertEqual(result["xattention_profile"], "dense")
-            self.assertEqual(
-                result["candidate_kv_plane_layouts"], run.R9700_KV_PLANE_LAYOUTS
-            )
+            self.assertEqual(result["candidate_kv_plane_layouts"], run.R9700_KV_PLANE_LAYOUTS)
             self.assertEqual(result["quality_gate_contract"]["tier"], "accuracy")
             self.assertEqual(
                 result["quality_gate_contract"]["prefill_decode_schedule"],
@@ -1523,9 +1814,7 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 },
             )
             self.assertEqual(
-                result["quality_gate_contract"]["same_route_execution_variants"][
-                    "argmax_identity"
-                ],
+                result["quality_gate_contract"]["same_route_execution_variants"]["argmax_identity"],
                 "required",
             )
             self.assertEqual(result["lengths"], [run.DEFAULT_TOKENS, run.LONG_TOKENS])
@@ -1554,9 +1843,7 @@ class CampaignOrchestrationTest(unittest.TestCase):
                     length_cells = [
                         cell for cell in profile_cells if cell["prompt_tokens"] == tokens
                     ]
-                    self.assertTrue(
-                        any("device_graph_parity" in cell for cell in length_cells)
-                    )
+                    self.assertTrue(any("device_graph_parity" in cell for cell in length_cells))
                     self.assertTrue(any("spec_parity" in cell for cell in length_cells))
                     self.assertTrue(
                         all(
@@ -1566,7 +1853,9 @@ class CampaignOrchestrationTest(unittest.TestCase):
                             if key in ("device_graph_parity", "spec_parity", "draft_window_parity")
                         )
                     )
-                    self.assertTrue(all(cell["quality_tier"] == "accuracy" for cell in length_cells))
+                    self.assertTrue(
+                        all(cell["quality_tier"] == "accuracy" for cell in length_cells)
+                    )
             self.assertFalse(
                 any(
                     profile == run.BASELINE and "--no-device-graph" in extra

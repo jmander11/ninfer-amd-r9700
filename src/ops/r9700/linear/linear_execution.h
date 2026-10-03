@@ -33,13 +33,13 @@ public:
     // region are serialized.
     void bind_storage(void* activation_storage, std::size_t activation_storage_capacity_bytes);
 
-    [[nodiscard]] static std::size_t activation_workspace_capacity_bytes(
-        std::uint32_t tokens, std::uint32_t columns) noexcept;
+    [[nodiscard]] static std::size_t
+    activation_workspace_capacity_bytes(std::uint32_t tokens, std::uint32_t columns) noexcept;
 
     // The E4M3 activation image of a T-token call in the bound region; empty before binding or
     // when T exceeds the region.
-    [[nodiscard]] std::optional<r9700::linear::Fp8ActivationWorkspace> activation_workspace(
-        std::uint32_t tokens) const noexcept;
+    [[nodiscard]] std::optional<r9700::linear::Fp8ActivationWorkspace>
+    activation_workspace(std::uint32_t tokens) const noexcept;
 
     [[nodiscard]] std::uint32_t rows() const noexcept;
     [[nodiscard]] std::uint32_t columns() const noexcept;

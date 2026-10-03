@@ -15,9 +15,15 @@ from pathlib import Path
 from typing import Callable
 
 from tools.bench.prepare_selected_decode_memory_profile import (
-    MARKER_SOURCE, PROFILE_BUILD_DIR, PROFILE_BUILD_PRODUCER,
-    PROFILE_BUILD_RECEIPT_TYPE, PROFILE_ROUTE_RESOLVER, lexical_absolute,
-    profile_build_commands, sha, validate_profile_build_receipt,
+    MARKER_SOURCE,
+    PROFILE_BUILD_DIR,
+    PROFILE_BUILD_PRODUCER,
+    PROFILE_BUILD_RECEIPT_TYPE,
+    PROFILE_ROUTE_RESOLVER,
+    lexical_absolute,
+    profile_build_commands,
+    sha,
+    validate_profile_build_receipt,
 )
 from tools.bench.run_ninfer_bench_matrix import inspect_executable
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
@@ -28,8 +34,11 @@ FINALIST_TOKEN = "prefill-chunk-selection-pipeline-20260905/run-finalists.sh"
 
 def snapshot(path: Path) -> dict:
     resolved = path.resolve(strict=True)
-    return {"path": str(resolved), "file_size_bytes": resolved.stat().st_size,
-            "sha256": sha(resolved)}
+    return {
+        "path": str(resolved),
+        "file_size_bytes": resolved.stat().st_size,
+        "sha256": sha(resolved),
+    }
 
 
 def finalist_campaign_is_live() -> bool:
@@ -46,8 +55,9 @@ def finalist_campaign_is_live() -> bool:
 
 
 def resolve_route(selection: Path) -> dict:
-    spec = importlib.util.spec_from_file_location("ninfer_selected_profile_route",
-                                                  PROFILE_ROUTE_RESOLVER)
+    spec = importlib.util.spec_from_file_location(
+        "ninfer_selected_profile_route", PROFILE_ROUTE_RESOLVER
+    )
     if spec is None or spec.loader is None:
         raise ValueError("cannot load selected route resolver")
     module = importlib.util.module_from_spec(spec)
@@ -114,27 +124,31 @@ def build(selection_path: Path, output: Path) -> dict:
     manifest_path = Path(whole["path"]).resolve(strict=True)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     compiled = {
-        "q4_activation_bits": 8, "w8_activation_bits": 8,
+        "q4_activation_bits": 8,
+        "w8_activation_bits": 8,
         "split512_enabled": True,
         "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
-        "packed_decode_min_context": 64, "split512_min_context": 8192,
-        "q4_prefill_cta_profile":
-            "m64n128-pingpong-n16-k16-scalar-base-production",
+        "packed_decode_min_context": 64,
+        "split512_min_context": 8192,
+        "q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-scalar-base-production",
     }
     selected_route = {
-        "winner": terminal["winner"], "artifact": terminal["winner_artifact"],
+        "winner": terminal["winner"],
+        "artifact": terminal["winner_artifact"],
         "cache_profile": terminal["winner_cache_profile"],
         "execution_profile": terminal["winner_execution_profile"],
         "prefill_chunk": selection["selected_prefill_chunk"],
     }
     sparse = selected_route["execution_profile"]["xattention_profile"] != "dense"
     definitions = {
-        "CMAKE_BUILD_TYPE": "Release", "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_HIP_ARCHITECTURES": "gfx1201",
         "NINFER_BUILD_BENCHMARKS": "ON",
         "NINFER_R9700_KV_VALUE_GROUP": str(selected_route["cache_profile"]["value_group"]),
         "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
         "NINFER_R9700_Q4_PREFILL_PINGPONG_QUALIFICATION": "OFF",
-        "NINFER_R9700_W8_ACTIVATION_BITS": "8", "NINFER_R9700_FP8_QK_WMMA": "1",
+        "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+        "NINFER_R9700_FP8_QK_WMMA": "1",
         "NINFER_R9700_XATTENTION_QUALIFICATION": "ON" if sparse else "OFF",
         "NINFER_R9700_XATTENTION_STRIDE": "16",
         "NINFER_R9700_XATTENTION_TAU_PERMILLE": "900",
@@ -147,32 +161,43 @@ def build(selection_path: Path, output: Path) -> dict:
     compile_database = PROFILE_BUILD_DIR / "compile_commands.json"
     marker = snapshot(MARKER_SOURCE)
     receipt = {
-        "artifact_type": PROFILE_BUILD_RECEIPT_TYPE, "schema_version": 1,
-        "status": "passed", "purpose": "profiler_attribution_only",
+        "artifact_type": PROFILE_BUILD_RECEIPT_TYPE,
+        "schema_version": 1,
+        "status": "passed",
+        "purpose": "profiler_attribution_only",
         "profile_timing_admissible": False,
         "producer": snapshot(PROFILE_BUILD_PRODUCER),
         "route_resolver": snapshot(PROFILE_ROUTE_RESOLVER),
-        "terminal_selection": {"path": str(selection_path),
-                               "sha256": hashlib.sha256(selection_raw).hexdigest()},
+        "terminal_selection": {
+            "path": str(selection_path),
+            "sha256": hashlib.sha256(selection_raw).hexdigest(),
+        },
         "source_matrix": {"path": str(manifest_path), "sha256": whole["sha256"]},
         "artifact": manifest["artifact"],
         "terminal_timing_executable": manifest["bench"],
         "ordinary_round_marker_source": marker,
-        "selected_route": selected_route, "compiled_route": compiled,
-        "hybrid_shared_workspace_authority": manifest.get(
-            "hybrid_shared_workspace_authority"),
+        "selected_route": selected_route,
+        "compiled_route": compiled,
+        "hybrid_shared_workspace_authority": manifest.get("hybrid_shared_workspace_authority"),
         "instrumentation_executable": inspect_executable(binary),
-        "build_directory": str(PROFILE_BUILD_DIR), "cmake_cache": snapshot(cache),
+        "build_directory": str(PROFILE_BUILD_DIR),
+        "cmake_cache": snapshot(cache),
         "compile_database": snapshot(compile_database),
-        "compile_definitions": definitions, "build_commands": commands,
+        "compile_definitions": definitions,
+        "build_commands": commands,
     }
+
     def validate_published(path: Path) -> None:
         validated, _, _ = validate_profile_build_receipt(
-            path, selection_path=selection_path,
+            path,
+            selection_path=selection_path,
             selection_sha256=receipt["terminal_selection"]["sha256"],
-            manifest_path=manifest_path, manifest_sha256=whole["sha256"],
-            artifact=manifest["artifact"], terminal_executable=manifest["bench"],
-            marker_source=marker, selected_route=selected_route,
+            manifest_path=manifest_path,
+            manifest_sha256=whole["sha256"],
+            artifact=manifest["artifact"],
+            terminal_executable=manifest["bench"],
+            marker_source=marker,
+            selected_route=selected_route,
             compiled_route=compiled,
             hybrid_workspace_authority=manifest.get("hybrid_shared_workspace_authority"),
         )
@@ -190,8 +215,15 @@ def main() -> int:
     args = parser.parse_args()
     try:
         build(args.selection, args.out)
-    except (OSError, subprocess.CalledProcessError, UnicodeError, json.JSONDecodeError,
-            KeyError, TypeError, ValueError) as error:
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        UnicodeError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
         raise SystemExit(str(error)) from error
     return 0
 

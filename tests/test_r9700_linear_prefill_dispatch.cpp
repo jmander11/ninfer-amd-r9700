@@ -16,25 +16,29 @@ static_assert(!linear::is_q4_prefill_gate_up_a4_eligible(2048U, 34816U, 5120U, 5
 static_assert(!linear::is_q4_prefill_gate_up_a4_eligible(2048U, 5120U, 17408U, 17408U));
 static_assert([] {
     for (const auto t : {1U, 2U, 4U, 5U, 6U, 24U, 128U, 129U, 2047U, 2048U, 4096U}) {
-        const auto expected = linear::kQ4PrefillGateUpA4 && t > 128U
-            ? 4U : linear::kQ4ActivationBits;
-        if (linear::q4_linear_activation_bits(t, 34816U, 5120U, 5120U) != expected)
-            return false;
+        const auto expected =
+            linear::kQ4PrefillGateUpA4 && t > 128U ? 4U : linear::kQ4ActivationBits;
+        if (linear::q4_linear_activation_bits(t, 34816U, 5120U, 5120U) != expected) return false;
         // Endpoints remain A8; the wider evaluators add only exact Text shapes.
         for (const auto n : {4096U, 7168U, 12288U, 248320U})
             if (linear::q4_linear_activation_bits(t, n, 5120U, 5120U) !=
                 (t > 128U && ((linear::kQ4PrefillA4Families == 3U && n != 248320U) ||
-                    (linear::kQ4PrefillA4Families >= 3U && n == 7168U))
-                    ? 4U : linear::kQ4ActivationBits)) return false;
+                              (linear::kQ4PrefillA4Families >= 3U && n == 7168U))
+                     ? 4U
+                     : linear::kQ4ActivationBits))
+                return false;
         if (linear::q4_linear_activation_bits(t, 5120U, 17408U, 17408U) !=
             ((linear::kQ4PrefillA4Families == 2U || linear::kQ4PrefillA4Families == 3U) && t > 128U
-                ? 4U : linear::kQ4ActivationBits)) return false;
+                 ? 4U
+                 : linear::kQ4ActivationBits))
+            return false;
         if (linear::q4_linear_activation_bits(t, 5120U, 6144U, 6144U) !=
-            (linear::kQ4PrefillA4Families == 3U && t > 128U
-                ? 4U : linear::kQ4ActivationBits)) return false;
+            (linear::kQ4PrefillA4Families == 3U && t > 128U ? 4U : linear::kQ4ActivationBits))
+            return false;
         for (const auto k : {5120U, 6144U, 17408U})
-            if (linear::q4_linear_activation_bits(t, 5120U, k, k+128U) !=
-                linear::kQ4ActivationBits) return false;
+            if (linear::q4_linear_activation_bits(t, 5120U, k, k + 128U) !=
+                linear::kQ4ActivationBits)
+                return false;
     }
     return true;
 }());
@@ -45,15 +49,24 @@ struct Shape {
 };
 
 constexpr std::array<std::uint32_t, 4> kQualifiedTokens{1024U, 2048U, 4096U, 8192U};
-constexpr std::array<std::uint32_t, 8> kDFlashSmallTEligible{4U, 5U, 6U, 8U,
-                                                            10U, 12U, 18U, 20U};
+constexpr std::array<std::uint32_t, 8> kDFlashSmallTEligible{4U, 5U, 6U, 8U, 10U, 12U, 18U, 20U};
 constexpr std::array<Shape, 10> kQ4Shapes{{
-    {7168U, 5120U}, {4096U, 5120U}, {12288U, 5120U}, {5120U, 6144U},
-    {34816U, 5120U}, {5120U, 17408U}, {5120U, 10240U}, {1024U, 5120U},
-    {5120U, 25600U}, {6144U, 5120U},
+    {7168U, 5120U},
+    {4096U, 5120U},
+    {12288U, 5120U},
+    {5120U, 6144U},
+    {34816U, 5120U},
+    {5120U, 17408U},
+    {5120U, 10240U},
+    {1024U, 5120U},
+    {5120U, 25600U},
+    {6144U, 5120U},
 }};
 constexpr std::array<Shape, 4> kW8Shapes{{
-    {7168U, 5120U}, {12288U, 5120U}, {5120U, 6144U}, {5120U, 17408U},
+    {7168U, 5120U},
+    {12288U, 5120U},
+    {5120U, 6144U},
+    {5120U, 17408U},
 }};
 
 template <std::size_t N, typename Predicate>
@@ -110,21 +123,14 @@ static_assert(!linear::is_a8q4_dflash_small_t_eligible(12U, 34816U, 5120U, 5248U
 static_assert(!linear::use_a8q4_dflash_small_t(15U, 34816U, 5120U, 5120U));
 static_assert(!linear::use_a8q4_dflash_small_t(12U, 4096U, 5120U, 5120U));
 
-static_assert(linear::is_a8q4_dflash_mlp_down_t5_eligible(
-    5U, 5120U, 17408U, 17408U));
+static_assert(linear::is_a8q4_dflash_mlp_down_t5_eligible(5U, 5120U, 17408U, 17408U));
 static_assert(linear::use_a8q4_dflash_mlp_down_t5(5U, 5120U, 17408U, 17408U) ==
-              (linear::kDFlashMlpDownT5CandidateEnabled &&
-               linear::kQ4ActivationBits == 8U));
-static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
-    4U, 5120U, 17408U, 17408U));
-static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
-    6U, 5120U, 17408U, 17408U));
-static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
-    5U, 5121U, 17408U, 17408U));
-static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
-    5U, 5120U, 17409U, 17536U));
-static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
-    5U, 5120U, 17408U, 17536U));
+              (linear::kDFlashMlpDownT5CandidateEnabled && linear::kQ4ActivationBits == 8U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(4U, 5120U, 17408U, 17408U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(6U, 5120U, 17408U, 17408U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(5U, 5121U, 17408U, 17408U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(5U, 5120U, 17409U, 17536U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(5U, 5120U, 17408U, 17536U));
 
 static_assert(linear::select_a8q4_prefill_route(2048U, 7168U, 5120U) ==
               linear::A8Q4PrefillRoute::M64N128PingPongProduction);
@@ -148,7 +154,7 @@ static_assert(!linear::use_a8w8_prefill_cta(4096U, 5120U, 10240U));
 
 int main() {
     std::cout << "R9700 cooperative prefill CTA dispatch predicates passed: q4_prefill_cta_profile="
-              << linear::kQ4PrefillCtaProfile << ", q4_activation_profile="
-              << linear::kQ4ActivationProfile << '\n';
+              << linear::kQ4PrefillCtaProfile
+              << ", q4_activation_profile=" << linear::kQ4ActivationProfile << '\n';
     return 0;
 }

@@ -8,10 +8,19 @@ from tools.r9700.check_rmsnorm_decode_static import check
 SYMBOL = "_ZN6ninfer3ops5r97005eager12_GLOBAL__N_137rmsnorm_k5120_rows4_cta_kernelEv"
 
 
-def fixture(*, vgprs: int = 24, lds: int = 80, occupancy: int = 16,
-            global_load: bool = True, shuffle: bool = True, scalar: bool = False,
-            scratch: int = 0, maximum_workgroup: int = 640,
-            barrier_protocol: str | None = None, store: bool = True) -> str:
+def fixture(
+    *,
+    vgprs: int = 24,
+    lds: int = 80,
+    occupancy: int = 16,
+    global_load: bool = True,
+    shuffle: bool = True,
+    scalar: bool = False,
+    scratch: int = 0,
+    maximum_workgroup: int = 640,
+    barrier_protocol: str | None = None,
+    store: bool = True,
+) -> str:
     load = "  global_load_b128 v[2:5], v[2:3], off\n" if global_load else ""
     gain = "  global_load_b128 v[2:5], v0, s[6:7]\n"
     row_store = "  global_store_b128 v[0:1], v[2:5], off\n" if store else ""
@@ -102,8 +111,10 @@ class StaticCheckTest(unittest.TestCase):
             self.run_check(fixture(barrier_protocol=protocol))
 
     def test_rejects_atomic_or_wmma(self):
-        for instruction in ("  v_wmma_f32_16x16x16_bf16 v0, v1, v2, v3\n",
-                            "  global_atomic_add v0, v[1:2], v3, off\n"):
+        for instruction in (
+            "  v_wmma_f32_16x16x16_bf16 v0, v1, v2, v3\n",
+            "  global_atomic_add v0, v[1:2], v3, off\n",
+        ):
             with self.subTest(instruction=instruction):
                 with self.assertRaisesRegex(ValueError, "forbidden instructions"):
                     self.run_check(fixture(barrier_protocol=instruction))

@@ -44,7 +44,8 @@ def role_of(name: str) -> str:
 
 def selected_specs():
     specs = [
-        spec for spec in e4m3_inventory.TENSOR_SPECS
+        spec
+        for spec in e4m3_inventory.TENSOR_SPECS
         if spec.format == e4m3_inventory.F8E4M3_ROW_F32S
         and spec.name.startswith("text/layers/")
         and role_of(spec.name) in SELECTED_ROLES
@@ -121,8 +122,12 @@ def _summary(tensors: Sequence[Mapping[str, object]]) -> dict[str, object]:
 
 
 def assemble_report(
-    *, rows_per_tensor: int, tensors: Sequence[dict[str, object]], source: Mapping[str, object],
-    implementation: Mapping[str, str], all_matrix_reference: Mapping[str, object],
+    *,
+    rows_per_tensor: int,
+    tensors: Sequence[dict[str, object]],
+    source: Mapping[str, object],
+    implementation: Mapping[str, str],
+    all_matrix_reference: Mapping[str, object],
     worst_count: int = DEFAULT_WORST_COUNT,
 ) -> dict[str, object]:
     ordered = sorted(tensors, key=lambda item: str(item["name"]))
@@ -133,15 +138,18 @@ def assemble_report(
         for role in SELECTED_ROLES
     }
     finite = [item for item in ordered if item["e4m3"] is not None]
+
     def ranked(metric: str, reverse: bool) -> list[Mapping[str, object]]:
         return sorted(
             finite,
             key=lambda item: (
                 -float(item["e4m3_over_q4g64"][metric])
-                if reverse else float(item["e4m3_over_q4g64"][metric]),
+                if reverse
+                else float(item["e4m3_over_q4g64"][metric]),
                 str(item["name"]),
             ),
         )[:worst_count]
+
     aggregate = _summary(ordered)
     full_tensors = all_matrix_reference.get("tensors")
     if not isinstance(full_tensors, list):
@@ -152,13 +160,23 @@ def assemble_report(
         if (
             not isinstance(prior, Mapping)
             or prior.get("sampled_row_indices") != item["sampled_row_indices"]
-            or not math.isclose(float(prior["relative_l2"]), float(item["e4m3"]["relative_l2"]), rel_tol=1e-12)
-            or not math.isclose(float(prior["max_abs"]), float(item["e4m3"]["max_abs"]), rel_tol=1e-12)
+            or not math.isclose(
+                float(prior["relative_l2"]), float(item["e4m3"]["relative_l2"]), rel_tol=1e-12
+            )
+            or not math.isclose(
+                float(prior["max_abs"]), float(item["e4m3"]["max_abs"]), rel_tol=1e-12
+            )
         ):
-            raise ValueError(f"{item['name']}: deterministic E4M3 result differs from all-matrix reference")
+            raise ValueError(
+                f"{item['name']}: deterministic E4M3 result differs from all-matrix reference"
+            )
     full_finite = [item for item in full_tensors if item.get("relative_l2") is not None]
-    global_rel_worst = max(full_finite, key=lambda item: (float(item["relative_l2"]), str(item["name"])))
-    global_abs_worst = max(full_finite, key=lambda item: (float(item["max_abs"]), str(item["name"])))
+    global_rel_worst = max(
+        full_finite, key=lambda item: (float(item["relative_l2"]), str(item["name"]))
+    )
+    global_abs_worst = max(
+        full_finite, key=lambda item: (float(item["max_abs"]), str(item["name"]))
+    )
     selected_names = {str(item["name"]) for item in ordered}
     full_aggregate = all_matrix_reference["aggregate"]
     concentration = {
@@ -171,14 +189,17 @@ def assemble_report(
         "contains_global_e4m3_relative_l2_worst": global_rel_worst["name"] in selected_names,
         "contains_global_e4m3_max_abs_worst": global_abs_worst["name"] in selected_names,
         "global_e4m3_relative_l2_worst": {
-            "name": global_rel_worst["name"], "value": global_rel_worst["relative_l2"]
+            "name": global_rel_worst["name"],
+            "value": global_rel_worst["relative_l2"],
         },
         "global_e4m3_max_abs_worst": {
-            "name": global_abs_worst["name"], "value": global_abs_worst["max_abs"]
+            "name": global_abs_worst["name"],
+            "value": global_abs_worst["max_abs"],
         },
     }
     compact = lambda item, metric: {
-        "name": item["name"], "role": item["role"],
+        "name": item["name"],
+        "role": item["role"],
         "metric": metric,
         "e4m3": item["e4m3"][metric],
         "q4g64": item["q4g64"][metric],
@@ -220,8 +241,13 @@ def assemble_report(
 
 
 def run_screen(
-    model_dir: Path, ranking: Path, all_matrix_report_path: Path, output: Path,
-    *, rows_per_tensor: int, worst_count: int,
+    model_dir: Path,
+    ranking: Path,
+    all_matrix_report_path: Path,
+    output: Path,
+    *,
+    rows_per_tensor: int,
+    worst_count: int,
 ) -> dict[str, object]:
     if rows_per_tensor <= 0 or worst_count <= 0:
         raise ValueError("rows-per-tensor and worst-count must be positive")
@@ -234,8 +260,10 @@ def run_screen(
         raise ValueError("all-matrix E4M3 report uses a different sampling contract")
     all_matrix_report = {
         **all_matrix_report,
-        "identity": {"path": str(all_matrix_report_path.resolve()),
-                     "sha256": sha256_file(all_matrix_report_path)},
+        "identity": {
+            "path": str(all_matrix_report_path.resolve()),
+            "sha256": sha256_file(all_matrix_report_path),
+        },
     }
     config_path = model_dir / "config.json"
     index_path = model_dir / "model.safetensors.index.json"
@@ -272,11 +300,17 @@ def run_screen(
             "index": {"path": index_path.name, "sha256": sha256_file(index_path)},
             "ranking": {"path": str(ranking.resolve()), "sha256": sha256_file(ranking)},
             "shards": [
-                {"path": shard, "bytes": (model_dir / shard).stat().st_size,
-                 "sha256": sha256_file(model_dir / shard)} for shard in shards
+                {
+                    "path": shard,
+                    "bytes": (model_dir / shard).stat().st_size,
+                    "sha256": sha256_file(model_dir / shard),
+                }
+                for shard in shards
             ],
         },
-        implementation={str(path.relative_to(root)): sha256_file(path) for path in implementation_paths},
+        implementation={
+            str(path.relative_to(root)): sha256_file(path) for path in implementation_paths
+        },
         all_matrix_reference=all_matrix_report,
         worst_count=worst_count,
     )
@@ -294,10 +328,22 @@ def main() -> int:
     parser.add_argument("--worst-count", type=int, default=DEFAULT_WORST_COUNT)
     args = parser.parse_args()
     report = run_screen(
-        args.model_dir, args.ranking, args.all_matrix_e4m3_report, args.output,
-        rows_per_tensor=args.rows_per_tensor, worst_count=args.worst_count,
+        args.model_dir,
+        args.ranking,
+        args.all_matrix_e4m3_report,
+        args.output,
+        rows_per_tensor=args.rows_per_tensor,
+        worst_count=args.worst_count,
     )
-    print(json.dumps({"aggregate": report["aggregate"], "quality_concentration": report["quality_concentration"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "aggregate": report["aggregate"],
+                "quality_concentration": report["quality_concentration"],
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 

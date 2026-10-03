@@ -87,8 +87,17 @@ class E4M3CapacityAnalysisTest(unittest.TestCase):
             planner_sources=sources,
             provenance={"hash": "fixed"},
         )
-        self.assertEqual([item["workspace"]["prefill_chunk"] for item in report["scenarios"]], [2048, 8192])
-        self.assertEqual(sum(len(group["cells"]) for scenario in report["scenarios"] for group in scenario["groups"]), 16)
+        self.assertEqual(
+            [item["workspace"]["prefill_chunk"] for item in report["scenarios"]], [2048, 8192]
+        )
+        self.assertEqual(
+            sum(
+                len(group["cells"])
+                for scenario in report["scenarios"]
+                for group in scenario["groups"]
+            ),
+            16,
+        )
         self.assertEqual(report["planner_contract"]["automatic_headroom_bytes"], HEADROOM_BYTES)
         self.assertEqual(canonical_json(report), canonical_json(report))
 

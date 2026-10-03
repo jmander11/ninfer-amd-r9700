@@ -25,9 +25,10 @@ struct HostCopy {
 // Both buffers must stay valid and unaliased by other writers until such an event completes.
 inline void enqueue_host_copies(std::vector<HostCopy> copies, hipStream_t stream) {
     if (copies.empty()) { return; }
-    auto batch = std::make_unique<std::vector<HostCopy>>(std::move(copies));
+    auto batch     = std::make_unique<std::vector<HostCopy>>(std::move(copies));
     const auto run = [](void* data) {
-        const std::unique_ptr<std::vector<HostCopy>> owned(static_cast<std::vector<HostCopy>*>(data));
+        const std::unique_ptr<std::vector<HostCopy>> owned(
+            static_cast<std::vector<HostCopy>*>(data));
         for (const HostCopy& copy : *owned) {
             if (copy.bytes != 0) { std::memcpy(copy.dst, copy.src, copy.bytes); }
         }

@@ -27,10 +27,11 @@ namespace ninfer::ops {
  * extents, which quantize the normalized rows without materializing them; other extents
  * compose public RMSNorm and Linear using a BF16 intermediate in caller workspace.
  */
-[[nodiscard]] std::size_t normalized_linear_workspace_capacity_bytes(
-    std::int32_t tokens, std::int32_t columns, std::int32_t rows);
-void normalized_linear(const Tensor& input, const Tensor& norm, float eps,
-                       bool unit_offset, const Weight& weight, Tensor& output,
-                       const DeviceSpan& workspace, hipStream_t stream);
+[[nodiscard]] std::size_t normalized_linear_workspace_capacity_bytes(std::int32_t tokens,
+                                                                     std::int32_t columns,
+                                                                     std::int32_t rows);
+void normalized_linear(const Tensor& input, const Tensor& norm, float eps, bool unit_offset,
+                       const Weight& weight, Tensor& output, const DeviceSpan& workspace,
+                       hipStream_t stream);
 
 } // namespace ninfer::ops

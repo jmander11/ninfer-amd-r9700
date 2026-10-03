@@ -10,33 +10,45 @@
 #include <dlfcn.h>
 
 namespace {
-template <class F> F next(const char* name) {
+template <class F>
+F next(const char* name) {
     auto value = reinterpret_cast<F>(dlsym(RTLD_NEXT, name));
-    if (!value) { std::fprintf(stderr, "graph-memory: missing %s\n", name); std::abort(); }
+    if (!value) {
+        std::fprintf(stderr, "graph-memory: missing %s\n", name);
+        std::abort();
+    }
     return value;
 }
+
 std::size_t free_bytes() {
     std::size_t available = 0, total = 0;
     if (next<decltype(&hipMemGetInfo)>("hipMemGetInfo")(&available, &total) != hipSuccess) {
-        std::fprintf(stderr, "graph-memory: memory query failed\n"); std::abort();
+        std::fprintf(stderr, "graph-memory: memory query failed\n");
+        std::abort();
     }
     return available;
 }
+
 std::size_t node_count(hipGraph_t graph) {
     std::size_t count = 0;
-    if (next<decltype(&hipGraphGetNodes)>("hipGraphGetNodes")(graph, nullptr, &count) != hipSuccess) {
-        std::fprintf(stderr, "graph-memory: node query failed\n"); std::abort();
+    if (next<decltype(&hipGraphGetNodes)>("hipGraphGetNodes")(graph, nullptr, &count) !=
+        hipSuccess) {
+        std::fprintf(stderr, "graph-memory: node query failed\n");
+        std::abort();
     }
     return count;
 }
-void record(const char* event, const void* handle, std::size_t nodes,
-            std::size_t before, std::size_t after, hipError_t status) {
+
+void record(const char* event, const void* handle, std::size_t nodes, std::size_t before,
+            std::size_t after, hipError_t status) {
     std::fprintf(stderr,
-        "graph-memory event=%s handle=%p nodes=%zu free_before=%zu free_after=%zu delta=%lld status=%d\n",
-        event, handle, nodes, before, after,
-        static_cast<long long>(before) - static_cast<long long>(after), static_cast<int>(status));
+                 "graph-memory event=%s handle=%p nodes=%zu free_before=%zu free_after=%zu "
+                 "delta=%lld status=%d\n",
+                 event, handle, nodes, before, after,
+                 static_cast<long long>(before) - static_cast<long long>(after),
+                 static_cast<int>(status));
 }
-}
+} // namespace
 
 extern "C" hipError_t hipMemGetInfo(std::size_t* available, std::size_t* total) {
     const auto status = next<decltype(&hipMemGetInfo)>("hipMemGetInfo")(available, total);
@@ -59,8 +71,8 @@ extern "C" hipError_t hipGraphInstantiate(hipGraphExec_t* executable, hipGraph_t
     const auto before = free_bytes();
     const auto status = next<decltype(&hipGraphInstantiate)>("hipGraphInstantiate")(
         executable, graph, error_node, log, size);
-    record("instantiate", status == hipSuccess ? *executable : nullptr,
-           node_count(graph), before, free_bytes(), status);
+    record("instantiate", status == hipSuccess ? *executable : nullptr, node_count(graph), before,
+           free_bytes(), status);
     return status;
 }
 
@@ -79,7 +91,10 @@ extern "C" hipError_t hipGraphUpload(hipGraphExec_t executable, hipStream_t stre
     const auto status = next<decltype(&hipGraphUpload)>("hipGraphUpload")(executable, stream);
     if (status == hipSuccess) {
         const auto sync = next<decltype(&hipStreamSynchronize)>("hipStreamSynchronize")(stream);
-        if (sync != hipSuccess) { record("upload_sync_failed", executable, 0, before, free_bytes(), sync); return sync; }
+        if (sync != hipSuccess) {
+            record("upload_sync_failed", executable, 0, before, free_bytes(), sync);
+            return sync;
+        }
     }
     record("upload", executable, 0, before, free_bytes(), status);
     return status;

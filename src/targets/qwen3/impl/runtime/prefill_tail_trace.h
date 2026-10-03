@@ -28,7 +28,7 @@ namespace {
 
 inline float bf16_to_float(std::uint16_t bits) {
     const std::uint32_t word = static_cast<std::uint32_t>(bits) << 16U;
-    float value = 0.0F;
+    float value              = 0.0F;
     std::memcpy(&value, &word, sizeof(value));
     return value;
 }
@@ -44,9 +44,9 @@ inline bool precedes(float value, std::int32_t token, const RankedLogit& incumbe
            (value == incumbent.value && (incumbent.token < 0 || token < incumbent.token));
 }
 
-inline void capture_if_enabled(std::uint32_t base, std::uint32_t tokens,
-                               const Tensor& tail_hidden, const Tensor& logits,
-                               std::int32_t token_domain, hipStream_t stream) {
+inline void capture_if_enabled(std::uint32_t base, std::uint32_t tokens, const Tensor& tail_hidden,
+                               const Tensor& logits, std::int32_t token_domain,
+                               hipStream_t stream) {
     const char* enabled = std::getenv("NINFER_QWEN3_PREFILL_P129_TRACE");
     if (enabled == nullptr) { return; }
     if (enabled[0] != '1' || enabled[1] != '\0') {
@@ -56,9 +56,8 @@ inline void capture_if_enabled(std::uint32_t base, std::uint32_t tokens,
     if (!((base == 0U && tokens == 129U) || (base == 128U && tokens == 1U))) {
         throw std::logic_error("P129 prefill trace requires exact fresh or one-token append shape");
     }
-    if (tokens == 0U || tail_hidden.dtype != DType::BF16 ||
-        tail_hidden.ne[0] != 5120 || tail_hidden.ne[1] != 1 ||
-        tail_hidden.ne[2] != 1 || tail_hidden.ne[3] != 1 ||
+    if (tokens == 0U || tail_hidden.dtype != DType::BF16 || tail_hidden.ne[0] != 5120 ||
+        tail_hidden.ne[1] != 1 || tail_hidden.ne[2] != 1 || tail_hidden.ne[3] != 1 ||
         !tail_hidden.is_contiguous() || tail_hidden.data == nullptr ||
         logits.dtype != DType::BF16 || logits.ne[0] < token_domain || logits.ne[1] != 1 ||
         logits.ne[2] != 1 || logits.ne[3] != 1 || !logits.is_contiguous() ||
@@ -73,13 +72,13 @@ inline void capture_if_enabled(std::uint32_t base, std::uint32_t tokens,
 
     std::vector<std::uint16_t> hidden(5120U);
     std::vector<std::uint16_t> host_logits(static_cast<std::size_t>(token_domain));
-    hipError_t status = hipMemcpyAsync(hidden.data(), tail_hidden.data,
-                                       hidden.size() * sizeof(std::uint16_t),
-                                       hipMemcpyDeviceToHost, stream);
+    hipError_t status =
+        hipMemcpyAsync(hidden.data(), tail_hidden.data, hidden.size() * sizeof(std::uint16_t),
+                       hipMemcpyDeviceToHost, stream);
     if (status == hipSuccess) {
         status = hipMemcpyAsync(host_logits.data(), logits.data,
-                                host_logits.size() * sizeof(std::uint16_t),
-                                hipMemcpyDeviceToHost, stream);
+                                host_logits.size() * sizeof(std::uint16_t), hipMemcpyDeviceToHost,
+                                stream);
     }
     if (status == hipSuccess) { status = hipStreamSynchronize(stream); }
     if (status != hipSuccess) {
@@ -124,12 +123,12 @@ inline void capture_if_enabled(std::uint32_t base, std::uint32_t tokens,
     output << "],\n"
            << "  \"target_logits_kind\": \"full_lm_head_bf16\",\n"
            << "  \"token_domain\": " << token_domain << ",\n"
-           << "  \"top1\": {\"token\": " << first.token << ", \"bf16_bits\": "
-           << first.bits << ", \"value\": " << std::setprecision(9) << first.value << "},\n"
-           << "  \"top2\": {\"token\": " << second.token << ", \"bf16_bits\": "
-           << second.bits << ", \"value\": " << std::setprecision(9) << second.value << "},\n"
-           << "  \"top1_top2_margin\": " << std::setprecision(9)
-           << first.value - second.value << "\n"
+           << "  \"top1\": {\"token\": " << first.token << ", \"bf16_bits\": " << first.bits
+           << ", \"value\": " << std::setprecision(9) << first.value << "},\n"
+           << "  \"top2\": {\"token\": " << second.token << ", \"bf16_bits\": " << second.bits
+           << ", \"value\": " << std::setprecision(9) << second.value << "},\n"
+           << "  \"top1_top2_margin\": " << std::setprecision(9) << first.value - second.value
+           << "\n"
            << "}\n";
     output.close();
     if (!output) { throw std::runtime_error("P129 prefill trace output write failed"); }

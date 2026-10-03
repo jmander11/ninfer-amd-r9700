@@ -15,8 +15,12 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from tools.artifact.layouts import (encode_q4_n16k16, encode_row_split,
-                                    q4_n16k16_geometry, row_split_geometry)
+from tools.artifact.layouts import (
+    encode_q4_n16k16,
+    encode_row_split,
+    q4_n16k16_geometry,
+    row_split_geometry,
+)
 from tools.artifact.numeric import QuantFormat, get_format
 from tools.convert.common.quantize import QuantizedMatrix, pick_device
 
@@ -26,9 +30,7 @@ ROW_CHUNK = 128
 _FP16_MIN_SUBNORMAL = np.float16(2.0**-24)
 
 
-def _canonical_fp16(
-    raw_scale: np.ndarray, nonzero: np.ndarray, format_name: str
-) -> np.ndarray:
+def _canonical_fp16(raw_scale: np.ndarray, nonzero: np.ndarray, format_name: str) -> np.ndarray:
     with np.errstate(over="ignore", invalid="ignore"):
         scale = raw_scale.astype(np.float32).astype(np.float16)
     underflow = (scale == 0) & nonzero
@@ -43,49 +45,31 @@ def _canonical_fp16(
 def _reciprocal(scale: np.ndarray) -> np.ndarray:
     reciprocal = np.zeros(scale.shape, dtype=np.float32)
     positive = scale > 0
-    reciprocal[positive] = (
-        1.0 / scale[positive].astype(np.float64)
-    ).astype(np.float32)
+    reciprocal[positive] = (1.0 / scale[positive].astype(np.float64)).astype(np.float32)
     return reciprocal
 
 
-def _codes(
-    grouped: np.ndarray, scale: np.ndarray, qmin: int, qmax: int
-) -> np.ndarray:
+def _codes(grouped: np.ndarray, scale: np.ndarray, qmin: int, qmax: int) -> np.ndarray:
     reciprocal = _reciprocal(scale)
-    return np.clip(
-        np.rint(grouped * reciprocal[..., None]), qmin, qmax
-    ).astype(np.int8)
+    return np.clip(np.rint(grouped * reciprocal[..., None]), qmin, qmax).astype(np.int8)
 
 
-def _decoded_sse(
-    grouped: np.ndarray, codes: np.ndarray, scale: np.ndarray
-) -> np.ndarray:
+def _decoded_sse(grouped: np.ndarray, codes: np.ndarray, scale: np.ndarray) -> np.ndarray:
     error = grouped.astype(np.float64) - (
         codes.astype(np.float64) * scale.astype(np.float64)[..., None]
     )
     return np.sum(error * error, axis=2, dtype=np.float64)
 
 
-def _optimize_group_scales(
-    grouped: np.ndarray, spec: QuantFormat
-) -> np.ndarray:
-    if (
-        grouped.dtype != np.float32
-        or grouped.ndim != 3
-        or grouped.shape[2] != spec.group_size
-    ):
-        raise ValueError(
-            f"{spec.name} MSE fitting requires float32 groups of {spec.group_size}"
-        )
+def _optimize_group_scales(grouped: np.ndarray, spec: QuantFormat) -> np.ndarray:
+    if grouped.dtype != np.float32 or grouped.ndim != 3 or grouped.shape[2] != spec.group_size:
+        raise ValueError(f"{spec.name} MSE fitting requires float32 groups of {spec.group_size}")
     if not np.isfinite(grouped).all():
         raise ValueError("grouped quantization source contains NaN or infinity")
 
     maximum = np.max(np.abs(grouped), axis=2).astype(np.float32)
     nonzero = maximum > 0
-    current = _canonical_fp16(
-        maximum.astype(np.float64) / float(spec.qmax), nonzero, spec.name
-    )
+    current = _canonical_fp16(maximum.astype(np.float64) / float(spec.qmax), nonzero, spec.name)
     baseline_codes = _codes(grouped, current, spec.qmin, spec.qmax)
     best = current.copy()
     best_sse = _decoded_sse(grouped, baseline_codes, current)
@@ -144,19 +128,12 @@ def _optimize_scales(
     scales = np.empty((n, groups_per_row), dtype=np.float16)
     for row_begin in range(0, n, row_chunk):
         row_end = min(row_begin + row_chunk, n)
-        logical = (
-            weight[row_begin:row_end]
-            .detach()
-            .to(device="cpu", dtype=torch.float32)
-            .numpy()
-        )
+        logical = weight[row_begin:row_end].detach().to(device="cpu", dtype=torch.float32).numpy()
         if k_pad != k:
             physical = np.zeros((row_end - row_begin, k_pad), dtype=np.float32)
             physical[:, :k] = logical
             logical = physical
-        grouped = logical.reshape(
-            row_end - row_begin, groups_per_row, spec.group_size
-        )
+        grouped = logical.reshape(row_end - row_begin, groups_per_row, spec.group_size)
         scales[row_begin:row_end] = _optimize_group_scales(grouped, spec)
     return torch.from_numpy(scales)
 
@@ -213,18 +190,14 @@ def _quantize_matrix_mse(
 
     logical = weight.detach().to(device=target, dtype=torch.float32)
     if k_pad != k:
-        physical = torch.zeros(
-            (n, k_pad), dtype=torch.float32, device=target
-        )
+        physical = torch.zeros((n, k_pad), dtype=torch.float32, device=target)
         physical[:, :k].copy_(logical)
         logical = physical
-    grouped = logical.reshape(
-        n, groups_per_row, spec.group_size
-    )
+    grouped = logical.reshape(n, groups_per_row, spec.group_size)
     reciprocal = host_reciprocal.to(target)
-    codes = torch.clamp(
-        torch.round(grouped * reciprocal.unsqueeze(-1)), spec.qmin, spec.qmax
-    ).to(torch.int8)
+    codes = torch.clamp(torch.round(grouped * reciprocal.unsqueeze(-1)), spec.qmin, spec.qmax).to(
+        torch.int8
+    )
     return QuantizedMatrix(codes=codes, scales=host_scales.to(target))
 
 

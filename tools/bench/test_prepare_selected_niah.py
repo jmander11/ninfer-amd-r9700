@@ -55,25 +55,36 @@ def test_prepare_rejects_dangling_output_before_route_resolution() -> None:
 def test_generated_commands_use_importable_repo_modules() -> None:
     with tempfile.TemporaryDirectory(dir=REPO / "profiles/bench") as directory:
         root = Path(directory)
-        selection = root / "selection.json"; selection.write_text("{}\n")
-        artifact = root / "artifact.ninfer"; artifact.write_bytes(b"artifact")
+        selection = root / "selection.json"
+        selection.write_text("{}\n")
+        artifact = root / "artifact.ninfer"
+        artifact.write_bytes(b"artifact")
         build = root / "build"
-        bench = build / "bench/ninfer_bench"; bench.parent.mkdir(parents=True)
+        bench = build / "bench/ninfer_bench"
+        bench.parent.mkdir(parents=True)
         bench.write_bytes(b"bench")
-        serve = build / "apps/ninfer-serve"; serve.parent.mkdir(parents=True)
-        serve.write_bytes(b"serve"); serve.chmod(0o755)
-        matrix = root / "matrix.json"; matrix.write_text("{}\n")
-        fixture = root / "fixture.json"; fixture.write_text("{}\n")
+        serve = build / "apps/ninfer-serve"
+        serve.parent.mkdir(parents=True)
+        serve.write_bytes(b"serve")
+        serve.chmod(0o755)
+        matrix = root / "matrix.json"
+        matrix.write_text("{}\n")
+        fixture = root / "fixture.json"
+        fixture.write_text("{}\n")
         route = {
-            "artifact": {"path": str(artifact)}, "benchmark": {"path": str(bench)},
-            "build_directory": str(build), "selected_prefill_chunk": 2048,
+            "artifact": {"path": str(artifact)},
+            "benchmark": {"path": str(bench)},
+            "build_directory": str(build),
+            "selected_prefill_chunk": 2048,
             "source_matrices": {"whole": {"path": str(matrix)}},
             "hybrid_width_tool": None,
         }
         output = root / "campaign"
-        with mock.patch.object(preparer, "resolve_route", return_value=route), \
-             mock.patch.object(preparer, "matrix_cases", return_value=[("64k-start", "ref")]), \
-             mock.patch.object(preparer, "resolve_fixture", return_value=fixture):
+        with (
+            mock.patch.object(preparer, "resolve_route", return_value=route),
+            mock.patch.object(preparer, "matrix_cases", return_value=[("64k-start", "ref")]),
+            mock.patch.object(preparer, "resolve_fixture", return_value=fixture),
+        ):
             prepare(selection, output)
         commands = (output / "commands.sh").read_text(encoding="utf-8")
         assert f"readonly python={sys.executable}" in commands
@@ -89,7 +100,10 @@ def test_all_niah_module_entry_points_import_from_repo() -> None:
         "tools.bench.validate_selected_niah",
     ):
         result = subprocess.run(
-            [sys.executable, "-m", module, "--help"], cwd=REPO,
-            text=True, capture_output=True, check=False,
+            [sys.executable, "-m", module, "--help"],
+            cwd=REPO,
+            text=True,
+            capture_output=True,
+            check=False,
         )
         assert result.returncode == 0, (module, result.stderr)

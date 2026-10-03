@@ -22,9 +22,18 @@ class ValidateProfileTraceTest(unittest.TestCase):
         plan["kernel_include_regex"] = None
         plan["required_power_profile"]["value"] = "auto"
         plan["profiler_command"] = [
-            "/opt/rocm/bin/rocprofv3", "--selected-regions", "-f", "rocpd", "-d",
-            str((root / "rocprof-trace").resolve()), "--marker-trace", "--kernel-trace",
-            "--memory-copy-trace", "--stats", "--summary", "--",
+            "/opt/rocm/bin/rocprofv3",
+            "--selected-regions",
+            "-f",
+            "rocpd",
+            "-d",
+            str((root / "rocprof-trace").resolve()),
+            "--marker-trace",
+            "--kernel-trace",
+            "--memory-copy-trace",
+            "--stats",
+            "--summary",
+            "--",
             *plan["benchmark_command"],
         ]
         paths["plan"].write_text(json.dumps(plan), encoding="utf-8")
@@ -49,25 +58,78 @@ class ValidateProfileTraceTest(unittest.TestCase):
             create table memory_copies(start integer, "end" integer, duration integer,
                 name text, region_name text, size integer);
         """)
-        connection.executemany("insert into regions values (?,?,?)", [
-            (0, 400, json.dumps({"message": "ninfer_bench_measured"})),
-            (50, 350, json.dumps({
-                "message": "ninfer.prefill.prefill.chunk payload=2048"})),
-        ])
-        connection.executemany("insert into kernels values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-            (1, "kernel_a", "ninfer.attention.prefill.attention", 100, 200, 100, 7, 1,
-             64, 32, 1, 256, 1, 1, 128, 24, 8, 4096, 0, 4096, 0),
-            (2, "kernel_b", "ninfer.gdn.prefill.gdn", 150, 250, 100, 8, 1,
-             48, 4, 1, 256, 1, 1, None, None, None, None, None, None, None),
-        ])
+        connection.executemany(
+            "insert into regions values (?,?,?)",
+            [
+                (0, 400, json.dumps({"message": "ninfer_bench_measured"})),
+                (50, 350, json.dumps({"message": "ninfer.prefill.prefill.chunk payload=2048"})),
+            ],
+        )
+        connection.executemany(
+            "insert into kernels values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    1,
+                    "kernel_a",
+                    "ninfer.attention.prefill.attention",
+                    100,
+                    200,
+                    100,
+                    7,
+                    1,
+                    64,
+                    32,
+                    1,
+                    256,
+                    1,
+                    1,
+                    128,
+                    24,
+                    8,
+                    4096,
+                    0,
+                    4096,
+                    0,
+                ),
+                (
+                    2,
+                    "kernel_b",
+                    "ninfer.gdn.prefill.gdn",
+                    150,
+                    250,
+                    100,
+                    8,
+                    1,
+                    48,
+                    4,
+                    1,
+                    256,
+                    1,
+                    1,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ],
+        )
         connection.commit()
         connection.close()
         return paths
 
     def run_validate(self, paths: dict[str, Path]) -> dict:
         return validate(
-            paths["plan"], paths["report"], paths["database"], paths["before"],
-            paths["after"], paths["terminal"], paths["artifact"], paths["executable"],
+            paths["plan"],
+            paths["report"],
+            paths["database"],
+            paths["before"],
+            paths["after"],
+            paths["terminal"],
+            paths["artifact"],
+            paths["executable"],
             paths["corpus"],
         )
 
@@ -76,11 +138,14 @@ class ValidateProfileTraceTest(unittest.TestCase):
             result = self.run_validate(self.fixture(Path(directory)))
             self.assertEqual(result["artifact_type"], "ninfer_r9700_selected_profile_trace")
             self.assertFalse(result["profile_timing_admissible"])
-            self.assertEqual(result["aggregates"], {
-                "dispatch_count": 2,
-                "independent_device_service_time_ns": 200,
-                "device_wall_union_ns": 150,
-            })
+            self.assertEqual(
+                result["aggregates"],
+                {
+                    "dispatch_count": 2,
+                    "independent_device_service_time_ns": 200,
+                    "device_wall_union_ns": 150,
+                },
+            )
             first, second = result["dispatches"]
             self.assertEqual(first["dispatch_id"], "trace:1")
             self.assertEqual(first["grid"], {"x": 64, "y": 32, "z": 1})
@@ -89,8 +154,7 @@ class ValidateProfileTraceTest(unittest.TestCase):
             self.assertIsNone(second["resources"]["scratch_bytes"])
             self.assertEqual(result["power_profile"]["before"], "auto")
             self.assertEqual(result["selected_route"]["artifact"]["weights_id"], "selected")
-            self.assertEqual(result["selected_route"]["unprofiled_p2048"]["observed_tok_s"],
-                             1900.0)
+            self.assertEqual(result["selected_route"]["unprofiled_p2048"]["observed_tok_s"], 1900.0)
             self.assertEqual(result["analyzer"]["operator_stage_attribution"]["complete"], True)
 
     def test_rejects_wrong_power_profiler_contract_and_duplicate_dispatch(self) -> None:
@@ -138,12 +202,26 @@ class ValidateProfileTraceTest(unittest.TestCase):
             output = Path(directory) / "trace-evidence.json"
             output.write_text("retained", encoding="utf-8")
             arguments = [
-                "--plan", str(paths["plan"]), "--benchmark-report", str(paths["report"]),
-                "--database", str(paths["database"]), "--power-before", str(paths["before"]),
-                "--power-after", str(paths["after"]), "--terminal-selection",
-                str(paths["terminal"]), "--artifact", str(paths["artifact"]),
-                "--executable", str(paths["executable"]), "--corpus", str(paths["corpus"]),
-                "--out", str(output),
+                "--plan",
+                str(paths["plan"]),
+                "--benchmark-report",
+                str(paths["report"]),
+                "--database",
+                str(paths["database"]),
+                "--power-before",
+                str(paths["before"]),
+                "--power-after",
+                str(paths["after"]),
+                "--terminal-selection",
+                str(paths["terminal"]),
+                "--artifact",
+                str(paths["artifact"]),
+                "--executable",
+                str(paths["executable"]),
+                "--corpus",
+                str(paths["corpus"]),
+                "--out",
+                str(output),
             ]
             with self.assertRaisesRegex(SystemExit, "refusing to overwrite"):
                 main(arguments)

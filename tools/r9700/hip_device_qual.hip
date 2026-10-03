@@ -14,7 +14,7 @@ int main() {
         }
         ninfer::DeviceEventTimer timer(device);
         timer.start();
-        const float elapsed = timer.stop_ms();
+        const float elapsed                       = timer.stop_ms();
         const std::array<std::uint32_t, 4> source = {0x12345678U, 0x9abcdef0U, 7U, 11U};
         std::array<std::uint32_t, 4> copied{};
         ninfer::DeviceBuffer buffer(sizeof(source));
@@ -27,9 +27,7 @@ int main() {
         bool rejected_buffer_range = false;
         try {
             buffer.copy_from_host(source.data(), 1U, buffer.size());
-        } catch (const std::out_of_range&) {
-            rejected_buffer_range = true;
-        }
+        } catch (const std::out_of_range&) { rejected_buffer_range = true; }
         if (!rejected_buffer_range) {
             std::cerr << "HIP buffer accepted an out-of-range transfer\n";
             return 1;
@@ -54,9 +52,10 @@ int main() {
                 return 1;
             }
         }
-        if (arena.used() != static_cast<std::size_t>(
-                                reinterpret_cast<std::uintptr_t>(first.data) -
-                                reinterpret_cast<std::uintptr_t>(arena.base())) + first.bytes) {
+        if (arena.used() !=
+            static_cast<std::size_t>(reinterpret_cast<std::uintptr_t>(first.data) -
+                                     reinterpret_cast<std::uintptr_t>(arena.base())) +
+                first.bytes) {
             std::cerr << "HIP arena scope did not restore offset\n";
             return 1;
         }
@@ -77,7 +76,7 @@ int main() {
             return 1;
         }
         ninfer::HostPinnedArena pinned_arena(1024);
-        void* pinned_first = pinned_arena.try_alloc(17, 256);
+        void* pinned_first  = pinned_arena.try_alloc(17, 256);
         void* pinned_second = pinned_arena.try_alloc(300, 512);
         if (pinned_first == nullptr || pinned_second == nullptr ||
             reinterpret_cast<std::uintptr_t>(pinned_second) % 512U != 0U) {
@@ -91,7 +90,9 @@ int main() {
             return 1;
         }
         ninfer::DecodeGraphDefinition graph;
-        graph.capture(device.stream, [&] { HIP_CHECK(hipMemsetAsync(buffer.data(), 0x4c, buffer.size(), device.stream)); });
+        graph.capture(device.stream, [&] {
+            HIP_CHECK(hipMemsetAsync(buffer.data(), 0x4c, buffer.size(), device.stream));
+        });
         ninfer::DecodeGraphExecutable executable;
         executable.instantiate(graph);
         executable.upload(device.stream);
@@ -99,7 +100,10 @@ int main() {
         device.synchronize();
         buffer.copy_to_host(copied.data(), sizeof(copied));
         for (const auto word : copied) {
-            if (word != 0x4c4c4c4cU) { std::cerr << "HIP graph replay wrote wrong bytes\n"; return 1; }
+            if (word != 0x4c4c4c4cU) {
+                std::cerr << "HIP graph replay wrote wrong bytes\n";
+                return 1;
+            }
         }
         ninfer::DecodeGraphDefinition updated_graph;
         updated_graph.capture(device.stream, [&] {
@@ -120,8 +124,8 @@ int main() {
 
         std::cout << "hip_core_device: PASS arch=" << device.props.gcnArchName
                   << " wave=" << device.props.warpSize
-                  << " vram_mib=" << device.total_vram() / (1024 * 1024)
-                  << " event_ms=" << elapsed << '\n';
+                  << " vram_mib=" << device.total_vram() / (1024 * 1024) << " event_ms=" << elapsed
+                  << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "hip_core_device: FAIL: " << error.what() << '\n';

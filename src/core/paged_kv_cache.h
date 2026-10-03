@@ -29,11 +29,11 @@ enum class PagedKVIntraPageOrder : std::uint8_t {
 
 // A pool plane is storage-only. Consumers assign K/V/layer meaning to plane indices.
 struct PagedKVPlaneSpec {
-    DType dtype                 = DType::BF16;
-    std::int32_t leading_extent = 0;
-    std::int32_t head_extent    = 0;
-    std::size_t alignment       = 256;
-    PagedKVPlaneOrder order     = PagedKVPlaneOrder::PageMajor;
+    DType dtype                            = DType::BF16;
+    std::int32_t leading_extent            = 0;
+    std::int32_t head_extent               = 0;
+    std::size_t alignment                  = 256;
+    PagedKVPlaneOrder order                = PagedKVPlaneOrder::PageMajor;
     PagedKVIntraPageOrder intra_page_order = PagedKVIntraPageOrder::FeatureFastest;
 };
 
@@ -160,8 +160,8 @@ private:
 
     PagedKVPool* pool_ = nullptr;
     std::vector<std::int32_t> page_ids_;
-    std::uint32_t page_entitlement_ = 0;
-    std::int32_t bound_row_         = -1;
+    std::uint32_t page_entitlement_   = 0;
+    std::int32_t bound_row_           = -1;
     std::uint64_t mapping_generation_ = 0;
 };
 
@@ -199,7 +199,7 @@ void unpack_paged_kv_allocation_from_host(PagedKVAllocation& allocation, const P
 // Immutable device scatter geometry for one packed logical page. The caller owns the device copy
 // of this table and the packed device staging buffer; the raw transfer path allocates neither.
 struct PagedKVScatterPlane {
-    unsigned char* base       = nullptr;
+    unsigned char* base         = nullptr;
     std::uint64_t packed_offset = 0;
     std::uint64_t packed_bytes  = 0;
     std::int64_t page_stride    = 0;
@@ -216,8 +216,9 @@ struct PagedKVScatterPlan {
 
 [[nodiscard]] std::size_t paged_kv_logical_page_bytes(const PagedKVPool& pool);
 
-void pack_paged_kv_logical_page_to_host(const PagedKVAllocation& allocation, const PagedKVPool& pool,
-                                        std::uint32_t logical_index, void* dst, hipStream_t stream);
+void pack_paged_kv_logical_page_to_host(const PagedKVAllocation& allocation,
+                                        const PagedKVPool& pool, std::uint32_t logical_index,
+                                        void* dst, hipStream_t stream);
 
 void unpack_paged_kv_logical_page_from_host(PagedKVAllocation& allocation, const PagedKVPool& pool,
                                             const void* src, std::uint32_t logical_index,
@@ -225,10 +226,11 @@ void unpack_paged_kv_logical_page_from_host(PagedKVAllocation& allocation, const
 
 [[nodiscard]] PagedKVScatterPlan make_paged_kv_scatter_plan(const PagedKVPool& pool);
 
-void scatter_paged_kv_logical_page_from_device(
-    PagedKVAllocation& allocation, const PagedKVPool& pool, const void* device_staging,
-    const PagedKVScatterPlane* device_planes, std::size_t plane_count,
-    std::size_t max_plane_bytes, std::uint32_t logical_index, hipStream_t stream);
+void scatter_paged_kv_logical_page_from_device(PagedKVAllocation& allocation,
+                                               const PagedKVPool& pool, const void* device_staging,
+                                               const PagedKVScatterPlane* device_planes,
+                                               std::size_t plane_count, std::size_t max_plane_bytes,
+                                               std::uint32_t logical_index, hipStream_t stream);
 
 void gather_logical_page_from_host_image(const void* image, const PagedKVPool& pool,
                                          std::uint32_t src_page_count, std::uint32_t logical_index,

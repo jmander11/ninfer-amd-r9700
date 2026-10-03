@@ -23,19 +23,21 @@
 
 namespace {
 
-constexpr std::uint32_t kFeatures = 17408U;
+constexpr std::uint32_t kFeatures     = 17408U;
 constexpr std::uint32_t kPackedStride = 34816U;
-constexpr std::size_t kSamples = 7U;
+constexpr std::size_t kSamples        = 7U;
 constexpr std::string_view kPowerPath =
     "/sys/class/drm/card2/device/power_dpm_force_performance_level";
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
+
 void hip_check(hipError_t status, const char* expression, const char* file, int line) {
     if (status == hipSuccess) return;
     std::ostringstream message;
     message << file << ':' << line << ": " << expression << ": " << hipGetErrorString(status);
     fail(message.str());
 }
+
 #define HIP_CHECK(expression) hip_check((expression), #expression, __FILE__, __LINE__)
 
 template <typename T>
@@ -44,13 +46,17 @@ public:
     explicit DeviceBuffer(std::size_t count) : count_(count) {
         HIP_CHECK(hipMalloc(&data_, count * sizeof(T)));
     }
-    DeviceBuffer(const DeviceBuffer&) = delete;
+
+    DeviceBuffer(const DeviceBuffer&)            = delete;
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
     ~DeviceBuffer() { (void)hipFree(data_); }
+
     [[nodiscard]] T* get() const noexcept { return data_; }
+
     [[nodiscard]] std::size_t size() const noexcept { return count_; }
 private:
-    T* data_ = nullptr;
+    T* data_           = nullptr;
     std::size_t count_ = 0;
 };
 
@@ -74,7 +80,7 @@ std::vector<hip_bfloat16> fixture(std::size_t count, std::uint32_t seed) {
     std::vector<hip_bfloat16> values(count);
     for (std::size_t index = 0; index < count; ++index) {
         const auto code = static_cast<std::int32_t>((index * 43U + seed * 29U) % 509U) - 254;
-        values[index] = bf16(static_cast<float>(code) / 73.0F);
+        values[index]   = bf16(static_cast<float>(code) / 73.0F);
     }
     return values;
 }
@@ -135,8 +141,8 @@ void qualify_numerical(hipStream_t stream) {
     upload(d_packed, packed);
     for (const std::uint32_t rows : {1U, 2U, 3U, 7U, 8U, 9U, 17U, 128U}) {
         const std::size_t elements = static_cast<std::size_t>(rows) * kFeatures;
-        const hip_bfloat16* gate = d_packed.get();
-        const hip_bfloat16* up = d_packed.get() + kFeatures;
+        const hip_bfloat16* gate   = d_packed.get();
+        const hip_bfloat16* up     = d_packed.get() + kFeatures;
         HIP_CHECK(ninfer::ops::r9700::eager::silu_mul_split17408_incumbent_qualification(
             gate, up, d_incumbent.get(), rows, stream));
         HIP_CHECK(ninfer::ops::r9700::eager::silu_mul_split17408_2d_qualification(
@@ -148,15 +154,15 @@ void qualify_numerical(hipStream_t stream) {
             if (candidate[index].data != incumbent[index].data) {
                 fail("candidate differs from incumbent at element " + std::to_string(index));
             }
-            const std::uint32_t row = static_cast<std::uint32_t>(index / kFeatures);
+            const std::uint32_t row     = static_cast<std::uint32_t>(index / kFeatures);
             const std::uint32_t feature = static_cast<std::uint32_t>(index % kFeatures);
-            const std::size_t offset = static_cast<std::size_t>(row) * kPackedStride + feature;
-            const double gate_value = static_cast<float>(packed[offset]);
-            const double up_value = static_cast<float>(packed[offset + kFeatures]);
-            const double expected = gate_value / (1.0 + std::exp(-gate_value)) * up_value;
-            const double observed = static_cast<float>(candidate[index]);
-            const double absolute = std::abs(observed - expected);
-            const double relative = absolute / std::max(1.0e-6, std::abs(expected));
+            const std::size_t offset    = static_cast<std::size_t>(row) * kPackedStride + feature;
+            const double gate_value     = static_cast<float>(packed[offset]);
+            const double up_value       = static_cast<float>(packed[offset + kFeatures]);
+            const double expected       = gate_value / (1.0 + std::exp(-gate_value)) * up_value;
+            const double observed       = static_cast<float>(candidate[index]);
+            const double absolute       = std::abs(observed - expected);
+            const double relative       = absolute / std::max(1.0e-6, std::abs(expected));
             if (absolute > 4.0e-2 && relative > 4.0e-2) {
                 fail("candidate exceeds independent FP64 criterion at element " +
                      std::to_string(index));
@@ -175,7 +181,7 @@ void qualify_numerical(hipStream_t stream) {
 template <typename Launch>
 float timed(hipStream_t stream, Launch&& launch) {
     hipEvent_t start = nullptr;
-    hipEvent_t stop = nullptr;
+    hipEvent_t stop  = nullptr;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
     HIP_CHECK(hipEventRecord(start, stream));
@@ -209,6 +215,7 @@ void benchmark(hipStream_t stream, const std::filesystem::path& path) {
     DeviceBuffer<hip_bfloat16> d_packed(packed.size());
     DeviceBuffer<hip_bfloat16> d_output(static_cast<std::size_t>(maximum_rows) * kFeatures);
     upload(d_packed, packed);
+
     struct Row {
         std::uint32_t tokens;
         std::array<float, kSamples> incumbent{};
@@ -216,6 +223,7 @@ void benchmark(hipStream_t stream, const std::filesystem::path& path) {
         float incumbent_median = 0.0F;
         float candidate_median = 0.0F;
     };
+
     std::vector<Row> results;
     for (const std::uint32_t rows : {128U, 512U, 2048U, 4096U}) {
         auto incumbent = [&] {
@@ -268,12 +276,12 @@ void benchmark(hipStream_t stream, const std::filesystem::path& path) {
     }
     out << "  ]\n}\n";
     const std::string payload = out.str();
-    const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    const int descriptor      = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
     if (descriptor < 0) fail("refusing to overwrite or could not create report");
     std::size_t written = 0;
     while (written < payload.size()) {
-        const ssize_t count = ::write(descriptor, payload.data() + written,
-                                      payload.size() - written);
+        const ssize_t count =
+            ::write(descriptor, payload.data() + written, payload.size() - written);
         if (count <= 0) {
             (void)::close(descriptor);
             fail("could not finish report");

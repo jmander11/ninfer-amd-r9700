@@ -20,8 +20,11 @@ class SelectiveQ4G128SourceDiagnosticTest(unittest.TestCase):
         self.assertEqual(len(diagnostic.SELECTED_SPECS), 160)
         self.assertEqual(len(diagnostic.SELECTED_SOURCE_ROWS), 208)
         self.assertEqual(
-            sum(end - begin for spans in diagnostic.SELECTED_SOURCE_ROWS.values()
-                for begin, end in spans),
+            sum(
+                end - begin
+                for spans in diagnostic.SELECTED_SOURCE_ROWS.values()
+                for begin, end in spans
+            ),
             1_163_264,
         )
         self.assertEqual(
@@ -50,21 +53,22 @@ class SelectiveQ4G128SourceDiagnosticTest(unittest.TestCase):
     def test_nonselected_matrix_and_nonmatrix_boundaries(self) -> None:
         matrix = torch.arange(256, dtype=torch.float32).reshape(1, 256).to(torch.bfloat16)
         vector = torch.arange(8, dtype=torch.bfloat16)
-        self.assertTrue(torch.equal(
-            diagnostic.SelectiveQ4Checkpoint(None, "q4g128-mse")._represented("other", matrix),
-            matrix,
-        ))
+        self.assertTrue(
+            torch.equal(
+                diagnostic.SelectiveQ4Checkpoint(None, "q4g128-mse")._represented("other", matrix),
+                matrix,
+            )
+        )
         self.assertIs(
-            diagnostic.SelectiveQ4Checkpoint(None, "q4g128-mse")._represented("other", vector), vector
+            diagnostic.SelectiveQ4Checkpoint(None, "q4g128-mse")._represented("other", vector),
+            vector,
         )
 
     def test_mse_g128_row_chunk_is_exactly_row_independent(self) -> None:
         torch.manual_seed(23)
         source = (torch.randn(9, 256) * 0.1).to(torch.bfloat16)
         whole = _mse_q4g128_decode(source).to(torch.bfloat16)
-        self.assertTrue(torch.equal(
-            diagnostic._mse_q4g128_bf16(source, row_chunk=2), whole
-        ))
+        self.assertTrue(torch.equal(diagnostic._mse_q4g128_bf16(source, row_chunk=2), whole))
         with self.assertRaises(ValueError):
             diagnostic._mse_q4g128_bf16(source, row_chunk=0)
 

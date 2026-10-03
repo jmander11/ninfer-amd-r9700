@@ -20,14 +20,18 @@ def check(path: Path) -> dict[str, int | str | bool]:
     functions = []
     for index, start in enumerate(starts):
         end = starts[index + 1].start() if index + 1 < len(starts) else len(text)
-        functions.append((start.group(1), text[start.start():end]))
-    selected = [(symbol, body) for symbol, body in functions
-                if "rmsnorm_k256_token8_kernel" in symbol]
+        functions.append((start.group(1), text[start.start() : end]))
+    selected = [
+        (symbol, body) for symbol, body in functions if "rmsnorm_k256_token8_kernel" in symbol
+    ]
     if len(selected) != 1:
         raise ValueError(f"expected one exact K256 symbol, found {len(selected)}")
     symbol, body = selected[0]
-    records = [record for record in re.split(r"(?=^  - \.args:)", text, flags=re.MULTILINE)
-               if re.search(rf"^    \.name:\s+{re.escape(symbol)}$", record, re.MULTILINE)]
+    records = [
+        record
+        for record in re.split(r"(?=^  - \.args:)", text, flags=re.MULTILINE)
+        if re.search(rf"^    \.name:\s+{re.escape(symbol)}$", record, re.MULTILINE)
+    ]
     if len(records) != 1:
         raise ValueError(f"expected one exact metadata record, found {len(records)}")
     maximum_workgroup = one(records[0], r"^\s*\.max_flat_workgroup_size:\s*(\d+)", "maxWG")
@@ -38,8 +42,9 @@ def check(path: Path) -> dict[str, int | str | bool]:
     occupancy = one(body, r"^;\s*Occupancy:\s*(\d+)", "occupancy")
     wave32 = one(body, r"^\s*\.amdhsa_wavefront_size32\s+(\d+)", "wave32")
     wgp = one(body, r"^\s*\.amdhsa_workgroup_processor_mode\s+(\d+)", "WGP")
-    vector_loads = len(re.findall(
-        r"^\s*(?:global_load_dwordx4|global_load_b128)(?:\s|$)", body, re.MULTILINE))
+    vector_loads = len(
+        re.findall(r"^\s*(?:global_load_dwordx4|global_load_b128)(?:\s|$)", body, re.MULTILINE)
+    )
     if vector_loads < 1:
         raise ValueError("K256 route lacks 128-bit reduction loads")
     if re.search(r"^\s*s_barrier(?:\s|$)", body, re.MULTILINE):
@@ -52,8 +57,14 @@ def check(path: Path) -> dict[str, int | str | bool]:
         raise ValueError(f"resources fail vgprs={vgprs}/64 occupancy={occupancy}/12")
     if wave32 != 1 or wgp != 1 or maximum_workgroup != 256:
         raise ValueError(f"geometry fails wave32={wave32} WGP={wgp} maxWG={maximum_workgroup}")
-    return {"symbol": symbol, "vgprs": vgprs, "occupancy": occupancy,
-            "vector_loads": vector_loads, "production": True, "rows_minimum": 128}
+    return {
+        "symbol": symbol,
+        "vgprs": vgprs,
+        "occupancy": occupancy,
+        "vector_loads": vector_loads,
+        "production": True,
+        "rows_minimum": 128,
+    }
 
 
 def main() -> int:

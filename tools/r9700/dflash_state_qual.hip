@@ -1,6 +1,6 @@
 #include "../../src/targets/qwen3_8_27b/impl/variant.h"
 
-#define NINFER_QWEN3_VARIANT ::ninfer::targets::qwen3_8_27b::detail::Variant
+#define NINFER_QWEN3_VARIANT    ::ninfer::targets::qwen3_8_27b::detail::Variant
 #define NINFER_QWEN3_RUNTIME_NS qwen3_8_27b_runtime
 #include "../../src/targets/qwen3/impl/runtime/dflash_context_impl.h"
 
@@ -24,9 +24,8 @@ void require(bool condition, const char* message) {
 
 int main() {
     try {
-        namespace runtime =
-            ninfer::targets::qwen3::detail::qwen3_8_27b_runtime;
-        using Config = runtime::DFlashConfig;
+        namespace runtime = ninfer::targets::qwen3::detail::qwen3_8_27b_runtime;
+        using Config      = runtime::DFlashConfig;
 
         ninfer::DeviceContext device(0);
         require(device.is_gfx1201() && device.props.warpSize == 32,
@@ -34,14 +33,14 @@ int main() {
 
         ninfer::LayoutBuilder builder;
         runtime::DFlashPersistentLayout layout;
-        layout.local = ninfer::plan_cyclic_kv_cache(builder, Config::local_layers,
-                                                    Config::local_capacity, Config::kv_heads,
-                                                    Config::head_dim, 2);
-        layout.staging_local = ninfer::plan_cyclic_kv_cache(
-            builder, Config::local_layers, Config::local_capacity, Config::kv_heads,
-            Config::head_dim, 1);
-        layout.prefill_features = builder.add_tensor(
-            ninfer::DType::BF16, {Config::feature_rows, 1}, 256, "DFlash prefill features");
+        layout.local =
+            ninfer::plan_cyclic_kv_cache(builder, Config::local_layers, Config::local_capacity,
+                                         Config::kv_heads, Config::head_dim, 2);
+        layout.staging_local =
+            ninfer::plan_cyclic_kv_cache(builder, Config::local_layers, Config::local_capacity,
+                                         Config::kv_heads, Config::head_dim, 1);
+        layout.prefill_features = builder.add_tensor(ninfer::DType::BF16, {Config::feature_rows, 1},
+                                                     256, "DFlash prefill features");
         layout.prefill_positions =
             builder.add_tensor(ninfer::DType::I32, {1}, 256, "DFlash prefill positions");
         layout.pending_features = builder.add_tensor(
@@ -50,8 +49,8 @@ int main() {
         require(!layout.full.has_value(),
                 "Qwen3.8 DFlash2 unexpectedly planned a growing Full cache");
         require(layout.local.payload_bytes() != 0 &&
-                    layout.kv_payload_bytes() == layout.local.payload_bytes() +
-                                                     layout.staging_local.payload_bytes(),
+                    layout.kv_payload_bytes() ==
+                        layout.local.payload_bytes() + layout.staging_local.payload_bytes(),
                 "DFlash payload accounting does not describe the two BF16 cyclic states");
 
         ninfer::DeviceBuffer backing(builder.finish(256, "DFlash persistent state"));
@@ -59,14 +58,13 @@ int main() {
         require(!state.full.has_value() && state.local.layer_count() == Config::local_layers &&
                     state.local.capacity() == Config::local_capacity &&
                     state.local.num_kv_heads() == Config::kv_heads &&
-                    state.local.head_dim() == Config::head_dim &&
-                    state.local.lane_capacity() == 2,
+                    state.local.head_dim() == Config::head_dim && state.local.lane_capacity() == 2,
                 "DFlash2 did not bind its fixed BF16 cyclic geometry");
 
         // Exact byte oracle for the lane-owned pinned rewrite image: distinct patterns per lane,
         // copied with the cyclic primitives the Program's capture uses (lane -> staging lane ->
         // pinned image on the copy stream) and both restores (image -> lane, staging -> lane).
-        constexpr std::int32_t lane = 1;
+        constexpr std::int32_t lane  = 1;
         const std::size_t lane_bytes = state.local.lane_host_bytes();
         require(lane_bytes == state.staging_local.lane_host_bytes(),
                 "DFlash staging lane image differs from the per-lane image");
@@ -74,7 +72,7 @@ int main() {
             std::vector<std::byte> bytes(lane_bytes);
             std::uint32_t x = seed;
             for (std::byte& byte : bytes) {
-                x = x * 1664525U + 1013904223U;
+                x    = x * 1664525U + 1013904223U;
                 byte = static_cast<std::byte>(x >> 24);
             }
             return bytes;

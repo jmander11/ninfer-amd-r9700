@@ -26,20 +26,25 @@ class ValidateFp8GateUpHardwareProofTest(unittest.TestCase):
         self.assertNotIn(Q4_KERNEL, "a8q4g64_linear_prefill_cta_m64n128_regression_kernel")
 
     def test_existing_gate_plan_without_qualification_remains_valid(self) -> None:
-        profile = _hardware_profile({
-            "schema": "ninfer.r9700.fp8_gate_up_hardware_proof_plan.v1",
-            "shape": {"tokens": 2048, "rows": 34816, "columns": 5120},
-        })
+        profile = _hardware_profile(
+            {
+                "schema": "ninfer.r9700.fp8_gate_up_hardware_proof_plan.v1",
+                "shape": {"tokens": 2048, "rows": 34816, "columns": 5120},
+            }
+        )
         self.assertEqual(profile["qualification"], "gate_up")
 
     def test_attention_plan_and_validator_are_distinct(self) -> None:
-        profile = _hardware_profile({
-            "schema": "ninfer.r9700.fp8_attention_qk_gate_value_hardware_proof_plan.v1",
-            "qualification": "attention_qk_gate_value",
-            "shape": {"tokens": 2048, "rows": 7168, "columns": 5120},
-        })
-        self.assertEqual(profile["proof_schema"],
-                         "ninfer.r9700.fp8_attention_qk_gate_value_hardware_proof.v1")
+        profile = _hardware_profile(
+            {
+                "schema": "ninfer.r9700.fp8_attention_qk_gate_value_hardware_proof_plan.v1",
+                "qualification": "attention_qk_gate_value",
+                "shape": {"tokens": 2048, "rows": 7168, "columns": 5120},
+            }
+        )
+        self.assertEqual(
+            profile["proof_schema"], "ninfer.r9700.fp8_attention_qk_gate_value_hardware_proof.v1"
+        )
         with mock.patch(
             "tools.bench.validate_fp8_gate_up_hardware_proof.validate_projection"
         ) as validate:
@@ -48,22 +53,35 @@ class ValidateFp8GateUpHardwareProofTest(unittest.TestCase):
 
     def test_profile_shape_mismatch_fails_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "qualification or shape"):
-            _hardware_profile({
-                "schema": "ninfer.r9700.fp8_attention_qk_gate_value_hardware_proof_plan.v1",
-                "qualification": "attention_qk_gate_value",
-                "shape": {"tokens": 2048, "rows": 4096, "columns": 5120},
-            })
+            _hardware_profile(
+                {
+                    "schema": "ninfer.r9700.fp8_attention_qk_gate_value_hardware_proof_plan.v1",
+                    "qualification": "attention_qk_gate_value",
+                    "shape": {"tokens": 2048, "rows": 4096, "columns": 5120},
+                }
+            )
 
     def test_fp8_resources_are_exact_and_stable(self) -> None:
-        columns = {"sgpr_count", "arch_vgpr_count", "accum_vgpr_count",
-                   "group_segment_size", "private_segment_size"}
-        row = {"sgpr_count": 128, "arch_vgpr_count": 192,
-               "accum_vgpr_count": 0, "group_segment_size": 25088,
-               "private_segment_size": 0}
-        expected = _hardware_profile({
-            "schema": "ninfer.r9700.fp8_gate_up_hardware_proof_plan.v1",
-            "shape": {"tokens": 2048, "rows": 34816, "columns": 5120},
-        })["resources"]
+        columns = {
+            "sgpr_count",
+            "arch_vgpr_count",
+            "accum_vgpr_count",
+            "group_segment_size",
+            "private_segment_size",
+        }
+        row = {
+            "sgpr_count": 128,
+            "arch_vgpr_count": 192,
+            "accum_vgpr_count": 0,
+            "group_segment_size": 25088,
+            "private_segment_size": 0,
+        }
+        expected = _hardware_profile(
+            {
+                "schema": "ninfer.r9700.fp8_gate_up_hardware_proof_plan.v1",
+                "shape": {"tokens": 2048, "rows": 34816, "columns": 5120},
+            }
+        )["resources"]
         self.assertEqual(_validate_resources([row, dict(row)], columns, expected), expected)
         changed = dict(row, arch_vgpr_count=191)
         with self.assertRaisesRegex(ValueError, "stable kernel resource"):
@@ -72,16 +90,14 @@ class ValidateFp8GateUpHardwareProofTest(unittest.TestCase):
             _validate_resources([changed], columns, expected)
         spill_columns = columns | {"sgpr_spill_count", "vgpr_spill_count"}
         spill_row = dict(row, sgpr_spill_count=2, vgpr_spill_count=3)
-        spill_expected = dict(expected, spill_counts={
-            "available": True, "sgpr": 2, "vgpr": 3})
+        spill_expected = dict(expected, spill_counts={"available": True, "sgpr": 2, "vgpr": 3})
         self.assertEqual(
-            _validate_resources([spill_row], spill_columns, spill_expected), spill_expected)
+            _validate_resources([spill_row], spill_columns, spill_expected), spill_expected
+        )
 
     def test_resource_rows_bind_exact_kernel_code_object_and_uri(self) -> None:
-        row = {"kernel_id": 825, "code_object_id": 4,
-               "uri": "memory://1433014#offset=0x10&size=32"}
-        fp8 = {"kernel_id": 825, "code_object_id": 4,
-               "code_object": {"uri": row["uri"]}}
+        row = {"kernel_id": 825, "code_object_id": 4, "uri": "memory://1433014#offset=0x10&size=32"}
+        fp8 = {"kernel_id": 825, "code_object_id": 4, "code_object": {"uri": row["uri"]}}
         _validate_resource_binding([row, dict(row)], fp8)
         for field, value in (("kernel_id", 826), ("code_object_id", 5)):
             changed = dict(fp8, **{field: value})

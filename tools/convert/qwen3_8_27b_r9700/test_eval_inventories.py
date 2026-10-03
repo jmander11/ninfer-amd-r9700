@@ -72,9 +72,7 @@ class LowBitEvaluationPlanTest(unittest.TestCase):
             source_inventory.TENSOR_SPECS, q4_inventory.TENSOR_SPECS, strict=True
         ):
             expected = (
-                source.format
-                if source.format in q4_inventory.DIRECT_FORMATS
-                else "Q4G64_F16S"
+                source.format if source.format in q4_inventory.DIRECT_FORMATS else "Q4G64_F16S"
             )
             self.assertEqual(candidate.format, expected)
         self.check_common_plan(q4_inventory, payload_span=15_159_815_936)
@@ -153,9 +151,7 @@ class LowBitEvaluationPlanTest(unittest.TestCase):
                 expected = "BF16"
             else:
                 expected = (
-                    source.format
-                    if source.format in inventory.DIRECT_FORMATS
-                    else "W8G32_F16S"
+                    source.format if source.format in inventory.DIRECT_FORMATS else "W8G32_F16S"
                 )
             self.assertEqual(candidate.format, expected)
         self.check_common_plan(inventory, payload_span=31_452_362_240)
@@ -185,9 +181,7 @@ class LowBitEvaluationPlanTest(unittest.TestCase):
                 promoted += 1
             else:
                 expected = (
-                    source.format
-                    if source.format in inventory.DIRECT_FORMATS
-                    else "W8G32_F16S"
+                    source.format if source.format in inventory.DIRECT_FORMATS else "W8G32_F16S"
                 )
             self.assertEqual(candidate.format, expected)
         self.assertEqual(promoted, 32)
@@ -217,9 +211,7 @@ class LowBitEvaluationPlanTest(unittest.TestCase):
                 promoted += 1
             else:
                 expected = (
-                    source.format
-                    if source.format in inventory.DIRECT_FORMATS
-                    else "W8G32_F16S"
+                    source.format if source.format in inventory.DIRECT_FORMATS else "W8G32_F16S"
                 )
             self.assertEqual(candidate.format, expected)
         self.assertEqual(promoted, 16)
@@ -249,9 +241,7 @@ class LowBitEvaluationPlanTest(unittest.TestCase):
                 promoted += 1
             else:
                 expected = (
-                    source.format
-                    if source.format in inventory.DIRECT_FORMATS
-                    else "W8G32_F16S"
+                    source.format if source.format in inventory.DIRECT_FORMATS else "W8G32_F16S"
                 )
             self.assertEqual(candidate.format, expected)
         self.assertEqual(promoted, 48)

@@ -15,22 +15,22 @@
 
 namespace ninfer::bench {
 
-inline constexpr int kSchemaVersion                   = 24;
+inline constexpr int kSchemaVersion = 24;
 inline constexpr std::string_view kPhaseTimingSemantics =
     "serial-lane-service-sum_shared-decode-max_v1";
-inline constexpr std::string_view kArtifactType       = "ninfer_bench_report";
-inline constexpr std::string_view kDefaultCorpusPath  = "bench/fixtures/bench_corpus.ids";
-inline constexpr int kDecodeSeedTokens                = 1;
-inline constexpr int kDefaultNPrompt                  = 512;
-inline constexpr int kDefaultNGen                     = 128;
-inline constexpr int kDefaultRepetitions              = 5;
-inline constexpr int kDefaultWarmup                   = 1;
-inline constexpr std::uint32_t kDefaultPrefillChunk   = ninfer::kDefaultPrefillChunk;
-inline constexpr std::uint32_t kPrefillChunkAlignment = 128;
-inline constexpr std::uint32_t kKvPageTokens          = 64;
-inline constexpr std::uint32_t kMaxMtpDraftTokens     = 5;
-inline constexpr std::uint32_t kMaxDFlashDraftTokens  = 7;
-inline constexpr std::uint32_t kMaxDFlashVerifyWidth  = 8;
+inline constexpr std::string_view kArtifactType           = "ninfer_bench_report";
+inline constexpr std::string_view kDefaultCorpusPath      = "bench/fixtures/bench_corpus.ids";
+inline constexpr int kDecodeSeedTokens                    = 1;
+inline constexpr int kDefaultNPrompt                      = 512;
+inline constexpr int kDefaultNGen                         = 128;
+inline constexpr int kDefaultRepetitions                  = 5;
+inline constexpr int kDefaultWarmup                       = 1;
+inline constexpr std::uint32_t kDefaultPrefillChunk       = ninfer::kDefaultPrefillChunk;
+inline constexpr std::uint32_t kPrefillChunkAlignment     = 128;
+inline constexpr std::uint32_t kKvPageTokens              = 64;
+inline constexpr std::uint32_t kMaxMtpDraftTokens         = 5;
+inline constexpr std::uint32_t kMaxDFlashDraftTokens      = 7;
+inline constexpr std::uint32_t kMaxDFlashVerifyWidth      = 8;
 inline constexpr std::uint32_t kBenchmarkPendingTimeoutMs = 0xffffffffU;
 
 enum class TestKind { Prefill, Decode, PrefillDecode, WholeInference };
@@ -79,32 +79,33 @@ struct BenchOptions {
     int repetitions = kDefaultRepetitions;
     int warmup      = kDefaultWarmup;
     std::optional<std::uint32_t> max_context;
-    std::uint32_t prefill_chunk    = kDefaultPrefillChunk;
+    std::uint32_t prefill_chunk = kDefaultPrefillChunk;
     // Prefill-first by default so pp/tg cells keep their methodology; unset => Engine auto.
     std::optional<std::uint32_t> mixed_forward = 0;
-    std::uint32_t mixed_forward_rounds = 1;
-    std::uint32_t concurrency      = 1;
-    SpeculativeBackend spec_backend    = SpeculativeBackend::Mtp;
-    std::uint32_t draft_tokens         = 0;
-    bool adaptive_draft               = false;
-    std::uint32_t dflash_verify_width  = 0;
-    ProposalHead proposal_head         = ProposalHead::Full;
-    int device                     = 0;
-    bool use_device_graph          = true;
-    bool profile_measured          = false;
-    bool retain_token_ids          = false;
-    bool isolate_prompt_decode     = false;
-    bool automatic_kv_capacity     = false;
-    OutputFormat output            = OutputFormat::Table;
+    std::uint32_t mixed_forward_rounds         = 1;
+    std::uint32_t concurrency                  = 1;
+    SpeculativeBackend spec_backend            = SpeculativeBackend::Mtp;
+    std::uint32_t draft_tokens                 = 0;
+    bool adaptive_draft                        = false;
+    std::uint32_t dflash_verify_width          = 0;
+    ProposalHead proposal_head                 = ProposalHead::Full;
+    int device                                 = 0;
+    bool use_device_graph                      = true;
+    bool profile_measured                      = false;
+    bool retain_token_ids                      = false;
+    bool isolate_prompt_decode                 = false;
+    bool automatic_kv_capacity                 = false;
+    OutputFormat output                        = OutputFormat::Table;
     std::string output_file;
     bool help_requested = false;
 };
 
 struct RepTiming {
     struct PrefillTail {
-        double tok_s = 0.0;
+        double tok_s    = 0.0;
         double window_s = 0.0;
     };
+
     GenerationTimings timings;
     SpeculativeStats speculative;
     std::uint32_t generated_output_tokens = 0;
@@ -125,7 +126,7 @@ RepTiming fold_lane_results(const std::vector<GenerationResult>& generated,
 
 struct TestResult {
     BenchTest test;
-    std::uint32_t concurrency                  = 1;
+    std::uint32_t concurrency = 1;
     std::vector<RepTiming> reps;
     std::size_t workspace_peak_bytes           = 0;
     std::size_t workspace_allocator_peak_bytes = 0;
@@ -152,12 +153,12 @@ struct BenchEnvironment {
     std::uint32_t max_context                      = 0;
     std::uint32_t prefill_chunk                    = kDefaultPrefillChunk;
     std::uint32_t concurrency                      = 1;
-    std::uint32_t pending_timeout_ms                = kBenchmarkPendingTimeoutMs;
+    std::uint32_t pending_timeout_ms               = kBenchmarkPendingTimeoutMs;
     SpeculativeBackend speculative_backend         = SpeculativeBackend::None;
-    std::uint32_t draft_tokens                      = 0;
-    std::uint32_t dflash_verify_width_requested     = 0;
-    std::uint32_t dflash_verify_width               = 0;
-    ProposalHead proposal_head                      = ProposalHead::Full;
+    std::uint32_t draft_tokens                     = 0;
+    std::uint32_t dflash_verify_width_requested    = 0;
+    std::uint32_t dflash_verify_width              = 0;
+    ProposalHead proposal_head                     = ProposalHead::Full;
     bool use_device_graph                          = true;
     bool retain_token_ids                          = false;
     bool isolate_prompt_decode                     = false;

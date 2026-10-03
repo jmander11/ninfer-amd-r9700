@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exact gfx1201 static gate for the reused K5120 rows5/6 CTA challenger."""
+
 from __future__ import annotations
 
 import argparse

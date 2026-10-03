@@ -34,33 +34,47 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         selection_sha = "1" * 64
         artifact_sha = "2" * 64
         evidence = {
-            "artifact_type": "ninfer_niah_evidence", "schema_version": 2, "pass": True,
-            "evidence_mode": "provenance-bound", "model": "qwen3.8-27b",
-            "needle": DEFAULT_NEEDLE, "answer_match": "exact",
-            "max_tokens": 64, "thinking": False,
-            "seed": None, "runs": 1,
+            "artifact_type": "ninfer_niah_evidence",
+            "schema_version": 2,
+            "pass": True,
+            "evidence_mode": "provenance-bound",
+            "model": "qwen3.8-27b",
+            "needle": DEFAULT_NEEDLE,
+            "answer_match": "exact",
+            "max_tokens": 64,
+            "thinking": False,
+            "seed": None,
+            "runs": 1,
             "cases": [
                 {
-                    "label": label, "fixture": fixture["ref"],
-                    "fixture_identity": {
-                        key: fixture[key] for key in ("path", "bytes", "sha256")
-                    },
-                    "fixture_unchanged": True, "passed": True,
-                    "retrieved": 1, "total": 1, "recall": 1.0,
-                    "requests": [{
-                        "run": 1, "status": "pass", "prompt_tokens": 1024 + index,
-                        "completion_tokens": 3,
-                        "answer_bytes": len(DEFAULT_NEEDLE.encode("utf-8")),
-                        "answer_sha256": sha256(DEFAULT_NEEDLE.encode("utf-8")).hexdigest(),
-                    }],
+                    "label": label,
+                    "fixture": fixture["ref"],
+                    "fixture_identity": {key: fixture[key] for key in ("path", "bytes", "sha256")},
+                    "fixture_unchanged": True,
+                    "passed": True,
+                    "retrieved": 1,
+                    "total": 1,
+                    "recall": 1.0,
+                    "requests": [
+                        {
+                            "run": 1,
+                            "status": "pass",
+                            "prompt_tokens": 1024 + index,
+                            "completion_tokens": 3,
+                            "answer_bytes": len(DEFAULT_NEEDLE.encode("utf-8")),
+                            "answer_sha256": sha256(DEFAULT_NEEDLE.encode("utf-8")).hexdigest(),
+                        }
+                    ],
                 }
                 for index, (label, fixture) in enumerate(zip(labels, fixtures, strict=True))
             ],
             "fresh_full_prefill": {
-                "pass": True, "request_count": 5,
+                "pass": True,
+                "request_count": 5,
                 "requests": [
                     {
-                        "request_id": index + 1, "prompt_tokens": 1024 + index,
+                        "request_id": index + 1,
+                        "prompt_tokens": 1024 + index,
                         "computed_prefill_tokens": 1024 + index,
                     }
                     for index in range(5)
@@ -70,8 +84,10 @@ class SelectedNiahValidatorTest(unittest.TestCase):
             },
             "provenance": {
                 "static_profile_selection": {
-                    "sha256": selection_sha, "kv_value_group": 16,
-                    "xattention_profile": "dense", "prefill_chunk": 4096,
+                    "sha256": selection_sha,
+                    "kv_value_group": 16,
+                    "xattention_profile": "dense",
+                    "prefill_chunk": 4096,
                 },
                 "artifact": {"sha256": artifact_sha, "weights_id": "weights"},
                 "server_executable": file_identity(self.server),
@@ -80,7 +96,8 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         self.evidence_path = self.root / "niah.evidence.json"
         self.evidence_path.write_text(json.dumps(evidence) + "\n", encoding="utf-8")
         self.plan = {
-            "artifact_type": "ninfer_r9700_selected_niah_plan", "schema_version": 1,
+            "artifact_type": "ninfer_r9700_selected_niah_plan",
+            "schema_version": 1,
             "terminal_route": {
                 "maximum_runtime_concurrency": 4,
                 "terminal_selection": {"path": str(self.selection), "sha256": selection_sha},
@@ -92,19 +109,29 @@ class SelectedNiahValidatorTest(unittest.TestCase):
             },
             "status": "command_only_not_executed",
             "workload": {
-                "model": "qwen3.8-27b", "length": "64k", "positions": list(POSITIONS),
-                "runs_per_cell": 1, "max_tokens": 64, "thinking": False,
-                "needle": DEFAULT_NEEDLE, "answer_match": "exact",
+                "model": "qwen3.8-27b",
+                "length": "64k",
+                "positions": list(POSITIONS),
+                "runs_per_cell": 1,
+                "max_tokens": 64,
+                "thinking": False,
+                "needle": DEFAULT_NEEDLE,
+                "answer_match": "exact",
                 "maximum_concurrency": 1,
             },
             "fixtures": fixtures,
             "server": {
-                **file_identity(self.server), "host": "127.0.0.1", "port": 18081,
-                "max_context": 262144, "kv_capacity": 262144,
-                "max_concurrency": 1, "prefix_reuse": False,
+                **file_identity(self.server),
+                "host": "127.0.0.1",
+                "port": 18081,
+                "max_context": 262144,
+                "kv_capacity": 262144,
+                "max_concurrency": 1,
+                "prefix_reuse": False,
             },
             "outputs": {
-                "evidence": str(self.evidence_path), "server_log": str(self.log),
+                "evidence": str(self.evidence_path),
+                "server_log": str(self.log),
                 "server_stdout": str(self.root / "server.stdout.log"),
                 "server_stderr": str(self.root / "server.stderr.log"),
                 "admission": str(self.root / "admission.json"),
@@ -114,16 +141,18 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         self.plan_path.write_text(json.dumps(self.plan) + "\n", encoding="utf-8")
         validator = REPO / "tools/bench/validate_selected_niah.py"
         closure = [self.plan_path, validator, *(Path(row["path"]) for row in fixtures)]
-        (self.root / "prepared.sha256").write_text("".join(
-            f"{sha(path)}  {path.relative_to(REPO)}\n" for path in closure
-        ), encoding="utf-8")
+        (self.root / "prepared.sha256").write_text(
+            "".join(f"{sha(path)}  {path.relative_to(REPO)}\n" for path in closure),
+            encoding="utf-8",
+        )
 
     def tearDown(self) -> None:
         self.temp.cleanup()
 
     def test_accepts_exact_admission_and_binds_server_log(self) -> None:
         result = validate(
-            self.plan_path, self.root,
+            self.plan_path,
+            self.root,
             route_resolver=lambda _path: self.plan["terminal_route"],
         )
         self.assertEqual(result["status"], "pass")
@@ -135,7 +164,8 @@ class SelectedNiahValidatorTest(unittest.TestCase):
             output.write(b"{}\n")
         with self.assertRaisesRegex(ValueError, "server log differs"):
             validate(
-                self.plan_path, self.root,
+                self.plan_path,
+                self.root,
                 route_resolver=lambda _path: self.plan["terminal_route"],
             )
 
@@ -151,7 +181,8 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         self.evidence_path.write_text(json.dumps(evidence) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "frozen fixture/run"):
             validate(
-                self.plan_path, self.root,
+                self.plan_path,
+                self.root,
                 route_resolver=lambda _path: self.plan["terminal_route"],
             )
 
@@ -161,7 +192,8 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         self.evidence_path.write_text(json.dumps(evidence) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "exact admission ladder"):
             validate(
-                self.plan_path, self.root,
+                self.plan_path,
+                self.root,
                 route_resolver=lambda _path: self.plan["terminal_route"],
             )
 
@@ -176,15 +208,18 @@ class SelectedNiahValidatorTest(unittest.TestCase):
             self.plan_path.write_text(json.dumps(self.plan) + "\n", encoding="utf-8")
             validator = REPO / "tools/bench/validate_selected_niah.py"
             closure = [
-                self.plan_path, validator,
+                self.plan_path,
+                validator,
                 *(Path(row["path"]) for row in self.plan["fixtures"]),
             ]
-            (self.root / "prepared.sha256").write_text("".join(
-                f"{sha(path)}  {path.relative_to(REPO)}\n" for path in closure
-            ), encoding="utf-8")
+            (self.root / "prepared.sha256").write_text(
+                "".join(f"{sha(path)}  {path.relative_to(REPO)}\n" for path in closure),
+                encoding="utf-8",
+            )
             with self.assertRaisesRegex(ValueError, "plan contract differs"):
                 validate(
-                    self.plan_path, self.root,
+                    self.plan_path,
+                    self.root,
                     route_resolver=lambda _path: self.plan["terminal_route"],
                 )
             self.plan[section][key] = original
@@ -193,12 +228,20 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         output = self.root / "admission.json"
         result = {"status": "pass"}
         argv = [
-            "validate_selected_niah.py", "--plan", str(self.plan_path),
-            "--root", str(self.root), "--out", str(output),
+            "validate_selected_niah.py",
+            "--plan",
+            str(self.plan_path),
+            "--root",
+            str(self.root),
+            "--out",
+            str(output),
         ]
-        with mock.patch.object(sys, "argv", argv), mock.patch.object(
-            validator_module, "validate", side_effect=[result, result]
-        ) as validate_call:
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(
+                validator_module, "validate", side_effect=[result, result]
+            ) as validate_call,
+        ):
             self.assertEqual(validator_module.main(), 0)
         self.assertEqual(validate_call.call_count, 2)
         self.assertEqual(json.loads(output.read_text(encoding="utf-8")), result)
@@ -207,12 +250,18 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         output = self.root / "admission.json"
         output.symlink_to(self.root / "missing.json")
         argv = [
-            "validate_selected_niah.py", "--plan", str(self.plan_path),
-            "--root", str(self.root), "--out", str(output),
+            "validate_selected_niah.py",
+            "--plan",
+            str(self.plan_path),
+            "--root",
+            str(self.root),
+            "--out",
+            str(output),
         ]
-        with mock.patch.object(sys, "argv", argv), mock.patch.object(
-            validator_module, "validate"
-        ) as validate_call:
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(validator_module, "validate") as validate_call,
+        ):
             with self.assertRaises(SystemExit):
                 validator_module.main()
         validate_call.assert_not_called()
@@ -222,8 +271,13 @@ class SelectedNiahValidatorTest(unittest.TestCase):
         output = self.root / "admission.json"
         result = {"status": "pass"}
         argv = [
-            "validate_selected_niah.py", "--plan", str(self.plan_path),
-            "--root", str(self.root), "--out", str(output),
+            "validate_selected_niah.py",
+            "--plan",
+            str(self.plan_path),
+            "--root",
+            str(self.root),
+            "--out",
+            str(output),
         ]
 
         def validate_then_replace(*_args):
@@ -233,9 +287,11 @@ class SelectedNiahValidatorTest(unittest.TestCase):
             output.write_text('{"foreign": true}\n', encoding="utf-8")
             raise ValueError("revalidation failed")
 
-        with mock.patch.object(sys, "argv", argv), mock.patch.object(
-            validator_module, "validate", side_effect=validate_then_replace
-        ), self.assertRaisesRegex(ValueError, "revalidation failed"):
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(validator_module, "validate", side_effect=validate_then_replace),
+            self.assertRaisesRegex(ValueError, "revalidation failed"),
+        ):
             validator_module.main()
         self.assertEqual(json.loads(output.read_text(encoding="utf-8")), {"foreign": True})
 

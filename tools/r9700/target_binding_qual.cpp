@@ -33,10 +33,11 @@ void require(bool condition, const char* message) {
 
 void require_w8_workspace_profile(WeightsProfile profile) {
     const bool linear =
-        ninfer::targets::qwen3_8_27b::detail::Variant::linear_workspace_capacity_bytes(
+        ninfer::targets::qwen3_8_27b::detail::Variant::linear_workspace_capacity_bytes(profile,
+                                                                                       128) != 0;
+    const bool vision =
+        ninfer::targets::qwen3_8_27b::detail::Variant::vision_linear_workspace_capacity_bytes(
             profile, 128) != 0;
-    const bool vision = ninfer::targets::qwen3_8_27b::detail::Variant::
-                            vision_linear_workspace_capacity_bytes(profile, 128) != 0;
     const bool expected = ninfer::ops::r9700::linear::kW8ActivationBits == 8;
     require(linear == expected && vision == expected,
             "W8 evaluation workspace does not match the compile-selected activation profile");
@@ -45,11 +46,10 @@ void require_w8_workspace_profile(WeightsProfile profile) {
 ArtifactLoadPlan bind_complete(const std::filesystem::path& path,
                                std::string_view expected_weights_id) {
     ninfer::artifact::Reader reader(path);
-    require(reader.identity() == ninfer::artifact::ArtifactIdentity{
-                                     "qwen3.8-27b", std::string(expected_weights_id)},
+    require(reader.identity() ==
+                ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", std::string(expected_weights_id)},
             "sparse artifact has the wrong identity");
-    require(Package::resolve_weights(reader.identity()) ==
-                WeightsProfile::R9700W8G32Candidate,
+    require(Package::resolve_weights(reader.identity()) == WeightsProfile::R9700W8G32Candidate,
             "package resolved the candidate to the wrong profile");
     const auto defaults = Package::sampling_defaults(reader.identity().model_id);
     require(defaults.thinking.temperature == 2.0F && defaults.thinking.top_k == 20 &&
@@ -80,14 +80,13 @@ ArtifactLoadPlan bind_complete(const std::filesystem::path& path,
             throw std::runtime_error("candidate contains a non-R9700 matrix format");
         }
     }
-    require(reader.objects().size() == 1124 && bf16 == 582 && fp32 == 96 && i32 == 1 &&
-                w8 == 439,
+    require(reader.objects().size() == 1124 && bf16 == 582 && fp32 == 96 && i32 == 1 && w8 == 439,
             "candidate inventory/format counts differ from the exact contract");
 
     ninfer::artifact::Binder binder(reader);
     ninfer::targets::qwen3::StartupFeatures features{
-        .vision = true,
-        .speculative = ninfer::SpeculativeBackend::Mtp,
+        .vision        = true,
+        .speculative   = ninfer::SpeculativeBackend::Mtp,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
@@ -120,12 +119,12 @@ ArtifactLoadPlan bind_complete(const std::filesystem::path& path,
     return plan;
 }
 
-ArtifactLoadPlan bind_evaluation(const std::filesystem::path& path,
-                                 std::string_view weights_id, WeightsProfile profile,
-                                 std::size_t expected_q4, std::size_t expected_w8) {
+ArtifactLoadPlan bind_evaluation(const std::filesystem::path& path, std::string_view weights_id,
+                                 WeightsProfile profile, std::size_t expected_q4,
+                                 std::size_t expected_w8) {
     ninfer::artifact::Reader reader(path);
-    require(reader.identity() == ninfer::artifact::ArtifactIdentity{"qwen3.8-27b",
-                                                                      std::string(weights_id)},
+    require(reader.identity() ==
+                ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", std::string(weights_id)},
             "sparse evaluation artifact has the wrong identity");
     require(Package::resolve_weights(reader.identity()) == profile,
             "package resolved an evaluation artifact to the wrong profile");
@@ -143,12 +142,12 @@ ArtifactLoadPlan bind_evaluation(const std::filesystem::path& path,
 
     ninfer::artifact::Binder binder(reader);
     const ninfer::targets::qwen3::StartupFeatures features{
-        .vision = true,
-        .speculative = ninfer::SpeculativeBackend::Mtp,
+        .vision        = true,
+        .speculative   = ninfer::SpeculativeBackend::Mtp,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
-    ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
-        binder, profile, features);
+    ArtifactLoadPlan plan =
+        ninfer::targets::qwen3_8_27b::detail::bind_artifact(binder, profile, features);
     require(plan.materialization.object_count == 1124 &&
                 plan.materialization.device_objects.size() == 1117 &&
                 plan.materialization.mapped_host_objects.size() == 1 &&
@@ -156,9 +155,9 @@ ArtifactLoadPlan bind_evaluation(const std::filesystem::path& path,
             "evaluation materialization plan is incomplete");
 
     const NumericFormat source = NumericFormat::Q4G64_F16S;
-    const NumericFormat other = profile == WeightsProfile::R9700Q4G64Evaluation
-                                    ? NumericFormat::Q4G64_F16S
-                                    : NumericFormat::W8G32_F16S;
+    const NumericFormat other  = profile == WeightsProfile::R9700Q4G64Evaluation
+                                     ? NumericFormat::Q4G64_F16S
+                                     : NumericFormat::W8G32_F16S;
     require(plan.bindings.token_embedding.format == other &&
                 plan.bindings.output_head.format == other &&
                 plan.bindings.draft_head.format == source &&
@@ -190,13 +189,11 @@ ArtifactLoadPlan bind_evaluation(const std::filesystem::path& path,
 }
 
 ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
-                                            std::string_view weights_id,
-                                            WeightsProfile profile,
-                                            std::size_t expected_q4,
-                                            std::size_t expected_w8) {
+                                           std::string_view weights_id, WeightsProfile profile,
+                                           std::size_t expected_q4, std::size_t expected_w8) {
     ninfer::artifact::Reader reader(path);
-    require(reader.identity() == ninfer::artifact::ArtifactIdentity{
-                                     "qwen3.8-27b", std::string(weights_id)},
+    require(reader.identity() ==
+                ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", std::string(weights_id)},
             "sparse DFlash2 evaluation artifact has the wrong identity");
     require(Package::resolve_weights(reader.identity()) == profile,
             "package resolved a DFlash2 evaluation artifact to the wrong profile");
@@ -214,12 +211,12 @@ ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
 
     ninfer::artifact::Binder binder(reader);
     const ninfer::targets::qwen3::StartupFeatures features{
-        .vision = true,
-        .speculative = ninfer::SpeculativeBackend::DFlash,
+        .vision        = true,
+        .speculative   = ninfer::SpeculativeBackend::DFlash,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
-    ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
-        binder, profile, features);
+    ArtifactLoadPlan plan =
+        ninfer::targets::qwen3_8_27b::detail::bind_artifact(binder, profile, features);
     require(plan.materialization.object_count == 1190,
             "DFlash2 evaluation materialization object count differs");
     if (plan.materialization.device_objects.size() != 1171 ||
@@ -231,14 +228,12 @@ ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
     }
     require(plan.materialization.host_objects.size() == 6,
             "DFlash2 evaluation host-object count differs");
-    require(plan.bindings.dflash.has_value(),
-            "DFlash2 evaluation bind plan is missing");
+    require(plan.bindings.dflash.has_value(), "DFlash2 evaluation bind plan is missing");
 
-    const NumericFormat q4_format = NumericFormat::Q4G64_F16S;
-    const NumericFormat base_other =
-        profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation
-            ? q4_format
-            : NumericFormat::W8G32_F16S;
+    const NumericFormat q4_format  = NumericFormat::Q4G64_F16S;
+    const NumericFormat base_other = profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation
+                                         ? q4_format
+                                         : NumericFormat::W8G32_F16S;
     require(plan.bindings.token_embedding.format == base_other &&
                 plan.bindings.output_head.format == base_other &&
                 plan.bindings.draft_head.format == q4_format,
@@ -256,7 +251,7 @@ ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
                 "DFlash2 layer matrix binding is not uniformly Q4G64");
     }
     constexpr std::int32_t kTokens = 2;
-    constexpr std::int32_t kBatch = 2;
+    constexpr std::int32_t kBatch  = 2;
     constexpr std::size_t kProjectionBytes =
         static_cast<std::size_t>(ninfer::ops::kGroupedDynamicConvProjRows) * kTokens * kBatch *
         sizeof(std::uint16_t);
@@ -265,35 +260,32 @@ ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
             "DFlash2 grouped-convolution workspace omitted Q4 Linear scratch");
     // Selector projection runs one request at a time and reuses scratch with
     // top-k. At B2 top-k dominates both formats; B1 exposes Q4's Linear peak.
-    require(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
-                QType::Q4G64_F16S, kTokens, kTokens, 1) >
-                ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
-                    QType::BF16_CTRL, kTokens, kTokens, 1),
+    require(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(QType::Q4G64_F16S, kTokens,
+                                                                      kTokens, 1) >
+                ninfer::ops::dflash2_path_select_workspace_capacity_bytes(QType::BF16_CTRL, kTokens,
+                                                                          kTokens, 1),
             "DFlash2 selector workspace omitted Q4 Linear scratch");
     return plan;
 }
 
-void require_missing_dflash_rejection(const std::filesystem::path& path,
-                                      WeightsProfile profile) {
+void require_missing_dflash_rejection(const std::filesystem::path& path, WeightsProfile profile) {
     ninfer::artifact::Reader reader(path);
     ninfer::artifact::Binder binder(reader);
     const ninfer::targets::qwen3::StartupFeatures features{
-        .vision = false,
-        .speculative = ninfer::SpeculativeBackend::DFlash,
+        .vision        = false,
+        .speculative   = ninfer::SpeculativeBackend::DFlash,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
     try {
         (void)ninfer::targets::qwen3_8_27b::detail::bind_artifact(binder, profile, features);
-    } catch (const ninfer::artifact::ArtifactError&) {
-        return;
-    }
+    } catch (const ninfer::artifact::ArtifactError&) { return; }
     throw std::runtime_error("base evaluation identity accepted a missing DFlash2 inventory");
 }
 
 ArtifactLoadPlan bind_w8_bf16_embedding(const std::filesystem::path& path) {
     ninfer::artifact::Reader reader(path);
-    require(reader.identity() == ninfer::artifact::ArtifactIdentity{
-                                     "qwen3.8-27b", "r9700-w8-bf16-embed-eval"},
+    require(reader.identity() ==
+                ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", "r9700-w8-bf16-embed-eval"},
             "sparse W8/BF16-embedding artifact has the wrong identity");
     require(Package::resolve_weights(reader.identity()) ==
                 WeightsProfile::R9700W8Bf16EmbeddingEvaluation,
@@ -323,14 +315,13 @@ ArtifactLoadPlan bind_w8_bf16_embedding(const std::filesystem::path& path) {
             throw std::runtime_error("W8/BF16-embedding artifact contains an unexpected format");
         }
     }
-    require(reader.objects().size() == 1124 && bf16 == 583 && fp32 == 96 && i32 == 1 &&
-                w8 == 438,
+    require(reader.objects().size() == 1124 && bf16 == 583 && fp32 == 96 && i32 == 1 && w8 == 438,
             "W8/BF16-embedding inventory/format counts differ from the exact contract");
 
     ninfer::artifact::Binder binder(reader);
     const ninfer::targets::qwen3::StartupFeatures features{
-        .vision = true,
-        .speculative = ninfer::SpeculativeBackend::Mtp,
+        .vision        = true,
+        .speculative   = ninfer::SpeculativeBackend::Mtp,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
@@ -346,16 +337,11 @@ ArtifactLoadPlan bind_w8_bf16_embedding(const std::filesystem::path& path) {
                 plan.bindings.draft_head.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.mtp.input_projection.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.mtp.mlp.down.format == NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.patch_embedding.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].qkv.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].fc1.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].fc2.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_merger_input.fc1.format ==
-                    NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.patch_embedding.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].qkv.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].fc1.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].fc2.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_merger_input.fc1.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.vision_merger_fc2.format == NumericFormat::W8G32_F16S,
             "W8/BF16-embedding global/MTP/Vision binding formats are inconsistent");
     for (const auto& layer : plan.bindings.text_layers) {
@@ -364,15 +350,12 @@ ArtifactLoadPlan bind_w8_bf16_embedding(const std::filesystem::path& path) {
                 "W8/BF16-embedding MLP binding formats are inconsistent");
         if (layer.is_full_attention) {
             require(layer.attention.projection.query_key.format == NumericFormat::W8G32_F16S &&
-                        layer.attention.projection.gate_value.format ==
-                            NumericFormat::W8G32_F16S &&
+                        layer.attention.projection.gate_value.format == NumericFormat::W8G32_F16S &&
                         layer.attention.output.format == NumericFormat::W8G32_F16S,
                     "W8/BF16-embedding full-attention binding formats are inconsistent");
         } else {
-            require(layer.gdn.input_projection.query_key.format ==
-                            NumericFormat::W8G32_F16S &&
-                        layer.gdn.input_projection.value_z.format ==
-                            NumericFormat::W8G32_F16S &&
+            require(layer.gdn.input_projection.query_key.format == NumericFormat::W8G32_F16S &&
+                        layer.gdn.input_projection.value_z.format == NumericFormat::W8G32_F16S &&
                         layer.gdn.output.format == NumericFormat::W8G32_F16S,
                     "W8/BF16-embedding GDN binding formats are inconsistent");
         }
@@ -382,8 +365,8 @@ ArtifactLoadPlan bind_w8_bf16_embedding(const std::filesystem::path& path) {
 
 ArtifactLoadPlan bind_w8_bf16_attention_vo(const std::filesystem::path& path) {
     ninfer::artifact::Reader reader(path);
-    require(reader.identity() == ninfer::artifact::ArtifactIdentity{
-                                     "qwen3.8-27b", "r9700-w8-bf16-attn-vo-eval"},
+    require(reader.identity() ==
+                ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", "r9700-w8-bf16-attn-vo-eval"},
             "sparse W8/BF16-attention artifact has the wrong identity");
     require(Package::resolve_weights(reader.identity()) ==
                 WeightsProfile::R9700W8Bf16AttentionValueOutputEvaluation,
@@ -413,14 +396,13 @@ ArtifactLoadPlan bind_w8_bf16_attention_vo(const std::filesystem::path& path) {
             throw std::runtime_error("W8/BF16-attention artifact contains an unexpected format");
         }
     }
-    require(reader.objects().size() == 1124 && bf16 == 614 && fp32 == 96 && i32 == 1 &&
-                w8 == 407,
+    require(reader.objects().size() == 1124 && bf16 == 614 && fp32 == 96 && i32 == 1 && w8 == 407,
             "W8/BF16-attention inventory/format counts differ from the exact contract");
 
     ninfer::artifact::Binder binder(reader);
     const ninfer::targets::qwen3::StartupFeatures features{
-        .vision = true,
-        .speculative = ninfer::SpeculativeBackend::Mtp,
+        .vision        = true,
+        .speculative   = ninfer::SpeculativeBackend::Mtp,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
@@ -436,16 +418,11 @@ ArtifactLoadPlan bind_w8_bf16_attention_vo(const std::filesystem::path& path) {
                 plan.bindings.draft_head.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.mtp.input_projection.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.mtp.mlp.down.format == NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.patch_embedding.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].qkv.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].fc1.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].fc2.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_merger_input.fc1.format ==
-                    NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.patch_embedding.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].qkv.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].fc1.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].fc2.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_merger_input.fc1.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.vision_merger_fc2.format == NumericFormat::W8G32_F16S,
             "W8/BF16-attention global/MTP/Vision bindings are inconsistent");
     for (const auto& layer : plan.bindings.text_layers) {
@@ -458,10 +435,8 @@ ArtifactLoadPlan bind_w8_bf16_attention_vo(const std::filesystem::path& path) {
                         layer.attention.output.format == NumericFormat::BF16,
                     "W8/BF16-attention full-attention bindings are inconsistent");
         } else {
-            require(layer.gdn.input_projection.query_key.format ==
-                            NumericFormat::W8G32_F16S &&
-                        layer.gdn.input_projection.value_z.format ==
-                            NumericFormat::W8G32_F16S &&
+            require(layer.gdn.input_projection.query_key.format == NumericFormat::W8G32_F16S &&
+                        layer.gdn.input_projection.value_z.format == NumericFormat::W8G32_F16S &&
                         layer.gdn.output.format == NumericFormat::W8G32_F16S,
                     "W8/BF16-attention GDN bindings are inconsistent");
         }
@@ -471,8 +446,8 @@ ArtifactLoadPlan bind_w8_bf16_attention_vo(const std::filesystem::path& path) {
 
 ArtifactLoadPlan bind_w8_bf16_attention_qk(const std::filesystem::path& path) {
     ninfer::artifact::Reader reader(path);
-    require(reader.identity() == ninfer::artifact::ArtifactIdentity{
-                                     "qwen3.8-27b", "r9700-w8-bf16-attn-qk-eval"},
+    require(reader.identity() ==
+                ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", "r9700-w8-bf16-attn-qk-eval"},
             "sparse W8/BF16-attention-QK artifact has the wrong identity");
     require(Package::resolve_weights(reader.identity()) ==
                 WeightsProfile::R9700W8Bf16AttentionQueryKeyEvaluation,
@@ -499,18 +474,16 @@ ArtifactLoadPlan bind_w8_bf16_attention_qk(const std::filesystem::path& path) {
             ++w8;
             break;
         default:
-            throw std::runtime_error(
-                "W8/BF16-attention-QK artifact contains an unexpected format");
+            throw std::runtime_error("W8/BF16-attention-QK artifact contains an unexpected format");
         }
     }
-    require(reader.objects().size() == 1124 && bf16 == 598 && fp32 == 96 && i32 == 1 &&
-                w8 == 423,
+    require(reader.objects().size() == 1124 && bf16 == 598 && fp32 == 96 && i32 == 1 && w8 == 423,
             "W8/BF16-attention-QK inventory/format counts differ from the exact contract");
 
     ninfer::artifact::Binder binder(reader);
     const ninfer::targets::qwen3::StartupFeatures features{
-        .vision = true,
-        .speculative = ninfer::SpeculativeBackend::Mtp,
+        .vision        = true,
+        .speculative   = ninfer::SpeculativeBackend::Mtp,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
@@ -526,16 +499,11 @@ ArtifactLoadPlan bind_w8_bf16_attention_qk(const std::filesystem::path& path) {
                 plan.bindings.draft_head.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.mtp.input_projection.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.mtp.mlp.down.format == NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.patch_embedding.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].qkv.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].fc1.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].fc2.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_merger_input.fc1.format ==
-                    NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.patch_embedding.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].qkv.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].fc1.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].fc2.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_merger_input.fc1.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.vision_merger_fc2.format == NumericFormat::W8G32_F16S,
             "W8/BF16-attention-QK global/MTP/Vision bindings are inconsistent");
     for (const auto& layer : plan.bindings.text_layers) {
@@ -544,15 +512,12 @@ ArtifactLoadPlan bind_w8_bf16_attention_qk(const std::filesystem::path& path) {
                 "W8/BF16-attention-QK MLP bindings are inconsistent");
         if (layer.is_full_attention) {
             require(layer.attention.projection.query_key.format == NumericFormat::BF16 &&
-                        layer.attention.projection.gate_value.format ==
-                            NumericFormat::W8G32_F16S &&
+                        layer.attention.projection.gate_value.format == NumericFormat::W8G32_F16S &&
                         layer.attention.output.format == NumericFormat::W8G32_F16S,
                     "W8/BF16-attention-QK full-attention bindings are inconsistent");
         } else {
-            require(layer.gdn.input_projection.query_key.format ==
-                            NumericFormat::W8G32_F16S &&
-                        layer.gdn.input_projection.value_z.format ==
-                            NumericFormat::W8G32_F16S &&
+            require(layer.gdn.input_projection.query_key.format == NumericFormat::W8G32_F16S &&
+                        layer.gdn.input_projection.value_z.format == NumericFormat::W8G32_F16S &&
                         layer.gdn.output.format == NumericFormat::W8G32_F16S,
                     "W8/BF16-attention-QK GDN bindings are inconsistent");
         }
@@ -562,8 +527,8 @@ ArtifactLoadPlan bind_w8_bf16_attention_qk(const std::filesystem::path& path) {
 
 ArtifactLoadPlan bind_w8_bf16_gdn_qk(const std::filesystem::path& path) {
     ninfer::artifact::Reader reader(path);
-    require(reader.identity() == ninfer::artifact::ArtifactIdentity{
-                                     "qwen3.8-27b", "r9700-w8-bf16-gdn-qk-eval"},
+    require(reader.identity() ==
+                ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", "r9700-w8-bf16-gdn-qk-eval"},
             "sparse W8/BF16-GDN-QK artifact has the wrong identity");
     require(Package::resolve_weights(reader.identity()) ==
                 WeightsProfile::R9700W8Bf16GdnQueryKeyEvaluation,
@@ -593,14 +558,13 @@ ArtifactLoadPlan bind_w8_bf16_gdn_qk(const std::filesystem::path& path) {
             throw std::runtime_error("W8/BF16-GDN-QK artifact contains an unexpected format");
         }
     }
-    require(reader.objects().size() == 1124 && bf16 == 630 && fp32 == 96 && i32 == 1 &&
-                w8 == 391,
+    require(reader.objects().size() == 1124 && bf16 == 630 && fp32 == 96 && i32 == 1 && w8 == 391,
             "W8/BF16-GDN-QK inventory/format counts differ from the exact contract");
 
     ninfer::artifact::Binder binder(reader);
     const ninfer::targets::qwen3::StartupFeatures features{
-        .vision = true,
-        .speculative = ninfer::SpeculativeBackend::Mtp,
+        .vision        = true,
+        .speculative   = ninfer::SpeculativeBackend::Mtp,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
@@ -616,16 +580,11 @@ ArtifactLoadPlan bind_w8_bf16_gdn_qk(const std::filesystem::path& path) {
                 plan.bindings.draft_head.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.mtp.input_projection.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.mtp.mlp.down.format == NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.patch_embedding.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].qkv.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].fc1.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_backbone.layers[0].fc2.format ==
-                    NumericFormat::W8G32_F16S &&
-                plan.bindings.vision_merger_input.fc1.format ==
-                    NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.patch_embedding.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].qkv.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].fc1.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_backbone.layers[0].fc2.format == NumericFormat::W8G32_F16S &&
+                plan.bindings.vision_merger_input.fc1.format == NumericFormat::W8G32_F16S &&
                 plan.bindings.vision_merger_fc2.format == NumericFormat::W8G32_F16S,
             "W8/BF16-GDN-QK global/MTP/Vision bindings are inconsistent");
     for (const auto& layer : plan.bindings.text_layers) {
@@ -634,14 +593,12 @@ ArtifactLoadPlan bind_w8_bf16_gdn_qk(const std::filesystem::path& path) {
                 "W8/BF16-GDN-QK MLP bindings are inconsistent");
         if (layer.is_full_attention) {
             require(layer.attention.projection.query_key.format == NumericFormat::W8G32_F16S &&
-                        layer.attention.projection.gate_value.format ==
-                            NumericFormat::W8G32_F16S &&
+                        layer.attention.projection.gate_value.format == NumericFormat::W8G32_F16S &&
                         layer.attention.output.format == NumericFormat::W8G32_F16S,
                     "W8/BF16-GDN-QK full-attention bindings are inconsistent");
         } else {
             require(layer.gdn.input_projection.query_key.format == NumericFormat::BF16 &&
-                        layer.gdn.input_projection.value_z.format ==
-                            NumericFormat::W8G32_F16S &&
+                        layer.gdn.input_projection.value_z.format == NumericFormat::W8G32_F16S &&
                         layer.gdn.output.format == NumericFormat::W8G32_F16S,
                     "W8/BF16-GDN-QK GDN bindings are inconsistent");
         }
@@ -655,9 +612,7 @@ void require_wrong_format_rejection(const std::filesystem::path& path) {
     try {
         (void)ninfer::targets::qwen3_8_27b::detail::bind_artifact(
             binder, WeightsProfile::R9700W8G32Candidate, {});
-    } catch (const ninfer::artifact::ArtifactError&) {
-        return;
-    }
+    } catch (const ninfer::artifact::ArtifactError&) { return; }
     throw std::runtime_error("candidate binder accepted a non-W8 vocabulary matrix");
 }
 
@@ -667,9 +622,7 @@ void require_fp8_hybrid_format_rejection(const std::filesystem::path& all_q4_pat
     try {
         (void)ninfer::targets::qwen3_8_27b::detail::bind_artifact(
             binder, WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation, {});
-    } catch (const ninfer::artifact::ArtifactError&) {
-        return;
-    }
+    } catch (const ninfer::artifact::ArtifactError&) { return; }
     throw std::runtime_error("FP8/Q4 hybrid binder accepted a selected matrix through Q4");
 }
 
@@ -677,24 +630,22 @@ void require_rejected_bf16_head_identity() {
     try {
         (void)Package::resolve_weights(
             ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", "r9700-w8-bf16-head-eval"});
-    } catch (const std::runtime_error&) {
-        return;
-    }
+    } catch (const std::runtime_error&) { return; }
     throw std::runtime_error("package retained the rejected BF16-output-head identity");
 }
 
 ArtifactLoadPlan bind_fp8_q4_hybrid(const std::filesystem::path& path) {
     namespace hybrid = ninfer::targets::qwen3_8_27b::detail::fp8_hybrid;
     ninfer::artifact::Reader reader(path);
-    require(reader.identity() == ninfer::artifact::ArtifactIdentity{
-                                     "qwen3.8-27b", std::string(hybrid::kWeightsId)},
+    require(reader.identity() ==
+                ninfer::artifact::ArtifactIdentity{"qwen3.8-27b", std::string(hybrid::kWeightsId)},
             "sparse FP8/Q4 hybrid artifact has the wrong identity");
     require(Package::resolve_weights(reader.identity()) ==
                 WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation,
             "package resolved the FP8/Q4 hybrid artifact to the wrong profile");
 
-    std::size_t q4 = 0;
-    std::size_t fp8 = 0;
+    std::size_t q4       = 0;
+    std::size_t fp8      = 0;
     std::size_t selected = 0;
     for (const auto& object : reader.objects()) {
         const auto* tensor = std::get_if<ninfer::artifact::TensorDescriptor>(&object);
@@ -716,8 +667,8 @@ ArtifactLoadPlan bind_fp8_q4_hybrid(const std::filesystem::path& path) {
 
     ninfer::artifact::Binder binder(reader);
     const ninfer::targets::qwen3::StartupFeatures features{
-        .vision = true,
-        .speculative = ninfer::SpeculativeBackend::Mtp,
+        .vision        = true,
+        .speculative   = ninfer::SpeculativeBackend::Mtp,
         .proposal_head = ninfer::ProposalHead::Optimized,
     };
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
@@ -734,25 +685,21 @@ ArtifactLoadPlan bind_fp8_q4_hybrid(const std::filesystem::path& path) {
                 plan.bindings.draft_head.format == NumericFormat::Q4G64_F16S &&
                 plan.bindings.mtp.input_projection.format == NumericFormat::Q4G64_F16S &&
                 plan.bindings.mtp.mlp.gate_up.format == NumericFormat::Q4G64_F16S &&
-                plan.bindings.vision_backbone.patch_embedding.format ==
-                    NumericFormat::Q4G64_F16S,
+                plan.bindings.vision_backbone.patch_embedding.format == NumericFormat::Q4G64_F16S,
             "FP8/Q4 hybrid leaked FP8 into global, MTP, or Vision binding");
     for (const auto& layer : plan.bindings.text_layers) {
         require(layer.mlp.gate_up.format == NumericFormat::F8E4M3_ROW_F32S &&
                     layer.mlp.down.format == NumericFormat::Q4G64_F16S,
                 "FP8/Q4 hybrid MLP role formats differ");
         if (layer.is_full_attention) {
-            require(layer.attention.projection.query_key.format ==
-                            NumericFormat::F8E4M3_ROW_F32S &&
+            require(layer.attention.projection.query_key.format == NumericFormat::F8E4M3_ROW_F32S &&
                         layer.attention.projection.gate_value.format ==
                             NumericFormat::F8E4M3_ROW_F32S &&
                         layer.attention.output.format == NumericFormat::Q4G64_F16S,
                     "FP8/Q4 hybrid full-attention role formats differ");
         } else {
-            require(layer.gdn.input_projection.query_key.format ==
-                            NumericFormat::F8E4M3_ROW_F32S &&
-                        layer.gdn.input_projection.value_z.format ==
-                            NumericFormat::Q4G64_F16S &&
+            require(layer.gdn.input_projection.query_key.format == NumericFormat::F8E4M3_ROW_F32S &&
+                        layer.gdn.input_projection.value_z.format == NumericFormat::Q4G64_F16S &&
                         layer.gdn.output.format == NumericFormat::Q4G64_F16S,
                     "FP8/Q4 hybrid GDN role formats differ");
         }
@@ -767,17 +714,19 @@ int main(int argc, char** argv) {
         if (argc == 5 && (std::string_view(argv[1]) == "--fp8-capped" ||
                           std::string_view(argv[1]) == "--fp8-capped-dflash")) {
             namespace detail = ninfer::targets::qwen3_8_27b::detail;
-            using Variant = detail::Variant;
+            using Variant    = detail::Variant;
             ninfer::artifact::Reader reader(argv[2]);
-            const auto profile = Package::resolve_weights(reader.identity());
+            const auto profile   = Package::resolve_weights(reader.identity());
             const bool companion = std::string_view(argv[1]) == "--fp8-capped-dflash";
-            require(companion == (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation),
+            require(companion ==
+                        (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation),
                     "capped companion identity does not match qualification mode");
-            require(detail::is_fp8_capped_profile(profile),
-                    "expected fixed capped FP8 identity");
-            const std::size_t expected = profile == WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation
-                ? 12U : profile == WeightsProfile::R9700Q4Fp8AllAttentionEvaluation
-                ? 32U : profile == WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation ? 80U : 26U;
+            require(detail::is_fp8_capped_profile(profile), "expected fixed capped FP8 identity");
+            const std::size_t expected =
+                profile == WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation ? 12U
+                : profile == WeightsProfile::R9700Q4Fp8AllAttentionEvaluation ? 32U
+                : profile == WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation ? 80U
+                                                                              : 26U;
             std::size_t fp8 = 0U, q4 = 0U;
             for (const auto& object : reader.objects()) {
                 const auto* tensor = std::get_if<ninfer::artifact::TensorDescriptor>(&object);
@@ -792,111 +741,130 @@ int main(int argc, char** argv) {
                 q4 += tensor->format == NumericFormat::Q4G64_F16S;
             }
             require(reader.objects().size() == (companion ? 1190U : 1124U) && fp8 == expected &&
-                    q4 == 439U - expected + (companion ? 32U : 0U),
+                        q4 == 439U - expected + (companion ? 32U : 0U),
                     "capped base object/format counts differ");
             const auto bind = [&](ninfer::artifact::Reader& source) {
                 ninfer::artifact::Binder binder(source);
-                return detail::bind_artifact(binder, profile,
-                    {.vision = true, .speculative = companion ? ninfer::SpeculativeBackend::DFlash
-                                                             : ninfer::SpeculativeBackend::Mtp,
+                return detail::bind_artifact(
+                    binder, profile,
+                    {.vision        = true,
+                     .speculative   = companion ? ninfer::SpeculativeBackend::DFlash
+                                                : ninfer::SpeculativeBackend::Mtp,
                      .proposal_head = ninfer::ProposalHead::Optimized});
             };
             const auto plan = bind(reader);
             require(plan.materialization.object_count == (companion ? 1190U : 1124U) &&
-                    (companion || plan.materialization.device_objects.size() == 1117U) &&
-                    plan.materialization.mapped_host_objects.size() == 1U &&
-                    plan.bindings.token_embedding.format == NumericFormat::Q4G64_F16S &&
-                    plan.bindings.output_head.format == NumericFormat::Q4G64_F16S,
+                        (companion || plan.materialization.device_objects.size() == 1117U) &&
+                        plan.materialization.mapped_host_objects.size() == 1U &&
+                        plan.bindings.token_embedding.format == NumericFormat::Q4G64_F16S &&
+                        plan.bindings.output_head.format == NumericFormat::Q4G64_F16S,
                     "capped base materialization/endpoints differ");
-            require(plan.bindings.dflash.has_value() == companion,
-                    "capped companion is not bound");
+            require(plan.bindings.dflash.has_value() == companion, "capped companion is not bound");
             for (int i = 3; i < 5; ++i) {
                 ninfer::artifact::Reader invalid(argv[i]);
                 bool rejected = false;
-                try { (void)bind(invalid); }
-                catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
+                try {
+                    (void)bind(invalid);
+                } catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
                 require(rejected, "capped binder accepted wrong selected/unlisted format");
             }
             for (const int tokens : {1, 6, 24, 2048}) {
                 require(Variant::linear_workspace_capacity_bytes(profile, tokens) ==
-                        Variant::linear_workspace_capacity_bytes(companion
-                            ? WeightsProfile::R9700Q4G64DFlash2Q4Evaluation
-                            : WeightsProfile::R9700Q4G64Evaluation, tokens),
+                            Variant::linear_workspace_capacity_bytes(
+                                companion ? WeightsProfile::R9700Q4G64DFlash2Q4Evaluation
+                                          : WeightsProfile::R9700Q4G64Evaluation,
+                                tokens),
                         "capped Q4 workspace differs from complete Q4 inventory");
                 require(Variant::execution_state_capacity_bytes(profile, 2048, tokens) >=
-                        Variant::linear_workspace_capacity_bytes(profile, 2048),
+                            Variant::linear_workspace_capacity_bytes(profile, 2048),
                         "capped execution storage misses Q4 activation region");
             }
             require(Variant::runtime_allocation_overhead_bound(profile) == (4U << 20U),
                     "capped FP8 physical arena rounding omitted");
-            std::cout << "r9700_target_binding: PASS capped FP8 inventory, rejected formats, planning\n";
+            std::cout
+                << "r9700_target_binding: PASS capped FP8 inventory, rejected formats, planning\n";
             return 0;
         }
         if (argc == 4 && std::string_view(argv[1]) == "--selective-dflash-tiled-head") {
             const auto bind = [](const char* path) {
                 ninfer::artifact::Reader reader(path);
-                constexpr auto profile = WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
+                constexpr auto profile =
+                    WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
                 require(Package::resolve_weights(reader.identity()) == profile,
                         "wrong selective DFlash recipe identity");
                 ninfer::artifact::Binder binder(reader);
-                return ninfer::targets::qwen3_8_27b::detail::bind_artifact(binder, profile,
-                    {.vision = true, .speculative = ninfer::SpeculativeBackend::DFlash,
+                return ninfer::targets::qwen3_8_27b::detail::bind_artifact(
+                    binder, profile,
+                    {.vision        = true,
+                     .speculative   = ninfer::SpeculativeBackend::DFlash,
                      .proposal_head = ninfer::ProposalHead::Optimized});
             };
             const auto plan = bind(argv[2]);
             require(plan.materialization.object_count == 1190 &&
-                    plan.bindings.output_head.format == NumericFormat::W8G32_F16S &&
-                    plan.bindings.output_head.layout == ninfer::artifact::StorageLayout::R9700W8G32N16K16V1 &&
-                    plan.bindings.token_embedding.layout == ninfer::artifact::StorageLayout::RowSplitK128V1,
+                        plan.bindings.output_head.format == NumericFormat::W8G32_F16S &&
+                        plan.bindings.output_head.layout ==
+                            ninfer::artifact::StorageLayout::R9700W8G32N16K16V1 &&
+                        plan.bindings.token_embedding.layout ==
+                            ninfer::artifact::StorageLayout::RowSplitK128V1,
                     "selective DFlash single tiled-head storage contract differs");
             bool rejected = false;
-            try { (void)bind(argv[3]); }
-            catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
+            try {
+                (void)bind(argv[3]);
+            } catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
             require(rejected, "superseded row-split selective companion head was accepted");
-            std::cout << "r9700_target_binding: PASS selective DFlash tiled head and old-layout rejection\n";
+            std::cout << "r9700_target_binding: PASS selective DFlash tiled head and old-layout "
+                         "rejection\n";
             return 0;
         }
         if (argc == 4 && std::string_view(argv[1]) == "--selective-protected") {
             const auto bind = [](const char* path) {
                 ninfer::artifact::Reader reader(path);
                 require(Package::resolve_weights(reader.identity()) ==
-                    WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation,
-                    "wrong protected identity");
+                            WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation,
+                        "wrong protected identity");
                 ninfer::artifact::Binder binder(reader);
-                return ninfer::targets::qwen3_8_27b::detail::bind_artifact(binder,
-                    WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation,
-                    {.vision = true, .speculative = ninfer::SpeculativeBackend::Mtp,
+                return ninfer::targets::qwen3_8_27b::detail::bind_artifact(
+                    binder, WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation,
+                    {.vision        = true,
+                     .speculative   = ninfer::SpeculativeBackend::Mtp,
                      .proposal_head = ninfer::ProposalHead::Optimized});
             };
             const auto plan = bind(argv[2]);
             require(plan.materialization.object_count == 1124 &&
-                    plan.materialization.device_objects.size() == 1117 &&
-                    plan.materialization.mapped_host_objects.size() == 1 &&
-                    plan.materialization.device_capacity_bytes == 16'314'416'640ULL &&
-                    plan.materialization.mapped_host_capacity_bytes == 1'350'860'800ULL,
+                        plan.materialization.device_objects.size() == 1117 &&
+                        plan.materialization.mapped_host_objects.size() == 1 &&
+                        plan.materialization.device_capacity_bytes == 16'314'416'640ULL &&
+                        plan.materialization.mapped_host_capacity_bytes == 1'350'860'800ULL,
                     "protected exact inventory/arena differs");
             namespace selective = ninfer::targets::qwen3_8_27b::detail::selective_protected;
             for (std::size_t layer = 0; layer < 64; ++layer) {
-                const auto& bound = plan.bindings.text_layers[layer];
+                const auto& bound        = plan.bindings.text_layers[layer];
                 const std::string prefix = "text/layers/" + std::to_string(layer) + "/";
-                require(bound.mlp.gate_up.format == selective::matrix_format(prefix + "mlp/gate_up") &&
-                        bound.mlp.down.format == selective::matrix_format(prefix + "mlp/down"),
+                require(bound.mlp.gate_up.format ==
+                                selective::matrix_format(prefix + "mlp/gate_up") &&
+                            bound.mlp.down.format == selective::matrix_format(prefix + "mlp/down"),
                         "protected MLP differs");
                 if (bound.is_full_attention) {
-                    require(bound.attention.projection.query_key.format == selective::matrix_format(prefix + "attention/query_key") &&
-                            bound.attention.projection.gate_value.format == selective::matrix_format(prefix + "attention/gate_value") &&
-                            bound.attention.output.format == selective::matrix_format(prefix + "attention/output"),
+                    require(bound.attention.projection.query_key.format ==
+                                    selective::matrix_format(prefix + "attention/query_key") &&
+                                bound.attention.projection.gate_value.format ==
+                                    selective::matrix_format(prefix + "attention/gate_value") &&
+                                bound.attention.output.format ==
+                                    selective::matrix_format(prefix + "attention/output"),
                             "protected attention differs");
                 } else {
-                    require(bound.gdn.output.format == selective::matrix_format(prefix + "gdn/output"),
+                    require(bound.gdn.output.format ==
+                                selective::matrix_format(prefix + "gdn/output"),
                             "protected GDN differs");
                 }
             }
             bool rejected = false;
-            try { (void)bind(argv[3]); }
-            catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
+            try {
+                (void)bind(argv[3]);
+            } catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
             require(rejected, "protected binder accepted Q4 in an FP8-only selected role");
-            std::cout << "r9700_target_binding: PASS selective protected all1124objects, wrongFP8role rejected\n";
+            std::cout << "r9700_target_binding: PASS selective protected all1124objects, "
+                         "wrongFP8role rejected\n";
             return 0;
         }
         if (argc != 14) {
@@ -908,25 +876,25 @@ int main(int argc, char** argv) {
         const ArtifactLoadPlan plan = bind_complete(argv[1], "r9700-int-candidate");
         require_wrong_format_rejection(argv[2]);
         require_rejected_bf16_head_identity();
-        const ArtifactLoadPlan q4 = bind_evaluation(
-            argv[3], "r9700-q4g64-n16k16-eval", WeightsProfile::R9700Q4G64Evaluation, 439, 0);
+        const ArtifactLoadPlan q4 = bind_evaluation(argv[3], "r9700-q4g64-n16k16-eval",
+                                                    WeightsProfile::R9700Q4G64Evaluation, 439, 0);
         require_fp8_hybrid_format_rejection(argv[3]);
         const ArtifactLoadPlan q4_w8 = bind_evaluation(
             argv[4], "r9700-q4-w8-n16k16-eval", WeightsProfile::R9700Q4W8Evaluation, 183, 256);
         const ArtifactLoadPlan q4_w8_mse = bind_evaluation(
             argv[5], "r9700-q4-w8-mse-n16k16-eval", WeightsProfile::R9700Q4W8Evaluation, 183, 256);
-        const ArtifactLoadPlan w8_bf16_embedding = bind_w8_bf16_embedding(argv[6]);
+        const ArtifactLoadPlan w8_bf16_embedding    = bind_w8_bf16_embedding(argv[6]);
         const ArtifactLoadPlan w8_bf16_attention_vo = bind_w8_bf16_attention_vo(argv[7]);
-        const ArtifactLoadPlan w8_bf16_gdn_qk = bind_w8_bf16_gdn_qk(argv[8]);
+        const ArtifactLoadPlan w8_bf16_gdn_qk       = bind_w8_bf16_gdn_qk(argv[8]);
         const ArtifactLoadPlan w8_bf16_attention_qk = bind_w8_bf16_attention_qk(argv[9]);
         const ArtifactLoadPlan w8_mse = bind_complete(argv[10], "r9700-w8g32-mse-eval");
         require_missing_dflash_rejection(argv[3], WeightsProfile::R9700Q4G64Evaluation);
-        const ArtifactLoadPlan q4_dflash = bind_dflash_q4_evaluation(
-            argv[11], "r9700-q4g64-n16k16-dflash2-q4-eval",
-            WeightsProfile::R9700Q4G64DFlash2Q4Evaluation, 471, 0);
-        const ArtifactLoadPlan mixed_dflash = bind_dflash_q4_evaluation(
-            argv[12], "r9700-q4-w8-mse-n16k16-dflash2-q4-eval",
-            WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation, 215, 256);
+        const ArtifactLoadPlan q4_dflash =
+            bind_dflash_q4_evaluation(argv[11], "r9700-q4g64-n16k16-dflash2-q4-eval",
+                                      WeightsProfile::R9700Q4G64DFlash2Q4Evaluation, 471, 0);
+        const ArtifactLoadPlan mixed_dflash =
+            bind_dflash_q4_evaluation(argv[12], "r9700-q4-w8-mse-n16k16-dflash2-q4-eval",
+                                      WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation, 215, 256);
         const ArtifactLoadPlan fp8_q4_hybrid = bind_fp8_q4_hybrid(argv[13]);
         std::cout << "r9700_target_binding: PASS objects=" << plan.materialization.object_count
                   << " device=" << plan.materialization.device_objects.size()

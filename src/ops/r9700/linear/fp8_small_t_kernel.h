@@ -23,24 +23,24 @@ inline constexpr std::uint16_t kCanonicalBf16QuietNan = 0x7FC0U;
 // quarters are summed in order, then scaled by the weight-row and token scales and rounded to BF16.
 // T 17..32 adds a second token tile (tokens 16 + axis) fed by the same weight bytes, with two steps
 // in flight to hold the doubled activation registers.
-inline constexpr std::uint32_t kSplit = 4U;
-inline constexpr std::uint32_t kSteps = 4U;
+inline constexpr std::uint32_t kSplit      = 4U;
+inline constexpr std::uint32_t kSteps      = 4U;
 inline constexpr std::uint32_t kKAlignment = 64U * kSplit * kSteps;
-using I32x2 = int __attribute__((ext_vector_type(2)));
-using F32x8 = float __attribute__((ext_vector_type(8)));
+using I32x2                                = int __attribute__((ext_vector_type(2)));
+using F32x8                                = float __attribute__((ext_vector_type(8)));
 
 enum class Epilogue { Store, PairSplit, Residual };
 
 struct KernelArgs {
     Fp8RowScaledWeight first{};
-    Fp8RowScaledWeight second{};  // PairSplit: CTAs past first.rows / 16 project this weight
+    Fp8RowScaledWeight second{}; // PairSplit: CTAs past first.rows / 16 project this weight
     const std::uint8_t* activation = nullptr;
     const float* token_scales      = nullptr;
     const std::uint32_t* status    = nullptr;
-    std::uint32_t tokens  = 0;
-    std::uint32_t columns = 0;
-    std::uint32_t split   = 0;
-    hip_bfloat16* outputs[4]{};  // Store/Residual: [0]; PairSplit: first/second leading/trailing
+    std::uint32_t tokens           = 0;
+    std::uint32_t columns          = 0;
+    std::uint32_t split            = 0;
+    hip_bfloat16* outputs[4]{}; // Store/Residual: [0]; PairSplit: first/second leading/trailing
 };
 
 template <std::uint32_t kTiles>
@@ -53,53 +53,59 @@ __device__ __forceinline__ void small_t_body(const Cta& cta, SmallTShared<kTiles
                                              const KernelArgs& a) {
     static_assert(kTiles == 1U || kTiles == 2U);
     constexpr std::uint32_t kInFlight = kTiles == 1U ? kSteps : 2U;
-    auto& partial = shared.partial;
+    auto& partial                     = shared.partial;
     const std::uint32_t lane = cta.thread() & 31U, wave = cta.thread() >> 5U;
     const std::uint32_t axis = lane & 15U, half = lane >> 4U;
     const std::uint32_t first_blocks = a.first.rows / 16U;
-    const std::uint32_t block = cta.block().x;
-    const bool second = Kind == Epilogue::PairSplit && block >= first_blocks;
+    const std::uint32_t block        = cta.block().x;
+    const bool second                = Kind == Epilogue::PairSplit && block >= first_blocks;
     const Fp8RowScaledWeight& weight = second ? a.second : a.first;
-    const std::uint32_t row_base = (second ? block - first_blocks : block) * 16U;
-    const std::uint32_t rows = weight.rows;
-    const std::uint32_t columns = a.columns;
+    const std::uint32_t row_base     = (second ? block - first_blocks : block) * 16U;
+    const std::uint32_t rows         = weight.rows;
+    const std::uint32_t columns      = a.columns;
     // Publishes one rounded projection element (or the poison value) of token `token`.
     const auto publish = [&](std::uint32_t token, std::uint32_t row, bool poison, float value) {
         if constexpr (Kind == Epilogue::Store) {
             auto* out = reinterpret_cast<std::uint16_t*>(a.outputs[0]) +
                         static_cast<std::size_t>(token) * rows + row;
-            *out = poison ? kCanonicalBf16QuietNan : hip_bfloat16(value).data;
+            *out      = poison ? kCanonicalBf16QuietNan : hip_bfloat16(value).data;
         } else if constexpr (Kind == Epilogue::PairSplit) {
-            const bool leading = row < a.split;
-            hip_bfloat16* base = a.outputs[(second ? 2U : 0U) + (leading ? 0U : 1U)];
+            const bool leading        = row < a.split;
+            hip_bfloat16* base        = a.outputs[(second ? 2U : 0U) + (leading ? 0U : 1U)];
             const std::uint32_t width = leading ? a.split : rows - a.split;
             auto* out = reinterpret_cast<std::uint16_t*>(base) +
                         static_cast<std::size_t>(token) * width + (leading ? row : row - a.split);
-            *out = poison ? kCanonicalBf16QuietNan : hip_bfloat16(value).data;
+            *out      = poison ? kCanonicalBf16QuietNan : hip_bfloat16(value).data;
         } else {
             hip_bfloat16* out = a.outputs[0] + static_cast<std::size_t>(token) * rows + row;
-            const float delta = poison ? __builtin_nanf("")
-                                       : static_cast<float>(hip_bfloat16(value));
+            const float delta =
+                poison ? __builtin_nanf("") : static_cast<float>(hip_bfloat16(value));
             *out = hip_bfloat16(static_cast<float>(*out) + delta);
         }
     };
-    const std::uint32_t steps = columns / 64U / kSplit;
+    const std::uint32_t steps  = columns / 64U / kSplit;
     const std::uint32_t k_base = wave * steps * 64U + half * 32U;
     bool token[kTiles];
     const std::uint8_t* activation_row[kTiles];
 #pragma unroll
     for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
         token[tile] = tile * 16U + axis < a.tokens;
-        activation_row[tile] = a.activation +
+        activation_row[tile] =
+            a.activation +
             static_cast<std::size_t>(token[tile] ? tile * 16U + axis : 0U) * columns + k_base;
     }
-    const std::uint8_t* weight_row = weight.codes +
-                                     static_cast<std::size_t>(row_base + axis) * columns + k_base;
-    struct Step { uint4 w0, w1; uint4 a[kTiles][2]; };
+    const std::uint8_t* weight_row =
+        weight.codes + static_cast<std::size_t>(row_base + axis) * columns + k_base;
+
+    struct Step {
+        uint4 w0, w1;
+        uint4 a[kTiles][2];
+    };
+
     const auto load = [&](std::uint32_t step) {
         Step value;
-        const uint4* w = reinterpret_cast<const uint4*>(weight_row +
-                                                        static_cast<std::size_t>(step) * 64U);
+        const uint4* w =
+            reinterpret_cast<const uint4*>(weight_row + static_cast<std::size_t>(step) * 64U);
         value.w0 = w[0];
         value.w1 = w[1];
 #pragma unroll
@@ -161,7 +167,7 @@ __device__ __forceinline__ void small_t_body(const Cta& cta, SmallTShared<kTiles
 #pragma unroll
         for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
             if (!token[tile]) continue;
-            const std::uint32_t t = tile * 16U + axis;
+            const std::uint32_t t   = tile * 16U + axis;
             const float token_scale = a.token_scales[t];
 #pragma unroll
             for (std::uint32_t item = 0; item < 8U; ++item) {

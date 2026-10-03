@@ -61,7 +61,8 @@ class QualityRecoveryIoTest(unittest.TestCase):
             "sha256": hashlib.sha256(weights_id.encode()).hexdigest(),
             "file_size_bytes": len(weights_id),
             "conversion_receipt": {
-                "recipe_id": weights_id, "authority": f"receipt-{weights_id}",
+                "recipe_id": weights_id,
+                "authority": f"receipt-{weights_id}",
             },
             "representation": {"xattention_profile": campaign["profile"]},
             "cells": {"group": group, "chunk": chunk},
@@ -117,28 +118,46 @@ class QualityRecoveryIoTest(unittest.TestCase):
     def test_map_preserves_replayed_group_exclusion_and_rejects_forged_eligibility(self):
         with tempfile.TemporaryDirectory() as directory:
             path, value = self.make_authority_map(Path(directory))
-            entry = value['authorities']['MIXED_XATTENTION_QUALITY']
-            entry['eligibility_by_group'] = {'16': True, '32': False}
+            entry = value["authorities"]["MIXED_XATTENTION_QUALITY"]
+            entry["eligibility_by_group"] = {"16": True, "32": False}
+
             def replay(campaign, weights_id, group, chunk):
                 cells, source = self.campaign_source(campaign, weights_id, group, chunk)
-                if weights_id == 'r9700-q4-w8-mse-n16k16-eval' and campaign['profile'] != 'dense' and group == 32:
-                    cells['32k']['eligible'] = False
+                if (
+                    weights_id == "r9700-q4-w8-mse-n16k16-eval"
+                    and campaign["profile"] != "dense"
+                    and group == 32
+                ):
+                    cells["32k"]["eligible"] = False
                 return cells, source
-            with patch('tools.bench.prefill_chunk_authority.validate_prefill_chunk_authority',
-                       return_value=({**value['selected_prefill_chunk_authority'], 'selected_prefill_chunk': 4096}, {})), \
-                    patch('tools.ppl.assemble_pareto._campaign_quality_candidate', side_effect=replay):
+
+            with (
+                patch(
+                    "tools.bench.prefill_chunk_authority.validate_prefill_chunk_authority",
+                    return_value=(
+                        {
+                            **value["selected_prefill_chunk_authority"],
+                            "selected_prefill_chunk": 4096,
+                        },
+                        {},
+                    ),
+                ),
+                patch("tools.ppl.assemble_pareto._campaign_quality_candidate", side_effect=replay),
+            ):
                 path.write_text(json.dumps(value))
                 self.assertEqual(validate_authority_map(path), value)
-                entry['eligibility_by_group']['32'] = True
+                entry["eligibility_by_group"]["32"] = True
                 path.write_text(json.dumps(value))
-                with self.assertRaisesRegex(ValueError, 'eligibility differs'):
+                with self.assertRaisesRegex(ValueError, "eligibility differs"):
                     validate_authority_map(path)
 
     def test_preflight_rejects_dangling_output_and_validates_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            checkpoint = root / "checkpoint"; checkpoint.mkdir()
-            output = root / "output"; output.symlink_to(root / "missing")
+            checkpoint = root / "checkpoint"
+            checkpoint.mkdir()
+            output = root / "output"
+            output.symlink_to(root / "missing")
             with patch("tools.ppl.quality_recovery_io.validate_checkpoint_files") as validate:
                 with self.assertRaisesRegex(ValueError, "occupied"):
                     require_preflight(checkpoint, [output])
@@ -147,13 +166,15 @@ class QualityRecoveryIoTest(unittest.TestCase):
     def test_publish_is_exclusive_and_removes_pending(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            pending = root / "pending.json"; pending.write_bytes(b"authority")
+            pending = root / "pending.json"
+            pending.write_bytes(b"authority")
             final = root / "final.json"
             with patch("tools.ppl.quality_recovery_io.validate_authority_map"):
                 publish(pending, final)
             self.assertEqual(final.read_bytes(), b"authority")
             self.assertFalse(pending.exists())
-            new_pending = root / "pending.json"; new_pending.write_bytes(b"replacement")
+            new_pending = root / "pending.json"
+            new_pending.write_bytes(b"replacement")
             with patch("tools.ppl.quality_recovery_io.validate_authority_map"):
                 with self.assertRaisesRegex(ValueError, "already exists"):
                     publish(new_pending, final)
@@ -162,15 +183,18 @@ class QualityRecoveryIoTest(unittest.TestCase):
     def test_publish_rejects_symlink_pending(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "source"; source.write_bytes(b"authority")
-            pending = root / "pending"; pending.symlink_to(source)
+            source = root / "source"
+            source.write_bytes(b"authority")
+            pending = root / "pending"
+            pending.symlink_to(source)
             with self.assertRaisesRegex(ValueError, "not a regular file"):
                 publish(pending, root / "final")
 
     def test_publish_rejects_malformed_authority_map(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            pending = root / "pending.json"; pending.write_text("{}", encoding="utf-8")
+            pending = root / "pending.json"
+            pending.write_text("{}", encoding="utf-8")
             final = root / "final.json"
             with self.assertRaisesRegex(ValueError, "schema is invalid"):
                 publish(pending, final)

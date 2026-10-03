@@ -14,9 +14,17 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def _arguments(root: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
-    paths = tuple(root / name for name in (
-        "pending.json", "output.json", "manifest.json", "bench", "artifact", "selection.json"
-    ))
+    paths = tuple(
+        root / name
+        for name in (
+            "pending.json",
+            "output.json",
+            "manifest.json",
+            "bench",
+            "artifact",
+            "selection.json",
+        )
+    )
     for path in paths[2:]:
         path.write_text("source\n", encoding="utf-8")
     paths[0].write_text(json.dumps({"passes_p2048_gate": True}), encoding="utf-8")
@@ -39,9 +47,7 @@ def test_preserves_occupied_or_dangling_output(
 ) -> None:
     pending, output, manifest, executable, artifact, selection = _arguments(tmp_path)
     output.symlink_to(tmp_path / "missing")
-    monkeypatch.setattr(
-        publication, "validate_ladder", lambda *args: {"passes_p2048_gate": True}
-    )
+    monkeypatch.setattr(publication, "validate_ladder", lambda *args: {"passes_p2048_gate": True})
     with pytest.raises(ValueError, match="occupied"):
         publication.publish(pending, output, manifest, executable, artifact, selection, 2000.0)
     assert output.is_symlink()
@@ -57,8 +63,7 @@ def test_post_publish_validation_failure_rolls_back_owned_inode(
     def validate(*args):
         nonlocal calls
         calls += 1
-        return ({"passes_p2048_gate": True} if calls == 1
-                else {"passes_p2048_gate": False})
+        return {"passes_p2048_gate": True} if calls == 1 else {"passes_p2048_gate": False}
 
     monkeypatch.setattr(publication, "validate_ladder", validate)
     with pytest.raises(ValueError, match="published"):

@@ -46,15 +46,11 @@ def preflight_conversion(
 ) -> Q4W8ConversionPreflight:
     model = Path(model_dir)
     q4_w8_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
-    object_plan = family_conversion.build_object_plan(
-        q4_w8_inventory.OBJECT_SPECS, resource_map
-    )
+    object_plan = family_conversion.build_object_plan(q4_w8_inventory.OBJECT_SPECS, resource_map)
     ranking = build_draft_ranking.validate_ranking_provenance(draft_ranking)
     draft = draft_head.compute_shortlist(ranking.ranking_path, model)
     return Q4W8ConversionPreflight(
@@ -95,9 +91,7 @@ def convert(
 ) -> Path:
     output = Path(out_path)
     if output.exists():
-        raise FileExistsError(
-            f"refusing to overwrite existing Q4/W8 evaluation artifact: {output}"
-        )
+        raise FileExistsError(f"refusing to overwrite existing Q4/W8 evaluation artifact: {output}")
     started = time.perf_counter()
     requested_device = str(device)
     resolved_device = pick_device(device)
@@ -128,9 +122,7 @@ def convert(
                 )
 
     report = family_conversion.build_conversion_report(
-        identity=ArtifactIdentity(
-            q4_w8_inventory.MODEL_ID, q4_w8_inventory.WEIGHTS_ID
-        ),
+        identity=ArtifactIdentity(q4_w8_inventory.MODEL_ID, q4_w8_inventory.WEIGHTS_ID),
         target_key=q4_w8_inventory.TARGET_KEY,
         recipe_id=q4_w8_inventory.RECIPE_ID,
         repo_root=_repo_root(),

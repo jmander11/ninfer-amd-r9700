@@ -16,9 +16,9 @@ struct Fp8RowScaledWeight {
     std::uint32_t rows        = 0;
 };
 
-// Small-T (T <= 32; one or two 16-token WMMA tiles) row-scaled E4M3 projection y[t, r] = BF16(sum_k w[r, k] a[t, k] * ws[r] * as[t])
-// of one prepared activation image. A nonzero activation status replaces every published element
-// with the canonical BF16 quiet NaN.
+// Small-T (T <= 32; one or two 16-token WMMA tiles) row-scaled E4M3 projection y[t, r] = BF16(sum_k
+// w[r, k] a[t, k] * ws[r] * as[t]) of one prepared activation image. A nonzero activation status
+// replaces every published element with the canonical BF16 quiet NaN.
 inline constexpr std::uint32_t kFp8SmallTokenLimit = 32U;
 [[nodiscard]] bool fp8_small_t_supported(std::uint32_t tokens, std::uint32_t rows,
                                          std::uint32_t columns,
@@ -35,12 +35,13 @@ inline constexpr std::uint32_t kFp8SmallTokenLimit = 32U;
 struct Fp8SmallTPairSplitArgs {
     Fp8RowScaledWeight first{};
     Fp8RowScaledWeight second{};
-    std::uint32_t split = 0;
+    std::uint32_t split           = 0;
     hip_bfloat16* first_leading   = nullptr;
     hip_bfloat16* first_trailing  = nullptr;
     hip_bfloat16* second_leading  = nullptr;
     hip_bfloat16* second_trailing = nullptr;
 };
+
 [[nodiscard]] hipError_t fp8_small_t_pair_split(const Fp8SmallTPairSplitArgs& args,
                                                 const Fp8ActivationWorkspace& activation,
                                                 hipStream_t stream) noexcept;
@@ -49,8 +50,7 @@ struct Fp8SmallTPairSplitArgs {
 // separate BF16 residual add of fp8_small_t_linear's output.
 [[nodiscard]] hipError_t fp8_small_t_residual(const Fp8RowScaledWeight& weight,
                                               const Fp8ActivationWorkspace& activation,
-                                              hip_bfloat16* residual,
-                                              hipStream_t stream) noexcept;
+                                              hip_bfloat16* residual, hipStream_t stream) noexcept;
 
 // Prefill (T > 32) row-scaled E4M3 projection with the same result contract as
 // fp8_small_t_linear: the FP8LUT4 prefill GEMM (fp8lut4_linear.hip) staging the raw E4M3 rows

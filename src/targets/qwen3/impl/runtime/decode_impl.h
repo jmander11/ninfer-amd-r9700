@@ -45,8 +45,8 @@ auto ordinary_batch_body(OrdinaryBatchContext& state, std::int32_t batch_size) {
             state.text_kv_transactions[static_cast<std::size_t>(row)]->begin_device_segment(
                 all_positions + row, 1U, nullptr);
         }
-        card.ordinary_decode_batch(tokens, cache_positions, rope_positions, kv_rows, lanes,
-                                   hidden, logits);
+        card.ordinary_decode_batch(tokens, cache_positions, rope_positions, kv_rows, lanes, hidden,
+                                   logits);
         for (qwen3::PagedKVTransaction* transaction : state.text_kv_transactions) {
             transaction->end_device_segment(state.execution.device.stream);
         }

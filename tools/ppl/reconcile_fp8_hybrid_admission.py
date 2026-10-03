@@ -86,12 +86,15 @@ def validate_campaign(path: Path, tokens: int, artifact: dict | None) -> tuple[d
         output = _output_path(cell)
         nll_path = output.with_suffix(".nllf32")
         argmax_path = output.with_suffix(".argmaxi32")
-        if sha256(nll_path) != cell.get("nll_sha256") or sha256(argmax_path) != cell.get("argmax_sha256"):
+        if sha256(nll_path) != cell.get("nll_sha256") or sha256(argmax_path) != cell.get(
+            "argmax_sha256"
+        ):
             raise ValueError(f"{tokens}-token sidecar digest differs")
         raw = json.loads(output.read_text(encoding="utf-8"))
         fields = (
             ppl.BF16_SCORER_REPORT_FIELDS
-            if cell is baseline_cell else ppl.CANDIDATE_SCORER_REPORT_FIELDS
+            if cell is baseline_cell
+            else ppl.CANDIDATE_SCORER_REPORT_FIELDS
         )
         if any(raw.get(name) != cell.get(name) for name in fields):
             raise ValueError(f"{tokens}-token raw scorer report differs from its campaign")
@@ -110,7 +113,9 @@ def validate_campaign(path: Path, tokens: int, artifact: dict | None) -> tuple[d
     delta = sum(candidate_nll) / len(candidate_nll) - sum(baseline_nll) / len(baseline_nll)
     gate = math.log(1.05)
     severe = ppl.severe_position_stats(
-        candidate_nll, baseline_nll, threshold=ppl.TERRIBLE_NLL,
+        candidate_nll,
+        baseline_nll,
+        threshold=ppl.TERRIBLE_NLL,
         maximum_new_rate=ppl.QUALITY_TIERS["capacity-speed"]["maximum_new_severe_rate"],
         minimum_budget=ppl.QUALITY_TIERS["capacity-speed"]["minimum_new_severe_budget"],
     )
@@ -150,9 +155,7 @@ def main() -> int:
 
     capacity_path = args.capacity.resolve(strict=True)
     retained_capacity = json.loads(capacity_path.read_text(encoding="utf-8"))
-    current_capacity = capacity_tool.current_report(
-        args.planner, args.weights_report
-    )
+    current_capacity = capacity_tool.current_report(args.planner, args.weights_report)
     if retained_capacity != current_capacity:
         raise SystemExit("capacity report differs from the current CPU planner/provenance")
     capacity_cells = current_capacity["cells"]
@@ -199,8 +202,16 @@ def main() -> int:
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"quality_capacity_admitted": True, "performance_promotion_admitted": False,
-                      "p2048_tok_s": throughput}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "quality_capacity_admitted": True,
+                "performance_promotion_admitted": False,
+                "p2048_tok_s": throughput,
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 

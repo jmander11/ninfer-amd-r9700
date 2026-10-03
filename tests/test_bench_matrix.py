@@ -26,8 +26,11 @@ class BenchMatrixTest(unittest.TestCase):
         self.assertFalse(prefill_timing_eligible(legacy))
         self.assertTrue(prefill_timing_eligible(legacy, 1))
         for version in (21, 22, 23):
-            current = {**legacy, "schema_version": version,
-                       "phase_timing_semantics": PHASE_TIMING_SEMANTICS}
+            current = {
+                **legacy,
+                "schema_version": version,
+                "phase_timing_semantics": PHASE_TIMING_SEMANTICS,
+            }
             self.assertTrue(prefill_timing_eligible(current))
         for k in range(1, 8):
             self.assertEqual(resolved_dflash_verify_width(k, 0), k + 1)
@@ -85,8 +88,7 @@ class BenchMatrixTest(unittest.TestCase):
                         "kv_value_group": 16,
                         "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
                         "q4_activation_bits": 8,
-                        "q4_prefill_cta_profile":
-                            "m64n128-pingpong-n16-k16-scalar-base-production",
+                        "q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-scalar-base-production",
                         "w8_activation_bits": 16,
                         "split512_enabled": True,
                         "decode_attention_profile": DECODE_ATTENTION_PROFILE,
@@ -176,9 +178,7 @@ class BenchMatrixTest(unittest.TestCase):
         assert row["kv_value_group"] == 16
         assert row["kv_plane_layouts"] == R9700_KV_PLANE_LAYOUTS
         assert row["q4_activation_bits"] == 8
-        assert row["q4_prefill_cta_profile"] == (
-            "m64n128-pingpong-n16-k16-scalar-base-production"
-        )
+        assert row["q4_prefill_cta_profile"] == ("m64n128-pingpong-n16-k16-scalar-base-production")
         assert row["w8_activation_bits"] == 16
         assert row["split512_enabled"] is True
         assert row["decode_attention_profile"] == DECODE_ATTENTION_PROFILE

@@ -58,18 +58,11 @@ F8E4M3_ROW_F32S = RowScaledFormat("F8E4M3_ROW_F32S")
 FP8LUT4 = CodebookFormat("FP8LUT4", 32)
 
 
-DIRECT_FORMATS = MappingProxyType(
-    {item.name: item for item in (BF16, FP32, I32)}
-)
+DIRECT_FORMATS = MappingProxyType({item.name: item for item in (BF16, FP32, I32)})
 QUANT_FORMATS = MappingProxyType(
-    {
-        item.name: item
-        for item in (Q4G64_F16S, Q5G64_F16S, Q6G64_F16S, W8G32_F16S)
-    }
+    {item.name: item for item in (Q4G64_F16S, Q5G64_F16S, Q6G64_F16S, W8G32_F16S)}
 )
-ROW_SCALED_FORMATS = MappingProxyType(
-    {item.name: item for item in (F8E4M3_ROW_F32S,)}
-)
+ROW_SCALED_FORMATS = MappingProxyType({item.name: item for item in (F8E4M3_ROW_F32S,)})
 CODEBOOK_FORMATS = MappingProxyType({item.name: item for item in (FP8LUT4,)})
 NUMERIC_FORMATS = MappingProxyType(
     {**DIRECT_FORMATS, **QUANT_FORMATS, **ROW_SCALED_FORMATS, **CODEBOOK_FORMATS}

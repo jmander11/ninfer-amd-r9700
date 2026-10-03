@@ -10,7 +10,8 @@
 #   pre-commit run clang-tidy-full --hook-stage manual   # whole-tree clang-tidy
 # Policy and rationale: docs/maintainer/code-quality.md.
 minimum_pre_commit_version: "4.0.0"
-exclude: ^third_party/
+# Recorded evidence under profiles/ is raw tool output and stays byte-exact.
+exclude: ^(third_party|profiles)/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -27,12 +28,13 @@ repos:
       - id: check-yaml
       - id: detect-private-key
       - id: end-of-file-fixer
-        exclude: \.patch$
+        exclude: &data \.patch$|(^|/)fixtures/|^examples/cli/messages/
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: *data
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
-        exclude: \.patch$
+        exclude: *data
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v22.1.8
@@ -41,6 +43,8 @@ repos:
         # identify has no HIP tag, so C, C++, and HIP sources are selected by extension.
         types_or: [text]
         files: \.(c|cc|cpp|h|hpp|hip)$
+        # Candidate qualifiers whose source text tools/r9700 static checkers pin byte for byte.
+        exclude: ^tools/r9700/(a8g128_q4g128_n16k16_(harness|qual)|a8q4_dflash_small_t_qual|a8q4_group_major_activation_(harness|qual)|a8q4_n16k16_layout_(harness|qual)|a8q4_n16k16_weight_ht_harness|a8q4_shape_sweep_qual|split512_attention_qual|w8a8_wmma_linear_qual|xattention_prefill_qual)\.(hip|h)$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.9

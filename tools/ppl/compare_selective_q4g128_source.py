@@ -14,11 +14,19 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from tools.ppl.compare_q4_group_source import (
-    _against, _load_bf16, _sidecar_values, _source_key,
+    _against,
+    _load_bf16,
+    _sidecar_values,
+    _source_key,
 )
 from tools.ppl.q4_group_source_diagnostic import _atomic_new, sha256_file
 from tools.ppl.selective_q4g128_source_diagnostic import (
-    ARTIFACT_TYPE, SCHEMA_VERSION, TOKENS, _gate, _implementation, _quantization,
+    ARTIFACT_TYPE,
+    SCHEMA_VERSION,
+    TOKENS,
+    _gate,
+    _implementation,
+    _quantization,
 )
 
 
@@ -34,23 +42,29 @@ def _close(actual: object, expected: float) -> bool:
 
 def _load_score(path: Path, codec: str, bf16_path: Path):
     report = json.loads(path.read_text(encoding="utf-8"))
-    if (report.get("artifact_type") != ARTIFACT_TYPE
-            or report.get("schema_version") != SCHEMA_VERSION
-            or report.get("status") != "diagnostic_weight_codec_only_not_product_ppl"
-            or report.get("codec_profile") != codec):
+    if (
+        report.get("artifact_type") != ARTIFACT_TYPE
+        or report.get("schema_version") != SCHEMA_VERSION
+        or report.get("status") != "diagnostic_weight_codec_only_not_product_ppl"
+        or report.get("codec_profile") != codec
+    ):
         raise ValueError(f"{path}: selective source score identity differs")
     if report.get("implementation_sha256") != _implementation():
         raise ValueError(f"{path}: selective source score implementation differs")
     if report.get("quantization") != _quantization(codec):
         raise ValueError(f"{path}: selective source score quantization differs")
     expected_workload = {
-        "tokens": TOKENS, "skip": "half", "prefill_chunk": 4096,
-        "schedule": "prefill", "device": 0,
+        "tokens": TOKENS,
+        "skip": "half",
+        "prefill_chunk": 4096,
+        "schedule": "prefill",
+        "device": 0,
     }
     if report.get("workload") != expected_workload:
         raise ValueError(f"{path}: selective source score workload differs")
     if report.get("bf16_authority") != {
-        "path": str(bf16_path.resolve()), "sha256": sha256_file(bf16_path),
+        "path": str(bf16_path.resolve()),
+        "sha256": sha256_file(bf16_path),
     }:
         raise ValueError(f"{path}: BF16 authority binding differs")
     nlls = _sidecar_values(path, ".nllf32", "f")
@@ -62,7 +76,8 @@ def _load_score(path: Path, codec: str, bf16_path: Path):
     for kind, suffix in (("nll", ".nllf32"), ("argmax", ".argmaxi32")):
         target = path.with_suffix(suffix)
         if report.get("sidecars", {}).get(kind) != {
-            "path": target.name, "sha256": sha256_file(target),
+            "path": target.name,
+            "sha256": sha256_file(target),
         }:
             raise ValueError(f"{path}: {kind} sidecar binding differs")
     result = report.get("result", {})
@@ -83,32 +98,39 @@ def _load_score(path: Path, codec: str, bf16_path: Path):
         if not _close(result.get(key), expected_result[key]):
             raise ValueError(f"{path}: retained result {key} differs from sidecars")
     duration = result.get("score_seconds")
-    if type(duration) not in (int, float) or not math.isfinite(float(duration)) \
-            or float(duration) <= 0:
+    if (
+        type(duration) not in (int, float)
+        or not math.isfinite(float(duration))
+        or float(duration) <= 0
+    ):
         raise ValueError(f"{path}: retained score duration is invalid")
     return report, nlls, argmax
 
 
 def compare(control_path: Path, candidate_path: Path, bf16_path: Path) -> dict[str, object]:
-    control, control_nll, control_argmax = _load_score(
-        control_path, "q4g64-absmax", bf16_path
-    )
+    control, control_nll, control_argmax = _load_score(control_path, "q4g64-absmax", bf16_path)
     candidate, candidate_nll, candidate_argmax = _load_score(
         candidate_path, "q4g128-mse", bf16_path
     )
     bf16, bf16_nll, bf16_argmax = _load_bf16(bf16_path)
-    if (_source_key(control) != _source_key(candidate)
-            or control.get("workload") != candidate.get("workload")
-            or control.get("execution") != candidate.get("execution")
-            or control.get("matrix_scope") != candidate.get("matrix_scope")
-            or control.get("sampled_source_gate") != candidate.get("sampled_source_gate")):
+    if (
+        _source_key(control) != _source_key(candidate)
+        or control.get("workload") != candidate.get("workload")
+        or control.get("execution") != candidate.get("execution")
+        or control.get("matrix_scope") != candidate.get("matrix_scope")
+        or control.get("sampled_source_gate") != candidate.get("sampled_source_gate")
+    ):
         raise ValueError("selective G64/G128 paired score identity differs")
-    bf16_key = _source_key({"source": {
-        "config_sha256": bf16["source_config_sha256"],
-        "index_sha256": bf16["source_index_sha256"],
-        "shards_sha256": bf16["source_shards_sha256"],
-        "corpus_ids_sha256": bf16["corpus_ids_sha256"],
-    }})
+    bf16_key = _source_key(
+        {
+            "source": {
+                "config_sha256": bf16["source_config_sha256"],
+                "index_sha256": bf16["source_index_sha256"],
+                "shards_sha256": bf16["source_shards_sha256"],
+                "corpus_ids_sha256": bf16["corpus_ids_sha256"],
+            }
+        }
+    )
     if _source_key(control) != bf16_key:
         raise ValueError("selective scores and BF16 authority source/corpus differ")
     control_gate = _gate(control_nll, control_argmax, bf16_nll, bf16_argmax)
@@ -118,10 +140,11 @@ def compare(control_path: Path, candidate_path: Path, bf16_path: Path) -> dict[s
     if candidate.get("quality_gate") != candidate_gate:
         raise ValueError("selective G128 retained quality gate differs from sidecars")
     paired = _against(control_nll, candidate_nll, control_argmax, candidate_argmax)
-    if (control_gate["against_bf16"]["new_severe_position_budget"]
-            != EXPECTED_NEW_SEVERE_BUDGET
-            or candidate_gate["against_bf16"]["new_severe_position_budget"]
-            != EXPECTED_NEW_SEVERE_BUDGET):
+    if (
+        control_gate["against_bf16"]["new_severe_position_budget"] != EXPECTED_NEW_SEVERE_BUDGET
+        or candidate_gate["against_bf16"]["new_severe_position_budget"]
+        != EXPECTED_NEW_SEVERE_BUDGET
+    ):
         raise ValueError("selective source severe-position budget differs from exact 8K gate")
     passed = control_gate["pass"] is True and candidate_gate["pass"] is True
     return {
@@ -130,10 +153,12 @@ def compare(control_path: Path, candidate_path: Path, bf16_path: Path) -> dict[s
         "status": "diagnostic_weight_codec_gate_not_product_admission",
         "inputs": {
             "q4g64_control": {
-                "path": str(control_path.resolve()), "sha256": sha256_file(control_path),
+                "path": str(control_path.resolve()),
+                "sha256": sha256_file(control_path),
             },
             "q4g128_candidate": {
-                "path": str(candidate_path.resolve()), "sha256": sha256_file(candidate_path),
+                "path": str(candidate_path.resolve()),
+                "sha256": sha256_file(candidate_path),
             },
             "bf16": {"path": str(bf16_path.resolve()), "sha256": sha256_file(bf16_path)},
         },
@@ -157,8 +182,9 @@ def compare(control_path: Path, candidate_path: Path, bf16_path: Path) -> dict[s
     }
 
 
-def validate_comparison(path: Path, control_path: Path, candidate_path: Path,
-                        bf16_path: Path) -> dict[str, object]:
+def validate_comparison(
+    path: Path, control_path: Path, candidate_path: Path, bf16_path: Path
+) -> dict[str, object]:
     retained = json.loads(path.read_text(encoding="utf-8"))
     expected = compare(control_path, candidate_path, bf16_path)
     if retained != expected:

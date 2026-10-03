@@ -14,14 +14,13 @@
 namespace ninfer::ops {
 namespace {
 
-constexpr std::int32_t kHeadDim = 128;
-constexpr std::int32_t kKvHeads = 8;
+constexpr std::int32_t kHeadDim       = 128;
+constexpr std::int32_t kKvHeads       = 8;
 constexpr std::int32_t kDFlash2Window = 2048;
 
-void require_shape(const Tensor& tensor, std::int32_t n0, std::int32_t n1,
-                   std::int32_t n2, std::int32_t n3, const char* label) {
-    if (tensor.ne[0] != n0 || tensor.ne[1] != n1 || tensor.ne[2] != n2 ||
-        tensor.ne[3] != n3) {
+void require_shape(const Tensor& tensor, std::int32_t n0, std::int32_t n1, std::int32_t n2,
+                   std::int32_t n3, const char* label) {
+    if (tensor.ne[0] != n0 || tensor.ne[1] != n1 || tensor.ne[2] != n2 || tensor.ne[3] != n3) {
         throw std::invalid_argument(std::string("kv_cache_append_prefix: invalid shape for ") +
                                     label);
     }
@@ -40,11 +39,9 @@ void require_vector_alignment(const Tensor& tensor, const char* label) {
 }
 
 bool overlaps(const Tensor& first, const Tensor& second) {
-    const auto first_address = reinterpret_cast<std::uintptr_t>(first.data);
+    const auto first_address  = reinterpret_cast<std::uintptr_t>(first.data);
     const auto second_address = reinterpret_cast<std::uintptr_t>(second.data);
-    if (first_address <= second_address) {
-        return second_address - first_address < first.bytes();
-    }
+    if (first_address <= second_address) { return second_address - first_address < first.bytes(); }
     return first_address - second_address < second.bytes();
 }
 
@@ -73,8 +70,7 @@ void validate_common(const Tensor& key, const Tensor& value, const Tensor& posit
     require_vector_alignment(value, "value");
     const std::int32_t width = key.ne[2];
     const std::int32_t batch = key.ne[3];
-    if (width <= 0 || batch <= 0 ||
-        batch > static_cast<std::int32_t>(kMaximumConcurrency) ||
+    if (width <= 0 || batch <= 0 || batch > static_cast<std::int32_t>(kMaximumConcurrency) ||
         envelope.min_count > envelope.max_count ||
         envelope.max_count > static_cast<std::uint32_t>(width)) {
         throw std::invalid_argument("kv_cache_append_prefix: invalid width, batch, or envelope");
@@ -104,8 +100,8 @@ void validate_paged(const KVCacheAppendPrefixPagedView& cache) {
                   "paged value storage");
     require_shape(cache.block_tables, cache.block_tables.ne[0], cache.block_tables.ne[1], 1, 1,
                   "paged block tables");
-    require_disjoint(std::array<const Tensor*, 3>{
-        &cache.key_pages, &cache.value_pages, &cache.block_tables});
+    require_disjoint(
+        std::array<const Tensor*, 3>{&cache.key_pages, &cache.value_pages, &cache.block_tables});
 }
 
 void validate_cyclic(const CyclicKVCacheLayerView& cache) {
@@ -133,11 +129,11 @@ void kv_cache_append_prefix(const Tensor& key, const Tensor& value, const Tensor
                             const KVCacheAppendPrefixPagedView& cache, hipStream_t stream) {
     validate_common(key, value, positions, counts, table_rows, envelope, stream);
     validate_paged(cache);
-    require_disjoint(std::array<const Tensor*, 8>{
-        &key, &value, &positions, &counts, &table_rows,
-        &cache.key_pages, &cache.value_pages, &cache.block_tables});
-    r9700::dflash::kv_cache_append_prefix_paged_launch(
-        key, value, positions, counts, table_rows, cache, envelope, stream);
+    require_disjoint(std::array<const Tensor*, 8>{&key, &value, &positions, &counts, &table_rows,
+                                                  &cache.key_pages, &cache.value_pages,
+                                                  &cache.block_tables});
+    r9700::dflash::kv_cache_append_prefix_paged_launch(key, value, positions, counts, table_rows,
+                                                       cache, envelope, stream);
 }
 
 void kv_cache_append_prefix(const Tensor& key, const Tensor& value, const Tensor& positions,
@@ -146,10 +142,10 @@ void kv_cache_append_prefix(const Tensor& key, const Tensor& value, const Tensor
                             const CyclicKVCacheLayerView& cache, hipStream_t stream) {
     validate_common(key, value, positions, counts, lanes, envelope, stream);
     validate_cyclic(cache);
-    require_disjoint(std::array<const Tensor*, 7>{
-        &key, &value, &positions, &counts, &lanes, &cache.k, &cache.v});
-    r9700::dflash::kv_cache_append_prefix_cyclic_launch(
-        key, value, positions, counts, lanes, cache, envelope, stream);
+    require_disjoint(std::array<const Tensor*, 7>{&key, &value, &positions, &counts, &lanes,
+                                                  &cache.k, &cache.v});
+    r9700::dflash::kv_cache_append_prefix_cyclic_launch(key, value, positions, counts, lanes, cache,
+                                                        envelope, stream);
 }
 
 } // namespace ninfer::ops

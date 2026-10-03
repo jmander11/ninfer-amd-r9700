@@ -81,9 +81,7 @@ def validate_inventory() -> None:
     q4_names = {spec.name for spec in q4_inventory.TENSOR_SPECS if spec.format == Q4}
     if not SELECTED_MATRIX_NAMES <= q4_names:
         raise ValueError("FP8/Q4 hybrid selection contains a non-Q4 source object")
-    represented_selected = {
-        spec.name for spec in TENSOR_SPECS if spec.format == F8E4M3_ROW_F32S
-    }
+    represented_selected = {spec.name for spec in TENSOR_SPECS if spec.format == F8E4M3_ROW_F32S}
     if represented_selected != SELECTED_MATRIX_NAMES:
         raise ValueError("FP8/Q4 hybrid inventory differs from its decision-owned selection")
     expected_counts = {BF16: 582, FP32: 96, I32: 1, Q4: 295, F8E4M3_ROW_F32S: 144}

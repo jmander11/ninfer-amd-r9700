@@ -18,7 +18,7 @@
 
 namespace {
 
-constexpr int kDim = 72;
+constexpr int kDim   = 72;
 constexpr int kHeads = 16;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
@@ -41,13 +41,13 @@ Fixture make_fixture(int patches, int salt, bool isolate_segments,
     Fixture result{std::vector<hip_bfloat16>(elements), std::vector<hip_bfloat16>(elements),
                    std::vector<hip_bfloat16>(elements)};
     for (std::size_t index = 0; index < elements; ++index) {
-        result.q[index] = hip_bfloat16(query_scale *
-                                       static_cast<float>(static_cast<int>((index * 17U + salt) % 97U) - 48) /
-                                       64.0F);
-        result.k[index] = hip_bfloat16(static_cast<float>(static_cast<int>((index * 29U + salt + 3) % 101U) - 50) /
-                                       64.0F);
-        result.v[index] = hip_bfloat16(static_cast<float>(static_cast<int>((index * 43U + salt + 7) % 109U) - 54) /
-                                       32.0F);
+        result.q[index] = hip_bfloat16(
+            query_scale * static_cast<float>(static_cast<int>((index * 17U + salt) % 97U) - 48) /
+            64.0F);
+        result.k[index] = hip_bfloat16(
+            static_cast<float>(static_cast<int>((index * 29U + salt + 3) % 101U) - 50) / 64.0F);
+        result.v[index] = hip_bfloat16(
+            static_cast<float>(static_cast<int>((index * 43U + salt + 7) % 109U) - 54) / 32.0F);
     }
     if (isolate_segments) {
         std::fill(result.q.begin(), result.q.end(), hip_bfloat16(0.0F));
@@ -78,7 +78,7 @@ std::vector<double> oracle(const Fixture& fixture, const std::vector<int>& cumul
     std::vector<double> output(fixture.q.size(), 0.0);
     for (std::size_t segment = 0; segment + 1 < cumulative.size(); ++segment) {
         const int begin = cumulative[segment];
-        const int end = cumulative[segment + 1];
+        const int end   = cumulative[segment + 1];
         std::vector<double> scores(static_cast<std::size_t>(end - begin));
         for (int query = begin; query < end; ++query) {
             if (!checked_query(query, cumulative)) { continue; }
@@ -87,14 +87,14 @@ std::vector<double> oracle(const Fixture& fixture, const std::vector<int>& cumul
                 for (int key = begin; key < end; ++key) {
                     double dot = 0.0;
                     for (int dimension = 0; dimension < kDim; ++dimension) {
-                        dot += static_cast<double>(represented(
-                                   fixture.q[packed_index(query, head, dimension)])) *
-                               static_cast<double>(represented(
-                                   fixture.k[packed_index(key, head, dimension)]));
+                        dot += static_cast<double>(
+                                   represented(fixture.q[packed_index(query, head, dimension)])) *
+                               static_cast<double>(
+                                   represented(fixture.k[packed_index(key, head, dimension)]));
                     }
-                    const double score = dot * scale;
+                    const double score                            = dot * scale;
                     scores[static_cast<std::size_t>(key - begin)] = score;
-                    maximum = std::max(maximum, score);
+                    maximum                                       = std::max(maximum, score);
                 }
                 double denominator = 0.0;
                 for (double& score : scores) {
@@ -120,7 +120,7 @@ void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_q
               bool isolate_segments, int salt, hipStream_t stream, float query_scale = 1.0F) {
     std::vector<int> cumulative(lengths.size() + 1, 0);
     std::partial_sum(lengths.begin(), lengths.end(), cumulative.begin() + 1);
-    const int patches = cumulative.back();
+    const int patches             = cumulative.back();
     const std::size_t token_plane = static_cast<std::size_t>(kHeads) * kDim;
     const Fixture fixture = make_fixture(patches, salt, isolate_segments, cumulative, query_scale);
     const std::vector<double> expected = oracle(fixture, cumulative);
@@ -147,12 +147,12 @@ void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_q
         }
         interleaved = ninfer::DeviceBuffer(expected_storage.size() * sizeof(hip_bfloat16));
         interleaved.copy_from_host(expected_storage.data(), interleaved.size());
-        q = ninfer::Tensor(interleaved.data(), ninfer::DType::BF16, {kDim, kHeads, patches});
+        q       = ninfer::Tensor(interleaved.data(), ninfer::DType::BF16, {kDim, kHeads, patches});
         q.nb[2] = static_cast<std::int64_t>(3 * token_plane * sizeof(hip_bfloat16));
-        k = q;
-        v = q;
-        k.data = static_cast<hip_bfloat16*>(interleaved.data()) + token_plane;
-        v.data = static_cast<hip_bfloat16*>(interleaved.data()) + 2 * token_plane;
+        k       = q;
+        v       = q;
+        k.data  = static_cast<hip_bfloat16*>(interleaved.data()) + token_plane;
+        v.data  = static_cast<hip_bfloat16*>(interleaved.data()) + 2 * token_plane;
     } else {
         q_storage = ninfer::DeviceBuffer(fixture.q.size() * sizeof(hip_bfloat16));
         k_storage = ninfer::DeviceBuffer(fixture.k.size() * sizeof(hip_bfloat16));
@@ -185,7 +185,7 @@ void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_q
     launch();
 
     hipEvent_t begin = nullptr;
-    hipEvent_t end = nullptr;
+    hipEvent_t end   = nullptr;
     HIP_CHECK(hipEventCreate(&begin));
     HIP_CHECK(hipEventCreate(&end));
     HIP_CHECK(hipEventRecord(begin, stream));
@@ -199,24 +199,23 @@ void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_q
 
     std::vector<hip_bfloat16> actual(fixture.q.size());
     d_output.copy_to_host(actual.data(), d_output.size());
-    double squared_error = 0.0;
+    double squared_error     = 0.0;
     double squared_reference = 0.0;
-    double max_abs = 0.0;
-    double max_reference = 0.0;
+    double max_abs           = 0.0;
+    double max_reference     = 0.0;
     for (std::size_t index = 0; index < actual.size(); ++index) {
         if (!checked_query(static_cast<int>(index / (kHeads * kDim)), cumulative)) { continue; }
-        const double got = represented(actual[index]);
+        const double got   = represented(actual[index]);
         const double error = got - expected[index];
         squared_error += error * error;
         squared_reference += expected[index] * expected[index];
-        max_abs = std::max(max_abs, std::abs(error));
+        max_abs       = std::max(max_abs, std::abs(error));
         max_reference = std::max(max_reference, std::abs(expected[index]));
     }
     const double relative_l2 = std::sqrt(squared_error / std::max(squared_reference, 1.0e-30));
     if (relative_l2 > 2.5e-3 || max_abs > 1.0e-3 + 2.8e-3 * max_reference) {
         fail("vision_attention FP64-oracle criterion failed at P=" + std::to_string(patches) +
-             " rel_l2=" + std::to_string(relative_l2) + " max_abs=" +
-             std::to_string(max_abs));
+             " rel_l2=" + std::to_string(relative_l2) + " max_abs=" + std::to_string(max_abs));
     }
     if (!uniform_entry && (workspace.used() != 0 || workspace.peak_used() != workspace_bytes)) {
         fail("vision_attention workspace sizing/execution high-water mismatch");
@@ -242,8 +241,8 @@ void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_q
     std::cout << "vision_attention P=" << patches << " S=" << lengths.size()
               << " entry=" << (uniform_entry ? "uniform" : "packed")
               << " storage=" << (padded_qkv ? "interleaved" : "contiguous")
-              << " max_abs=" << max_abs << " rel_l2=" << relative_l2
-              << " time_ms=" << elapsed_ms << '\n';
+              << " max_abs=" << max_abs << " rel_l2=" << relative_l2 << " time_ms=" << elapsed_ms
+              << '\n';
 }
 
 } // namespace

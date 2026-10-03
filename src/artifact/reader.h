@@ -82,8 +82,7 @@ struct RowScaledGeometry {
     std::uint64_t encoded_bytes      = 0;
 };
 
-RowScaledGeometry row_scaled_geometry(NumericFormat format,
-                                      std::span<const std::uint64_t> shape);
+RowScaledGeometry row_scaled_geometry(NumericFormat format, std::span<const std::uint64_t> shape);
 
 // r9700-fp8lut4-n16k64-v1 (N % 16 == 0, K128 padding): N16 x K64 tiles, tile index
 // (r / 16) * (K / 64) + k / 64; slot 16 * ((k % 64) / 32) + r % 16 of a tile holds 16 packed code

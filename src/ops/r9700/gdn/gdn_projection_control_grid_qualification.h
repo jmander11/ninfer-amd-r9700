@@ -17,6 +17,7 @@ struct ProjectionControlArgs {
     float* g{};
     float* beta{};
 };
-[[nodiscard]] hipError_t projection_control_grid(
-    const ProjectionControlArgs& args, hipStream_t stream) noexcept;
-}
+
+[[nodiscard]] hipError_t projection_control_grid(const ProjectionControlArgs& args,
+                                                 hipStream_t stream) noexcept;
+} // namespace ninfer::ops::r9700::gdn::qualification

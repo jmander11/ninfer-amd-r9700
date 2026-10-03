@@ -532,7 +532,8 @@ void parse_tool_choice(const Json& body, ResponsesRequest& out) {
         bad_request("tool_choice must be a string or object", "tool_choice");
     }
     if ((out.generation.tool_choice.mode == ToolChoiceMode::Required ||
-         out.generation.tool_choice.mode == ToolChoiceMode::Named) && out.generation.tools.empty()) {
+         out.generation.tool_choice.mode == ToolChoiceMode::Named) &&
+        out.generation.tools.empty()) {
         bad_request("tool_choice requires tools", "tool_choice");
     }
     if (out.generation.tool_choice.mode == ToolChoiceMode::Named &&
@@ -708,7 +709,6 @@ void reject_server_managed_features(const Json& body) {
                             "text_option_not_supported");
             }
         }
-
     }
 }
 
@@ -746,10 +746,11 @@ ResponsesRequest parse_request_impl(const Json& body, const RequestLimits& limit
     validate_metadata(body, out);
     parse_tools(body, out);
     parse_tool_choice(body, out);
-    if (body.contains("text") && body["text"].is_object() &&
-        body["text"].contains("format") && !body["text"]["format"].is_null()) {
+    if (body.contains("text") && body["text"].is_object() && body["text"].contains("format") &&
+        !body["text"]["format"].is_null()) {
         out.text_format = body["text"]["format"];
-        out.generation.output_json_schema = parse_output_format(out.text_format, true, "text.format");
+        out.generation.output_json_schema =
+            parse_output_format(out.text_format, true, "text.format");
     }
     validate_output_format_combination(out.generation, "text.format");
     parse_reasoning(body, out);

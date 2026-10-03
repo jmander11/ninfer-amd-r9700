@@ -8,8 +8,15 @@ from tools.r9700.check_silu_mul_split_prefill_static import check
 SYMBOL = "_ZN6ninfer3ops5r97005eager12_GLOBAL__N_137silu_mul_split17408_2d_kernelEv"
 
 
-def fixture(*, vgprs: int = 24, occupancy: int = 16, lds: int = 0, scratch: int = 0,
-            operation: str = "v_exp_f32 v0, v0", maximum_workgroup: int = 256) -> str:
+def fixture(
+    *,
+    vgprs: int = 24,
+    occupancy: int = 16,
+    lds: int = 0,
+    scratch: int = 0,
+    operation: str = "v_exp_f32 v0, v0",
+    maximum_workgroup: int = 256,
+) -> str:
     return f"""\t.globl {SYMBOL} ; -- Begin function {SYMBOL}
 {SYMBOL}:
   {operation}

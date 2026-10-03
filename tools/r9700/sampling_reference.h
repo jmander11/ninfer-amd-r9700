@@ -14,12 +14,14 @@ struct Distribution {
     std::vector<int> ids;
     std::vector<double> probabilities;
 };
+
 inline bool eligible(int token, const ninfer::ops::SamplingConfig& config) {
     for (int i = 0; i < config.suppressed_token_count; ++i)
         if (config.suppressed_tokens[i] == token) return false;
     return config.allowed_token_words == nullptr ||
            ((config.allowed_token_words[token / 32] >> (token % 32)) & 1U) != 0;
 }
+
 inline Distribution p_less(const std::vector<double>& logits,
                            const ninfer::ops::SamplingConfig& config) {
     std::vector<int> order;
@@ -42,8 +44,8 @@ inline Distribution p_less(const std::vector<double>& logits,
         collision += weights[i] * weights[i];
     }
     // Epsilon relaxes only the collision threshold, never the effective-support floor.
-    const double threshold = std::max(collision * std::exp(-2.0 * 0.0625 / config.temperature),
-                                      1.0 / 1024.0);
+    const double threshold =
+        std::max(collision * std::exp(-2.0 * 0.0625 / config.temperature), 1.0 / 1024.0);
     Distribution result;
     double retained = 0;
     for (int i = 0; i < static_cast<int>(logits.size()); ++i) {
@@ -54,8 +56,8 @@ inline Distribution p_less(const std::vector<double>& logits,
         }
     }
     if (result.ids.empty()) {
-        const int fallback = order[0] == config.typical_exclude && order.size() > 1
-                                 ? order[1] : order[0];
+        const int fallback =
+            order[0] == config.typical_exclude && order.size() > 1 ? order[1] : order[0];
         return {{fallback}, {1.0}};
     }
     for (double& p : result.probabilities) p /= retained;

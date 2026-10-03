@@ -24,15 +24,14 @@ namespace ninfer::ops {
  * qualified gfx1201 dispatches. The W8 code and FP16 scale planes are consumed
  * directly from artifact storage, including target-owned row views. Q4 consumes
  * canonical signed A4G64 or compile-time-evaluation A8G64 activation codes and
- * FP16 scales in caller-owned serialized activation storage. A separately compiled W8 evaluator similarly uses
- * signed A8G32 at physically measured shape-specific crossovers while retaining exact BF16xW8
- * below them and for shapes outside the qualified mixed-artifact inventory.
- * BF16 and the default exact W8 route use no workspace. No route performs hidden allocation or
- * runtime weight repacking. Inputs, output, workspace, and weight planes must not overlap.
+ * FP16 scales in caller-owned serialized activation storage. A separately compiled W8 evaluator
+ * similarly uses signed A8G32 at physically measured shape-specific crossovers while retaining
+ * exact BF16xW8 below them and for shapes outside the qualified mixed-artifact inventory. BF16 and
+ * the default exact W8 route use no workspace. No route performs hidden allocation or runtime
+ * weight repacking. Inputs, output, workspace, and weight planes must not overlap.
  */
-[[nodiscard]] std::size_t linear_workspace_capacity_bytes(QType qtype,
-                                                           std::int32_t tokens,
-                                                           std::int32_t columns);
+[[nodiscard]] std::size_t linear_workspace_capacity_bytes(QType qtype, std::int32_t tokens,
+                                                          std::int32_t columns);
 void linear(const Tensor& x, const Weight& w, Tensor& out, WorkspaceArena& workspace,
             hipStream_t stream);
 
@@ -41,8 +40,8 @@ void linear(const Tensor& x, const Weight& w, Tensor& out, WorkspaceArena& works
 // required prefix; no partial-sum storage follows it.
 // BF16 and exact-W8 routes ignore the span. This boundary lets a Program keep graph addresses
 // stable without reserving private activation storage inside each schedule's WorkspaceArena.
-void linear(const Tensor& x, const Weight& w, Tensor& out,
-            const DeviceSpan& activation_workspace, hipStream_t stream);
+void linear(const Tensor& x, const Weight& w, Tensor& out, const DeviceSpan& activation_workspace,
+            hipStream_t stream);
 
 // Workspace-free boundary retained for BF16/exact-W8 control and qualification routes. It rejects
 // Q4 rather than allocating hidden activation storage; product execution uses the DeviceSpan

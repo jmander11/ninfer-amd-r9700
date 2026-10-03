@@ -41,10 +41,13 @@ class VisionReportHelpersTest(unittest.TestCase):
             (root / "model.safetensors.index.json").write_text(
                 json.dumps({"weight_map": {"x": "missing.safetensors"}}), encoding="utf-8"
             )
-            with mock.patch(
-                "tools.parity.qwen3_8_27b.vision.validate_checkpoint_files",
-                side_effect=ValueError("missing shards"),
-            ), self.assertRaisesRegex(ValueError, "missing shards"):
+            with (
+                mock.patch(
+                    "tools.parity.qwen3_8_27b.vision.validate_checkpoint_files",
+                    side_effect=ValueError("missing shards"),
+                ),
+                self.assertRaisesRegex(ValueError, "missing shards"),
+            ):
                 source_provenance(root)
 
     def test_metrics_reject_shape_and_nonfinite(self) -> None:

@@ -50,38 +50,36 @@ void require_row_pitched_matrix(const Tensor& tensor, std::int32_t rows, std::in
 }
 
 __global__ void mtp_prepare_next_round_kernel(
-    const std::int32_t* verify_ids, const std::int32_t* next_anchors,
-    const std::int32_t* accepted, const std::int32_t* updated_frontiers,
-    const std::int32_t* remaining_budgets, const std::int32_t* licensed_counts,
-    const std::int32_t* rope_deltas, std::int32_t* alignment_ids,
-    std::int32_t* next_extents, std::int32_t* ar_positions,
+    const std::int32_t* verify_ids, const std::int32_t* next_anchors, const std::int32_t* accepted,
+    const std::int32_t* updated_frontiers, const std::int32_t* remaining_budgets,
+    const std::int32_t* licensed_counts, const std::int32_t* rope_deltas,
+    std::int32_t* alignment_ids, std::int32_t* next_extents, std::int32_t* ar_positions,
     std::int32_t* ar_rope_positions, std::int32_t* ar_valid_columns, std::int32_t k,
     std::int32_t ar_step_stride, std::int32_t max_context) {
-    const int row = static_cast<int>(blockIdx.y);
-    const int width = k + 1;
+    const int row      = static_cast<int>(blockIdx.y);
+    const int width    = k + 1;
     int accepted_count = accepted[row];
-    accepted_count = accepted_count < 0 ? 0 : (accepted_count > k ? k : accepted_count);
+    accepted_count     = accepted_count < 0 ? 0 : (accepted_count > k ? k : accepted_count);
     for (int column = static_cast<int>(blockIdx.x) * static_cast<int>(blockDim.x) +
                       static_cast<int>(threadIdx.x);
-         column < width;
-         column += static_cast<int>(blockDim.x) * static_cast<int>(gridDim.x)) {
+         column < width; column += static_cast<int>(blockDim.x) * static_cast<int>(gridDim.x)) {
         alignment_ids[row * width + column] =
             column < accepted_count ? verify_ids[row * width + column + 1] : next_anchors[row];
     }
     if (blockIdx.x == 0 && threadIdx.x == 0) {
-        const int remaining = remaining_budgets[row] - licensed_counts[row];
-        const int budget_extent = remaining > 1 ? remaining - 1 : 0;
+        const int remaining      = remaining_budgets[row] - licensed_counts[row];
+        const int budget_extent  = remaining > 1 ? remaining - 1 : 0;
         const int context_extent = max_context - updated_frontiers[row] - 1;
-        int next = budget_extent < context_extent ? budget_extent : context_extent;
-        next = next < 0 ? 0 : (next > k ? k : next);
-        next_extents[row] = next;
-        const int steps = k > 1 ? k - 1 : 1;
+        int next                 = budget_extent < context_extent ? budget_extent : context_extent;
+        next                     = next < 0 ? 0 : (next > k ? k : next);
+        next_extents[row]        = next;
+        const int steps          = k > 1 ? k - 1 : 1;
         for (int step = 0; step < steps; ++step) {
-            const int offset = step * ar_step_stride + row;
-            const int position = updated_frontiers[row] + step;
-            ar_positions[offset] = position;
+            const int offset          = step * ar_step_stride + row;
+            const int position        = updated_frontiers[row] + step;
+            ar_positions[offset]      = position;
             ar_rope_positions[offset] = position + rope_deltas[row];
-            ar_valid_columns[offset] = step + 1 < next ? 1 : 0;
+            ar_valid_columns[offset]  = step + 1 < next ? 1 : 0;
         }
     }
 }
@@ -122,13 +120,14 @@ void mtp_prepare_next_round(const Tensor& verify_ids, const Tensor& next_anchors
     require_row_pitched_matrix(ar_valid_columns, batch, steps, op, "ar_valid_columns");
     if (ar_rope_positions.nb[1] != ar_positions.nb[1] ||
         ar_valid_columns.nb[1] != ar_positions.nb[1]) {
-        throw std::invalid_argument("mtp_prepare_next_round: AR outputs must share one step stride");
+        throw std::invalid_argument(
+            "mtp_prepare_next_round: AR outputs must share one step stride");
     }
 
     constexpr int block_size = 32;
-    const int k = width - 1;
-    const int ar_step_stride = static_cast<int>(
-        ar_positions.nb[1] / static_cast<std::int64_t>(sizeof(std::int32_t)));
+    const int k              = width - 1;
+    const int ar_step_stride =
+        static_cast<int>(ar_positions.nb[1] / static_cast<std::int64_t>(sizeof(std::int32_t)));
     const dim3 grid(static_cast<unsigned int>((width + block_size - 1) / block_size),
                     static_cast<unsigned int>(batch));
     mtp_prepare_next_round_kernel<<<grid, block_size, 0, stream>>>(

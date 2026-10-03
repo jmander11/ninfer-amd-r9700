@@ -58,9 +58,7 @@ class KVCache:
     def _quantize_values(cls, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if not bool(torch.isfinite(x).all()):
             raise ValueError("KV values must be finite")
-        groups = x.float().reshape(
-            *x.shape[:-1], CFG.head_dim // cls.VALUE_GROUP, cls.VALUE_GROUP
-        )
+        groups = x.float().reshape(*x.shape[:-1], CFG.head_dim // cls.VALUE_GROUP, cls.VALUE_GROUP)
         scale = (groups.abs().amax(dim=-1) / cls.VALUE_CODE_MAX).to(torch.float16)
         if not bool(torch.isfinite(scale).all()):
             raise ValueError("KV value scale overflows FP16")
@@ -77,22 +75,14 @@ class KVCache:
         return packed.reshape(*x.shape[:-1], CFG.head_dim // 2), scale
 
     @classmethod
-    def _dequantize_values(
-        cls, packed: torch.Tensor, scale: torch.Tensor
-    ) -> torch.Tensor:
+    def _dequantize_values(cls, packed: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
         packed_i16 = packed.to(torch.int16)
         low = packed_i16 & 0x0F
         high = (packed_i16 >> 4) & 0x0F
-        codes = torch.stack((low, high), dim=-1).reshape(
-            *packed.shape[:-1], CFG.head_dim
-        )
+        codes = torch.stack((low, high), dim=-1).reshape(*packed.shape[:-1], CFG.head_dim)
         codes = torch.where(codes >= 8, codes - 16, codes).float()
-        groups = codes.reshape(
-            *codes.shape[:-1], CFG.head_dim // cls.VALUE_GROUP, cls.VALUE_GROUP
-        )
-        return (
-            groups * scale.float().unsqueeze(-1)
-        ).reshape(*codes.shape).to(torch.bfloat16)
+        groups = codes.reshape(*codes.shape[:-1], CFG.head_dim // cls.VALUE_GROUP, cls.VALUE_GROUP)
+        return (groups * scale.float().unsqueeze(-1)).reshape(*codes.shape).to(torch.bfloat16)
 
     def write(self, layer: int, start: int, k: torch.Tensor, v: torch.Tensor) -> None:
         end = start + k.shape[0]
@@ -103,8 +93,8 @@ class KVCache:
         self._allocate(layer)
         if not bool(torch.isfinite(k).all()):
             raise ValueError("KV keys must be finite")
-        key_codes = k.float().clamp(-self.KEY_MAX_FINITE, self.KEY_MAX_FINITE).to(
-            torch.float8_e4m3fn
+        key_codes = (
+            k.float().clamp(-self.KEY_MAX_FINITE, self.KEY_MAX_FINITE).to(torch.float8_e4m3fn)
         )
         value_codes, value_scales = self._quantize_values(v)
         self._k[layer][start:end].copy_(key_codes)

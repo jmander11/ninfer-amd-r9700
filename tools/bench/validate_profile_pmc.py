@@ -104,18 +104,22 @@ def _replace_option(command: list[str], name: str, value: str) -> None:
     command[command.index(name) + 1] = value
 
 
-def _parse_csv(path: Path) -> tuple[
+def _parse_csv(
+    path: Path,
+) -> tuple[
     dict[tuple[int, str], Decimal], dict[int, tuple[str, int, int]], dict[str, dict[str, Any]]
 ]:
     required = {
-        "Dispatch_Id", "Kernel_Name", "Counter_Name", "Counter_Value",
-        "Start_Timestamp", "End_Timestamp",
+        "Dispatch_Id",
+        "Kernel_Name",
+        "Counter_Name",
+        "Counter_Value",
+        "Start_Timestamp",
+        "End_Timestamp",
     }
     aggregates: dict[tuple[int, str], Decimal] = defaultdict(Decimal)
     dispatches: dict[int, tuple[str, int, int]] = {}
-    samples: dict[str, list[Any]] = {
-        name: [0, 0, Decimal(0)] for name in DISPATCH_COUNTERS
-    }
+    samples: dict[str, list[Any]] = {name: [0, 0, Decimal(0)] for name in DISPATCH_COUNTERS}
     with path.open("r", encoding="utf-8", newline="") as source:
         reader = csv.DictReader(source)
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
@@ -126,7 +130,9 @@ def _parse_csv(path: Path) -> tuple[
                 start = int(row["Start_Timestamp"])
                 end = int(row["End_Timestamp"])
             except (TypeError, ValueError) as error:
-                raise ValueError(f"counter CSV row {number} has invalid dispatch metadata") from error
+                raise ValueError(
+                    f"counter CSV row {number} has invalid dispatch metadata"
+                ) from error
             name = row["Kernel_Name"]
             counter = row["Counter_Name"]
             if not name or end < start:
@@ -151,25 +157,34 @@ def _parse_csv(path: Path) -> tuple[
         observed = {counter for dispatch, counter in aggregates if dispatch == dispatch_id}
         if observed != expected:
             raise ValueError(f"counter CSV dispatch {dispatch_id} has an incomplete counter set")
-    return aggregates, dispatches, {
-        name: {
-            "samples": values[0],
-            "nonzero_samples": values[1],
-            "sum": str(values[2]),
-            "state": "observed_nonzero" if values[1] else "observed_zero",
-        }
-        for name, values in samples.items() if name in expected
-    }
+    return (
+        aggregates,
+        dispatches,
+        {
+            name: {
+                "samples": values[0],
+                "nonzero_samples": values[1],
+                "sum": str(values[2]),
+                "state": "observed_nonzero" if values[1] else "observed_zero",
+            }
+            for name, values in samples.items()
+            if name in expected
+        },
+    )
 
 
-def _parse_database(path: Path) -> tuple[
+def _parse_database(
+    path: Path,
+) -> tuple[
     dict[tuple[int, str], Decimal], dict[int, tuple[str, int, int]], dict[int, str | None], str
 ]:
     connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        tables = [row[0] for row in connection.execute(
-            "select name from sqlite_master where type='table'")]
+        tables = [
+            row[0]
+            for row in connection.execute("select name from sqlite_master where type='table'")
+        ]
         process = _one_table(tables, "rocpd_info_process_")
         agent = _one_table(tables, "rocpd_info_agent_")
         pmc_info = _one_table(tables, "rocpd_info_pmc_")
@@ -177,12 +192,16 @@ def _parse_database(path: Path) -> tuple[
         dispatch = _one_table(tables, "rocpd_kernel_dispatch_")
         symbol = _one_table(tables, "rocpd_info_kernel_symbol_")
         strings = _one_table(tables, "rocpd_string_")
-        commands = [row[0] for row in connection.execute(
-            f'select command from "{process}" order by id')]
+        commands = [
+            row[0] for row in connection.execute(f'select command from "{process}" order by id')
+        ]
         if len(commands) != 1 or not isinstance(commands[0], str):
             raise ValueError("PMC database does not contain one workload command")
-        gpu_rows = list(connection.execute(
-            f'select type, name, product_name from "{agent}" where type = ?', ("GPU",)))
+        gpu_rows = list(
+            connection.execute(
+                f'select type, name, product_name from "{agent}" where type = ?', ("GPU",)
+            )
+        )
         if len(gpu_rows) != 1 or tuple(gpu_rows[0]) != ("GPU", EXPECTED_ARCH, EXPECTED_GPU):
             raise ValueError("PMC database is not one R9700/gfx1201 capture")
         info_columns = {row[1] for row in connection.execute(f'pragma table_info("{pmc_info}")')}
@@ -223,22 +242,43 @@ def _parse_database(path: Path) -> tuple[
 
 def _ratio(numerator: Decimal, denominator: Decimal) -> dict[str, Any]:
     if denominator == 0:
-        return {"state": "unknown_zero_denominator", "value": None,
-                "numerator": str(numerator), "denominator": str(denominator)}
-    return {"state": "measured", "value": float(numerator / denominator),
-            "numerator": str(numerator), "denominator": str(denominator)}
+        return {
+            "state": "unknown_zero_denominator",
+            "value": None,
+            "numerator": str(numerator),
+            "denominator": str(denominator),
+        }
+    return {
+        "state": "measured",
+        "value": float(numerator / denominator),
+        "numerator": str(numerator),
+        "denominator": str(denominator),
+    }
 
 
 def validate(
-    plan_path: Path, report_path: Path, csv_path: Path, database_path: Path,
-    power_before_path: Path, power_after_path: Path, terminal_selection_path: Path,
-    artifact_path: Path, executable_path: Path, corpus_path: Path,
+    plan_path: Path,
+    report_path: Path,
+    csv_path: Path,
+    database_path: Path,
+    power_before_path: Path,
+    power_after_path: Path,
+    terminal_selection_path: Path,
+    artifact_path: Path,
+    executable_path: Path,
+    corpus_path: Path,
 ) -> dict[str, Any]:
     paths = {
-        "plan": plan_path, "benchmark_report": report_path, "counter_csv": csv_path,
-        "database": database_path, "power_before": power_before_path,
-        "power_after": power_after_path, "terminal_selection": terminal_selection_path,
-        "artifact": artifact_path, "benchmark_executable": executable_path, "corpus": corpus_path,
+        "plan": plan_path,
+        "benchmark_report": report_path,
+        "counter_csv": csv_path,
+        "database": database_path,
+        "power_before": power_before_path,
+        "power_after": power_after_path,
+        "terminal_selection": terminal_selection_path,
+        "artifact": artifact_path,
+        "benchmark_executable": executable_path,
+        "corpus": corpus_path,
     }
     snapshots = {name: _snapshot(path, name) for name, path in paths.items()}
     plan = _load_object(Path(snapshots["plan"]["path"]), "profile plan")
@@ -251,29 +291,37 @@ def validate(
     ):
         raise ValueError("profile plan is not the exact schema-v2 dispatch-PMC contract")
     required_power = plan["required_power_profile"]
-    if (
-        Path(str(required_power.get("before_evidence", ""))).resolve()
-        != Path(snapshots["power_before"]["path"])
-        or Path(str(required_power.get("after_evidence", ""))).resolve()
-        != Path(snapshots["power_after"]["path"])
+    if Path(str(required_power.get("before_evidence", ""))).resolve() != Path(
+        snapshots["power_before"]["path"]
+    ) or Path(str(required_power.get("after_evidence", ""))).resolve() != Path(
+        snapshots["power_after"]["path"]
     ):
         raise ValueError("power endpoint evidence paths differ from the profile plan")
     workload = plan.get("workload")
-    if not isinstance(workload, dict) or any(workload.get(key) != value for key, value in (
-        ("concurrency", 1), ("prompt_tokens", 2048), ("generated_tokens", 0),
-        ("spec", "none"), ("draft_tokens", 0), ("dflash_verify_width", 0),
-        ("xattention_profile", "dense"),
-    )):
+    if not isinstance(workload, dict) or any(
+        workload.get(key) != value
+        for key, value in (
+            ("concurrency", 1),
+            ("prompt_tokens", 2048),
+            ("generated_tokens", 0),
+            ("spec", "none"),
+            ("draft_tokens", 0),
+            ("dflash_verify_width", 0),
+            ("xattention_profile", "dense"),
+        )
+    ):
         raise ValueError("profile plan is not the selected dense C1 P2048 prefill point")
     _identity_matches(plan.get("artifact"), snapshots["artifact"], "artifact")
     _identity_matches(
-        plan.get("benchmark_executable"), snapshots["benchmark_executable"],
+        plan.get("benchmark_executable"),
+        snapshots["benchmark_executable"],
         "benchmark executable",
     )
     _identity_matches(plan.get("corpus"), snapshots["corpus"], "corpus")
     terminal = plan.get("terminal_selection")
     if not isinstance(terminal, dict) or (
-        Path(str(terminal.get("path", ""))).resolve() != Path(snapshots["terminal_selection"]["path"])
+        Path(str(terminal.get("path", ""))).resolve()
+        != Path(snapshots["terminal_selection"]["path"])
         or terminal.get("sha256") != snapshots["terminal_selection"]["sha256"]
         or terminal.get("bytes") != snapshots["terminal_selection"]["file_size_bytes"]
     ):
@@ -284,8 +332,7 @@ def validate(
         not isinstance(winner_artifact, dict)
         or winner_artifact.get("weights_id") != plan["artifact"].get("weights_id")
         or winner_artifact.get("sha256") != snapshots["artifact"]["sha256"]
-        or winner_artifact.get("conversion_receipt")
-        != plan["artifact"].get("conversion_receipt")
+        or winner_artifact.get("conversion_receipt") != plan["artifact"].get("conversion_receipt")
         or not isinstance(winner_cache, dict)
         or winner_cache.get("value_group") != workload.get("kv_value_group")
         or terminal.get("selected_prefill_chunk") != workload.get("prefill_chunk")
@@ -321,21 +368,17 @@ def validate(
         raise ValueError("profile plan lacks a valid low-context evaluation authority")
     authorities = {
         "source_matrix": _authority(source_matrix, "source matrix"),
-        "source_report": _authority(
-            source_matrix.get("report"), "source P2048 report"),
-        "low_context_evaluation": _authority(
-            low_context, "low-context evaluation"),
+        "source_report": _authority(source_matrix.get("report"), "source P2048 report"),
+        "low_context_evaluation": _authority(low_context, "low-context evaluation"),
     }
     evaluation_value = _load_object(
         Path(authorities["low_context_evaluation"]["path"]), "low-context evaluation"
     )
     if (
-        evaluation_value.get("artifact_type")
-        != "ninfer_r9700_low_context_prefill_evaluation"
+        evaluation_value.get("artifact_type") != "ninfer_r9700_low_context_prefill_evaluation"
         or evaluation_value.get("schema_version") != 1
-        or evaluation_value.get("manifest") != {
-            "path": source_matrix.get("path"), "sha256": source_matrix.get("sha256")
-        }
+        or evaluation_value.get("manifest")
+        != {"path": source_matrix.get("path"), "sha256": source_matrix.get("sha256")}
         or evaluation_value.get("artifact") != plan.get("artifact")
         or evaluation_value.get("bench") != plan.get("benchmark_executable")
         or evaluation_value.get("terminal_selection") != terminal
@@ -344,7 +387,9 @@ def validate(
         or any(
             evaluation_value.get(key) != low_context.get(key)
             for key in (
-                "minimum_p2048_tok_s", "observed_p2048_tok_s", "passes_p2048_gate",
+                "minimum_p2048_tok_s",
+                "observed_p2048_tok_s",
+                "passes_p2048_gate",
             )
         )
     ):
@@ -361,7 +406,8 @@ def validate(
         Path(authorities["source_matrix"]["path"]), "source low-context manifest"
     )
     source_records = [
-        record for record in source_manifest_value.get("commands", [])
+        record
+        for record in source_manifest_value.get("commands", [])
         if isinstance(record, dict)
         and record.get("suite") == "low_context_prefill"
         and record.get("case") == "prefill_p2048_dense_none"
@@ -391,10 +437,20 @@ def validate(
     if not isinstance(regex, str) or not regex.strip() or regex != regex.strip():
         raise ValueError("profile plan lacks one canonical kernel include regex")
     expected_profiler_command = [
-        str(ROCPROFV3), "--selected-regions", "-f", "rocpd", "-d",
+        str(ROCPROFV3),
+        "--selected-regions",
+        "-f",
+        "rocpd",
+        "-d",
         str(Path(snapshots["plan"]["path"]).parent / "rocprof-dispatch-pmc"),
-        "--marker-trace", "--kernel-trace", "--kernel-include-regex", regex,
-        "--pmc", *DISPATCH_COUNTERS, "--", *command,
+        "--marker-trace",
+        "--kernel-trace",
+        "--kernel-include-regex",
+        regex,
+        "--pmc",
+        *DISPATCH_COUNTERS,
+        "--",
+        *command,
     ]
     if profiler_command != expected_profiler_command:
         raise ValueError("profiler command differs from the exact same-capture PMC contract")
@@ -404,7 +460,9 @@ def validate(
         raise ValueError("profile command artifact differs")
     if Path(_option(command, "--corpus")).resolve() != Path(snapshots["corpus"]["path"]):
         raise ValueError("profile command corpus differs")
-    if Path(_option(command, "--output-file")).resolve() != Path(snapshots["benchmark_report"]["path"]):
+    if Path(_option(command, "--output-file")).resolve() != Path(
+        snapshots["benchmark_report"]["path"]
+    ):
         raise ValueError("profile command benchmark report differs")
     if _option(command, "-p") != "2048" or _option(command, "-r") != "1":
         raise ValueError("profile command does not retain one P2048 repetition")
@@ -436,14 +494,21 @@ def validate(
         or config.get("dflash_verify_width_requested") != 0
         or config.get("dflash_verify_width") != 0
         or config.get("xattention_qualification") is not False
-        or any(key in config for key in (
-            "xattention_profile", "xattention_find_block", "xattention_stride",
-            "xattention_tau_permille",
-        ))
+        or any(
+            key in config
+            for key in (
+                "xattention_profile",
+                "xattention_find_block",
+                "xattention_stride",
+                "xattention_tau_permille",
+            )
+        )
         or config.get("repetitions") != 1
         or config.get("warmup") != 1
-        or not isinstance(tests, list) or len(tests) != 1
-        or tests[0].get("kind") != "pp" or tests[0].get("n_prompt") != 2048
+        or not isinstance(tests, list)
+        or len(tests) != 1
+        or tests[0].get("kind") != "pp"
+        or tests[0].get("n_prompt") != 2048
         or tests[0].get("n_gen") != 0
     ):
         raise ValueError("benchmark report is not the planned selected P2048 capture")
@@ -477,19 +542,22 @@ def validate(
         "state": "exact_same_capture" if all(has_regions) else "unavailable_not_captured",
         "basis": (
             "PMC event_id joined to the same kernel-dispatch event and its ROCTX region_name_id"
-            if all(has_regions) else
-            "no ROCTX region association is present; no separately captured stage was inferred"
+            if all(has_regions)
+            else "no ROCTX region association is present; no separately captured stage was inferred"
         ),
         "dispatches": [
-            {"dispatch_id": dispatch, "stage": regions[dispatch],
-             "symbol": db_dispatches[dispatch][0]}
+            {
+                "dispatch_id": dispatch,
+                "stage": regions[dispatch],
+                "symbol": db_dispatches[dispatch][0],
+            }
             for dispatch in sorted(regions)
-        ] if all(has_regions) else [],
+        ]
+        if all(has_regions)
+        else [],
     }
     if all(has_regions):
-        stage_totals: dict[str, dict[str, Decimal]] = defaultdict(
-            lambda: defaultdict(Decimal)
-        )
+        stage_totals: dict[str, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
         stage_dispatches: dict[str, set[int]] = defaultdict(set)
         for (dispatch_id, counter), value in csv_aggregates.items():
             stage = regions[dispatch_id]
@@ -497,8 +565,7 @@ def validate(
             stage_totals[stage][counter] += value
             stage_dispatches[stage].add(dispatch_id)
         if any(
-            values.get("TCP_REQ_MISS", Decimal(0))
-            > values.get("TCP_REQ", Decimal(0))
+            values.get("TCP_REQ_MISS", Decimal(0)) > values.get("TCP_REQ", Decimal(0))
             for values in stage_totals.values()
         ):
             raise ValueError("a ROCTX stage TCP miss count exceeds its request count")
@@ -507,17 +574,14 @@ def validate(
                 "stage": stage,
                 "dispatch_count": len(stage_dispatches[stage]),
                 "counter_sums": {
-                    counter: str(values.get(counter, Decimal(0)))
-                    for counter in DISPATCH_COUNTERS
+                    counter: str(values.get(counter, Decimal(0))) for counter in DISPATCH_COUNTERS
                 },
                 "gl2_hit_ratio": _ratio(
                     values.get("GL2C_HIT", Decimal(0)),
-                    values.get("GL2C_HIT", Decimal(0))
-                    + values.get("GL2C_MISS", Decimal(0)),
+                    values.get("GL2C_HIT", Decimal(0)) + values.get("GL2C_MISS", Decimal(0)),
                 ),
                 "tcp_hit_ratio": _ratio(
-                    values.get("TCP_REQ", Decimal(0))
-                    - values.get("TCP_REQ_MISS", Decimal(0)),
+                    values.get("TCP_REQ", Decimal(0)) - values.get("TCP_REQ_MISS", Decimal(0)),
                     values.get("TCP_REQ", Decimal(0)),
                 ),
             }
@@ -553,8 +617,11 @@ def validate(
         "workload": workload,
         "power_profile": {"required": "profile_standard", "before": before, "after": after},
         "counters": counter_summary,
-        "metrics": {"gl2_hit_ratio": gl2, "tcp_hit_ratio": tcp,
-                    "sq_waves": str(totals["SQ_WAVES"])},
+        "metrics": {
+            "gl2_hit_ratio": gl2,
+            "tcp_hit_ratio": tcp,
+            "sq_waves": str(totals["SQ_WAVES"]),
+        },
         "roctx_stage_join": stage_join,
         "limitations": [
             "GL2/TCP ratios are relative event ratios, not absolute cache or HBM bandwidth.",
@@ -567,8 +634,17 @@ def validate(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in (
-        "plan", "benchmark-report", "counter-csv", "database", "power-before",
-        "power-after", "terminal-selection", "artifact", "executable", "corpus", "out",
+        "plan",
+        "benchmark-report",
+        "counter-csv",
+        "database",
+        "power-before",
+        "power-after",
+        "terminal-selection",
+        "artifact",
+        "executable",
+        "corpus",
+        "out",
     ):
         parser.add_argument(f"--{flag}", required=True, type=Path)
     return parser.parse_args(argv)
@@ -580,9 +656,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"refusing to overwrite existing output: {args.out}")
     try:
         result = validate(
-            args.plan, args.benchmark_report, args.counter_csv, args.database,
-            args.power_before, args.power_after, args.terminal_selection,
-            args.artifact, args.executable, args.corpus,
+            args.plan,
+            args.benchmark_report,
+            args.counter_csv,
+            args.database,
+            args.power_before,
+            args.power_after,
+            args.terminal_selection,
+            args.artifact,
+            args.executable,
+            args.corpus,
         )
     except (OSError, sqlite3.Error, json.JSONDecodeError, TypeError, ValueError) as error:
         raise SystemExit(str(error)) from error

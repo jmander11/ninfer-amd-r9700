@@ -14,7 +14,13 @@ import torch
 from safetensors import safe_open
 
 from tools.convert.qwen3.common.recipe import (
-    Concat, Expression, GatherRows, Reshape, Slice, SourceTensor, expression_shape,
+    Concat,
+    Expression,
+    GatherRows,
+    Reshape,
+    Slice,
+    SourceTensor,
+    expression_shape,
 )
 
 from . import draft_head, q4_inventory, source_recipe
@@ -39,9 +45,7 @@ def select_row_indices(name: str, rows: int, count: int) -> tuple[int, ...]:
     selected = {0}
     if wanted > 1:
         selected.add(rows - 1)
-    seed = hashlib.sha256(
-        f"{SELECTION_ALGORITHM}\0{name}\0{rows}".encode("utf-8")
-    ).digest()
+    seed = hashlib.sha256(f"{SELECTION_ALGORITHM}\0{name}\0{rows}".encode("utf-8")).digest()
     counter = 0
     while len(selected) < wanted:
         digest = hashlib.sha256(seed + counter.to_bytes(8, "little")).digest()
@@ -73,9 +77,11 @@ class SampledShardReader:
         tensor_slice = self._open(self.weight_map[source.name]).get_slice(source.name)
         if tuple(tensor_slice.get_shape()) != source.shape:
             raise ValueError(f"source shape differs for {source.name}")
-        return torch.cat(
-            [tensor_slice[index:index + 1] for index in indices], dim=0
-        ).reshape(len(indices), -1).contiguous()
+        return (
+            torch.cat([tensor_slice[index : index + 1] for index in indices], dim=0)
+            .reshape(len(indices), -1)
+            .contiguous()
+        )
 
     def close(self) -> None:
         if self._context is not None:
@@ -91,17 +97,22 @@ class SampledShardReader:
         self.close()
 
 
-def _sample_expression(expression: Expression, indices: Sequence[int],
-                       reader: SampledShardReader,
-                       draft_ids: Sequence[int]) -> torch.Tensor:
+def _sample_expression(
+    expression: Expression,
+    indices: Sequence[int],
+    reader: SampledShardReader,
+    draft_ids: Sequence[int],
+) -> torch.Tensor:
     if isinstance(expression, SourceTensor):
         return reader.rows(expression, indices)
     if isinstance(expression, GatherRows):
         return reader.rows(expression.source, [int(draft_ids[index]) for index in indices])
     if isinstance(expression, Slice) and expression.axis == 0:
         return _sample_expression(
-            expression.source, [expression.begin + index for index in indices],
-            reader, draft_ids,
+            expression.source,
+            [expression.begin + index for index in indices],
+            reader,
+            draft_ids,
         )
     if isinstance(expression, Concat) and expression.axis == 0:
         shapes = [expression_shape(part) for part in expression.sources]
@@ -110,8 +121,7 @@ def _sample_expression(expression: Expression, indices: Sequence[int],
             offset = 0
             for part, shape in zip(expression.sources, shapes):
                 if index < offset + shape[0]:
-                    rows.append(_sample_expression(
-                        part, [index - offset], reader, draft_ids))
+                    rows.append(_sample_expression(part, [index - offset], reader, draft_ids))
                     break
                 offset += shape[0]
             else:
@@ -121,26 +131,34 @@ def _sample_expression(expression: Expression, indices: Sequence[int],
         output_shape = expression_shape(expression)
         source_shape = expression_shape(expression.source)
         if len(output_shape) == 2 and output_shape[0] == source_shape[0]:
-            return _sample_expression(
-                expression.source, indices, reader, draft_ids
-            ).reshape(len(indices), output_shape[1])
+            return _sample_expression(expression.source, indices, reader, draft_ids).reshape(
+                len(indices), output_shape[1]
+            )
         sliced = expression.source
-        if (len(output_shape) == 2 and isinstance(sliced, Slice) and sliced.axis == 1
-                and isinstance(sliced.source, Reshape)
-                and isinstance(sliced.source.source, SourceTensor)):
+        if (
+            len(output_shape) == 2
+            and isinstance(sliced, Slice)
+            and sliced.axis == 1
+            and isinstance(sliced.source, Reshape)
+            and isinstance(sliced.source.source, SourceTensor)
+        ):
             inner_shape = sliced.source.shape
             width = sliced.end - sliced.begin
             if output_shape[0] == inner_shape[0] * width:
-                physical = [(index // width) * inner_shape[1] + sliced.begin + index % width
-                            for index in indices]
+                physical = [
+                    (index // width) * inner_shape[1] + sliced.begin + index % width
+                    for index in indices
+                ]
                 return reader.rows(sliced.source.source, physical)
     raise TypeError(
         f"row sampler does not admit {type(expression).__name__} "
-        f"with shape {expression_shape(expression)}")
+        f"with shape {expression_shape(expression)}"
+    )
 
 
-def measure(name: str, shape: tuple[int, int], indices: tuple[int, ...],
-            source: torch.Tensor) -> dict[str, object]:
+def measure(
+    name: str, shape: tuple[int, int], indices: tuple[int, ...], source: torch.Tensor
+) -> dict[str, object]:
     if source.dtype != torch.bfloat16 or tuple(source.shape) != (len(indices), shape[1]):
         raise ValueError(f"{name}: sampled BF16 source has wrong shape or dtype")
     nonfinite = int((~torch.isfinite(source)).sum().item())
@@ -163,17 +181,21 @@ def _aggregate(tensors: Sequence[Mapping[str, object]], key: str) -> dict[str, f
     squared_error = sum(float(item["squared_error"]) for item in metrics)
     squared_reference = sum(float(item["squared_reference"]) for item in metrics)
     return {
-        "relative_l2": math.sqrt(squared_error / squared_reference)
-        if squared_reference else 0.0,
+        "relative_l2": math.sqrt(squared_error / squared_reference) if squared_reference else 0.0,
         "max_abs": max((float(item["max_abs"]) for item in metrics), default=0.0),
         "squared_error": squared_error,
         "squared_reference": squared_reference,
     }
 
 
-def assemble_report(*, rows_per_tensor: int, tensors: Sequence[dict[str, object]],
-                    source: Mapping[str, object], implementation: Mapping[str, str],
-                    worst_count: int = DEFAULT_WORST_COUNT) -> dict[str, object]:
+def assemble_report(
+    *,
+    rows_per_tensor: int,
+    tensors: Sequence[dict[str, object]],
+    source: Mapping[str, object],
+    implementation: Mapping[str, str],
+    worst_count: int = DEFAULT_WORST_COUNT,
+) -> dict[str, object]:
     ordered = sorted(tensors, key=lambda item: str(item["name"]))
     grouped = _aggregate(ordered, "q4g64")
     row = _aggregate(ordered, "q4_row_scaled")
@@ -183,9 +205,14 @@ def assemble_report(*, rows_per_tensor: int, tensors: Sequence[dict[str, object]
     }
     by_ratio = sorted(
         ordered,
-        key=lambda item: (-(float(item["ratios"]["relative_l2"])
-                            if item["ratios"]["relative_l2"] is not None else -1.0),
-                          str(item["name"])),
+        key=lambda item: (
+            -(
+                float(item["ratios"]["relative_l2"])
+                if item["ratios"]["relative_l2"] is not None
+                else -1.0
+            ),
+            str(item["name"]),
+        ),
     )[:worst_count]
     return {
         "schema": SCHEMA,
@@ -209,9 +236,12 @@ def assemble_report(*, rows_per_tensor: int, tensors: Sequence[dict[str, object]
             "candidate_over_control": ratios,
         },
         "worst_candidate_over_control_relative_l2": [
-            {"name": item["name"], "ratio": item["ratios"]["relative_l2"],
-             "q4g64": item["q4g64"]["relative_l2"],
-             "q4_row_scaled": item["q4_row_scaled"]["relative_l2"]}
+            {
+                "name": item["name"],
+                "ratio": item["ratios"]["relative_l2"],
+                "q4g64": item["q4g64"]["relative_l2"],
+                "q4_row_scaled": item["q4_row_scaled"]["relative_l2"],
+            }
             for item in by_ratio
         ],
         "source": dict(source),
@@ -235,8 +265,9 @@ def write_no_clobber(path: Path, payload: bytes) -> None:
         raise
 
 
-def run_screen(model_dir: Path, ranking: Path, output: Path, *, rows_per_tensor: int,
-               worst_count: int) -> dict[str, object]:
+def run_screen(
+    model_dir: Path, ranking: Path, output: Path, *, rows_per_tensor: int, worst_count: int
+) -> dict[str, object]:
     if rows_per_tensor <= 0 or worst_count <= 0:
         raise ValueError("rows-per-tensor and worst-count must be positive")
     if output.exists() or output.is_symlink():
@@ -247,8 +278,7 @@ def run_screen(model_dir: Path, ranking: Path, output: Path, *, rows_per_tensor:
     weight_map = dict(index["weight_map"])
     shard_names = sorted(set(weight_map.values()))
     draft_ids = draft_head.compute_shortlist(ranking, model_dir).selected.tolist()
-    candidates = [spec for spec in q4_inventory.TENSOR_SPECS
-                  if spec.format == "Q4G64_F16S"]
+    candidates = [spec for spec in q4_inventory.TENSOR_SPECS if spec.format == "Q4G64_F16S"]
     if len(candidates) != 439:
         raise ValueError(f"expected 439 Q4 candidates, got {len(candidates)}")
     records = []
@@ -257,7 +287,9 @@ def run_screen(model_dir: Path, ranking: Path, output: Path, *, rows_per_tensor:
             indices = select_row_indices(spec.name, spec.shape[0], rows_per_tensor)
             sampled = _sample_expression(
                 source_recipe.RECIPES_BY_NAME[spec.name].expression,
-                indices, reader, draft_ids,
+                indices,
+                reader,
+                draft_ids,
             )
             records.append(measure(spec.name, spec.shape, indices, sampled))
             if ordinal % 50 == 0 or ordinal == len(candidates):
@@ -277,12 +309,18 @@ def run_screen(model_dir: Path, ranking: Path, output: Path, *, rows_per_tensor:
             "config": {"path": config_path.name, "sha256": sha256_file(config_path)},
             "index": {"path": index_path.name, "sha256": sha256_file(index_path)},
             "ranking": {"path": str(ranking.resolve()), "sha256": sha256_file(ranking)},
-            "shards": [{"path": shard, "bytes": (model_dir / shard).stat().st_size,
-                        "sha256": sha256_file(model_dir / shard)}
-                       for shard in shard_names],
+            "shards": [
+                {
+                    "path": shard,
+                    "bytes": (model_dir / shard).stat().st_size,
+                    "sha256": sha256_file(model_dir / shard),
+                }
+                for shard in shard_names
+            ],
         },
-        implementation={str(path.relative_to(root)): sha256_file(path)
-                        for path in implementation_paths},
+        implementation={
+            str(path.relative_to(root)): sha256_file(path) for path in implementation_paths
+        },
         worst_count=worst_count,
     )
     write_no_clobber(output, canonical_json(report))
@@ -297,9 +335,13 @@ def main() -> int:
     parser.add_argument("--rows-per-tensor", type=int, default=DEFAULT_ROWS_PER_TENSOR)
     parser.add_argument("--worst-count", type=int, default=DEFAULT_WORST_COUNT)
     args = parser.parse_args()
-    report = run_screen(args.model_dir, args.ranking, args.output,
-                        rows_per_tensor=args.rows_per_tensor,
-                        worst_count=args.worst_count)
+    report = run_screen(
+        args.model_dir,
+        args.ranking,
+        args.output,
+        rows_per_tensor=args.rows_per_tensor,
+        worst_count=args.worst_count,
+    )
     print(json.dumps(report["aggregate"], sort_keys=True))
     return 0
 

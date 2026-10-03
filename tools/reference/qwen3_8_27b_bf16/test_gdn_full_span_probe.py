@@ -17,8 +17,9 @@ class GdnFullSpanProbeTest(unittest.TestCase):
         self.assertEqual(probe.sampled_rows(4095), (0, 1, 2047, 4093, 4094))
         self.assertEqual(probe.sampled_rows(4096), (0, 1, 2048, 4094, 4095))
         self.assertEqual(len(set(probe.SAMPLE_COLUMNS)), len(probe.SAMPLE_COLUMNS))
-        self.assertTrue(all(0 <= head < 48 and 0 <= feature < 128
-                            for head, feature in probe.SAMPLE_COLUMNS))
+        self.assertTrue(
+            all(0 <= head < 48 and 0 <= feature < 128 for head, feature in probe.SAMPLE_COLUMNS)
+        )
 
     def test_fp64_column_oracle_applies_decay_prediction_update_and_output(self) -> None:
         outputs, final = probe.sampled_column_fp64(
@@ -37,8 +38,14 @@ class GdnFullSpanProbeTest(unittest.TestCase):
     def test_fp64_prediction_and_output_reduce_all_128_key_features(self) -> None:
         ones = tuple(1.0 for _ in range(probe.KEY_DIM))
         outputs, final = probe.sampled_column_fp64(
-            q_rows=(ones,), k_rows=(ones,), values=(0.0,), decays=(0.0,),
-            betas=(0.0,), initial_column=ones, output_rows=(0,), scale=1.0,
+            q_rows=(ones,),
+            k_rows=(ones,),
+            values=(0.0,),
+            decays=(0.0,),
+            betas=(0.0,),
+            initial_column=ones,
+            output_rows=(0,),
+            scale=1.0,
         )
         self.assertEqual(outputs[0], 128.0)
         self.assertEqual(final, ones)
@@ -50,8 +57,14 @@ class GdnFullSpanProbeTest(unittest.TestCase):
             )
         with self.assertRaises(ValueError):
             probe.sampled_column_fp64(
-                ((1.0,),), ((1.0,),), (1.0,), (0.0,), (1.0,), (0.0,),
-                (1,), scale=1.0,
+                ((1.0,),),
+                ((1.0,),),
+                (1.0,),
+                (0.0,),
+                (1.0,),
+                (0.0,),
+                (1,),
+                scale=1.0,
             )
 
     def test_atomic_report_and_cli_contract(self) -> None:

@@ -42,9 +42,8 @@ q3::PreparedPromptData prompt_data(std::int32_t first_token) {
     return prompt;
 }
 
-void paint_allocation(const ninfer::PagedKVPool& pool,
-                      const ninfer::PagedKVAllocation& allocation, std::uint8_t seed,
-                      hipStream_t stream) {
+void paint_allocation(const ninfer::PagedKVPool& pool, const ninfer::PagedKVAllocation& allocation,
+                      std::uint8_t seed, hipStream_t stream) {
     for (std::size_t plane_index = 0; plane_index < pool.plane_count(); ++plane_index) {
         const ninfer::Tensor& plane = pool.plane(plane_index);
         std::vector<std::uint8_t> host(plane.bytes(), 0xE1U);
@@ -65,14 +64,13 @@ void paint_allocation(const ninfer::PagedKVPool& pool,
                             static_cast<std::size_t>(plane.nb[2]), value);
             }
         }
-        HIP_CHECK(hipMemcpyAsync(plane.data, host.data(), host.size(), hipMemcpyHostToDevice,
-                                 stream));
+        HIP_CHECK(
+            hipMemcpyAsync(plane.data, host.data(), host.size(), hipMemcpyHostToDevice, stream));
     }
 }
 
-void verify_allocation(const ninfer::PagedKVPool& pool,
-                       const ninfer::PagedKVAllocation& allocation, std::uint8_t seed,
-                       const char* label) {
+void verify_allocation(const ninfer::PagedKVPool& pool, const ninfer::PagedKVAllocation& allocation,
+                       std::uint8_t seed, const char* label) {
     for (std::size_t plane_index = 0; plane_index < pool.plane_count(); ++plane_index) {
         const ninfer::Tensor& plane = pool.plane(plane_index);
         std::vector<std::uint8_t> host(plane.bytes());
@@ -108,11 +106,9 @@ void verify_allocation(const ninfer::PagedKVPool& pool,
 bool all_bytes_equal(const ninfer::DeviceBuffer& buffer, std::uint8_t value) {
     std::vector<std::uint8_t> host(buffer.size());
     buffer.copy_to_host(host.data(), host.size());
-    return std::all_of(host.begin(), host.end(), [value](std::uint8_t byte) {
-        return byte == value;
-    });
+    return std::all_of(host.begin(), host.end(),
+                       [value](std::uint8_t byte) { return byte == value; });
 }
-
 
 // Blocks a stream behind a host callback until released, so copies enqueued after it stay pending.
 struct StreamGate {
@@ -121,6 +117,7 @@ struct StreamGate {
     bool released = false;
     bool finished = false;
     bool launched = false;
+
     static void callback(void* pointer) {
         auto& gate = *static_cast<StreamGate*>(pointer);
         std::unique_lock lock(gate.mutex);
@@ -128,15 +125,18 @@ struct StreamGate {
         gate.finished = true;
         gate.cv.notify_all();
     }
+
     void launch(hipStream_t stream) {
         HIP_CHECK(hipLaunchHostFunc(stream, callback, this));
         launched = true;
     }
+
     void release() {
         std::lock_guard lock(mutex);
         released = true;
         cv.notify_all();
     }
+
     ~StreamGate() {
         release();
         if (launched) {
@@ -186,6 +186,7 @@ struct HiddenCapture {
         source.tail_hidden        = &hidden;
         source.stream             = stream;
     }
+
     HiddenCapture(const HiddenCapture&)            = delete;
     HiddenCapture& operator=(const HiddenCapture&) = delete;
 };
@@ -220,8 +221,10 @@ void two_pending_loads_fold_as_loads(ninfer::DeviceContext& device,
     HIP_CHECK(hipStreamSynchronize(device.stream));
     ninfer::DeviceBuffer out_a(kBulkBytes);
     ninfer::DeviceBuffer out_b(kBulkBytes);
-    ninfer::Tensor out_a_t(out_a.data(), ninfer::DType::U8, {static_cast<std::int32_t>(kBulkBytes)});
-    ninfer::Tensor out_b_t(out_b.data(), ninfer::DType::U8, {static_cast<std::int32_t>(kBulkBytes)});
+    ninfer::Tensor out_a_t(out_a.data(), ninfer::DType::U8,
+                           {static_cast<std::int32_t>(kBulkBytes)});
+    ninfer::Tensor out_b_t(out_b.data(), ninfer::DType::U8,
+                           {static_cast<std::int32_t>(kBulkBytes)});
     const auto restore = [&](std::uint64_t id, ninfer::PagedKVAllocation& dest,
                              ninfer::Tensor& out) {
         q3::detail::RamRestoreTarget target;
@@ -243,8 +246,8 @@ void two_pending_loads_fold_as_loads(ninfer::DeviceContext& device,
     dest_a.release();
     dest_b.release();
     if (loaded.save != 0.0 || loaded.load <= 0.0) {
-        std::cerr << "two pending loads harvested save=" << loaded.save
-                  << " load=" << loaded.load << '\n';
+        std::cerr << "two pending loads harvested save=" << loaded.save << " load=" << loaded.load
+                  << '\n';
     }
     require(loaded.save == 0.0 && loaded.load > 0.0,
             "a second restore orphaned the first restore's load as save time");
@@ -261,7 +264,7 @@ void stream_wait_does_not_block_host(ninfer::DeviceContext& device,
     ninfer::DeviceBuffer bulk(1ULL << 20);
     ninfer::Tensor hidden(bulk.data(), ninfer::DType::U8, {1 << 20});
     bool captured = false;
-    bool prompt = false;
+    bool prompt   = false;
     {
         StreamGate gate;
         gate.launch(device.copy_stream);
@@ -325,16 +328,14 @@ void failed_unpack_fences_enqueued_reads(ninfer::DeviceContext& device,
     target.reuse      = ninfer::PrefixReusePath::RestoreContextCheckpoint;
     target.reuse_base = 3;
     cache.claim(entry_id);
-    bool threw = false;
+    bool threw  = false;
     bool fenced = false;
     {
         StreamGate gate;
         gate.launch(device.copy_stream);
         try {
             (void)cache.unpack_device(entry_id, target);
-        } catch (const std::logic_error&) {
-            threw = true;
-        }
+        } catch (const std::logic_error&) { threw = true; }
         fenced = threw && !cache.copies_ready(entry_id);
         gate.release();
     }
@@ -405,9 +406,9 @@ void rewrite_images_round_trip(ninfer::DeviceContext& device,
         capture.source.rewrite_valid             = true;
         capture.source.rewrite_frontier          = 4;
         capture.source.rewrite_checkpoint_hidden = &rewrite_hidden;
-        capture.source.rewrite_state = {rewrite_conv.data(), rewrite_rec.data(),
-                                        rewrite_cyclic.data()};
-        const auto result = cache.capture(capture.source);
+        capture.source.rewrite_state             = {rewrite_conv.data(), rewrite_rec.data(),
+                                                    rewrite_cyclic.data()};
+        const auto result                        = cache.capture(capture.source);
         device.synchronize_all();
         source.release();
         require(result.status == q3::detail::RamCaptureStatus::Captured,
@@ -425,18 +426,18 @@ void rewrite_images_round_trip(ninfer::DeviceContext& device,
     std::vector<std::uint8_t> out_rec(rec_bytes, 0);
     std::vector<std::uint8_t> out_cyclic(cyclic_bytes, 0);
     q3::detail::RamRestoreTarget target;
-    target.text             = &dest;
-    target.text_pool        = fixture.pool.get();
-    target.text_semantics   = fixture.semantics;
-    target.text_dst_pages   = 1;
-    target.gdn              = &gdn;
-    target.gdn_current_slot = lane;
-    target.rewrite_state    = {out_conv.data(), out_rec.data(), out_cyclic.data()};
-    target.tail_hidden      = &tail_hidden;
+    target.text                      = &dest;
+    target.text_pool                 = fixture.pool.get();
+    target.text_semantics            = fixture.semantics;
+    target.text_dst_pages            = 1;
+    target.gdn                       = &gdn;
+    target.gdn_current_slot          = lane;
+    target.rewrite_state             = {out_conv.data(), out_rec.data(), out_cyclic.data()};
+    target.tail_hidden               = &tail_hidden;
     target.rewrite_checkpoint_hidden = &rewrite_hidden;
-    target.dflash_local     = &cyclic;
-    target.dflash_lane      = lane;
-    target.stream           = device.copy_stream;
+    target.dflash_local              = &cyclic;
+    target.dflash_lane               = lane;
+    target.stream                    = device.copy_stream;
     cache.claim(entry_id);
     const q3::detail::RamRestoredHost restored = cache.unpack_device(entry_id, target);
     cache.consume(entry_id);
@@ -465,33 +466,31 @@ int main() {
                 "KV RAM qualifier requires wave32 gfx1201");
 
         const ninfer::Fp8KInt4VPagedKVSpec text_spec{
-            .page_group_count = 10,
+            .page_group_count      = 10,
             .logical_page_capacity = 8,
-            .table_rows = 4,
-            .layer_count = 2,
-            .head_dim = 256,
-            .num_kv_heads = 4,
-            .value_group = 16,
-            .plane_layouts = {.key = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
-                              .value = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
-                              .value_scale =
-                                  ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor},
+            .table_rows            = 4,
+            .layer_count           = 2,
+            .head_dim              = 256,
+            .num_kv_heads          = 4,
+            .value_group           = 16,
+            .plane_layouts = {.key         = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
+                              .value       = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
+                              .value_scale = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor},
         };
         const ninfer::Fp8KInt4VPagedKVSpec mtp_spec{
-            .page_group_count = 8,
+            .page_group_count      = 8,
             .logical_page_capacity = 8,
-            .table_rows = 4,
-            .layer_count = 1,
-            .head_dim = 256,
-            .num_kv_heads = 4,
-            .value_group = 16,
-            .plane_layouts = {.key = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
-                              .value = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
-                              .value_scale =
-                                  ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor},
+            .table_rows            = 4,
+            .layer_count           = 1,
+            .head_dim              = 256,
+            .num_kv_heads          = 4,
+            .value_group           = 16,
+            .plane_layouts = {.key         = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
+                              .value       = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
+                              .value_scale = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor},
         };
         const auto text_semantics = ninfer::fp8_k_int4_v_semantic_fingerprint(text_spec);
-        const auto mtp_semantics = ninfer::fp8_k_int4_v_semantic_fingerprint(mtp_spec);
+        const auto mtp_semantics  = ninfer::fp8_k_int4_v_semantic_fingerprint(mtp_spec);
 
         ninfer::LayoutBuilder text_source_builder;
         const auto text_source_layout =
@@ -509,8 +508,8 @@ int main() {
         const auto mtp_source_layout =
             ninfer::plan_fp8_k_int4_v_paged_kv_pool(mtp_source_builder, mtp_spec);
         ninfer::DeviceBuffer mtp_source_backing(mtp_source_builder.finish(256));
-        ninfer::PagedKVPool mtp_source_pool(
-            {mtp_source_backing.data(), mtp_source_backing.size()}, mtp_source_layout.storage);
+        ninfer::PagedKVPool mtp_source_pool({mtp_source_backing.data(), mtp_source_backing.size()},
+                                            mtp_source_layout.storage);
         auto mtp_source = mtp_source_pool.reserve(3);
         mtp_source.materialize_pages(1, device.stream);
         auto mtp_hole = mtp_source_pool.reserve(1);
@@ -531,19 +530,19 @@ int main() {
         identity.assign(prompt);
         q3::detail::RamCaptureSource source;
         source.execution_frontier = 6;
-        source.ledger_frontier = 7;
-        source.text_kv_valid = 6;
-        source.mtp_kv_valid = 5;
-        source.ledger = prompt.token_ids;
-        source.identity = &identity;
-        source.hash_f = q3::detail::prefix_hash_at(prompt.token_ids, identity, 6);
-        source.text = &text_source;
-        source.text_pool = &text_source_pool;
-        source.text_semantics = text_semantics;
-        source.backend = &mtp_source;
-        source.backend_pool = &mtp_source_pool;
-        source.backend_semantics = mtp_semantics;
-        source.stream = device.copy_stream;
+        source.ledger_frontier    = 7;
+        source.text_kv_valid      = 6;
+        source.mtp_kv_valid       = 5;
+        source.ledger             = prompt.token_ids;
+        source.identity           = &identity;
+        source.hash_f             = q3::detail::prefix_hash_at(prompt.token_ids, identity, 6);
+        source.text               = &text_source;
+        source.text_pool          = &text_source_pool;
+        source.text_semantics     = text_semantics;
+        source.backend            = &mtp_source;
+        source.backend_pool       = &mtp_source_pool;
+        source.backend_semantics  = mtp_semantics;
+        source.stream             = device.copy_stream;
 
         q3::detail::KVRamCache cache(8U << 20);
         require(cache.capture(source).status == q3::detail::RamCaptureStatus::Captured,
@@ -579,46 +578,39 @@ int main() {
         mtp_dest_backing.fill(0xA5);
 
         q3::detail::RamRestoreTarget target;
-        target.text_dst_pages = 3;
+        target.text_dst_pages    = 3;
         target.backend_dst_pages = 3;
-        target.text = &text_dest;
-        target.text_pool = &text_dest_pool;
-        target.text_semantics = text_semantics;
-        target.backend = &mtp_dest;
-        target.backend_pool = &mtp_dest_pool;
+        target.text              = &text_dest;
+        target.text_pool         = &text_dest_pool;
+        target.text_semantics    = text_semantics;
+        target.backend           = &mtp_dest;
+        target.backend_pool      = &mtp_dest_pool;
         target.backend_semantics = mtp_semantics;
-        target.stream = device.stream;
+        target.stream            = device.stream;
 
-        auto wrong = target;
+        auto wrong                       = target;
         wrong.text_semantics.value_group = 32;
-        bool rejected_mismatch = false;
+        bool rejected_mismatch           = false;
         try {
             (void)cache.unpack_device(match->entry_id, wrong);
-        } catch (const std::invalid_argument&) {
-            rejected_mismatch = true;
-        }
+        } catch (const std::invalid_argument&) { rejected_mismatch = true; }
         HIP_CHECK(hipStreamSynchronize(device.stream));
         require(rejected_mismatch, "semantic fingerprint mismatch was accepted");
-        require(all_bytes_equal(text_dest_backing, 0xA5) &&
-                    all_bytes_equal(mtp_dest_backing, 0xA5),
+        require(all_bytes_equal(text_dest_backing, 0xA5) && all_bytes_equal(mtp_dest_backing, 0xA5),
                 "semantic mismatch modified a destination byte");
 
-        auto wrong_backend = target;
+        auto wrong_backend                           = target;
         wrong_backend.backend_semantics->value_group = 32;
-        rejected_mismatch = false;
+        rejected_mismatch                            = false;
         try {
             (void)cache.unpack_device(match->entry_id, wrong_backend);
-        } catch (const std::invalid_argument&) {
-            rejected_mismatch = true;
-        }
+        } catch (const std::invalid_argument&) { rejected_mismatch = true; }
         HIP_CHECK(hipStreamSynchronize(device.stream));
         require(rejected_mismatch, "backend semantic fingerprint mismatch was accepted");
-        require(all_bytes_equal(text_dest_backing, 0xA5) &&
-                    all_bytes_equal(mtp_dest_backing, 0xA5),
+        require(all_bytes_equal(text_dest_backing, 0xA5) && all_bytes_equal(mtp_dest_backing, 0xA5),
                 "backend semantic mismatch modified a destination byte");
 
-        const q3::detail::RamRestoredHost restored =
-            cache.unpack_device(match->entry_id, target);
+        const q3::detail::RamRestoredHost restored = cache.unpack_device(match->entry_id, target);
         HIP_CHECK(hipStreamSynchronize(device.stream));
         require(restored.text_kv_valid == 6 && restored.mtp_kv_valid == 5,
                 "restored Text/MTP frontiers changed");
@@ -633,7 +625,8 @@ int main() {
         q3::detail::KVRamCache eviction_cache(entry_bytes + 255U);
         require(eviction_cache.capture(source).status == q3::detail::RamCaptureStatus::Captured,
                 "eviction probe first capture failed");
-        require(eviction_cache.capture(source).status == q3::detail::RamCaptureStatus::NeedsEviction,
+        require(eviction_cache.capture(source).status ==
+                    q3::detail::RamCaptureStatus::NeedsEviction,
                 "full RAM cache did not request eviction");
         const auto victim = eviction_cache.peek_oldest_unpinned();
         require(victim && eviction_cache.evict_one_unpinned(*victim),
@@ -651,8 +644,7 @@ int main() {
 
         std::cout << "kv_ram_cache: PASS text_planes=" << text_source_pool.plane_count()
                   << " mtp_planes=" << mtp_source_pool.plane_count()
-                  << " entry_bytes=" << entry_bytes << " evictions=" << eviction.evictions
-                  << '\n';
+                  << " entry_bytes=" << entry_bytes << " evictions=" << eviction.evictions << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "kv_ram_cache: FAIL: " << error.what() << '\n';

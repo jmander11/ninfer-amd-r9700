@@ -71,7 +71,8 @@ public:
         flat_ptr_ = LLVMPointerTypeInContext(context_, kFlat);
         lds_ptr_  = LLVMPointerTypeInContext(context_, kLds);
         // Opaque storage for the runtime's NinferRcState (lds_race_rt.hip asserts it fits).
-        state_type_ = LLVMArrayType2(LLVMInt64TypeInContext(context_), ninfer::gpu_check::kStateBytes / 8);
+        state_type_ =
+            LLVMArrayType2(LLVMInt64TypeInContext(context_), ninfer::gpu_check::kStateBytes / 8);
 
         LLVMTypeRef enter_params[]   = {flat_ptr_, lds_ptr_};
         enter_type_                  = LLVMFunctionType(void_, enter_params, 2, 0);

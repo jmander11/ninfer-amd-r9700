@@ -11,7 +11,8 @@ from tools.bench import run_niah_check as niah
 from tools.ppl.pareto import _file_sha256, classify
 
 CHUNK_SELECTION = {
-    "path": "/chunk-selection.json", "sha256": "9" * 64,
+    "path": "/chunk-selection.json",
+    "sha256": "9" * 64,
     "selection_rule": "global_maximin_normalized_prefill_then_workspace_then_smaller_chunk_v2",
     "selected_prefill_chunk": 4096,
 }
@@ -22,18 +23,26 @@ class NiahEvidenceTest(unittest.TestCase):
     def migration_receipt(weights_id: str) -> dict:
         recipe = {
             "r9700-q4g64-n16k16-eval": "r9700-all-q4g64-n16k16-eval-v1",
-            "r9700-q4-w8-mse-n16k16-eval":
-                "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
-            "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-                "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+            "r9700-q4-w8-mse-n16k16-eval": "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
+            "r9700-q4g64-f8e4m3-four-role-n16k16-eval": "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
         }[weights_id]
-        value = {"path": "/receipt", "sha256": "1" * 64, "recipe_id": recipe,
-                 "object_plan_sha256": "2" * 64, "source_artifact_sha256": "3" * 64,
-                 "source_receipt_sha256": "4" * 64, "transcoder_sha256": "5" * 64}
+        value = {
+            "path": "/receipt",
+            "sha256": "1" * 64,
+            "recipe_id": recipe,
+            "object_plan_sha256": "2" * 64,
+            "source_artifact_sha256": "3" * 64,
+            "source_receipt_sha256": "4" * 64,
+            "transcoder_sha256": "5" * 64,
+        }
         if "four-role" in weights_id:
-            value.update({"selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
-                          "source_index_sha256": "6" * 64,
-                          "source_ranking_sha256": "7" * 64})
+            value.update(
+                {
+                    "selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+                    "source_index_sha256": "6" * 64,
+                    "source_ranking_sha256": "7" * 64,
+                }
+            )
         else:
             value["receipt_producer_sha256"] = "8" * 64
         return value
@@ -51,15 +60,23 @@ class NiahEvidenceTest(unittest.TestCase):
         self.serve = self.root / "ninfer-serve"
         self.serve.write_bytes(b"executable")
         self.selection = self.root / "selection.json"
-        cache = {"value_group": 16, "plane_layouts": {
-            "key": "token-fastest-head-major", "value": "feature-fastest-page-major",
-            "value_scale": "feature-fastest-page-major",
-        }}
-        execution = {"q4_activation_bits": 8, "w8_activation_bits": 8,
-                     "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
-                     "xattention_profile": "dense"}
+        cache = {
+            "value_group": 16,
+            "plane_layouts": {
+                "key": "token-fastest-head-major",
+                "value": "feature-fastest-page-major",
+                "value_scale": "feature-fastest-page-major",
+            },
+        }
+        execution = {
+            "q4_activation_bits": 8,
+            "w8_activation_bits": 8,
+            "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+            "xattention_profile": "dense",
+        }
         recipe = {
-            "kind": "artifact", "weights_id": "r9700-q4g64-n16k16-eval",
+            "kind": "artifact",
+            "weights_id": "r9700-q4g64-n16k16-eval",
             "sha256": niah.file_identity(self.artifact)["sha256"],
         }
         candidates = []
@@ -70,43 +87,57 @@ class NiahEvidenceTest(unittest.TestCase):
             ("r9700-q4g64-f8e4m3-four-role-n16k16-eval", "c" * 64, "hybrid-", 105.0),
         ):
             for group, profile in (
-                (16, "dense"), (32, "dense"),
-                (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+                (16, "dense"),
+                (32, "dense"),
+                (16, "b128-s16-tau900"),
+                (32, "b128-s16-tau900"),
             ):
                 name = f"{prefix}g{group}-{profile}"
                 selected = group == 16 and profile == "dense"
-                candidates.append({
-                    "name": name,
-                    "whole_inference_profile": "spec-none-ordinary",
-                    "base_capacity_profile": "spec-none-ordinary",
-                    "prefill_chunk": 4096,
-                    "cache_profile": {**cache, "value_group": group},
-                    "execution_profile": {**execution, "xattention_profile": profile},
-                    "quality": {
-                        "eligible": True, "tier": "accuracy", "mean_nll_delta": 0.001,
-                        "complete_finite_aligned": True, "scored_positions": 10000,
-                        "new_severe_positions": 0,
-                    },
-                    "whole_inference_tokens_per_second": {
-                        "whole_8k_c1": best_speed if selected else 90.0,
-                    },
-                    "capacity": {
-                        "measurement_kind": "resolved_effective_maximum",
-                        "binding_constraint": "device_memory", "tokens": 1000,
-                    },
-                })
-                provenance.append({
-                    "candidate": name,
-                    "artifact": {"weights_id": recipe_name, "sha256": digest,
-                                 "conversion_receipt": self.migration_receipt(recipe_name)},
-                    "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
-                    "capacity_failures": [],
-                })
+                candidates.append(
+                    {
+                        "name": name,
+                        "whole_inference_profile": "spec-none-ordinary",
+                        "base_capacity_profile": "spec-none-ordinary",
+                        "prefill_chunk": 4096,
+                        "cache_profile": {**cache, "value_group": group},
+                        "execution_profile": {**execution, "xattention_profile": profile},
+                        "quality": {
+                            "eligible": True,
+                            "tier": "accuracy",
+                            "mean_nll_delta": 0.001,
+                            "complete_finite_aligned": True,
+                            "scored_positions": 10000,
+                            "new_severe_positions": 0,
+                        },
+                        "whole_inference_tokens_per_second": {
+                            "whole_8k_c1": best_speed if selected else 90.0,
+                        },
+                        "capacity": {
+                            "measurement_kind": "resolved_effective_maximum",
+                            "binding_constraint": "device_memory",
+                            "tokens": 1000,
+                        },
+                    }
+                )
+                provenance.append(
+                    {
+                        "candidate": name,
+                        "artifact": {
+                            "weights_id": recipe_name,
+                            "sha256": digest,
+                            "conversion_receipt": self.migration_receipt(recipe_name),
+                        },
+                        "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
+                        "capacity_failures": [],
+                    }
+                )
         for row in candidates:
             row["quality_cells"] = {label: dict(row["quality"]) for label in ("8k", "32k")}
             row["capacity_by_cell"] = {f"c{c}": dict(row["capacity"]) for c in (1, 2, 3, 4)}
         source = {
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+            "artifact_type": "ninfer_r9700_pareto_input",
+            "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
             "base_ranking_profile": "spec-none-ordinary",
@@ -115,13 +146,15 @@ class NiahEvidenceTest(unittest.TestCase):
             "required_capacity_cells": ["c1", "c2", "c3", "c4"],
             "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
-            "candidates": candidates, "source_provenance": provenance,
+            "candidates": candidates,
+            "source_provenance": provenance,
         }
         self.input = self.root / "pareto-input.json"
         self.input.write_text(json.dumps(source) + "\n", encoding="utf-8")
         authority = classify(source)
         authority["pareto_input"] = {
-            "path": str(self.input), "sha256": _file_sha256(self.input),
+            "path": str(self.input),
+            "sha256": _file_sha256(self.input),
         }
         self.candidate_inputs = candidates
         self.candidate_provenance = provenance
@@ -159,7 +192,8 @@ class NiahEvidenceTest(unittest.TestCase):
                 200.0 if row["name"] == name else 90.0
             )
         source = {
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+            "artifact_type": "ninfer_r9700_pareto_input",
+            "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
             "base_ranking_profile": "spec-none-ordinary",
@@ -168,18 +202,26 @@ class NiahEvidenceTest(unittest.TestCase):
             "required_capacity_cells": ["c1", "c2", "c3", "c4"],
             "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
-            "candidates": candidates, "source_provenance": self.candidate_provenance,
+            "candidates": candidates,
+            "source_provenance": self.candidate_provenance,
         }
         input_path = self.root / f"pareto-input-{name}.json"
         input_path.write_text(json.dumps(source) + "\n", encoding="utf-8")
         result = classify(source)
         result["pareto_input"] = {
-            "path": str(input_path), "sha256": _file_sha256(input_path),
+            "path": str(input_path),
+            "sha256": _file_sha256(input_path),
         }
         return result
 
-    def append_done(self, *, computed: int = 1024, cache_hit: int = 0,
-                    restored: int = 0, reuse_source: str = "none") -> None:
+    def append_done(
+        self,
+        *,
+        computed: int = 1024,
+        cache_hit: int = 0,
+        restored: int = 0,
+        reuse_source: str = "none",
+    ) -> None:
         event = {
             "artifact_type": niah.SERVER_LOG_ARTIFACT_TYPE,
             "schema_version": niah.SERVER_LOG_SCHEMA_VERSION,
@@ -206,30 +248,39 @@ class NiahEvidenceTest(unittest.TestCase):
 
     @property
     def expected(self) -> list[dict[str, object]]:
-        return [{
-            "model": "coding", "message_count": 2, "requested_output_tokens": 64,
-            "enable_thinking": False, "prompt_tokens": 1024, "completion_tokens": 3,
-        }]
+        return [
+            {
+                "model": "coding",
+                "message_count": 2,
+                "requested_output_tokens": 64,
+                "enable_thinking": False,
+                "prompt_tokens": 1024,
+                "completion_tokens": 3,
+            }
+        ]
 
     def test_binds_files_server_start_and_fresh_full_prefill(self) -> None:
         binding, offset = niah.prepare_server_log_binding(
-            self.log, self.artifact, self.serve, self.selection)
+            self.log, self.artifact, self.serve, self.selection
+        )
         self.append_done()
-        result = niah.validate_fresh_prefill_log(
-            self.log, offset, binding, self.expected)
+        result = niah.validate_fresh_prefill_log(self.log, offset, binding, self.expected)
         self.assertTrue(result["pass"])
         self.assertEqual(result["requests"][0]["computed_prefill_tokens"], 1024)
         self.assertEqual(binding["artifact"]["sha256"], niah.file_identity(self.artifact)["sha256"])
 
     def test_64k_admission_ladder_expands_to_exact_five_positions(self) -> None:
         cases = niah.matrix_cases(["64k"], list(niah.NIAH_POSITIONS))
-        self.assertEqual(cases, [
-            ("context_64k_start", "examples/cli/messages/long_niah_64k_start.json"),
-            ("context_64k_q25", "examples/cli/messages/long_niah_64k_q25.json"),
-            ("context_64k", "examples/cli/messages/long_niah_64k.json"),
-            ("context_64k_q75", "examples/cli/messages/long_niah_64k_q75.json"),
-            ("context_64k_end", "examples/cli/messages/long_niah_64k_end.json"),
-        ])
+        self.assertEqual(
+            cases,
+            [
+                ("context_64k_start", "examples/cli/messages/long_niah_64k_start.json"),
+                ("context_64k_q25", "examples/cli/messages/long_niah_64k_q25.json"),
+                ("context_64k", "examples/cli/messages/long_niah_64k.json"),
+                ("context_64k_q75", "examples/cli/messages/long_niah_64k_q75.json"),
+                ("context_64k_end", "examples/cli/messages/long_niah_64k_end.json"),
+            ],
+        )
         self.assertTrue(all(niah.resolve_fixture(ref).is_file() for _, ref in cases))
 
     def test_rejects_prefix_reuse_or_checkpoint_restore(self) -> None:
@@ -239,7 +290,8 @@ class NiahEvidenceTest(unittest.TestCase):
         ):
             self.log.write_text(json.dumps(self.start) + "\n", encoding="utf-8")
             binding, offset = niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection)
+                self.log, self.artifact, self.serve, self.selection
+            )
             self.append_done(**values)
             with self.assertRaisesRegex(ValueError, "fresh full prefill"):
                 niah.validate_fresh_prefill_log(self.log, offset, binding, self.expected)
@@ -257,15 +309,15 @@ class NiahEvidenceTest(unittest.TestCase):
             start["engine"][field] = value
             self.log.write_text(json.dumps(start) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, field):
-                niah.prepare_server_log_binding(
-                    self.log, self.artifact, self.serve, self.selection)
+                niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
     def test_accepts_selection_bound_nondefault_prefill_chunk(self) -> None:
         candidates = json.loads(json.dumps(self.candidate_inputs))
         for row in candidates:
             row["prefill_chunk"] = 2048
         source = {
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+            "artifact_type": "ninfer_r9700_pareto_input",
+            "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
             "base_ranking_profile": "spec-none-ordinary",
@@ -274,14 +326,17 @@ class NiahEvidenceTest(unittest.TestCase):
             "required_capacity_cells": ["c1", "c2", "c3", "c4"],
             "selected_prefill_chunk": 2048,
             "prefill_chunk_selection": {
-                **CHUNK_SELECTION, "selected_prefill_chunk": 2048,
+                **CHUNK_SELECTION,
+                "selected_prefill_chunk": 2048,
             },
-            "candidates": candidates, "source_provenance": self.candidate_provenance,
+            "candidates": candidates,
+            "source_provenance": self.candidate_provenance,
         }
         self.input.write_text(json.dumps(source) + "\n", encoding="utf-8")
         authority = classify(source)
         authority["pareto_input"] = {
-            "path": str(self.input), "sha256": _file_sha256(self.input),
+            "path": str(self.input),
+            "sha256": _file_sha256(self.input),
         }
         self.selection.write_text(json.dumps(authority) + "\n", encoding="utf-8")
         self.start["engine"]["prefill_chunk"] = 2048
@@ -296,8 +351,7 @@ class NiahEvidenceTest(unittest.TestCase):
         start["engine"]["kv_value_group"] = 32
         self.log.write_text(json.dumps(start) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "selected G16"):
-            niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection)
+            niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
         for field, value, error in (
             ("weights_id", "other", "does not select the supplied artifact"),
@@ -307,12 +361,10 @@ class NiahEvidenceTest(unittest.TestCase):
             start["artifact"][field] = value
             self.log.write_text(json.dumps(start) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, error):
-                niah.prepare_server_log_binding(
-                    self.log, self.artifact, self.serve, self.selection)
+                niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
     def test_rejects_malformed_or_ambiguous_static_selection(self) -> None:
-        artifact = {**niah.file_identity(self.artifact),
-                    "weights_id": "r9700-q4g64-n16k16-eval"}
+        artifact = {**niah.file_identity(self.artifact), "weights_id": "r9700-q4g64-n16k16-eval"}
         original = json.loads(self.selection.read_text())
         malformed = (
             [],
@@ -329,53 +381,54 @@ class NiahEvidenceTest(unittest.TestCase):
 
         substituted = json.loads(json.dumps(original))
         target = next(
-            row for row in substituted["candidates"]
-            if row["name"] == "g32-b128-s16-tau900"
+            row for row in substituted["candidates"] if row["name"] == "g32-b128-s16-tau900"
         )
         all_q4 = next(
-            choice for choice in
-            substituted["same_recipe_static_profile_selection"]["selections"]
+            choice
+            for choice in substituted["same_recipe_static_profile_selection"]["selections"]
             if choice["weight_recipe"]["weights_id"] == "r9700-q4g64-n16k16-eval"
         )
-        all_q4.update({
-            "winner": target["name"],
-            "winner_cache_profile": target["cache_profile"],
-            "winner_execution_profile": target["execution_profile"],
-        })
+        all_q4.update(
+            {
+                "winner": target["name"],
+                "winner_cache_profile": target["cache_profile"],
+                "winner_execution_profile": target["execution_profile"],
+            }
+        )
         terminal = substituted["terminal_production_selection"]
-        terminal.update({
-            "eligible_profile_winners": sorted(
-                choice["winner"] for choice in
-                substituted["same_recipe_static_profile_selection"]["selections"]
-            ),
-            "winner": target["name"],
-            "winner_cache_profile": target["cache_profile"],
-            "winner_execution_profile": target["execution_profile"],
-        })
+        terminal.update(
+            {
+                "eligible_profile_winners": sorted(
+                    choice["winner"]
+                    for choice in substituted["same_recipe_static_profile_selection"]["selections"]
+                ),
+                "winner": target["name"],
+                "winner_cache_profile": target["cache_profile"],
+                "winner_execution_profile": target["execution_profile"],
+            }
+        )
         self.selection.write_text(json.dumps(substituted) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "does not recompute exactly"):
             niah.load_static_profile_selection(self.selection, artifact)
 
         unsupported = json.loads(json.dumps(original))
         unsupported["same_recipe_static_profile_selection"]["selections"][0][
-            "winner_execution_profile"]["q4_activation_bits"] = 4
-        unsupported["terminal_production_selection"][
             "winner_execution_profile"
         ]["q4_activation_bits"] = 4
+        unsupported["terminal_production_selection"]["winner_execution_profile"][
+            "q4_activation_bits"
+        ] = 4
         unsupported["candidates"][0]["execution_profile"]["q4_activation_bits"] = 4
         self.selection.write_text(json.dumps(unsupported) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "does not recompute exactly"):
             niah.load_static_profile_selection(self.selection, artifact)
 
         selection = original
-        selection["terminal_production_selection"]["winner_artifact"][
-            "sha256"
-        ] = "0" * 64
+        selection["terminal_production_selection"]["winner_artifact"]["sha256"] = "0" * 64
         self.selection.write_text(json.dumps(selection) + "\n", encoding="utf-8")
         self.log.write_text(json.dumps(self.start) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "does not recompute exactly"):
-            niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection)
+            niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
     def test_rejects_mismatched_artifact_or_executable(self) -> None:
         other = self.root / "other"
@@ -401,41 +454,36 @@ class NiahEvidenceTest(unittest.TestCase):
         binding, _ = niah.prepare_server_log_binding(
             self.log, self.artifact, self.serve, self.selection
         )
-        self.assertEqual(
-            binding["server_start"]["xattention_profile"], "b128-s16-tau900"
-        )
+        self.assertEqual(binding["server_start"]["xattention_profile"], "b128-s16-tau900")
         with self.assertRaisesRegex(ValueError, "xattention_qualification=True"):
             dense_selection = self.select_authority_winner("g16-dense")
             self.selection.write_text(json.dumps(dense_selection) + "\n", encoding="utf-8")
-            niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection)
+            niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
         self.log.write_text(json.dumps(self.start) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "xattention_qualification=False"):
             self.selection.write_text(json.dumps(sparse_selection) + "\n", encoding="utf-8")
-            niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection
-            )
+            niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
         stale_dense = json.loads(json.dumps(self.start))
         stale_dense["engine"]["xattention_profile"] = "b128-s16-tau900"
         self.log.write_text(json.dumps(stale_dense) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "dense server_start carries"):
             self.selection.write_text(json.dumps(dense_selection) + "\n", encoding="utf-8")
-            niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection)
+            niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
         malformed = json.loads(json.dumps(self.start))
         malformed["engine"] = []
         self.log.write_text(json.dumps(malformed) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "engine provenance must be an object"):
-            niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection)
+            niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
     def test_accepts_each_selected_group_and_attention_server_tuple(self) -> None:
         for group, profile in (
-            (16, "dense"), (32, "dense"),
-            (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+            (16, "dense"),
+            (32, "dense"),
+            (16, "b128-s16-tau900"),
+            (32, "b128-s16-tau900"),
         ):
             selection = self.select_authority_winner(f"g{group}-{profile}")
             self.selection.write_text(json.dumps(selection) + "\n", encoding="utf-8")
@@ -443,25 +491,31 @@ class NiahEvidenceTest(unittest.TestCase):
             start = json.loads(json.dumps(self.start))
             start["engine"]["kv_value_group"] = group
             if profile == "b128-s16-tau900":
-                start["engine"].update({
-                    "xattention_qualification": True,
-                    "xattention_profile": profile,
-                    "xattention_find_block": 128,
-                    "xattention_stride": 16,
-                    "xattention_tau_permille": 900,
-                })
+                start["engine"].update(
+                    {
+                        "xattention_qualification": True,
+                        "xattention_profile": profile,
+                        "xattention_find_block": 128,
+                        "xattention_stride": 16,
+                        "xattention_tau_permille": 900,
+                    }
+                )
             self.log.write_text(json.dumps(start) + "\n", encoding="utf-8")
             binding, _ = niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection)
+                self.log, self.artifact, self.serve, self.selection
+            )
             self.assertEqual(
-                (binding["static_profile_selection"]["kv_value_group"],
-                 binding["static_profile_selection"]["xattention_profile"]),
+                (
+                    binding["static_profile_selection"]["kv_value_group"],
+                    binding["static_profile_selection"]["xattention_profile"],
+                ),
                 (group, profile),
             )
 
     def test_rejects_artifact_changed_during_run(self) -> None:
         binding, offset = niah.prepare_server_log_binding(
-            self.log, self.artifact, self.serve, self.selection)
+            self.log, self.artifact, self.serve, self.selection
+        )
         self.append_done()
         self.artifact.write_bytes(b"changed!")
         with self.assertRaisesRegex(ValueError, "artifact bytes changed"):
@@ -469,7 +523,8 @@ class NiahEvidenceTest(unittest.TestCase):
 
     def test_rejects_selection_changed_during_run(self) -> None:
         binding, offset = niah.prepare_server_log_binding(
-            self.log, self.artifact, self.serve, self.selection)
+            self.log, self.artifact, self.serve, self.selection
+        )
         self.append_done()
         self.selection.write_text(self.selection.read_text() + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "selection bytes changed"):
@@ -477,7 +532,8 @@ class NiahEvidenceTest(unittest.TestCase):
 
     def test_rejects_server_start_changed_during_run(self) -> None:
         binding, offset = niah.prepare_server_log_binding(
-            self.log, self.artifact, self.serve, self.selection)
+            self.log, self.artifact, self.serve, self.selection
+        )
         initial = self.log.read_text(encoding="utf-8")
         self.log.write_text(initial.replace("instance-1", "instance-2"), encoding="utf-8")
         self.append_done()
@@ -492,38 +548,51 @@ class NiahEvidenceTest(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(ValueError, "exactly one server_start"):
-            niah.prepare_server_log_binding(
-                self.log, self.artifact, self.serve, self.selection
-            )
+            niah.prepare_server_log_binding(self.log, self.artifact, self.serve, self.selection)
 
     def test_explicit_output_path_is_used(self) -> None:
         fixture = self.root / "fixture.json"
-        fixture.write_text(json.dumps([{"role": "user", "content": "needle"}]),
-                           encoding="utf-8")
+        fixture.write_text(json.dumps([{"role": "user", "content": "needle"}]), encoding="utf-8")
         output = self.root / "evidence.json"
         response = {
             "choices": [{"message": {"content": niah.DEFAULT_NEEDLE}}],
             "usage": {"prompt_tokens": 8, "completion_tokens": 2},
         }
-        argv = ["run_niah_check.py", "--key", "test", "--fixture", str(fixture),
-                "--out", str(output)]
-        with mock.patch.object(sys, "argv", argv), mock.patch.object(niah, "post",
-                                                                    return_value=response):
+        argv = [
+            "run_niah_check.py",
+            "--key",
+            "test",
+            "--fixture",
+            str(fixture),
+            "--out",
+            str(output),
+        ]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(niah, "post", return_value=response),
+        ):
             self.assertEqual(niah.main(), 0)
         record = json.loads(output.read_text(encoding="utf-8"))
         self.assertTrue(record["pass"])
         self.assertEqual(record["evidence_mode"], "recall-only")
-        self.assertEqual(record["cases"][0]["fixture_identity"]["sha256"],
-                         niah.file_identity(fixture)["sha256"])
+        self.assertEqual(
+            record["cases"][0]["fixture_identity"]["sha256"], niah.file_identity(fixture)["sha256"]
+        )
 
     def test_dangling_output_namespace_is_rejected_without_request(self) -> None:
         fixture = self.root / "fixture.json"
-        fixture.write_text(json.dumps([{"role": "user", "content": "needle"}]),
-                           encoding="utf-8")
+        fixture.write_text(json.dumps([{"role": "user", "content": "needle"}]), encoding="utf-8")
         output = self.root / "durable.json"
         output.symlink_to(self.root / "missing.json")
-        argv = ["run_niah_check.py", "--key", "test", "--fixture", str(fixture),
-                "--out", str(output)]
+        argv = [
+            "run_niah_check.py",
+            "--key",
+            "test",
+            "--fixture",
+            str(fixture),
+            "--out",
+            str(output),
+        ]
         with mock.patch.object(sys, "argv", argv), mock.patch.object(niah, "post") as post:
             with self.assertRaises(SystemExit):
                 niah.main()
@@ -532,8 +601,7 @@ class NiahEvidenceTest(unittest.TestCase):
 
     def test_fixture_changed_during_run_invalidates_evidence(self) -> None:
         fixture = self.root / "fixture.json"
-        fixture.write_text(json.dumps([{"role": "user", "content": "needle"}]),
-                           encoding="utf-8")
+        fixture.write_text(json.dumps([{"role": "user", "content": "needle"}]), encoding="utf-8")
         output = self.root / "evidence.json"
         response = {
             "choices": [{"message": {"content": niah.DEFAULT_NEEDLE}}],
@@ -541,14 +609,24 @@ class NiahEvidenceTest(unittest.TestCase):
         }
 
         def post_and_mutate(*_args, **_kwargs):
-            fixture.write_text(json.dumps([{"role": "user", "content": "changed"}]),
-                               encoding="utf-8")
+            fixture.write_text(
+                json.dumps([{"role": "user", "content": "changed"}]), encoding="utf-8"
+            )
             return response
 
-        argv = ["run_niah_check.py", "--key", "test", "--fixture", str(fixture),
-                "--out", str(output)]
-        with mock.patch.object(sys, "argv", argv), mock.patch.object(
-                niah, "post", side_effect=post_and_mutate):
+        argv = [
+            "run_niah_check.py",
+            "--key",
+            "test",
+            "--fixture",
+            str(fixture),
+            "--out",
+            str(output),
+        ]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(niah, "post", side_effect=post_and_mutate),
+        ):
             self.assertEqual(niah.main(), 1)
         record = json.loads(output.read_text(encoding="utf-8"))
         self.assertFalse(record["pass"])
@@ -556,10 +634,15 @@ class NiahEvidenceTest(unittest.TestCase):
 
     def test_main_emits_provenance_bound_fresh_prefill_evidence(self) -> None:
         fixture = self.root / "fixture.json"
-        fixture.write_text(json.dumps([
-            {"role": "system", "content": "answer exactly"},
-            {"role": "user", "content": "find the needle"},
-        ]), encoding="utf-8")
+        fixture.write_text(
+            json.dumps(
+                [
+                    {"role": "system", "content": "answer exactly"},
+                    {"role": "user", "content": "find the needle"},
+                ]
+            ),
+            encoding="utf-8",
+        )
         output = self.root / "durable.json"
         response = {
             "choices": [{"message": {"content": niah.DEFAULT_NEEDLE}}],
@@ -571,13 +654,27 @@ class NiahEvidenceTest(unittest.TestCase):
             return response
 
         argv = [
-            "run_niah_check.py", "--key", "test", "--fixture", str(fixture),
-            "--out", str(output), "--server-log", str(self.log),
-            "--artifact", str(self.artifact), "--serve-bin", str(self.serve),
-            "--selection", str(self.selection), "--exact-answer",
+            "run_niah_check.py",
+            "--key",
+            "test",
+            "--fixture",
+            str(fixture),
+            "--out",
+            str(output),
+            "--server-log",
+            str(self.log),
+            "--artifact",
+            str(self.artifact),
+            "--serve-bin",
+            str(self.serve),
+            "--selection",
+            str(self.selection),
+            "--exact-answer",
         ]
-        with mock.patch.object(sys, "argv", argv), mock.patch.object(
-                niah, "post", side_effect=post_and_log):
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(niah, "post", side_effect=post_and_log),
+        ):
             self.assertEqual(niah.main(), 0)
         record = json.loads(output.read_text(encoding="utf-8"))
         self.assertTrue(record["pass"])
@@ -588,14 +685,18 @@ class NiahEvidenceTest(unittest.TestCase):
         )
         self.assertEqual(record["evidence_mode"], "provenance-bound")
         self.assertTrue(record["fresh_full_prefill"]["pass"])
-        self.assertEqual(record["provenance"]["artifact"]["weights_id"],
-                         "r9700-q4g64-n16k16-eval")
+        self.assertEqual(record["provenance"]["artifact"]["weights_id"], "r9700-q4g64-n16k16-eval")
 
     def test_exact_answer_rejects_explanatory_wrapper(self) -> None:
         fixture = self.root / "fixture.json"
-        fixture.write_text(json.dumps([
-            {"role": "user", "content": "find the needle"},
-        ]), encoding="utf-8")
+        fixture.write_text(
+            json.dumps(
+                [
+                    {"role": "user", "content": "find the needle"},
+                ]
+            ),
+            encoding="utf-8",
+        )
         output = self.root / "durable.json"
         response = {
             "choices": [{"message": {"content": f"The answer is {niah.DEFAULT_NEEDLE}"}}],
@@ -607,13 +708,27 @@ class NiahEvidenceTest(unittest.TestCase):
             return response
 
         argv = [
-            "run_niah_check.py", "--key", "test", "--fixture", str(fixture),
-            "--out", str(output), "--server-log", str(self.log),
-            "--artifact", str(self.artifact), "--serve-bin", str(self.serve),
-            "--selection", str(self.selection), "--exact-answer",
+            "run_niah_check.py",
+            "--key",
+            "test",
+            "--fixture",
+            str(fixture),
+            "--out",
+            str(output),
+            "--server-log",
+            str(self.log),
+            "--artifact",
+            str(self.artifact),
+            "--serve-bin",
+            str(self.serve),
+            "--selection",
+            str(self.selection),
+            "--exact-answer",
         ]
-        with mock.patch.object(sys, "argv", argv), mock.patch.object(
-                niah, "post", side_effect=post_and_log):
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(niah, "post", side_effect=post_and_log),
+        ):
             self.assertEqual(niah.main(), 1)
         record = json.loads(output.read_text(encoding="utf-8"))
         self.assertFalse(record["pass"])

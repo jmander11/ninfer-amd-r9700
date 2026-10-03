@@ -8,6 +8,7 @@ suffix they calibrate. Layers must be requested in ascending order; later layers
 (not the quantized) outputs of earlier ones. After the last layer, `final()` returns the second
 moment of the output-head input.
 """
+
 from __future__ import annotations
 
 import gc
@@ -32,8 +33,11 @@ _INPUT_OF = {
 
 
 def read_sequences(path: Path) -> list[list[int]]:
-    sequences = [[int(token) for token in line.split()] for line in path.read_text().splitlines()
-                 if line.strip()]
+    sequences = [
+        [int(token) for token in line.split()]
+        for line in path.read_text().splitlines()
+        if line.strip()
+    ]
     if not sequences or len({len(sequence) for sequence in sequences}) != 1:
         raise ValueError("calibration ids must be nonempty equal-length sequences, one per line")
     return sequences
@@ -44,8 +48,13 @@ class InputMoments:
         weight_map = json.loads((model / "model.safetensors.index.json").read_text())["weight_map"]
         self.checkpoint = backend.SourceCheckpoint(model, weight_map)
         self.scorer = backend.LayerMajorTextScorer(
-            self.checkpoint, device_index=device.index or 0, prefill_chunk=2048,
-            schedule="prefill", skip_text="", kv_value_group=None)
+            self.checkpoint,
+            device_index=device.index or 0,
+            prefill_chunk=2048,
+            schedule="prefill",
+            skip_text="",
+            kv_value_group=None,
+        )
         self.device = self.scorer.device
         sequences = read_sequences(ids)
         self.tokens = sum(len(sequence) for sequence in sequences)
@@ -59,7 +68,9 @@ class InputMoments:
             raise ValueError(f"calibration layers are layer-major: expected {self.next_layer}")
         prefix = f"model.language_model.layers.{layer}."
         weights = self.checkpoint.load_many(backend._layer_names(layer), self.device)
-        watched = {id(weights[prefix + name]): name for name in _INPUT_OF if prefix + name in weights}
+        watched = {
+            id(weights[prefix + name]): name for name in _INPUT_OF if prefix + name in weights
+        }
         moments: dict[str, torch.Tensor] = {}
         linear = backend._linear
 

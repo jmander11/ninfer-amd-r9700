@@ -21,11 +21,11 @@ runtime::ResolvedRequestOptions resolve_request_options(const ModelSamplingDefau
     runtime::ResolvedRequestOptions resolved;
     resolved.execution.sampling =
         runtime::resolve_sampling(defaults, mode, options.execution.sampling);
-    resolved.execution.requested_output_tokens = options.execution.requested_output_tokens;
-    resolved.execution.allow_prefix_reuse      = options.execution.allow_prefix_reuse;
+    resolved.execution.requested_output_tokens    = options.execution.requested_output_tokens;
+    resolved.execution.allow_prefix_reuse         = options.execution.allow_prefix_reuse;
     resolved.execution.capture_context_checkpoint = options.execution.capture_context_checkpoint;
-    resolved.stop                              = std::move(options.stop);
-    resolved.output                            = options.output;
+    resolved.stop                                 = std::move(options.stop);
+    resolved.output                               = options.output;
     return resolved;
 }
 
@@ -136,12 +136,12 @@ public:
 
     explicit Impl(EngineOptions engine_options)
         : options(std::move(engine_options)), device(options.device) {
-        auto constructed  = targets::construct_target(options, device);
-        active            = std::move(constructed.active);
-        load              = std::move(constructed.load);
-        sampling_defaults = constructed.sampling_defaults;
+        auto constructed      = targets::construct_target(options, device);
+        active                = std::move(constructed.active);
+        load                  = std::move(constructed.load);
+        sampling_defaults     = constructed.sampling_defaults;
         options.mixed_forward = active->program->mixed_forward();
-        executor          = std::make_unique<Executor>(*active, device, options);
+        executor              = std::make_unique<Executor>(*active, device, options);
     }
 
     ~Impl() noexcept {
@@ -181,8 +181,8 @@ PreparedPrompt Engine::prepare(PromptInput input) const {
                            context_capacity_error(info.prompt_tokens, target->capacity));
     }
     const double seconds = prepared.prepare_seconds();
-    return PreparedPrompt(std::make_unique<PreparedPrompt::Impl>(
-        info, seconds, sampling_mode, std::move(prepared)));
+    return PreparedPrompt(
+        std::make_unique<PreparedPrompt::Impl>(info, seconds, sampling_mode, std::move(prepared)));
 }
 
 PreparedPrompt Engine::prepare_tokens(std::vector<TokenId> token_ids,
@@ -190,8 +190,8 @@ PreparedPrompt Engine::prepare_tokens(std::vector<TokenId> token_ids,
     if (impl_ == nullptr) { throw std::logic_error("Engine is moved from"); }
     const auto& target = impl_->active;
     if (target == nullptr) { throw std::logic_error("Engine target is not active"); }
-    auto prepared = target->loaded->frontend.prepare_tokens(std::move(token_ids),
-                                                            allow_prefix_identity);
+    auto prepared =
+        target->loaded->frontend.prepare_tokens(std::move(token_ids), allow_prefix_identity);
     PromptSummary info = prepared.summary();
     if (info.prompt_tokens > target->capacity) {
         throw RequestError(RequestErrorKind::ContextLengthExceeded,
@@ -284,8 +284,8 @@ GenerationHandle Engine::submit(PreparedPrompt prompt, RequestOptions options,
     auto submission = impl_->executor->submit(std::move(prompt.impl_->value), prompt_summary,
                                               prepare_seconds, std::move(resolved_options),
                                               delivery, pending_deadline, std::move(host_input));
-    return GenerationHandle(std::make_unique<GenerationHandle::Impl>(
-        impl_, std::move(submission), resolved_sampling));
+    return GenerationHandle(
+        std::make_unique<GenerationHandle::Impl>(impl_, std::move(submission), resolved_sampling));
 }
 
 GenerationResult Engine::generate(PreparedPrompt prompt, RequestOptions options, OutputSink* sink,
@@ -303,8 +303,8 @@ ScoreResult Engine::score(PreparedPrompt prompt, ScoreOptions options) {
 }
 
 std::vector<ScoreResult> Engine::score_many(std::vector<PreparedPrompt> prompts,
-                                           std::vector<ScoreOptions> options,
-                                           const CancellationView& cancellation) {
+                                            std::vector<ScoreOptions> options,
+                                            const CancellationView& cancellation) {
     if (impl_ == nullptr) { throw std::logic_error("Engine is moved from"); }
     if (prompts.empty() || prompts.size() > 16 || options.size() != prompts.size()) {
         throw std::invalid_argument("score_many requires 1..16 prompts with one option per prompt");

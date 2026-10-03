@@ -7,35 +7,35 @@
 // bitwise those of the all-layer fold.
 #include <hip/hip_bfloat16.h>
 #if defined(__HIPCC__)
-#include <hip/hip_runtime.h>
+#    include <hip/hip_runtime.h>
 #endif
 
 #include <cstdint>
 
 namespace ninfer::ops::detail::gated_delta_net::fold {
 
-constexpr int kStateDim = 128;
-constexpr int kWaveSize = 32;
-constexpr int kItemThreads = 128;
+constexpr int kStateDim        = 128;
+constexpr int kWaveSize        = 32;
+constexpr int kItemThreads     = 128;
 constexpr int kThreadsPerValue = 8;
-constexpr int kValuesPerItem = kItemThreads / kThreadsPerValue;
-constexpr int kKeysPerLane = kStateDim / kThreadsPerValue;
-constexpr int kStateTiles = kStateDim / kValuesPerItem;
+constexpr int kValuesPerItem   = kItemThreads / kThreadsPerValue;
+constexpr int kKeysPerLane     = kStateDim / kThreadsPerValue;
+constexpr int kStateTiles      = kStateDim / kValuesPerItem;
 constexpr float kL2NormEpsilon = 1.0e-6F;
 // The sole Qwen3.8-27B geometry.
-constexpr int kQkHeads = 16;
-constexpr int kValueHeads = 48;
-constexpr int kConvChannels = 10240;
+constexpr int kQkHeads          = 16;
+constexpr int kValueHeads       = 48;
+constexpr int kConvChannels     = 10240;
 constexpr int kItemsPerLayerRow = kValueHeads * kStateTiles;
 
 static_assert(kKeysPerLane == 16 && kStateTiles == 8);
 
 // Record planes (outer index layer * record_capacity + record row, `width` columns each).
 struct Planes {
-    const hip_bfloat16* key   = nullptr;
-    const hip_bfloat16* value = nullptr;
-    const float* gate         = nullptr;
-    const hip_bfloat16* conv  = nullptr;
+    const hip_bfloat16* key      = nullptr;
+    const hip_bfloat16* value    = nullptr;
+    const float* gate            = nullptr;
+    const hip_bfloat16* conv     = nullptr;
     std::int32_t record_capacity = 0;
     std::int32_t width           = 0;
 };
@@ -76,7 +76,7 @@ __device__ __forceinline__ void publish_conv_history(const Planes& planes, std::
                                                      std::int32_t state_tile, int tid) {
     const std::int32_t channel_block = value_head * kStateTiles + state_tile;
     if (channel_block >= kConvChannels / kStateDim) return;
-    const std::int32_t commit = row.columns;
+    const std::int32_t commit  = row.columns;
     const std::int32_t channel = channel_block * kStateDim + tid;
     hip_bfloat16* history =
         conv_layer + static_cast<std::int64_t>(row.slot) * (3LL * kConvChannels) + channel;
@@ -104,8 +104,8 @@ __device__ __forceinline__ void publish_conv_history(const Planes& planes, std::
         h1 = record[static_cast<std::int64_t>(i1) * kConvChannels];
         h2 = record[static_cast<std::int64_t>(i2) * kConvChannels];
     }
-    history[0] = h0;
-    history[kConvChannels] = h1;
+    history[0]                   = h0;
+    history[kConvChannels]       = h1;
     history[2LL * kConvChannels] = h2;
 }
 
@@ -117,23 +117,23 @@ __device__ __forceinline__ void publish_conv_history(const Planes& planes, std::
 template <int Tiles = 1, class Sync>
 __device__ __forceinline__ void fold_item(const Planes& planes, std::int32_t layer, const Row& row,
                                           float* recurrent_layer, hip_bfloat16* conv_layer,
-                                          std::int32_t value_head, std::int32_t state_tile,
-                                          int tid, bool active, float* key, float* reduction,
-                                          Sync&& sync) {
+                                          std::int32_t value_head, std::int32_t state_tile, int tid,
+                                          bool active, float* key, float* reduction, Sync&& sync) {
     constexpr std::int32_t kGroup = kValueHeads / kQkHeads;
-    const int lane = tid % kWaveSize;
-    const int sublane = lane % kThreadsPerValue;
-    const auto value_row = [&](int tile) {
+    const int lane                = tid % kWaveSize;
+    const int sublane             = lane % kThreadsPerValue;
+    const auto value_row          = [&](int tile) {
         return (state_tile + tile) * kValuesPerItem + tid / kThreadsPerValue;
     };
-    constexpr std::int64_t kSlotStride = static_cast<std::int64_t>(kValueHeads) * kStateDim * kStateDim;
+    constexpr std::int64_t kSlotStride =
+        static_cast<std::int64_t>(kValueHeads) * kStateDim * kStateDim;
     float* recurrent = recurrent_layer + static_cast<std::int64_t>(row.slot) * kSlotStride +
                        static_cast<std::int64_t>(value_head) * kStateDim * kStateDim;
     float lane_state[Tiles][kKeysPerLane];
     if (active) {
-#pragma unroll
+#    pragma unroll
         for (int tile = 0; tile < Tiles; ++tile)
-#pragma unroll
+#    pragma unroll
             for (int item = 0; item < kKeysPerLane; ++item)
                 lane_state[tile][item] =
                     recurrent[value_row(tile) * kStateDim + sublane + item * kThreadsPerValue];
@@ -156,21 +156,22 @@ __device__ __forceinline__ void fold_item(const Planes& planes, std::int32_t lay
         sync();
         if (active) {
             const std::int64_t pair = (column * kValueHeads + value_head) * 2;
-            const float g = planes.gate[pair];
-            const float beta = planes.gate[pair + 1];
-            const float alpha = expf(g);
-#pragma unroll
+            const float g           = planes.gate[pair];
+            const float beta        = planes.gate[pair + 1];
+            const float alpha       = expf(g);
+#    pragma unroll
             for (int tile = 0; tile < Tiles; ++tile) {
                 const float value = static_cast<float>(
-                    planes.value[(column * kValueHeads + value_head) * kStateDim + value_row(tile)]);
+                    planes
+                        .value[(column * kValueHeads + value_head) * kStateDim + value_row(tile)]);
                 float state_key = 0.0F;
-#pragma unroll
+#    pragma unroll
                 for (int item = 0; item < kKeysPerLane; ++item)
                     state_key = fmaf(lane_state[tile][item], key[sublane + item * kThreadsPerValue],
                                      state_key);
-                state_key = group_sum(state_key);
+                state_key         = group_sum(state_key);
                 const float delta = beta * (value - alpha * state_key);
-#pragma unroll
+#    pragma unroll
                 for (int item = 0; item < kKeysPerLane; ++item)
                     lane_state[tile][item] = fmaf(delta, key[sublane + item * kThreadsPerValue],
                                                   alpha * lane_state[tile][item]);
@@ -179,9 +180,9 @@ __device__ __forceinline__ void fold_item(const Planes& planes, std::int32_t lay
         sync();
     }
     if (!active) return;
-#pragma unroll
+#    pragma unroll
     for (int tile = 0; tile < Tiles; ++tile) {
-#pragma unroll
+#    pragma unroll
         for (int item = 0; item < kKeysPerLane; ++item)
             recurrent[value_row(tile) * kStateDim + sublane + item * kThreadsPerValue] =
                 lane_state[tile][item];
@@ -202,18 +203,18 @@ struct DeferredRow {
 // One layer's deferred fold for `batch` device rows.
 struct LayerArgs {
     Planes planes{};
-    std::int32_t layer = 0;
-    float* recurrent_layer = nullptr;
+    std::int32_t layer       = 0;
+    float* recurrent_layer   = nullptr;
     hip_bfloat16* conv_layer = nullptr;
-    const DeferredRow* rows = nullptr;
-    std::int32_t batch = 0;
+    const DeferredRow* rows  = nullptr;
+    std::int32_t batch       = 0;
 };
 
 // CTAs of `threads` threads folding a layer with `tiles` state tiles per 128-thread item: per
 // row, ceil(items / (threads / 128)) CTAs.
 constexpr std::uint32_t layer_ctas_per_row(std::uint32_t threads, std::uint32_t tiles = 1U) {
     const std::uint32_t items_per_cta = threads / kItemThreads;
-    const std::uint32_t items = kItemsPerLayerRow / tiles;
+    const std::uint32_t items         = kItemsPerLayerRow / tiles;
     return (items + items_per_cta - 1U) / items_per_cta;
 }
 
@@ -221,22 +222,22 @@ constexpr std::uint32_t layer_ctas_per_row(std::uint32_t threads, std::uint32_t 
 // CTA `cta` of the layer fold grid (rows-major) run on CTA context `context` of `Threads`
 // threads (persistent_cta.h), LDS key/reduction arrays of Threads/128 items.
 template <std::uint32_t Threads, int Tiles = 1, class Context>
-__device__ __forceinline__ void fold_layer_cta(const Context& context, const LayerArgs& args,
-                                               std::uint32_t cta,
-                                               float (&key)[Threads / kItemThreads][kStateDim],
-                                               float (&reduction)[Threads / kItemThreads][kStateDim]) {
+__device__ __forceinline__ void
+fold_layer_cta(const Context& context, const LayerArgs& args, std::uint32_t cta,
+               float (&key)[Threads / kItemThreads][kStateDim],
+               float (&reduction)[Threads / kItemThreads][kStateDim]) {
     static_assert(kStateTiles % Tiles == 0);
-    constexpr std::uint32_t kItems = Threads / kItemThreads;
+    constexpr std::uint32_t kItems      = Threads / kItemThreads;
     constexpr std::uint32_t kCtasPerRow = layer_ctas_per_row(Threads, Tiles);
-    constexpr std::uint32_t kRowItems = kItemsPerLayerRow / Tiles;
-    constexpr std::int32_t kHeadItems = kStateTiles / Tiles;
-    const std::uint32_t batch = cta / kCtasPerRow;
-    const DeferredRow source = args.rows[batch];
-    if (source.columns <= 0) return;  // CTA-uniform
+    constexpr std::uint32_t kRowItems   = kItemsPerLayerRow / Tiles;
+    constexpr std::int32_t kHeadItems   = kStateTiles / Tiles;
+    const std::uint32_t batch           = cta / kCtasPerRow;
+    const DeferredRow source            = args.rows[batch];
+    if (source.columns <= 0) return; // CTA-uniform
     const Row row{.record_row = source.record_row, .slot = source.slot, .columns = source.columns};
-    const std::uint32_t sub = context.thread() / kItemThreads;
-    const std::uint32_t item = (cta % kCtasPerRow) * kItems + sub;
-    const bool active = item < kRowItems;
+    const std::uint32_t sub       = context.thread() / kItemThreads;
+    const std::uint32_t item      = (cta % kCtasPerRow) * kItems + sub;
+    const bool active             = item < kRowItems;
     const std::int32_t value_head = active ? static_cast<std::int32_t>(item) / kHeadItems : 0;
     const std::int32_t state_tile =
         active ? static_cast<std::int32_t>(item) % kHeadItems * Tiles : 0;

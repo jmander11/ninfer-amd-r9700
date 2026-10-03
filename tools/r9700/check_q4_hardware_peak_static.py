@@ -18,7 +18,7 @@ def function(text: str, needle: str) -> tuple[str, str]:
         raise ValueError(f"{needle}: expected one exact function body, found {len(selected)}")
     index = selected[0]
     end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-    return matches[index].group(1), text[matches[index].start():end]
+    return matches[index].group(1), text[matches[index].start() : end]
 
 
 def integer(body: str, pattern: str, name: str) -> int:
@@ -28,8 +28,9 @@ def integer(body: str, pattern: str, name: str) -> int:
     return int(values[0])
 
 
-def resources(body: str, *, vgpr_ceiling: int, occupancy_floor: int,
-              lds_ceiling: int = 0) -> dict[str, int]:
+def resources(
+    body: str, *, vgpr_ceiling: int, occupancy_floor: int, lds_ceiling: int = 0
+) -> dict[str, int]:
     private = integer(body, r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)", "private")
     scratch = integer(body, r"^;\s*ScratchSize:\s*(\d+)", "scratch")
     flat = integer(body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)", "flat scratch")
@@ -37,7 +38,9 @@ def resources(body: str, *, vgpr_ceiling: int, occupancy_floor: int,
     occupancy = integer(body, r"^;\s*Occupancy:\s*(\d+)", "occupancy")
     lds = integer(body, r"^;\s*LDSByteSize:\s*(\d+)", "LDS")
     if private or scratch or flat:
-        raise ValueError(f"scratch/private storage forbidden: private={private} scratch={scratch} flat={flat}")
+        raise ValueError(
+            f"scratch/private storage forbidden: private={private} scratch={scratch} flat={flat}"
+        )
     if vgpr > vgpr_ceiling:
         raise ValueError(f"VGPR count {vgpr} exceeds ceiling {vgpr_ceiling}")
     if occupancy < occupancy_floor:
@@ -50,34 +53,44 @@ def resources(body: str, *, vgpr_ceiling: int, occupancy_floor: int,
 def wmma_lines(body: str, opcode: str, label: str) -> list[str]:
     lines = re.findall(rf"^\s*{re.escape(opcode)}[^\n]*$", body, re.MULTILINE)
     if len(lines) != 8:
-        raise ValueError(f"{label} must contain exactly eight static instructions, got {len(lines)}")
+        raise ValueError(
+            f"{label} must contain exactly eight static instructions, got {len(lines)}"
+        )
     if any("neg_lo:[1,1,0]" not in line for line in lines):
         raise ValueError(f"every {label} instruction must be signed/signed and unclamped")
-    if re.search(rf"^\s*v_wmma_(?!{re.escape(opcode.removeprefix('v_wmma_'))})", body,
-                 re.MULTILINE):
+    if re.search(
+        rf"^\s*v_wmma_(?!{re.escape(opcode.removeprefix('v_wmma_'))})", body, re.MULTILINE
+    ):
         raise ValueError(f"{label} contains another WMMA opcode")
     return lines
 
 
-def wmma_register_topology(lines: list[str], expected_destinations: int,
-                           expected_reuses: int, label: str) -> dict[str, object]:
+def wmma_register_topology(
+    lines: list[str], expected_destinations: int, expected_reuses: int, label: str
+) -> dict[str, object]:
     parsed = []
     for line in lines:
-        match = re.search(r"(v\[\d+:\d+\]),\s*(v\[\d+:\d+\]),\s*"
-                          r"(v\[\d+:\d+\]),\s*(v\[\d+:\d+\])", line)
+        match = re.search(
+            r"(v\[\d+:\d+\]),\s*(v\[\d+:\d+\]),\s*"
+            r"(v\[\d+:\d+\]),\s*(v\[\d+:\d+\])",
+            line,
+        )
         if match is None or match.group(1) != match.group(4):
             raise ValueError(f"{label} must update each accumulator in place")
         parsed.append(match.groups())
     destination_counts = collections.Counter(item[0] for item in parsed)
     if len(destination_counts) != expected_destinations or set(destination_counts.values()) != {
-            expected_reuses}:
+        expected_reuses
+    }:
         raise ValueError(f"{label} dependency topology mismatch: {dict(destination_counts)}")
     operand_pairs = {(item[1], item[2]) for item in parsed}
     if len(operand_pairs) != 1:
         raise ValueError(f"{label} must reuse one register-resident operand pair")
-    return {"accumulator_chains": len(destination_counts),
-            "instructions_per_chain": expected_reuses,
-            "operand_register_pairs": len(operand_pairs)}
+    return {
+        "accumulator_chains": len(destination_counts),
+        "instructions_per_chain": expected_reuses,
+        "operand_register_pairs": len(operand_pairs),
+    }
 
 
 def check(path: Path) -> dict[str, object]:
@@ -87,10 +100,10 @@ def check(path: Path) -> dict[str, object]:
     iu8_saturation_symbol, iu8_saturation = function(text, "iu8_saturation_peak_kernel")
     stream_symbol, stream = function(text, "q4_code_scale_stream_kernel")
     iu4_lines = wmma_lines(iu4, "v_wmma_i32_16x16x32_iu4", "IU4 saturation peak")
-    iu8_topology_lines = wmma_lines(
-        iu8_topology, "v_wmma_i32_16x16x16_iu8", "IU8 topology peak")
+    iu8_topology_lines = wmma_lines(iu8_topology, "v_wmma_i32_16x16x16_iu8", "IU8 topology peak")
     iu8_saturation_lines = wmma_lines(
-        iu8_saturation, "v_wmma_i32_16x16x16_iu8", "IU8 saturation peak")
+        iu8_saturation, "v_wmma_i32_16x16x16_iu8", "IU8 saturation peak"
+    )
     if len(re.findall(r"^\s*global_load_b128\b", stream, re.MULTILINE)) != 2:
         raise ValueError("Q4 stream must contain exactly code and scale b128 load sites")
     if len(re.findall(r"^\s*global_store_b128\b", stream, re.MULTILINE)) != 1:
@@ -108,9 +121,11 @@ def check(path: Path) -> dict[str, object]:
         "iu8_topology_opcode_count": len(iu8_topology_lines),
         "iu8_saturation_opcode_count": len(iu8_saturation_lines),
         "iu8_topology_dependency": wmma_register_topology(
-            iu8_topology_lines, 2, 4, "IU8 topology peak"),
+            iu8_topology_lines, 2, 4, "IU8 topology peak"
+        ),
         "iu8_saturation_dependency": wmma_register_topology(
-            iu8_saturation_lines, 8, 1, "IU8 saturation peak"),
+            iu8_saturation_lines, 8, 1, "IU8 saturation peak"
+        ),
         "iu4": resources(iu4, vgpr_ceiling=128, occupancy_floor=10),
         "iu8_topology": resources(iu8_topology, vgpr_ceiling=128, occupancy_floor=10),
         "iu8_saturation": resources(iu8_saturation, vgpr_ceiling=128, occupancy_floor=10),

@@ -33,8 +33,7 @@ RECIPE_ID = "r9700-w8g32-bf16-gdn-query-key-eval-v0"
 
 def _is_promoted(spec: TensorSpec) -> bool:
     return any(
-        spec.name == f"text/layers/{layer}/gdn/query_key"
-        for layer in source_inventory.GDN_LAYERS
+        spec.name == f"text/layers/{layer}/gdn/query_key" for layer in source_inventory.GDN_LAYERS
     )
 
 
@@ -90,8 +89,7 @@ def validate_inventory() -> None:
     expected_counts = {BF16: 630, FP32: 96, I32: 1, W8: 391}
     if FORMAT_COUNTS != expected_counts:
         raise ValueError(
-            "W8/BF16-GDN-QK format counts differ: "
-            f"expected {expected_counts}, got {FORMAT_COUNTS}"
+            f"W8/BF16-GDN-QK format counts differ: expected {expected_counts}, got {FORMAT_COUNTS}"
         )
     expected_bytes = {
         BF16: 2_071_912_928,
@@ -108,11 +106,11 @@ def validate_inventory() -> None:
     promoted = tuple(spec for spec in TENSOR_SPECS if _is_promoted(spec))
     if len(promoted) != 48 or any(spec.format != BF16 for spec in promoted):
         raise ValueError("W8/BF16-GDN-QK promoted role family changed")
-    for source, candidate in zip(
-        source_inventory.TENSOR_SPECS, TENSOR_SPECS, strict=True
-    ):
-        expected = BF16 if _is_promoted(source) else (
-            source.format if source.format in DIRECT_FORMATS else W8
+    for source, candidate in zip(source_inventory.TENSOR_SPECS, TENSOR_SPECS, strict=True):
+        expected = (
+            BF16
+            if _is_promoted(source)
+            else (source.format if source.format in DIRECT_FORMATS else W8)
         )
         if candidate.format != expected:
             raise ValueError(f"W8/BF16-GDN-QK format mismatch for {candidate.name}")

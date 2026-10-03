@@ -125,33 +125,33 @@ Weight row_scaled_weight(const MaterializedArtifact& materialized, ObjectHandle 
     const auto* bytes = static_cast<const std::byte*>(materialized.device_data(handle));
 
     Weight out{};
-    out.payload          = bytes;
-    out.payload_bytes    = geometry.encoded_bytes;
-    out.qtype            = qtype_for(format);
-    out.layout           = QuantLayout::RowScaled;
-    out.qdata            = bytes;
-    out.qdata_bytes      = geometry.code_plane_bytes;
-    out.scales           = bytes + geometry.scale_plane_offset;
-    out.scale_bytes      = geometry.scale_plane_bytes;
-    out.n                = rows;
-    out.k                = columns;
-    out.scale_dtype      = DType::FP32;
-    out.scale_ne[0]      = rows;
-    out.scale_nb[0]      = sizeof(float);
-    out.ndim             = 2;
-    out.shape[0]         = rows;
-    out.shape[1]         = columns;
-    out.padded_shape[0]  = rows;
-    out.padded_shape[1]  = static_cast<std::int32_t>(geometry.padded_columns);
+    out.payload         = bytes;
+    out.payload_bytes   = geometry.encoded_bytes;
+    out.qtype           = qtype_for(format);
+    out.layout          = QuantLayout::RowScaled;
+    out.qdata           = bytes;
+    out.qdata_bytes     = geometry.code_plane_bytes;
+    out.scales          = bytes + geometry.scale_plane_offset;
+    out.scale_bytes     = geometry.scale_plane_bytes;
+    out.n               = rows;
+    out.k               = columns;
+    out.scale_dtype     = DType::FP32;
+    out.scale_ne[0]     = rows;
+    out.scale_nb[0]     = sizeof(float);
+    out.ndim            = 2;
+    out.shape[0]        = rows;
+    out.shape[1]        = columns;
+    out.padded_shape[0] = rows;
+    out.padded_shape[1] = static_cast<std::int32_t>(geometry.padded_columns);
     return out;
 }
 
 // Codes in qdata, group codes in qhigh, FP32 row multipliers in scales.
 Weight r9700_fp8lut4_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
-                           std::int32_t rows, std::int32_t columns) {
+                            std::int32_t rows, std::int32_t columns) {
     const std::array<std::uint64_t, 2> shape = {static_cast<std::uint64_t>(rows),
                                                 static_cast<std::uint64_t>(columns)};
-    const CodebookGeometry geometry = r9700_fp8lut4_geometry(shape);
+    const CodebookGeometry geometry          = r9700_fp8lut4_geometry(shape);
     const auto* bytes = static_cast<const std::byte*>(materialized.device_data(handle));
     Weight out{};
     out.payload          = bytes;
@@ -183,15 +183,25 @@ Weight r9700_q4_n16k16_weight(const MaterializedArtifact& materialized, ObjectHa
                               std::int32_t rows, std::int32_t columns) {
     const std::array<std::uint64_t, 2> shape = {static_cast<std::uint64_t>(rows),
                                                 static_cast<std::uint64_t>(columns)};
-    const RowSplitGeometry geometry = r9700_q4g64_n16k16_geometry(shape);
+    const RowSplitGeometry geometry          = r9700_q4g64_n16k16_geometry(shape);
     const auto* bytes = static_cast<const std::byte*>(materialized.device_data(handle));
     Weight out{};
-    out.payload = bytes; out.payload_bytes = geometry.encoded_bytes;
-    out.qtype = QType::Q4G64_F16S; out.layout = QuantLayout::Q4N16K16;
-    out.group_size = 64; out.qdata = bytes; out.qdata_bytes = geometry.low_plane_bytes;
-    out.scales = bytes + geometry.scale_plane_offset; out.scale_bytes = geometry.scale_plane_bytes;
-    out.n = rows; out.k = columns; out.group = 64; out.scale_dtype = DType::FP16;
-    out.ndim = 2; out.shape[0] = rows; out.shape[1] = columns;
+    out.payload         = bytes;
+    out.payload_bytes   = geometry.encoded_bytes;
+    out.qtype           = QType::Q4G64_F16S;
+    out.layout          = QuantLayout::Q4N16K16;
+    out.group_size      = 64;
+    out.qdata           = bytes;
+    out.qdata_bytes     = geometry.low_plane_bytes;
+    out.scales          = bytes + geometry.scale_plane_offset;
+    out.scale_bytes     = geometry.scale_plane_bytes;
+    out.n               = rows;
+    out.k               = columns;
+    out.group           = 64;
+    out.scale_dtype     = DType::FP16;
+    out.ndim            = 2;
+    out.shape[0]        = rows;
+    out.shape[1]        = columns;
     out.padded_shape[0] = rows;
     out.padded_shape[1] = static_cast<std::int32_t>(geometry.padded_columns);
     return out;
@@ -238,17 +248,18 @@ Tensor materialized_tensor(const MaterializedArtifact& materialized, ObjectHandl
 
 Weight materialized_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
                            NumericFormat format, std::int32_t rows, std::int32_t columns) {
-    return materialized_weight(materialized, handle, format, rows, columns, storage_layout_for(format));
+    return materialized_weight(materialized, handle, format, rows, columns,
+                               storage_layout_for(format));
 }
 
 Weight materialized_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
                            NumericFormat format, std::int32_t rows, std::int32_t columns,
                            StorageLayout layout) {
-    const std::array<std::uint64_t,2> shape{static_cast<std::uint64_t>(rows),
-                                           static_cast<std::uint64_t>(columns)};
+    const std::array<std::uint64_t, 2> shape{static_cast<std::uint64_t>(rows),
+                                             static_cast<std::uint64_t>(columns)};
     (void)tensor_encoded_size(layout, format, shape);
     if (layout == StorageLayout::R9700W8G32N16K16V1) {
-        auto out = row_split_weight(materialized, handle, format, rows, columns);
+        auto out   = row_split_weight(materialized, handle, format, rows, columns);
         out.layout = QuantLayout::W8N16K16;
         return out;
     }

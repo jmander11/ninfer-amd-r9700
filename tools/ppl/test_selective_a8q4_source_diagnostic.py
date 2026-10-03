@@ -27,16 +27,12 @@ class SelectiveA8Q4SourceDiagnosticTest(unittest.TestCase):
         self.assertGreater(scales[1, 0].item(), 0.0)
 
     def test_grouped_formula_matches_independent_small_integer_oracle(self) -> None:
-        activation = torch.tensor(
-            [[1.0, -2.0] * 32, [-1.0, 3.0] * 32], dtype=torch.bfloat16
-        )
+        activation = torch.tensor([[1.0, -2.0] * 32, [-1.0, 3.0] * 32], dtype=torch.bfloat16)
         weight = torch.tensor(
             [[2.0, -1.0] * 32, [-2.0, 1.0] * 32, [1.0, 1.0] * 32],
             dtype=torch.bfloat16,
         )
-        codes, scales = diagnostic.quantize_weight_rows(
-            weight, "a8g64-q4g64-control", row_chunk=1
-        )
+        codes, scales = diagnostic.quantize_weight_rows(weight, "a8g64-q4g64-control", row_chunk=1)
         span = diagnostic.QuantizedRowSpan(0, 3, codes, scales)
         actual = diagnostic.represented_linear(activation, span, 64)
         acodes, ascales = diagnostic.quantize_activation(activation, 64)
@@ -53,15 +49,9 @@ class SelectiveA8Q4SourceDiagnosticTest(unittest.TestCase):
         self.assertTrue(torch.equal(actual, expected))
 
     def test_grouped_formula_accumulates_two_groups_before_one_bf16_cast(self) -> None:
-        activation = torch.tensor(
-            [[1.0, -2.0] * 64, [-1.0, 3.0] * 64], dtype=torch.bfloat16
-        )
-        weight = torch.tensor(
-            [[2.0, -1.0] * 64, [-2.0, 1.0] * 64], dtype=torch.bfloat16
-        )
-        codes, scales = diagnostic.quantize_weight_rows(
-            weight, "a8g64-q4g64-control", row_chunk=1
-        )
+        activation = torch.tensor([[1.0, -2.0] * 64, [-1.0, 3.0] * 64], dtype=torch.bfloat16)
+        weight = torch.tensor([[2.0, -1.0] * 64, [-2.0, 1.0] * 64], dtype=torch.bfloat16)
+        codes, scales = diagnostic.quantize_weight_rows(weight, "a8g64-q4g64-control", row_chunk=1)
         span = diagnostic.QuantizedRowSpan(0, 2, codes, scales)
         actual = diagnostic.represented_linear(activation, span, 64)
         acodes, ascales = diagnostic.quantize_activation(activation, 64)
@@ -71,8 +61,7 @@ class SelectiveA8Q4SourceDiagnosticTest(unittest.TestCase):
                 total = torch.tensor(0.0, dtype=torch.float32)
                 for group in range(2):
                     dot = sum(
-                        int(acodes[token, group, k]) * int(codes[row, group, k])
-                        for k in range(64)
+                        int(acodes[token, group, k]) * int(codes[row, group, k]) for k in range(64)
                     )
                     factor = torch.tensor(
                         float(ascales[token, group]) * float(scales[row, group]),
@@ -96,7 +85,8 @@ class SelectiveA8Q4SourceDiagnosticTest(unittest.TestCase):
         weight = torch.ones((3, 64), dtype=torch.bfloat16)
         codes, scales = diagnostic.quantize_weight_rows(weight[1:], checkpoint.profile)
         checkpoint.bindings[id(weight)] = (
-            weight, (diagnostic.QuantizedRowSpan(1, 3, codes, scales),)
+            weight,
+            (diagnostic.QuantizedRowSpan(1, 3, codes, scales),),
         )
         original = backend._linear
         with diagnostic.ScopedLinearDispatcher(backend, checkpoint):

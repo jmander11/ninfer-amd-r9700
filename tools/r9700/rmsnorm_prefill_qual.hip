@@ -24,7 +24,7 @@
 namespace {
 
 constexpr std::uint32_t kFeatures = 5120;
-constexpr float kModelEps = 1.0e-6F;
+constexpr float kModelEps         = 1.0e-6F;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
@@ -43,13 +43,17 @@ public:
     explicit DeviceBuffer(std::size_t count) : count_(count) {
         HIP_CHECK(hipMalloc(&data_, count * sizeof(T)));
     }
-    DeviceBuffer(const DeviceBuffer&) = delete;
+
+    DeviceBuffer(const DeviceBuffer&)            = delete;
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
     ~DeviceBuffer() { (void)hipFree(data_); }
+
     [[nodiscard]] T* get() const noexcept { return data_; }
+
     [[nodiscard]] std::size_t size() const noexcept { return count_; }
 private:
-    T* data_ = nullptr;
+    T* data_           = nullptr;
     std::size_t count_ = 0;
 };
 
@@ -73,7 +77,7 @@ std::vector<hip_bfloat16> fixture(std::size_t count, std::uint32_t seed, float d
     std::vector<hip_bfloat16> values(count);
     for (std::size_t index = 0; index < count; ++index) {
         const auto wave = static_cast<std::int32_t>((index * 37U + seed * 19U) % 509U) - 254;
-        values[index] = bf16(static_cast<float>(wave) / divisor);
+        values[index]   = bf16(static_cast<float>(wave) / divisor);
     }
     if (count >= 8U) {
         values[0] = bf16(0.0F);
@@ -118,12 +122,12 @@ void select_r9700() {
 }
 
 std::vector<double> fp64_oracle(const std::vector<hip_bfloat16>& input,
-                                const std::vector<hip_bfloat16>& weight,
-                                std::uint32_t rows, double eps, bool unit_offset) {
+                                const std::vector<hip_bfloat16>& weight, std::uint32_t rows,
+                                double eps, bool unit_offset) {
     std::vector<double> output(static_cast<std::size_t>(rows) * kFeatures);
     for (std::uint32_t row = 0; row < rows; ++row) {
         const std::size_t base = static_cast<std::size_t>(row) * kFeatures;
-        double sumsq = 0.0;
+        double sumsq           = 0.0;
         for (std::uint32_t feature = 0; feature < kFeatures; ++feature) {
             const double value = static_cast<float>(input[base + feature]);
             sumsq += value * value;
@@ -147,8 +151,7 @@ void require_exact(const std::vector<hip_bfloat16>& actual,
     }
 }
 
-void require_oracle(const std::vector<hip_bfloat16>& actual,
-                    const std::vector<double>& expected) {
+void require_oracle(const std::vector<hip_bfloat16>& actual, const std::vector<double>& expected) {
     for (std::size_t index = 0; index < actual.size(); ++index) {
         const double observed = static_cast<float>(actual[index]);
         const double absolute = std::abs(observed - expected[index]);
@@ -161,7 +164,7 @@ void require_oracle(const std::vector<hip_bfloat16>& actual,
 
 void qualify_numerical(hipStream_t stream) {
     constexpr std::uint32_t maximum_rows = 2048;
-    const auto input = fixture(static_cast<std::size_t>(maximum_rows) * kFeatures, 7U, 127.0F);
+    const auto input  = fixture(static_cast<std::size_t>(maximum_rows) * kFeatures, 7U, 127.0F);
     const auto weight = fixture(kFeatures, 11U, 509.0F);
     DeviceBuffer<hip_bfloat16> d_input(input.size());
     DeviceBuffer<hip_bfloat16> d_weight(weight.size());
@@ -169,27 +172,25 @@ void qualify_numerical(hipStream_t stream) {
     DeviceBuffer<hip_bfloat16> d_candidate(input.size());
     upload(d_input, input);
     upload(d_weight, weight);
-    constexpr std::array<std::uint32_t, 11> row_cases{
-        1, 2, 7, 8, 9, 16, 32, 64, 128, 512, 2048};
+    constexpr std::array<std::uint32_t, 11> row_cases{1, 2, 7, 8, 9, 16, 32, 64, 128, 512, 2048};
     for (const bool unit_offset : {false, true}) {
         for (const float eps : {kModelEps, 1.0e-8F, 1.0e-4F}) {
-        for (const std::uint32_t rows : row_cases) {
-            if (eps != kModelEps && rows > 128U) continue;
-            const std::size_t elements = static_cast<std::size_t>(rows) * kFeatures;
-            HIP_CHECK(ninfer::ops::r9700::eager::rmsnorm_incumbent_qualification(
-                d_input.get(), d_weight.get(), d_incumbent.get(), kFeatures, rows,
-                eps, unit_offset, stream));
-            HIP_CHECK(ninfer::ops::r9700::eager::rmsnorm_k5120_token8_qualification(
-                d_input.get(), d_weight.get(), d_candidate.get(), rows, eps,
-                unit_offset, stream));
-            HIP_CHECK(hipStreamSynchronize(stream));
-            const auto candidate = download(d_candidate, elements);
-            require_exact(candidate, download(d_incumbent, elements));
-            if (rows <= 128U || rows == maximum_rows) {
-                require_oracle(candidate, fp64_oracle(input, weight, rows, eps,
-                                                       unit_offset));
+            for (const std::uint32_t rows : row_cases) {
+                if (eps != kModelEps && rows > 128U) continue;
+                const std::size_t elements = static_cast<std::size_t>(rows) * kFeatures;
+                HIP_CHECK(ninfer::ops::r9700::eager::rmsnorm_incumbent_qualification(
+                    d_input.get(), d_weight.get(), d_incumbent.get(), kFeatures, rows, eps,
+                    unit_offset, stream));
+                HIP_CHECK(ninfer::ops::r9700::eager::rmsnorm_k5120_token8_qualification(
+                    d_input.get(), d_weight.get(), d_candidate.get(), rows, eps, unit_offset,
+                    stream));
+                HIP_CHECK(hipStreamSynchronize(stream));
+                const auto candidate = download(d_candidate, elements);
+                require_exact(candidate, download(d_incumbent, elements));
+                if (rows <= 128U || rows == maximum_rows) {
+                    require_oracle(candidate, fp64_oracle(input, weight, rows, eps, unit_offset));
+                }
             }
-        }
         }
     }
     if (ninfer::ops::r9700::eager::rmsnorm_k5120_token8_qualification(
@@ -205,7 +206,7 @@ void qualify_numerical(hipStream_t stream) {
 template <typename Launch>
 std::array<float, 9> time_samples(hipStream_t stream, Launch&& launch) {
     hipEvent_t start = nullptr;
-    hipEvent_t stop = nullptr;
+    hipEvent_t stop  = nullptr;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
     for (int warmup = 0; warmup < 3; ++warmup) HIP_CHECK(launch());
@@ -230,26 +231,33 @@ float median(std::array<float, 9> samples) {
 
 void benchmark(hipStream_t stream, const std::filesystem::path& output_path) {
     constexpr std::uint32_t maximum_rows = 8192;
-    const auto input = fixture(static_cast<std::size_t>(maximum_rows) * kFeatures, 101U, 127.0F);
+    const auto input  = fixture(static_cast<std::size_t>(maximum_rows) * kFeatures, 101U, 127.0F);
     const auto weight = fixture(kFeatures, 103U, 509.0F);
     DeviceBuffer<hip_bfloat16> d_input(input.size());
     DeviceBuffer<hip_bfloat16> d_weight(weight.size());
     DeviceBuffer<hip_bfloat16> d_output(input.size());
     upload(d_input, input);
     upload(d_weight, weight);
-    struct Row { std::uint32_t tokens; bool unit_offset; float incumbent; float candidate; };
+
+    struct Row {
+        std::uint32_t tokens;
+        bool unit_offset;
+        float incumbent;
+        float candidate;
+    };
+
     std::vector<Row> rows_out;
     for (const bool unit_offset : {false, true}) {
         for (const std::uint32_t rows : {64U, 128U, 512U, 2048U, 8192U}) {
             const auto incumbent = time_samples(stream, [&] {
                 return ninfer::ops::r9700::eager::rmsnorm_incumbent_qualification(
-                    d_input.get(), d_weight.get(), d_output.get(), kFeatures, rows,
-                    kModelEps, unit_offset, stream);
+                    d_input.get(), d_weight.get(), d_output.get(), kFeatures, rows, kModelEps,
+                    unit_offset, stream);
             });
             const auto candidate = time_samples(stream, [&] {
                 return ninfer::ops::r9700::eager::rmsnorm_k5120_token8_qualification(
-                    d_input.get(), d_weight.get(), d_output.get(), rows, kModelEps,
-                    unit_offset, stream);
+                    d_input.get(), d_weight.get(), d_output.get(), rows, kModelEps, unit_offset,
+                    stream);
             });
             rows_out.push_back({rows, unit_offset, median(incumbent), median(candidate)});
         }
@@ -271,21 +279,21 @@ void benchmark(hipStream_t stream, const std::filesystem::path& output_path) {
         << "  \"rows\": [\n";
     for (std::size_t index = 0; index < rows_out.size(); ++index) {
         const Row& row = rows_out[index];
-        out << "    {\"tokens\": " << row.tokens << ", \"unit_offset\": "
-            << (row.unit_offset ? "true" : "false") << ", \"incumbent_ms\": "
-            << row.incumbent << ", \"candidate_ms\": " << row.candidate
+        out << "    {\"tokens\": " << row.tokens
+            << ", \"unit_offset\": " << (row.unit_offset ? "true" : "false")
+            << ", \"incumbent_ms\": " << row.incumbent << ", \"candidate_ms\": " << row.candidate
             << ", \"speedup\": " << row.incumbent / row.candidate << "}"
             << (index + 1U == rows_out.size() ? "\n" : ",\n");
     }
     out << "  ]\n}\n";
     const std::string payload = out.str();
-    const int descriptor = ::open(output_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
-                                  0644);
+    const int descriptor =
+        ::open(output_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
     if (descriptor < 0) fail("refusing to overwrite or could not create benchmark report");
     std::size_t written = 0;
     while (written < payload.size()) {
-        const ssize_t count = ::write(descriptor, payload.data() + written,
-                                      payload.size() - written);
+        const ssize_t count =
+            ::write(descriptor, payload.data() + written, payload.size() - written);
         if (count <= 0) {
             (void)::close(descriptor);
             fail("could not finish benchmark report");
@@ -304,7 +312,7 @@ int main(int argc, char** argv) {
         if (argc == 4 && std::string_view(argv[1]) == "--benchmark" &&
             std::string_view(argv[2]) == "--out-json") {
             run_benchmark = true;
-            output_path = argv[3];
+            output_path   = argv[3];
         } else if (argc != 1) {
             fail("usage: rmsnorm_prefill_qual [--benchmark --out-json PATH]");
         }

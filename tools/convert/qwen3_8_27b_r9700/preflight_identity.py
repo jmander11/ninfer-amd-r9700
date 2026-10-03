@@ -34,9 +34,12 @@ def source_checkpoint(model_dir: Path) -> dict[str, object]:
     value = json.loads(index.read_text(encoding="utf-8"))
     weight_map = bf16_protocol.validate_checkpoint_files(model)
     total_tensor_bytes = value.get("metadata", {}).get("total_size")
-    if (isinstance(total_tensor_bytes, bool) or not isinstance(total_tensor_bytes, (int, float))
-            or not float(total_tensor_bytes).is_integer()
-            or int(total_tensor_bytes) != bf16_protocol.SOURCE_TOTAL_BYTES):
+    if (
+        isinstance(total_tensor_bytes, bool)
+        or not isinstance(total_tensor_bytes, (int, float))
+        or not float(total_tensor_bytes).is_integer()
+        or int(total_tensor_bytes) != bf16_protocol.SOURCE_TOTAL_BYTES
+    ):
         raise ValueError("source index has invalid exact tensor byte count")
     names = tuple(sorted(set(weight_map.values())))
     if names != SOURCE_SHARDS:
@@ -57,7 +60,8 @@ def source_checkpoint(model_dir: Path) -> dict[str, object]:
         "shard_total_file_bytes": sum(row["bytes"] for row in shards),
         "shard_payload_sha256": None,
         "shard_payload_hash_policy": (
-            "not computed: exact names and nonempty regular files are the target-owned contract"),
+            "not computed: exact names and nonempty regular files are the target-owned contract"
+        ),
     }
 
 
@@ -67,18 +71,23 @@ def frontend_resources(resources: Iterable[object]) -> list[dict[str, object]]:
         name, data = resource.name, resource.data
         if not isinstance(name, str) or not isinstance(data, bytes):
             raise ValueError("frontend resource preflight is malformed")
-        rows.append({"name": name, "bytes": len(data),
-                     "sha256": hashlib.sha256(data).hexdigest()})
+        rows.append({"name": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
     if len(rows) != 6 or len({row["name"] for row in rows}) != 6:
         raise ValueError("converter preflight requires exactly six frontend resources")
     return rows
 
 
 def object_plan_sha256(objects: Iterable[object]) -> str:
-    encoded = json.dumps([obj.to_json() for obj in objects], sort_keys=True,
-                         separators=(",", ":")).encode()
+    encoded = json.dumps(
+        [obj.to_json() for obj in objects], sort_keys=True, separators=(",", ":")
+    ).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
-__all__ = ["SOURCE_SHARDS", "SOURCE_TENSORS", "frontend_resources",
-           "object_plan_sha256", "source_checkpoint"]
+__all__ = [
+    "SOURCE_SHARDS",
+    "SOURCE_TENSORS",
+    "frontend_resources",
+    "object_plan_sha256",
+    "source_checkpoint",
+]

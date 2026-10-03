@@ -16,8 +16,10 @@ class SelectiveQ4G128MseQualityTest(unittest.TestCase):
         self.assertTrue(all(spec.name.startswith("text/layers/") for spec in specs))
         self.assertFalse(any(spec.name.startswith("mtp/") for spec in specs))
         self.assertEqual(
-            {role: sum(screen._role(spec.name) == role for spec in specs)
-             for role in screen.ROLE_SHAPES_AND_COUNTS},
+            {
+                role: sum(screen._role(spec.name) == role for spec in specs)
+                for role in screen.ROLE_SHAPES_AND_COUNTS
+            },
             {"gdn_output": 48, "gdn_value_z": 48, "mlp_down": 64},
         )
 

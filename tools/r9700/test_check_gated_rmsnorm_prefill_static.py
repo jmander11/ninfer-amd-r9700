@@ -8,9 +8,16 @@ from tools.r9700.check_gated_rmsnorm_prefill_static import check
 SYMBOL = "_ZN6ninfer3ops5r97005eager12_GLOBAL__N_142gated_rmsnorm_k6144_token8_kernelEv"
 
 
-def fixture(*, vgprs: int = 48, occupancy: int = 16, vector_load: bool = True,
-            scratch: int = 0, lds: int = 0, maximum_workgroup: int = 256,
-            barrier: bool = False) -> str:
+def fixture(
+    *,
+    vgprs: int = 48,
+    occupancy: int = 16,
+    vector_load: bool = True,
+    scratch: int = 0,
+    lds: int = 0,
+    maximum_workgroup: int = 256,
+    barrier: bool = False,
+) -> str:
     load = "  global_load_b128 v[0:3], v0, off\n" if vector_load else ""
     barrier_op = "  s_barrier\n" if barrier else ""
     return f"""\t.globl {SYMBOL} ; -- Begin function {SYMBOL}

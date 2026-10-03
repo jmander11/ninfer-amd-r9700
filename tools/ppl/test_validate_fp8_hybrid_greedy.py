@@ -62,9 +62,7 @@ class HybridGreedyDiagnosticTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "sidecar hashes differ"):
                 validator._candidate_sidecars(cell)
             cell["argmax_sha256"] = run.file_sha256(path.with_suffix(".argmaxi32"))
-            path.with_suffix(".argmaxi32").write_bytes(
-                struct.pack("<i", run.TOKEN_DOMAIN)
-            )
+            path.with_suffix(".argmaxi32").write_bytes(struct.pack("<i", run.TOKEN_DOMAIN))
             cell["argmax_sha256"] = run.file_sha256(path.with_suffix(".argmaxi32"))
             with self.assertRaisesRegex(SystemExit, "in-domain"):
                 validator._candidate_sidecars(cell)

@@ -14,8 +14,7 @@ std::uint64_t PromptEmbeddingStaging::capacity_bytes(QType qtype, std::int32_t f
 }
 
 PromptEmbeddingStaging::PromptEmbeddingStaging(DeviceContext& device, const Weight& table,
-                                               DeviceSpan device_image,
-                                               std::int32_t capacity_ids)
+                                               DeviceSpan device_image, std::int32_t capacity_ids)
     : device_(device), table_(table), device_image_(device_image), capacity_ids_(capacity_ids),
       host_image_(static_cast<std::size_t>(
           capacity_bytes(table.qtype, table.ndim == 2 ? table.shape[1] : 0, capacity_ids))) {
@@ -57,16 +56,16 @@ void PromptEmbeddingStaging::stage(std::span<const std::int32_t> window) {
     staged_ids_.assign(window.begin(), window.end());
 }
 
-PromptEmbeddingStaging::Lease PromptEmbeddingStaging::acquire(
-    std::span<const std::int32_t> window) {
+PromptEmbeddingStaging::Lease
+PromptEmbeddingStaging::acquire(std::span<const std::int32_t> window) {
     if (leased_) { throw std::logic_error("prompt embedding staging is already leased"); }
     const bool resident = !window.empty() && window.size() <= staged_ids_.size() &&
                           std::equal(window.begin(), window.end(), staged_ids_.begin());
     if (!resident) { stage(window); }
     HIP_CHECK(hipStreamWaitEvent(device_.stream, copied_, 0));
     ops::StagedEmbedding view = ops::staged_embedding(stage_, table_, device_image_.data);
-    view.slots = view.slots.slice(0, 0, static_cast<std::int32_t>(window.size()));
-    leased_    = true;
+    view.slots                = view.slots.slice(0, 0, static_cast<std::int32_t>(window.size()));
+    leased_                   = true;
     return Lease(*this, view);
 }
 

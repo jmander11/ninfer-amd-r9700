@@ -91,14 +91,18 @@ def _read_sidecar(path: Path, code: str) -> list[float] | list[int]:
     return list(struct.unpack("<" + code * count, data))
 
 
-def _validated_sidecars(cell: dict[str, Any]) -> tuple[Path, list[float], list[int], dict[str, str]]:
+def _validated_sidecars(
+    cell: dict[str, Any],
+) -> tuple[Path, list[float], list[int], dict[str, str]]:
     cell_path = _cell_path(cell)
     if not cell_path.is_file():
         raise ValueError(f"missing retained cell report: {cell_path}")
     raw = _read_json(cell_path)
     for key, value in raw.items():
         if cell.get(key) != value:
-            raise ValueError(f"retained cell report disagrees with campaign field {key}: {cell_path}")
+            raise ValueError(
+                f"retained cell report disagrees with campaign field {key}: {cell_path}"
+            )
     nll_path = cell_path.with_suffix(".nllf32")
     argmax_path = cell_path.with_suffix(".argmaxi32")
     if not nll_path.is_file() or not argmax_path.is_file():
@@ -170,7 +174,9 @@ def _validate_cell_contract(
             "source_text_tensor_count": "text_tensor_count",
             "source_shard_count": "shard_count",
         }
-        expected.update({cell_field: source.get(top_field) for cell_field, top_field in source_fields.items()})
+        expected.update(
+            {cell_field: source.get(top_field) for cell_field, top_field in source_fields.items()}
+        )
         expected["execution_provenance"] = campaign.get("reference_execution")
     else:
         artifact = campaign.get("candidate_artifact")
@@ -237,7 +243,9 @@ def _candidate_key(cell: dict[str, Any]) -> tuple[str, int]:
     return scheme, prompt_tokens
 
 
-def _candidate_cells(campaign: dict[str, Any], profile: str) -> dict[tuple[str, int], dict[str, Any]]:
+def _candidate_cells(
+    campaign: dict[str, Any], profile: str
+) -> dict[tuple[str, int], dict[str, Any]]:
     selected: dict[tuple[str, int], dict[str, Any]] = {}
     for cell in campaign["cells"]:
         if not isinstance(cell, dict) or cell.get("scheme") == "bf16-reference":
@@ -258,10 +266,15 @@ def _candidate_cells(campaign: dict[str, Any], profile: str) -> dict[tuple[str, 
             }
             if any(cell.get(name) != value for name, value in expected.items()):
                 raise ValueError(f"{key} does not report the exact S16/tau900 profile")
-        elif any(name in cell for name in (
-            "xattention_profile", "xattention_find_block", "xattention_stride",
-            "xattention_tau_permille",
-        )):
+        elif any(
+            name in cell
+            for name in (
+                "xattention_profile",
+                "xattention_find_block",
+                "xattention_stride",
+                "xattention_tau_permille",
+            )
+        ):
             raise ValueError(f"{key} dense report retains sparse-profile fields")
         selected[key] = cell
     expected_keys = {(profile, tokens) for profile in CANDIDATES for tokens in EXPECTED_LENGTHS}
@@ -287,12 +300,28 @@ def _reference_cells(campaign: dict[str, Any]) -> dict[int, dict[str, Any]]:
 
 def _aligned_workload(dense: dict[str, Any], sparse: dict[str, Any]) -> dict[str, Any]:
     keys = (
-        "scheme", "model_id", "weights_id", "kv_format", "kv_value_group",
-        "kv_plane_layouts", "q4_activation_bits", "w8_activation_bits",
-        "split512_enabled", "decode_attention_profile", "packed_decode_min_context",
-        "split512_min_context", "schedule", "spec", "draft_tokens",
-        "device_graph", "prefill_chunk", "skip_tokens", "prompt_tokens", "tokens_scored",
-        "argmax_tokens", "terrible_nll",
+        "scheme",
+        "model_id",
+        "weights_id",
+        "kv_format",
+        "kv_value_group",
+        "kv_plane_layouts",
+        "q4_activation_bits",
+        "w8_activation_bits",
+        "split512_enabled",
+        "decode_attention_profile",
+        "packed_decode_min_context",
+        "split512_min_context",
+        "schedule",
+        "spec",
+        "draft_tokens",
+        "device_graph",
+        "prefill_chunk",
+        "skip_tokens",
+        "prompt_tokens",
+        "tokens_scored",
+        "argmax_tokens",
+        "terrible_nll",
     )
     for key in keys:
         if dense.get(key) != sparse.get(key):
@@ -301,8 +330,11 @@ def _aligned_workload(dense: dict[str, Any], sparse: dict[str, Any]) -> dict[str
 
 
 def _route_stats(
-    dense_nll: list[float], sparse_nll: list[float], dense_argmax: list[int],
-    sparse_argmax: list[int], threshold: float,
+    dense_nll: list[float],
+    sparse_nll: list[float],
+    dense_argmax: list[int],
+    sparse_argmax: list[int],
+    threshold: float,
 ) -> dict[str, Any]:
     if not (len(dense_nll) == len(sparse_nll) == len(dense_argmax) == len(sparse_argmax)):
         raise ValueError("dense/XAttention sidecars lost position alignment")
@@ -310,7 +342,9 @@ def _route_stats(
     absolute = [abs(value) for value in deltas]
     dense_severe = {i for i, value in enumerate(dense_nll) if value >= threshold}
     sparse_severe = {i for i, value in enumerate(sparse_nll) if value >= threshold}
-    flips = [i for i, (dense, sparse) in enumerate(zip(dense_argmax, sparse_argmax)) if dense != sparse]
+    flips = [
+        i for i, (dense, sparse) in enumerate(zip(dense_argmax, sparse_argmax)) if dense != sparse
+    ]
     return {
         "comparison_kind": "xattention-minus-dense",
         "positions_compared": len(deltas),
@@ -351,7 +385,10 @@ def compare_campaigns(dense_path: Path, sparse_path: Path) -> dict[str, Any]:
     for tokens in EXPECTED_LENGTHS:
         dense_path_cell, _, _, dense_hashes = _validated_sidecars(dense_references[tokens])
         sparse_path_cell, _, _, sparse_hashes = _validated_sidecars(sparse_references[tokens])
-        if dense_hashes["nllf32"] != sparse_hashes["nllf32"] or dense_hashes["argmaxi32"] != sparse_hashes["argmaxi32"]:
+        if (
+            dense_hashes["nllf32"] != sparse_hashes["nllf32"]
+            or dense_hashes["argmaxi32"] != sparse_hashes["argmaxi32"]
+        ):
             raise ValueError(f"BF16 sidecars differ between campaigns at {tokens} tokens")
         reference_sources[str(tokens)] = {
             "dense_cell": str(dense_path_cell),
@@ -369,28 +406,36 @@ def compare_campaigns(dense_path: Path, sparse_path: Path) -> dict[str, Any]:
         sparse_cell = sparse_cells[key]
         workload = _aligned_workload(dense_cell, sparse_cell)
         dense_cell_path, dense_nll, dense_argmax, dense_hashes = _validated_sidecars(dense_cell)
-        sparse_cell_path, sparse_nll, sparse_argmax, sparse_hashes = _validated_sidecars(sparse_cell)
+        sparse_cell_path, sparse_nll, sparse_argmax, sparse_hashes = _validated_sidecars(
+            sparse_cell
+        )
         dense_seconds = float(dense_cell.get("score_seconds", float("nan")))
         sparse_seconds = float(sparse_cell.get("score_seconds", float("nan")))
-        if not math.isfinite(dense_seconds) or not math.isfinite(sparse_seconds) or min(dense_seconds, sparse_seconds) <= 0:
+        if (
+            not math.isfinite(dense_seconds)
+            or not math.isfinite(sparse_seconds)
+            or min(dense_seconds, sparse_seconds) <= 0
+        ):
             raise ValueError(f"{key} has invalid scorer timing")
-        comparisons.append({
-            "profile": key[0],
-            "prompt_tokens": key[1],
-            "workload": workload,
-            "dense_source": {"path": str(dense_cell_path), "sha256": dense_hashes},
-            "xattention_source": {"path": str(sparse_cell_path), "sha256": sparse_hashes},
-            "route_quality": _route_stats(
-                dense_nll, sparse_nll, dense_argmax, sparse_argmax, threshold
-            ),
-            "timing": {
-                "dense_score_seconds": dense_seconds,
-                "xattention_score_seconds": sparse_seconds,
-                "xattention_minus_dense_seconds": sparse_seconds - dense_seconds,
-                "dense_over_xattention_speedup": dense_seconds / sparse_seconds,
-                "scope": "teacher-forced-ppl-scorer-diagnostic-not-production-throughput",
-            },
-        })
+        comparisons.append(
+            {
+                "profile": key[0],
+                "prompt_tokens": key[1],
+                "workload": workload,
+                "dense_source": {"path": str(dense_cell_path), "sha256": dense_hashes},
+                "xattention_source": {"path": str(sparse_cell_path), "sha256": sparse_hashes},
+                "route_quality": _route_stats(
+                    dense_nll, sparse_nll, dense_argmax, sparse_argmax, threshold
+                ),
+                "timing": {
+                    "dense_score_seconds": dense_seconds,
+                    "xattention_score_seconds": sparse_seconds,
+                    "xattention_minus_dense_seconds": sparse_seconds - dense_seconds,
+                    "dense_over_xattention_speedup": dense_seconds / sparse_seconds,
+                    "scope": "teacher-forced-ppl-scorer-diagnostic-not-production-throughput",
+                },
+            }
+        )
 
     return {
         "artifact_type": OUTPUT_TYPE,
@@ -422,8 +467,12 @@ def main() -> int:
         raise SystemExit(str(error)) from error
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=args.out.parent, prefix=args.out.name + ".",
-        suffix=".tmp", delete=False,
+        mode="w",
+        encoding="utf-8",
+        dir=args.out.parent,
+        prefix=args.out.name + ".",
+        suffix=".tmp",
+        delete=False,
     ) as output:
         json.dump(result, output, indent=2)
         output.write("\n")

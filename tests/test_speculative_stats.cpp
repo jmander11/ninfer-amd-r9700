@@ -13,9 +13,9 @@ int main() {
         licensed.push_back(0);
         for (std::uint32_t committed = 1; committed <= licensed.size(); ++committed) {
             ninfer::SpeculativeStats stats;
-            stats.rounds = 2;
-            stats.drafted_tokens = 18;
-            stats.fallback_steps = 3;
+            stats.rounds          = 2;
+            stats.drafted_tokens  = 18;
+            stats.fallback_steps  = 3;
             stats.accepted_tokens = 3 + drafts;
             stats.accepted_per_position.assign(11, 0);
             for (std::size_t i = 0; i < 3; ++i) { ++stats.accepted_per_position[i]; }

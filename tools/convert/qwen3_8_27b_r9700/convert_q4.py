@@ -42,20 +42,14 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def preflight_conversion(
-    model_dir: str | Path, draft_ranking: str | Path
-) -> Q4ConversionPreflight:
+def preflight_conversion(model_dir: str | Path, draft_ranking: str | Path) -> Q4ConversionPreflight:
     model = Path(model_dir)
     q4_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
-    object_plan = family_conversion.build_object_plan(
-        q4_inventory.OBJECT_SPECS, resource_map
-    )
+    object_plan = family_conversion.build_object_plan(q4_inventory.OBJECT_SPECS, resource_map)
     ranking = build_draft_ranking.validate_ranking_provenance(draft_ranking)
     draft = draft_head.compute_shortlist(ranking.ranking_path, model)
     return Q4ConversionPreflight(
@@ -78,8 +72,11 @@ def preflight_summary(preflight: Q4ConversionPreflight) -> dict[str, object]:
         "shards": preflight.source.source_shard_count,
         "dtypes": preflight.source.source_dtype_counts,
     }
-    if (source_summary["tensors"] != 1199 or source_summary["shards"] != 18
-            or source_summary["dtypes"] != {"BF16": 1199}):
+    if (
+        source_summary["tensors"] != 1199
+        or source_summary["shards"] != 18
+        or source_summary["dtypes"] != {"BF16": 1199}
+    ):
         raise ValueError("source is not the exact 1,199-BF16-tensor/18-shard checkpoint")
     objects = preflight.object_plan.objects
     statistics = family_conversion.object_statistics(objects)
@@ -235,7 +232,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.preflight_only:
         if args.out is not None or args.device is not None:
             parser.error("--preflight-only does not accept --out or --device")
-        print(json.dumps(preflight_summary(preflight_conversion(args.model, args.draft_ranking)), indent=2))
+        print(
+            json.dumps(
+                preflight_summary(preflight_conversion(args.model, args.draft_ranking)), indent=2
+            )
+        )
         return
     if args.out is None or args.device is None:
         parser.error("conversion requires --out and --device")

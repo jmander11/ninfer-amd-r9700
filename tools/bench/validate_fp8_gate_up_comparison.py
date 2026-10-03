@@ -28,9 +28,7 @@ def _nonnegative(value: object) -> bool:
 def _samples(report: dict[str, Any], name: str) -> list[float]:
     values = report.get(name)
     if not (
-        isinstance(values, list)
-        and len(values) == 14
-        and all(_positive(value) for value in values)
+        isinstance(values, list) and len(values) == 14 and all(_positive(value) for value in values)
     ):
         raise ValueError(f"{name} must contain fourteen positive finite trials")
     return [float(value) for value in values]
@@ -92,9 +90,10 @@ def validate(report: dict[str, Any], *, verify_files: bool = False) -> dict[str,
         or power.get("before") != "auto"
         or power.get("after") != "auto"
         or not isinstance(toolchain, dict)
-        or any(type(toolchain.get(name)) is not int or toolchain[name] <= 0 for name in (
-            "hip_runtime_version", "hip_driver_version", "hipblaslt_version"
-        ))
+        or any(
+            type(toolchain.get(name)) is not int or toolchain[name] <= 0
+            for name in ("hip_runtime_version", "hip_driver_version", "hipblaslt_version")
+        )
         or report.get("shape") != SHAPE
         or report.get("fp8_profile") != "E4M3-outer-vec32f-hipBLASLt-top-supported"
         or report.get("q4_control") != "A8Q4G64-m64n128-pingpong-production"
@@ -135,7 +134,10 @@ def validate(report: dict[str, Any], *, verify_files: bool = False) -> dict[str,
         source_root = Path(provenance["source_root"]).resolve(strict=True)
         source = (source_root / "tools/r9700/fp8_gate_up_qual.hip").resolve(strict=True)
         executable = Path(provenance["executable_path"]).resolve(strict=True)
-        if source_root != Path(provenance["source_root"]) or source.parent.parent.parent != source_root:
+        if (
+            source_root != Path(provenance["source_root"])
+            or source.parent.parent.parent != source_root
+        ):
             raise ValueError("qualifier source_root is not canonical")
         if _sha256(source) != provenance["source_sha256"]:
             raise ValueError("qualifier source hash differs from the retained report")
@@ -160,8 +162,7 @@ def validate(report: dict[str, Any], *, verify_files: bool = False) -> dict[str,
     for name, value in expected.items():
         observed = report.get(name)
         if not (
-            _positive(observed)
-            and math.isclose(float(observed), value, rel_tol=2e-6, abs_tol=1e-9)
+            _positive(observed) and math.isclose(float(observed), value, rel_tol=2e-6, abs_tol=1e-9)
         ):
             raise ValueError(f"{name} differs from retained timing samples")
     underperforms = ratio > 1.0

@@ -38,9 +38,7 @@ class DFlash2MatrixRecipesTest(unittest.TestCase):
                 if baseline.artifact.format == BF16:
                     self.assertEqual(candidate.artifact, baseline.artifact)
 
-            codebooks = [
-                row.artifact for row in bindings if row.artifact.name.endswith("codebook")
-            ]
+            codebooks = [row.artifact for row in bindings if row.artifact.name.endswith("codebook")]
             self.assertEqual(len(codebooks), 2)
             self.assertTrue(all(spec.format == BF16 for spec in codebooks))
 
@@ -89,31 +87,23 @@ class DFlash2MatrixRecipesTest(unittest.TestCase):
             },
         ):
             self.assertEqual(
-                recipes.encode_matrix_payload(
-                    tensor, q4, recipes.CANONICAL_Q4G64, "cpu"
-                ),
+                recipes.encode_matrix_payload(tensor, q4, recipes.CANONICAL_Q4G64, "cpu"),
                 b"canonical",
             )
             canonical.assert_called_once_with(tensor, q4, "cpu")
             self.assertEqual(
-                recipes.encode_matrix_payload(
-                    tensor, q4, recipes.SOURCE_MSE_Q4G64, "cpu"
-                ),
+                recipes.encode_matrix_payload(tensor, q4, recipes.SOURCE_MSE_Q4G64, "cpu"),
                 b"q4-mse",
             )
             q4_mse.assert_called_once_with(tensor, device="cpu")
             self.assertEqual(
-                recipes.encode_matrix_payload(
-                    tensor, w8, recipes.SOURCE_MSE_W8G32, "cpu"
-                ),
+                recipes.encode_matrix_payload(tensor, w8, recipes.SOURCE_MSE_W8G32, "cpu"),
                 b"w8-mse",
             )
             w8_mse.assert_called_once_with(tensor, device="cpu")
 
         with self.assertRaisesRegex(ValueError, "requires W8G32_F16S"):
-            recipes.encode_matrix_payload(
-                tensor, q4, recipes.SOURCE_MSE_W8G32, "cpu"
-            )
+            recipes.encode_matrix_payload(tensor, q4, recipes.SOURCE_MSE_W8G32, "cpu")
         with self.assertRaisesRegex(ValueError, "requires a matrix"):
             recipes.encode_matrix_payload(
                 tensor,
@@ -124,9 +114,7 @@ class DFlash2MatrixRecipesTest(unittest.TestCase):
         bad_source = RepresentedBf16Matrix()
         bad_source.dtype = "torch.float32"
         with self.assertRaisesRegex(TypeError, "represented BF16"):
-            recipes.encode_matrix_payload(
-                bad_source, q4, recipes.CANONICAL_Q4G64, "cpu"
-            )
+            recipes.encode_matrix_payload(bad_source, q4, recipes.CANONICAL_Q4G64, "cpu")
 
 
 if __name__ == "__main__":

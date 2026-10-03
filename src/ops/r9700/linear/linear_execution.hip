@@ -14,8 +14,8 @@
 namespace ninfer::ops {
 namespace {
 
-constexpr std::uint32_t kColumnAlignment       = 128U;
-constexpr std::size_t kPlaneAlignment          = 256U;
+constexpr std::uint32_t kColumnAlignment = 128U;
+constexpr std::size_t kPlaneAlignment    = 256U;
 
 bool checked_mul(std::size_t lhs, std::size_t rhs, std::size_t* out) noexcept {
     if (out == nullptr || (rhs != 0U && lhs > std::numeric_limits<std::size_t>::max() / rhs)) {
@@ -34,8 +34,8 @@ bool align_up(std::size_t value, std::size_t alignment, std::size_t* out) noexce
 }
 
 bool weight_geometry(const Weight& weight, std::uint32_t* rows, std::uint32_t* columns,
-                     std::size_t* code_bytes, std::size_t* scale_offset,
-                     std::size_t* scale_bytes, std::size_t* payload_bytes) noexcept {
+                     std::size_t* code_bytes, std::size_t* scale_offset, std::size_t* scale_bytes,
+                     std::size_t* payload_bytes) noexcept {
     if (weight.n <= 0 || weight.k <= 0 || rows == nullptr || columns == nullptr ||
         code_bytes == nullptr || scale_offset == nullptr || scale_bytes == nullptr ||
         payload_bytes == nullptr) {
@@ -58,29 +58,28 @@ bool weight_geometry(const Weight& weight, std::uint32_t* rows, std::uint32_t* c
     return true;
 }
 
-bool valid_weight(const Weight& weight, std::uint32_t* rows,
-                  std::uint32_t* columns, std::uint32_t* padded_columns) noexcept {
-    std::size_t code_bytes = 0;
-    std::size_t scale_offset = 0;
-    std::size_t scale_bytes = 0;
+bool valid_weight(const Weight& weight, std::uint32_t* rows, std::uint32_t* columns,
+                  std::uint32_t* padded_columns) noexcept {
+    std::size_t code_bytes    = 0;
+    std::size_t scale_offset  = 0;
+    std::size_t scale_bytes   = 0;
     std::size_t payload_bytes = 0;
     if (padded_columns == nullptr ||
-        !weight_geometry(weight, rows, columns, &code_bytes, &scale_offset,
-                         &scale_bytes, &payload_bytes)) {
+        !weight_geometry(weight, rows, columns, &code_bytes, &scale_offset, &scale_bytes,
+                         &payload_bytes)) {
         return false;
     }
     const auto* payload = static_cast<const std::byte*>(weight.payload);
-    const std::uint32_t padded = (*columns + kColumnAlignment - 1U) /
-                                 kColumnAlignment * kColumnAlignment;
+    const std::uint32_t padded =
+        (*columns + kColumnAlignment - 1U) / kColumnAlignment * kColumnAlignment;
     *padded_columns = padded;
     return payload != nullptr && weight.qdata == payload &&
            weight.scales == payload + scale_offset && weight.qhigh == nullptr &&
            weight.payload_bytes == payload_bytes && weight.qdata_bytes == code_bytes &&
            weight.scale_bytes == scale_bytes && weight.high_plane_bytes == 0U &&
-           weight.qtype == QType::F8E4M3_ROW_F32S &&
-           weight.layout == QuantLayout::RowScaled && weight.scale_dtype == DType::FP32 &&
-           weight.group == 0 && weight.group_size == 0U && weight.ndim == 2U &&
-           weight.shape[0] == weight.n && weight.shape[1] == weight.k &&
+           weight.qtype == QType::F8E4M3_ROW_F32S && weight.layout == QuantLayout::RowScaled &&
+           weight.scale_dtype == DType::FP32 && weight.group == 0 && weight.group_size == 0U &&
+           weight.ndim == 2U && weight.shape[0] == weight.n && weight.shape[1] == weight.k &&
            weight.padded_shape[0] == weight.n &&
            weight.padded_shape[1] == static_cast<std::int32_t>(padded) &&
            weight.scale_ne[0] == weight.n &&
@@ -109,14 +108,14 @@ bool ranges_overlap(const void* lhs, std::size_t lhs_bytes, const void* rhs,
 } // namespace
 
 struct LinearExecution::Impl {
-    std::uint32_t rows = 0;
-    std::uint32_t columns = 0;
-    std::uint32_t padded_columns = 0;
-    const void* weight_payload = nullptr;
-    std::size_t weight_payload_bytes = 0;
-    const void* weight_codes = nullptr;
-    const void* weight_scales = nullptr;
-    void* activation_storage = nullptr;
+    std::uint32_t rows                            = 0;
+    std::uint32_t columns                         = 0;
+    std::uint32_t padded_columns                  = 0;
+    const void* weight_payload                    = nullptr;
+    std::size_t weight_payload_bytes              = 0;
+    const void* weight_codes                      = nullptr;
+    const void* weight_scales                     = nullptr;
+    void* activation_storage                      = nullptr;
     std::size_t activation_storage_capacity_bytes = 0;
 
     [[nodiscard]] r9700::linear::Fp8RowScaledWeight weight() const noexcept {
@@ -138,8 +137,9 @@ struct LinearExecution::Impl {
     hipError_t project(const r9700::linear::Fp8ActivationWorkspace& activation,
                        hip_bfloat16* output, hipStream_t stream) const noexcept {
         return activation.tokens <= r9700::linear::kFp8SmallTokenLimit
-            ? r9700::linear::fp8_small_t_linear(weight(), activation, output, stream)
-            : r9700::linear::fp8_row_scaled_prefill_linear(weight(), activation, output, stream);
+                   ? r9700::linear::fp8_small_t_linear(weight(), activation, output, stream)
+                   : r9700::linear::fp8_row_scaled_prefill_linear(weight(), activation, output,
+                                                                  stream);
     }
 
     [[nodiscard]] bool output_disjoint(const hip_bfloat16* output,
@@ -160,20 +160,20 @@ LinearExecution::LinearExecution(const Weight& weight,
         activation_storage_capacity_bytes == 0U ||
         !r9700::linear::fp8_small_t_supported(1U, impl_->rows, impl_->columns,
                                               impl_->padded_columns) ||
-        !r9700::linear::fp8_row_scaled_prefill_supported(
-            r9700::linear::kFp8SmallTokenLimit + 1U, impl_->rows, impl_->columns,
-            impl_->padded_columns)) {
+        !r9700::linear::fp8_row_scaled_prefill_supported(r9700::linear::kFp8SmallTokenLimit + 1U,
+                                                         impl_->rows, impl_->columns,
+                                                         impl_->padded_columns)) {
         throw std::invalid_argument("invalid row-scaled E4M3 Linear execution binding");
     }
-    impl_->weight_payload = weight.payload;
-    impl_->weight_payload_bytes = static_cast<std::size_t>(weight.payload_bytes);
-    impl_->weight_codes = weight.qdata;
-    impl_->weight_scales = weight.scales;
+    impl_->weight_payload                    = weight.payload;
+    impl_->weight_payload_bytes              = static_cast<std::size_t>(weight.payload_bytes);
+    impl_->weight_codes                      = weight.qdata;
+    impl_->weight_scales                     = weight.scales;
     impl_->activation_storage_capacity_bytes = activation_storage_capacity_bytes;
 }
 
 void LinearExecution::bind_storage(void* activation_storage,
-                                    std::size_t activation_storage_capacity_bytes) {
+                                   std::size_t activation_storage_capacity_bytes) {
     if (impl_ == nullptr || impl_->activation_storage != nullptr || activation_storage == nullptr ||
         activation_storage_capacity_bytes < impl_->activation_storage_capacity_bytes ||
         reinterpret_cast<std::uintptr_t>(activation_storage) % kPlaneAlignment != 0U) {
@@ -186,25 +186,23 @@ void LinearExecution::bind_storage(void* activation_storage,
     impl_->activation_storage = activation_storage;
 }
 
-LinearExecution::~LinearExecution() = default;
-LinearExecution::LinearExecution(LinearExecution&&) noexcept = default;
+LinearExecution::~LinearExecution()                                     = default;
+LinearExecution::LinearExecution(LinearExecution&&) noexcept            = default;
 LinearExecution& LinearExecution::operator=(LinearExecution&&) noexcept = default;
 
-std::size_t LinearExecution::activation_workspace_capacity_bytes(
-    std::uint32_t tokens, std::uint32_t columns) noexcept {
+std::size_t LinearExecution::activation_workspace_capacity_bytes(std::uint32_t tokens,
+                                                                 std::uint32_t columns) noexcept {
     return r9700::linear::fp8_activation_workspace_capacity_bytes(tokens, columns);
 }
 
-std::optional<r9700::linear::Fp8ActivationWorkspace> LinearExecution::activation_workspace(
-    std::uint32_t tokens) const noexcept {
+std::optional<r9700::linear::Fp8ActivationWorkspace>
+LinearExecution::activation_workspace(std::uint32_t tokens) const noexcept {
     r9700::linear::Fp8ActivationWorkspace workspace{};
     if (impl_ == nullptr || !impl_->bind(tokens, &workspace)) return std::nullopt;
     return workspace;
 }
 
-std::uint32_t LinearExecution::rows() const noexcept {
-    return impl_ == nullptr ? 0U : impl_->rows;
-}
+std::uint32_t LinearExecution::rows() const noexcept { return impl_ == nullptr ? 0U : impl_->rows; }
 
 std::uint32_t LinearExecution::columns() const noexcept {
     return impl_ == nullptr ? 0U : impl_->columns;

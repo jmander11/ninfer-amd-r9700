@@ -72,14 +72,13 @@ def sampled_column_fp64(
     independent value columns avoids materializing the full HxKxV FP64 state trajectory.
     """
     rows = len(q_rows)
-    if not (
-        rows == len(k_rows) == len(values) == len(decays) == len(betas)
-        and rows > 0
-    ):
+    if not (rows == len(k_rows) == len(values) == len(decays) == len(betas) and rows > 0):
         raise ValueError("sampled GDN operands have inconsistent row extents")
     key_dim = len(initial_column)
-    if key_dim == 0 or any(len(row) != key_dim for row in q_rows) or any(
-        len(row) != key_dim for row in k_rows
+    if (
+        key_dim == 0
+        or any(len(row) != key_dim for row in q_rows)
+        or any(len(row) != key_dim for row in k_rows)
     ):
         raise ValueError("sampled GDN operands have inconsistent key dimensions")
     requested = tuple(output_rows)
@@ -96,14 +95,11 @@ def sampled_column_fp64(
         current = [value * decay for value in current]
         prediction = math.fsum(current[index] * float(key[index]) for index in range(key_dim))
         delta = float(betas[row]) * (float(values[row]) - prediction)
-        current = [
-            current[index] + float(key[index]) * delta
-            for index in range(key_dim)
-        ]
+        current = [current[index] + float(key[index]) * delta for index in range(key_dim)]
         if row in wanted:
-            outputs[row] = math.fsum(
-                current[index] * float(query[index]) for index in range(key_dim)
-            ) * scale
+            outputs[row] = (
+                math.fsum(current[index] * float(query[index]) for index in range(key_dim)) * scale
+            )
     return {row: outputs[row] for row in requested}, tuple(current)
 
 
@@ -136,7 +132,7 @@ def _validate_case(torch, cpu_inputs: dict[str, object], output, final_state) ->
     }
     records = []
     passed = True
-    scale = 128 ** -0.5
+    scale = 128**-0.5
     for value_head, feature in SAMPLE_COLUMNS:
         key_head = value_head // (VALUE_HEADS // KEY_HEADS)
         expected_outputs, expected_column = sampled_column_fp64(
@@ -153,7 +149,9 @@ def _validate_case(torch, cpu_inputs: dict[str, object], output, final_state) ->
         for row in output_rows:
             check = _tolerance(
                 float(output_columns[(value_head, feature)][row].item()),
-                expected_outputs[row], OUTPUT_ATOL, OUTPUT_RTOL,
+                expected_outputs[row],
+                OUTPUT_ATOL,
+                OUTPUT_RTOL,
             )
             output_checks.append({"row": row, **check})
             passed = passed and check["pass"]
@@ -165,23 +163,23 @@ def _validate_case(torch, cpu_inputs: dict[str, object], output, final_state) ->
         ]
         state_pass = all(check["pass"] for check in state_checks)
         passed = passed and state_pass
-        worst_index = max(
-            range(KEY_DIM), key=lambda index: state_checks[index]["absolute_error"]
+        worst_index = max(range(KEY_DIM), key=lambda index: state_checks[index]["absolute_error"])
+        records.append(
+            {
+                "value_head": value_head,
+                "key_head": key_head,
+                "value_feature": feature,
+                "output_rows": output_checks,
+                "final_state_column": {
+                    "elements_checked": KEY_DIM,
+                    "pass": state_pass,
+                    "actual_fp32_sha256": _tensor_sha256(torch, actual_tensor),
+                    "oracle_fp64_sha256": _fp64_sha256(expected_column),
+                    "max_absolute_error": state_checks[worst_index]["absolute_error"],
+                    "worst": {"key_feature": worst_index, **state_checks[worst_index]},
+                },
+            }
         )
-        records.append({
-            "value_head": value_head,
-            "key_head": key_head,
-            "value_feature": feature,
-            "output_rows": output_checks,
-            "final_state_column": {
-                "elements_checked": KEY_DIM,
-                "pass": state_pass,
-                "actual_fp32_sha256": _tensor_sha256(torch, actual_tensor),
-                "oracle_fp64_sha256": _fp64_sha256(expected_column),
-                "max_absolute_error": state_checks[worst_index]["absolute_error"],
-                "worst": {"key_feature": worst_index, **state_checks[worst_index]},
-            },
-        })
     return {
         "pass": passed,
         "output_criterion": {"atol": OUTPUT_ATOL, "rtol": OUTPUT_RTOL},
@@ -211,38 +209,44 @@ def run_probe(device_index: int) -> dict:
             torch.cuda.synchronize(device)
             started = time.perf_counter()
             output, final_state = backend._gdn_recurrence(
-                inputs["q"], inputs["k"], inputs["value"], inputs["decay"],
-                inputs["beta"], inputs["state"].clone(),
+                inputs["q"],
+                inputs["k"],
+                inputs["value"],
+                inputs["decay"],
+                inputs["beta"],
+                inputs["state"].clone(),
             )
             torch.cuda.synchronize(device)
             elapsed = time.perf_counter() - started
             validation = _validate_case(torch, cpu_inputs, output, final_state)
-            cases.append({
-                "rows": rows,
-                "input": {
-                    "combined_sha256": _input_sha256(torch, cpu_inputs),
-                    "tensors": {
-                        name: {
-                            "dtype": str(value.dtype),
-                            "shape": list(value.shape),
-                            "sha256": _tensor_sha256(torch, value),
-                        }
-                        for name, value in cpu_inputs.items()
+            cases.append(
+                {
+                    "rows": rows,
+                    "input": {
+                        "combined_sha256": _input_sha256(torch, cpu_inputs),
+                        "tensors": {
+                            name: {
+                                "dtype": str(value.dtype),
+                                "shape": list(value.shape),
+                                "sha256": _tensor_sha256(torch, value),
+                            }
+                            for name, value in cpu_inputs.items()
+                        },
                     },
-                },
-                "fused_recurrent": {
-                    "seconds": elapsed,
-                    "output_dtype": str(output.dtype),
-                    "output_sha256": hashlib.sha256(_tensor_bytes(torch, output)).hexdigest(),
-                    "output_finite": bool(torch.isfinite(output).all().item()),
-                    "final_state_dtype": str(final_state.dtype),
-                    "final_state_sha256": hashlib.sha256(
-                        _tensor_bytes(torch, final_state)
-                    ).hexdigest(),
-                    "final_state_finite": bool(torch.isfinite(final_state).all().item()),
-                },
-                "sampled_fp64_oracle": validation,
-            })
+                    "fused_recurrent": {
+                        "seconds": elapsed,
+                        "output_dtype": str(output.dtype),
+                        "output_sha256": hashlib.sha256(_tensor_bytes(torch, output)).hexdigest(),
+                        "output_finite": bool(torch.isfinite(output).all().item()),
+                        "final_state_dtype": str(final_state.dtype),
+                        "final_state_sha256": hashlib.sha256(
+                            _tensor_bytes(torch, final_state)
+                        ).hexdigest(),
+                        "final_state_finite": bool(torch.isfinite(final_state).all().item()),
+                    },
+                    "sampled_fp64_oracle": validation,
+                }
+            )
             del inputs, cpu_inputs, output, final_state
 
     source = Path(__file__).resolve()
@@ -278,9 +282,7 @@ def run_probe(device_index: int) -> dict:
         ),
         "cases": cases,
         "provenance": {
-            "execution": execution_provenance(
-                torch, device_index, stage_trace_enabled=False
-            ),
+            "execution": execution_provenance(torch, device_index, stage_trace_enabled=False),
             "sources": {
                 source.name: file_sha256(source),
                 backend_source.name: file_sha256(backend_source),

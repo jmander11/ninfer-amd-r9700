@@ -27,7 +27,6 @@ namespace ninfer::ops {
  * element is overwritten, and the Op owns no workspace or persistent state.
  */
 void prepare_masked_block(const Tensor& anchors, const Tensor& lengths, const Tensor& valid_columns,
-                          std::int32_t mask_id, Tensor& ids, Tensor& positions,
-                          hipStream_t stream);
+                          std::int32_t mask_id, Tensor& ids, Tensor& positions, hipStream_t stream);
 
 } // namespace ninfer::ops

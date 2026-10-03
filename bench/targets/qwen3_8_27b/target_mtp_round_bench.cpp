@@ -123,15 +123,15 @@ int run(const Options& options) {
     const std::uint32_t measured_rounds =
         static_cast<std::uint32_t>(options.warmup + options.repetitions);
     ninfer::EngineOptions engine;
-    engine.artifact_path       = options.artifact;
-    engine.device              = options.device;
-    engine.max_context         = static_cast<std::uint32_t>(seed.size() + 64ULL +
-                                                            static_cast<std::uint64_t>(measured_rounds) *
-                                                                (options.draft_tokens + 1ULL) +
-                                                            2ULL * options.draft_tokens);
-    engine.kv_capacity         = ninfer::KvCapacityPolicy::explicit_capacity(engine.max_context);
-    engine.prefill_chunk       = 128;
-    engine.speculative.backend = ninfer::SpeculativeBackend::Mtp;
+    engine.artifact_path = options.artifact;
+    engine.device        = options.device;
+    engine.max_context   = static_cast<std::uint32_t>(seed.size() + 64ULL +
+                                                      static_cast<std::uint64_t>(measured_rounds) *
+                                                          (options.draft_tokens + 1ULL) +
+                                                      2ULL * options.draft_tokens);
+    engine.kv_capacity   = ninfer::KvCapacityPolicy::explicit_capacity(engine.max_context);
+    engine.prefill_chunk = 128;
+    engine.speculative.backend       = ninfer::SpeculativeBackend::Mtp;
     engine.speculative.draft_tokens  = options.draft_tokens;
     engine.speculative.proposal_head = options.proposal;
     engine.use_device_graph          = options.use_device_graph;

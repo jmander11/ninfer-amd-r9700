@@ -23,8 +23,12 @@ class CompareSelectiveA8Q4SourceTest(unittest.TestCase):
     def _report(profile: str, nlls, argmax, bf16_nll, bf16_argmax) -> dict:
         return {
             "profile": profile,
-            "source": {"config_sha256": "a", "index_sha256": "b",
-                       "shards_sha256": {"s": "c"}, "corpus_ids_sha256": "d"},
+            "source": {
+                "config_sha256": "a",
+                "index_sha256": "b",
+                "shards_sha256": {"s": "c"},
+                "corpus_ids_sha256": "d",
+            },
             "execution": {"profile": "same"},
             "matrix_scope": {"selected_logical_matrix_count": 160},
             "sampled_source_gate": {"sha256": "e"},
@@ -36,26 +40,29 @@ class CompareSelectiveA8Q4SourceTest(unittest.TestCase):
         control_nll = [1.01] * 4095
         candidate_nll = [1.02] * 4095
         argmax = list(range(4095))
-        control = self._report(
-            "a8g64-q4g64-control", control_nll, argmax, bf16_nll, argmax
-        )
-        candidate = self._report(
-            "a8g128-q4g128-mse", candidate_nll, argmax, bf16_nll, argmax
-        )
-        bf16 = {"source_config_sha256": "a", "source_index_sha256": "b",
-                "source_shards_sha256": {"s": "c"}, "corpus_ids_sha256": "d"}
-        with tempfile.TemporaryDirectory() as temporary, patch.object(
-            comparison, "_load_score",
-            side_effect=[(control, control_nll, argmax), (candidate, candidate_nll, argmax)],
-        ), patch.object(comparison, "_load_bf16", return_value=(bf16, bf16_nll, argmax)), \
-                patch.object(comparison, "sha256_file", return_value="f" * 64):
+        control = self._report("a8g64-q4g64-control", control_nll, argmax, bf16_nll, argmax)
+        candidate = self._report("a8g128-q4g128-mse", candidate_nll, argmax, bf16_nll, argmax)
+        bf16 = {
+            "source_config_sha256": "a",
+            "source_index_sha256": "b",
+            "source_shards_sha256": {"s": "c"},
+            "corpus_ids_sha256": "d",
+        }
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(
+                comparison,
+                "_load_score",
+                side_effect=[(control, control_nll, argmax), (candidate, candidate_nll, argmax)],
+            ),
+            patch.object(comparison, "_load_bf16", return_value=(bf16, bf16_nll, argmax)),
+            patch.object(comparison, "sha256_file", return_value="f" * 64),
+        ):
             root = Path(temporary)
             report = comparison.compare(root / "control", root / "candidate", root / "bf16")
         self.assertTrue(report["pass"])
         self.assertEqual(report["acceptance"]["maximum_new_severe_positions"], 11)
-        self.assertTrue(
-            report["acceptance"]["control_and_candidate_must_pass_direct_bf16_gate"]
-        )
+        self.assertTrue(report["acceptance"]["control_and_candidate_must_pass_direct_bf16_gate"])
         self.assertIn("candidate_minus_control", report)
 
 

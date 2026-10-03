@@ -10,18 +10,30 @@ from tools.r9700.check_dense_prefill_attention_static import PROFILE, check
 
 
 class DensePrefillAttentionStaticTest(unittest.TestCase):
-    symbol = ("_ZN6ninfer3ops5r97002kv20dense_prefill_kernelILj16EEEv"
-              "NS2_22Fp8Int4KvAttentionArgsE")
+    symbol = "_ZN6ninfer3ops5r97002kv20dense_prefill_kernelILj16EEEvNS2_22Fp8Int4KvAttentionArgsE"
 
-    def fixture(self, root: Path, *, lds: int = PROFILE["lds"], vgpr: int = 240,
-                scratch: int = 0, occupancy: int = 6, maximum_workgroup: int = 384,
-                vgpr_spills: int = 0, bf16: int = 32, f16: int = 32, barriers: int = 3,
-                additional: str = "") -> tuple[Path, Path]:
+    def fixture(
+        self,
+        root: Path,
+        *,
+        lds: int = PROFILE["lds"],
+        vgpr: int = 240,
+        scratch: int = 0,
+        occupancy: int = 6,
+        maximum_workgroup: int = 384,
+        vgpr_spills: int = 0,
+        bf16: int = 32,
+        f16: int = 32,
+        barriers: int = 3,
+        additional: str = "",
+    ) -> tuple[Path, Path]:
         symbol = self.symbol
-        instructions = "\n".join(["\tv_wmma_f32_16x16x16_bf16 v[0:7], v[8:11], v[12:15]"] * bf16 +
-                                 ["\tv_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[12:15]"] * f16 +
-                                 ["\tv_exp_f32_e32 v0, v1"] +
-                                 ["\ts_barrier_signal -1\n\ts_barrier_wait -1"] * barriers)
+        instructions = "\n".join(
+            ["\tv_wmma_f32_16x16x16_bf16 v[0:7], v[8:11], v[12:15]"] * bf16
+            + ["\tv_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[12:15]"] * f16
+            + ["\tv_exp_f32_e32 v0, v1"]
+            + ["\ts_barrier_signal -1\n\ts_barrier_wait -1"] * barriers
+        )
         instructions += additional
         body = f"""\t.globl {symbol} ; -- Begin function {symbol}
 {symbol}:
@@ -50,8 +62,9 @@ amdhsa.kernels:
         return assembly, metadata
 
     def run_check(self, paths: tuple[Path, Path], value_group: int = 16):
-        return check(assembly=paths[0], metadata=paths[1], symbol=self.symbol,
-                     value_group=value_group)
+        return check(
+            assembly=paths[0], metadata=paths[1], symbol=self.symbol, value_group=value_group
+        )
 
     def test_accepts_exact_fused_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -69,8 +82,10 @@ amdhsa.kernels:
         cases = (
             (dict(bf16=31), "WMMA counts"),
             (dict(f16=33), "WMMA counts"),
-            (dict(additional="\n\tv_wmma_f32_16x16x16_fp8_fp8 v[0:7], v[8:9], v[10:11]"),
-             "unexpected matrix opcodes"),
+            (
+                dict(additional="\n\tv_wmma_f32_16x16x16_fp8_fp8 v[0:7], v[8:9], v[10:11]"),
+                "unexpected matrix opcodes",
+            ),
             (dict(barriers=2), "barrier pairs"),
             (dict(lds=37537), "LDS size"),
             (dict(vgpr=241), "resources fail"),

@@ -22,27 +22,28 @@
 
 namespace ninfer::ops::r9700::gdn::front_kernels {
 
-inline constexpr std::uint32_t kProjectionQueryRows = 2048;
-inline constexpr std::uint32_t kProjectionKeyRows = 2048;
-inline constexpr std::uint32_t kProjectionValueRows = 6144;
+inline constexpr std::uint32_t kProjectionQueryRows  = 2048;
+inline constexpr std::uint32_t kProjectionKeyRows    = 2048;
+inline constexpr std::uint32_t kProjectionValueRows  = 6144;
 inline constexpr std::uint32_t kProjectionValueZRows = 12288;
 inline constexpr std::uint32_t kProjectionChannels =
     kProjectionQueryRows + kProjectionKeyRows + kProjectionValueRows;
 inline constexpr std::uint32_t kMaximumVerifyWidth = 16;
-inline constexpr std::uint32_t kControlHeads = 48;
-inline constexpr std::uint32_t kControlColumns = 5120;
-inline constexpr std::uint32_t kControlT1Threads = kControlColumns / 8U;
+inline constexpr std::uint32_t kControlHeads       = 48;
+inline constexpr std::uint32_t kControlColumns     = 5120;
+inline constexpr std::uint32_t kControlT1Threads   = kControlColumns / 8U;
 
-__device__ __forceinline__ void publish_projection_output(
-    hip_bfloat16 output, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
-    std::size_t column, std::uint32_t channel) {
+__device__ __forceinline__ void publish_projection_output(hip_bfloat16 output, hip_bfloat16* query,
+                                                          hip_bfloat16* key, hip_bfloat16* value,
+                                                          std::size_t column,
+                                                          std::uint32_t channel) {
     if (channel < kProjectionQueryRows) {
         query[column * kProjectionQueryRows + channel] = output;
     } else if (channel < kProjectionQueryRows + kProjectionKeyRows) {
         key[column * kProjectionKeyRows + channel - kProjectionQueryRows] = output;
     } else {
-        value[column * kProjectionValueRows +
-              channel - kProjectionQueryRows - kProjectionKeyRows] = output;
+        value[column * kProjectionValueRows + channel - kProjectionQueryRows - kProjectionKeyRows] =
+            output;
     }
 }
 
@@ -57,24 +58,22 @@ struct ConvChannel {
 
 __device__ __forceinline__ ConvChannel load_conv_channel(
     const hip_bfloat16* conv_weight, const hip_bfloat16* conv_states,
-    const std::int32_t* valid_columns, const std::int32_t* initial_state_slots,
-    std::uint32_t width, std::uint32_t state_slots, std::uint32_t batch_index,
-    std::uint32_t channel) {
-    const std::int32_t valid_raw = valid_columns == nullptr
-        ? static_cast<std::int32_t>(width)
-        : valid_columns[batch_index];
+    const std::int32_t* valid_columns, const std::int32_t* initial_state_slots, std::uint32_t width,
+    std::uint32_t state_slots, std::uint32_t batch_index, std::uint32_t channel) {
+    const std::int32_t valid_raw =
+        valid_columns == nullptr ? static_cast<std::int32_t>(width) : valid_columns[batch_index];
     const std::int32_t initial_raw = initial_state_slots[batch_index];
-    const bool valid_initial = initial_raw >= 0 &&
-        static_cast<std::uint32_t>(initial_raw) < state_slots;
-    const std::size_t initial_base = valid_initial
-        ? static_cast<std::size_t>(initial_raw) * 3U * kProjectionChannels
-        : 0U;
+    const bool valid_initial =
+        initial_raw >= 0 && static_cast<std::uint32_t>(initial_raw) < state_slots;
+    const std::size_t initial_base =
+        valid_initial ? static_cast<std::size_t>(initial_raw) * 3U * kProjectionChannels : 0U;
     return ConvChannel{
         valid_raw <= 0 ? 0U : min(static_cast<std::uint32_t>(valid_raw), width),
         valid_initial,
         valid_initial ? static_cast<float>(conv_states[initial_base + channel]) : 0.0F,
-        valid_initial ? static_cast<float>(conv_states[initial_base + kProjectionChannels + channel])
-                      : 0.0F,
+        valid_initial
+            ? static_cast<float>(conv_states[initial_base + kProjectionChannels + channel])
+            : 0.0F,
         valid_initial
             ? static_cast<float>(conv_states[initial_base + 2U * kProjectionChannels + channel])
             : 0.0F,
@@ -89,12 +88,13 @@ __device__ __forceinline__ ConvChannel load_conv_channel(
 // batch_index * width) from its loaded inputs: `represented(column)` is the channel's BF16
 // projection of that column.
 template <class Represented>
-__device__ __forceinline__ void conv_record_loaded_channel(
-    Represented&& represented_at, const ConvChannel& conv, const std::int32_t* parent_index,
-    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
-    std::uint32_t width, std::uint32_t batch_index, std::uint32_t channel) {
+__device__ __forceinline__ void
+conv_record_loaded_channel(Represented&& represented_at, const ConvChannel& conv,
+                           const std::int32_t* parent_index, hip_bfloat16* conv_record,
+                           hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+                           std::uint32_t width, std::uint32_t batch_index, std::uint32_t channel) {
     const std::uint32_t valid = conv.valid;
-    const bool valid_initial = conv.valid_initial;
+    const bool valid_initial  = conv.valid_initial;
     const float checkpoint0 = conv.checkpoint0, checkpoint1 = conv.checkpoint1,
                 checkpoint2 = conv.checkpoint2;
     const float w0 = conv.w0, w1 = conv.w1, w2 = conv.w2, w3 = conv.w3;
@@ -110,23 +110,24 @@ __device__ __forceinline__ void conv_record_loaded_channel(
             continue;
         }
 
-        const std::int32_t parent = parent_index == nullptr ?
-            (token == 0 ? -1 : static_cast<std::int32_t>(token - 1U)) : parent_index[column];
+        const std::int32_t parent = parent_index == nullptr
+                                        ? (token == 0 ? -1 : static_cast<std::int32_t>(token - 1U))
+                                        : parent_index[column];
         if (parent >= static_cast<std::int32_t>(token)) {
             conv_record[column * kProjectionChannels + channel] = hip_bfloat16(0.0F);
             publish_projection_output(hip_bfloat16(0.0F), query, key, value, column, channel);
             continue;
         }
-        float h0 = parent < 0 ? checkpoint0 : saved0[parent];
-        float h1 = parent < 0 ? checkpoint1 : saved1[parent];
-        float h2 = parent < 0 ? checkpoint2 : saved2[parent];
+        float h0                       = parent < 0 ? checkpoint0 : saved0[parent];
+        float h1                       = parent < 0 ? checkpoint1 : saved1[parent];
+        float h2                       = parent < 0 ? checkpoint2 : saved2[parent];
         const hip_bfloat16 represented = represented_at(column);
         conv_record[column * kProjectionChannels + channel] = represented;
-        const float current = static_cast<float>(represented);
-        float sum = fmaf(w0, h0, 0.0F);
-        sum = fmaf(w1, h1, sum);
-        sum = fmaf(w2, h2, sum);
-        sum = fmaf(w3, current, sum);
+        const float current                                 = static_cast<float>(represented);
+        float sum                                           = fmaf(w0, h0, 0.0F);
+        sum                                                 = fmaf(w1, h1, sum);
+        sum                                                 = fmaf(w2, h2, sum);
+        sum                                                 = fmaf(w3, current, sum);
         publish_projection_output(hip_bfloat16(sum / (1.0F + expf(-sum))), query, key, value,
                                   column, channel);
         saved0[token] = h1;
@@ -138,13 +139,13 @@ __device__ __forceinline__ void conv_record_loaded_channel(
 // The recorded causal convolution of one channel of one sequence. Shared by the standalone record
 // kernel and the GDN pair epilogues.
 template <class Represented>
-__device__ __forceinline__ void conv_record_channel(
-    Represented&& represented_at, const hip_bfloat16* conv_weight,
-    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
-    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
-    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
-    std::uint32_t width, std::uint32_t state_slots, std::uint32_t batch_index,
-    std::uint32_t channel) {
+__device__ __forceinline__ void
+conv_record_channel(Represented&& represented_at, const hip_bfloat16* conv_weight,
+                    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+                    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
+                    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key,
+                    hip_bfloat16* value, std::uint32_t width, std::uint32_t state_slots,
+                    std::uint32_t batch_index, std::uint32_t channel) {
     conv_record_loaded_channel(
         represented_at,
         load_conv_channel(conv_weight, conv_states, valid_columns, initial_state_slots, width,
@@ -159,18 +160,19 @@ __device__ __forceinline__ void conv_record_channel(
 // output equals that sequential walk's. `represented(token)` is the channel's BF16 projection of
 // a token of the sequence.
 template <class Represented>
-__device__ __forceinline__ void conv_record_token(
-    Represented&& represented_at, const ConvChannel& conv, const std::int32_t* parent_index,
-    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
-    std::uint32_t width, std::uint32_t batch_index, std::uint32_t channel, std::uint32_t token) {
-    const std::size_t base = static_cast<std::size_t>(batch_index) * width;
+__device__ __forceinline__ void
+conv_record_token(Represented&& represented_at, const ConvChannel& conv,
+                  const std::int32_t* parent_index, hip_bfloat16* conv_record, hip_bfloat16* query,
+                  hip_bfloat16* key, hip_bfloat16* value, std::uint32_t width,
+                  std::uint32_t batch_index, std::uint32_t channel, std::uint32_t token) {
+    const std::size_t base   = static_cast<std::size_t>(batch_index) * width;
     const std::size_t column = base + token;
-    const auto parent_of = [&](std::int32_t t) -> std::int32_t {
+    const auto parent_of     = [&](std::int32_t t) -> std::int32_t {
         return parent_index == nullptr ? t - 1 : parent_index[base + static_cast<std::size_t>(t)];
     };
     const std::int32_t parent = token >= conv.valid || !conv.valid_initial
-        ? static_cast<std::int32_t>(token)
-        : parent_of(static_cast<std::int32_t>(token));
+                                    ? static_cast<std::int32_t>(token)
+                                    : parent_of(static_cast<std::int32_t>(token));
     if (parent >= static_cast<std::int32_t>(token)) {
         conv_record[column * kProjectionChannels + channel] = hip_bfloat16(0.0F);
         publish_projection_output(hip_bfloat16(0.0F), query, key, value, column, channel);
@@ -196,13 +198,13 @@ __device__ __forceinline__ void conv_record_token(
         h1 = parent_h2;
         h2 = value_at(parent);
     }
-    const hip_bfloat16 represented = represented_at(token);
+    const hip_bfloat16 represented                      = represented_at(token);
     conv_record[column * kProjectionChannels + channel] = represented;
-    const float current = static_cast<float>(represented);
-    float sum = fmaf(conv.w0, h0, 0.0F);
-    sum = fmaf(conv.w1, h1, sum);
-    sum = fmaf(conv.w2, h2, sum);
-    sum = fmaf(conv.w3, current, sum);
+    const float current                                 = static_cast<float>(represented);
+    float sum                                           = fmaf(conv.w0, h0, 0.0F);
+    sum                                                 = fmaf(conv.w1, h1, sum);
+    sum                                                 = fmaf(conv.w2, h2, sum);
+    sum                                                 = fmaf(conv.w3, current, sum);
     publish_projection_output(hip_bfloat16(sum / (1.0F + expf(-sum))), query, key, value, column,
                               channel);
 }
@@ -234,19 +236,18 @@ __device__ __forceinline__ void fp8lut4_pair_conv_record_body(
     hip_bfloat16* z, std::uint32_t state_slots) {
     constexpr unsigned kQueryKeyTiles = (kProjectionQueryRows + kProjectionKeyRows) / 16U;
     const std::uint32_t block = cta.block().x, thread = cta.thread();
-    const bool second = block >= kQueryKeyTiles;
+    const bool second                  = block >= kQueryKeyTiles;
     const linear::Fp8Lut4Weight weight = second ? value_z : query_key;
-    const std::uint32_t row_base = (second ? block - kQueryKeyTiles : block) * 16U;
+    const std::uint32_t row_base       = (second ? block - kQueryKeyTiles : block) * 16U;
     // Epilogue thread `thread` owns token thread / 16 of row thread % 16 and, unless the row is
     // an output-gate z row, its convolution channel, whose inputs are loaded before the
     // projection so their latency overlaps it.
     static_assert(16U * T <= 32U * kFp8Lut4PairSplit);
-    const std::uint32_t token = thread / 16U;
-    const std::uint32_t row = row_base + thread % 16U;
-    const bool active = token < T;
-    const bool convolved = active && (!second || row < kProjectionValueRows);
-    const std::uint32_t channel =
-        second ? kProjectionQueryRows + kProjectionKeyRows + row : row;
+    const std::uint32_t token   = thread / 16U;
+    const std::uint32_t row     = row_base + thread % 16U;
+    const bool active           = token < T;
+    const bool convolved        = active && (!second || row < kProjectionValueRows);
+    const std::uint32_t channel = second ? kProjectionQueryRows + kProjectionKeyRows + row : row;
     ConvChannel conv{};
     if (convolved)
         conv = load_conv_channel(conv_weight, conv_states, valid_columns, initial_state_slots, T,
@@ -254,7 +255,8 @@ __device__ __forceinline__ void fp8lut4_pair_conv_record_body(
     linear::fp8lut4::load_table(shared.table, thread, 32U * kFp8Lut4PairSplit);
     const auto stage = [&](std::uint32_t token, std::uint32_t row, float y) {
         shared.staged[row - row_base][token] = status[token] != linear::Fp8ActivationOk
-            ? hip_bfloat16(__builtin_nanf("")) : hip_bfloat16(y);
+                                                   ? hip_bfloat16(__builtin_nanf(""))
+                                                   : hip_bfloat16(y);
     };
     linear::fp8lut4::small_t_rows<kFp8Lut4PairSplit, kSteps, 1U>(
         cta, weight, row_base, activation, token_scales, T, shared.table, shared.partial, stage);
@@ -281,12 +283,24 @@ __global__ __launch_bounds__(32U * kFp8Lut4PairSplit) void gdn_fp8lut4_pair_conv
     __shared__ PairConvShared<T> shared;
     fp8lut4_pair_conv_record_body<T>(persistent::LaunchCta{}, shared, activation, token_scales,
                                      status, query_key, value_z, conv_weight, conv_states,
-                                     valid_columns, initial_state_slots, parent_index,
-                                     conv_record, query, key, value, z, state_slots);
+                                     valid_columns, initial_state_slots, parent_index, conv_record,
+                                     query, key, value, z, state_slots);
 #else
-    (void)activation; (void)token_scales; (void)status; (void)query_key; (void)value_z;
-    (void)conv_weight; (void)conv_states; (void)valid_columns; (void)initial_state_slots;
-    (void)parent_index; (void)conv_record; (void)query; (void)key; (void)value; (void)z;
+    (void)activation;
+    (void)token_scales;
+    (void)status;
+    (void)query_key;
+    (void)value_z;
+    (void)conv_weight;
+    (void)conv_states;
+    (void)valid_columns;
+    (void)initial_state_slots;
+    (void)parent_index;
+    (void)conv_record;
+    (void)query;
+    (void)key;
+    (void)value;
+    (void)z;
     (void)state_slots;
 #endif
 }
@@ -301,16 +315,16 @@ __global__ __launch_bounds__(32U * kFp8Lut4PairSplit) void gdn_fp8lut4_pair_conv
 // row vector per thread (kControlT1Threads); a narrower FP8 context of Threads threads holds
 // vectors v * Threads + t and keeps every partial and wave-sum order of that launch.
 inline constexpr std::uint32_t kFrontMaximumTokens = 32U;
-inline constexpr std::uint32_t kFrontPassTokens = 8U;
-inline constexpr std::uint32_t kFrontWaves = kControlT1Threads / 32U;
+inline constexpr std::uint32_t kFrontPassTokens    = 8U;
+inline constexpr std::uint32_t kFrontWaves         = kControlT1Threads / 32U;
 
 __device__ __forceinline__ float front_vector_sumsq(uint4 packed) {
     const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
-    float sumsq = 0.0F;
+    float sumsq                  = 0.0F;
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const float value = linear::codec::bf16_word_element(words, element);
-        sumsq = fmaf(value, value, sumsq);
+        sumsq             = fmaf(value, value, sumsq);
     }
 #pragma unroll
     for (std::uint32_t width = 16U; width != 0U; width >>= 1U)
@@ -328,18 +342,18 @@ __device__ __forceinline__ float front_inverse(const float* wave_sums, float eps
 // BF16 seam words and their FP32 values (nonfinite kept).
 __device__ __forceinline__ uint4 front_seam(uint4 packed, uint4 gains, float inverse, float offset,
                                             float (&value)[8]) {
-    const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+    const std::uint32_t words[4]      = {packed.x, packed.y, packed.z, packed.w};
     const std::uint32_t gain_words[4] = {gains.x, gains.y, gains.z, gains.w};
     std::uint32_t seam[4];
 #pragma unroll
     for (std::uint32_t w = 0; w < 4U; ++w) {
-        const float low_gain = __uint_as_float(gain_words[w] << 16) + offset;
+        const float low_gain  = __uint_as_float(gain_words[w] << 16) + offset;
         const float high_gain = __uint_as_float(gain_words[w] & 0xffff0000U) + offset;
         const hip_bfloat16 low(__uint_as_float(words[w] << 16) * inverse * low_gain);
         const hip_bfloat16 high(__uint_as_float(words[w] & 0xffff0000U) * inverse * high_gain);
-        seam[w] = static_cast<std::uint32_t>(low.data) |
-                  (static_cast<std::uint32_t>(high.data) << 16);
-        value[2U * w] = static_cast<float>(low);
+        seam[w] =
+            static_cast<std::uint32_t>(low.data) | (static_cast<std::uint32_t>(high.data) << 16);
+        value[2U * w]      = static_cast<float>(low);
         value[2U * w + 1U] = static_cast<float>(high);
     }
     return uint4{seam[0], seam[1], seam[2], seam[3]};
@@ -352,6 +366,7 @@ namespace fold = ninfer::ops::detail::gated_delta_net::fold;
 // front's register budget (one dispatch wave for a single row).
 inline constexpr int kFrontFoldTiles = 4;
 static_assert(kControlT1Threads % fold::kItemThreads == 0U);
+
 struct FrontFold {
     fold::LayerArgs args{};
     std::uint32_t ctas = 0U;
@@ -376,6 +391,7 @@ struct FrontShared {
             float b_waves[kFrontPassTokens][kFrontWaves];
             linear::fp8_encode::EncodeShared<Threads> encode;
         } head;
+
         struct {
             float key[Threads / fold::kItemThreads][fold::kStateDim];
             float reduction[Threads / fold::kItemThreads][fold::kStateDim];
@@ -396,16 +412,16 @@ __device__ __forceinline__ void normalized_front_body(
     const hip_bfloat16* norm, float eps, bool unit_offset, const hip_bfloat16* a_weight,
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias, float* g, float* beta,
     std::uint8_t* low_codes, std::uint8_t* high_codes, std::uint16_t* scale_words,
-    std::uint32_t* status, hip_bfloat16* hidden, std::uint32_t* clear_status,
-    std::uint32_t tokens, float* fp8_scales, const CacheWarm& warm, const FrontFold& fold) {
+    std::uint32_t* status, hip_bfloat16* hidden, std::uint32_t* clear_status, std::uint32_t tokens,
+    float* fp8_scales, const CacheWarm& warm, const FrontFold& fold) {
     static_assert(Threads % 32U == 0U && Threads % fold::kItemThreads == 0U);
     static_assert(kFp8 || Threads == kControlT1Threads);
     static_assert(kPassTokens != 0U && kPassTokens <= kFrontPassTokens);
-    constexpr std::uint32_t V = (kControlT1Threads + Threads - 1U) / Threads;
+    constexpr std::uint32_t V      = (kControlT1Threads + Threads - 1U) / Threads;
     constexpr std::uint32_t kWaves = Threads / 32U;
     const std::uint32_t block = cta.block().x, thread = cta.thread();
     if (block >= kControlHeads) {
-        const std::uint32_t index = block - kControlHeads;
+        const std::uint32_t index     = block - kControlHeads;
         const std::uint32_t fold_ctas = front_fold_ctas<Threads, kFoldTiles>(fold);
         if (index < fold_ctas) {
             fold::fold_layer_cta<Threads, kFoldTiles>(cta, fold.args, index, shared.fold.key,
@@ -416,26 +432,26 @@ __device__ __forceinline__ void normalized_front_body(
                    cta.threads());
         return;
     }
-    auto& wave_sums = shared.head.wave_sums;
-    auto& inverses = shared.head.inverses;
-    auto& a_waves = shared.head.a_waves;
-    auto& b_waves = shared.head.b_waves;
+    auto& wave_sums                     = shared.head.wave_sums;
+    auto& inverses                      = shared.head.inverses;
+    auto& a_waves                       = shared.head.a_waves;
+    auto& b_waves                       = shared.head.b_waves;
     constexpr std::uint32_t row_vectors = kControlT1Threads;
-    const std::uint32_t head = block;
+    const std::uint32_t head            = block;
     const std::uint32_t lane = thread & 31U, wave = thread >> 5U;
     // Vector v of this thread exists (wave-uniform) and its launch wave.
-    const auto exists = [&](std::uint32_t v) { return v * Threads + thread < row_vectors; };
+    const auto exists      = [&](std::uint32_t v) { return v * Threads + thread < row_vectors; };
     const auto vector_wave = [&](std::uint32_t v) { return v * kWaves + wave; };
-    const float offset = unit_offset ? 1.0F : 0.0F;
+    const float offset     = unit_offset ? 1.0F : 0.0F;
     uint4 gains[V], av[V], bv[V];
 #pragma unroll
     for (std::uint32_t v = 0; v < V; ++v) {
         const std::uint32_t vector = exists(v) ? v * Threads + thread : 0U;
-        gains[v] = reinterpret_cast<const uint4*>(norm)[vector];
-        av[v] = reinterpret_cast<const uint4*>(
-            a_weight + static_cast<std::size_t>(head) * kControlColumns)[vector];
-        bv[v] = reinterpret_cast<const uint4*>(
-            b_weight + static_cast<std::size_t>(head) * kControlColumns)[vector];
+        gains[v]                   = reinterpret_cast<const uint4*>(norm)[vector];
+        av[v] = reinterpret_cast<const uint4*>(a_weight + static_cast<std::size_t>(head) *
+                                                              kControlColumns)[vector];
+        bv[v] = reinterpret_cast<const uint4*>(b_weight + static_cast<std::size_t>(head) *
+                                                              kControlColumns)[vector];
     }
     const uint4* rows = reinterpret_cast<const uint4*>(residual);
     bool nonfinite = false, overflow = false;
@@ -447,9 +463,9 @@ __device__ __forceinline__ void normalized_front_body(
 #pragma unroll
             for (std::uint32_t v = 0; v < V; ++v)
                 loaded[row][v] = first + row < tokens && exists(v)
-                    ? rows[static_cast<std::size_t>(first + row) * row_vectors + v * Threads +
-                           thread]
-                    : uint4{};
+                                     ? rows[static_cast<std::size_t>(first + row) * row_vectors +
+                                            v * Threads + thread]
+                                     : uint4{};
 #pragma unroll
         for (std::uint32_t row = 0; row < kPassTokens; ++row) {
 #pragma unroll
@@ -472,8 +488,7 @@ __device__ __forceinline__ void normalized_front_body(
 #pragma unroll
                 for (std::uint32_t v = 0; v < V; ++v) {
                     if (!exists(v)) continue;
-                    seam[v] = front_seam(loaded[row][v], gains[v], inverses[row], offset,
-                                         value[v]);
+                    seam[v] = front_seam(loaded[row][v], gains[v], inverses[row], offset, value[v]);
                 }
                 if constexpr (kFp8) {
                     // CTA-uniform owner: the whole CTA encodes the row (block reduction inside).
@@ -482,9 +497,9 @@ __device__ __forceinline__ void normalized_front_body(
 #pragma unroll
                             for (std::uint32_t v = 0; v < V; ++v) {
                                 if (!exists(v)) continue;
-                                reinterpret_cast<uint4*>(hidden)[static_cast<std::size_t>(token) *
-                                                                     row_vectors +
-                                                                 v * Threads + thread] = seam[v];
+                                reinterpret_cast<uint4*>(
+                                    hidden)[static_cast<std::size_t>(token) * row_vectors +
+                                            v * Threads + thread] = seam[v];
                             }
                         }
                         linear::fp8_encode::encode_rows<Threads, V, row_vectors>(
@@ -515,8 +530,7 @@ __device__ __forceinline__ void normalized_front_body(
                         maximum = linear::codec::a8g64_group_maximum(maximum);
                         linear::codec::a8g64_encode_vector(
                             finite, maximum, lane, vector,
-                            static_cast<std::size_t>(token) * (kControlColumns / 64U) +
-                                thread / 8U,
+                            static_cast<std::size_t>(token) * (kControlColumns / 64U) + thread / 8U,
                             low_codes, high_codes, scale_words);
                     }
                 }
@@ -526,15 +540,14 @@ __device__ __forceinline__ void normalized_front_body(
                     const std::uint32_t xw[4] = {seam[v].x, seam[v].y, seam[v].z, seam[v].w};
                     const std::uint32_t aw[4] = {av[v].x, av[v].y, av[v].z, av[v].w};
                     const std::uint32_t bw[4] = {bv[v].x, bv[v].y, bv[v].z, bv[v].w};
-                    float a_partial = 0.0F;
-                    float b_partial = 0.0F;
+                    float a_partial           = 0.0F;
+                    float b_partial           = 0.0F;
 #pragma unroll
                     for (int w = 0; w < 4; ++w) {
 #pragma unroll
                         for (int half = 0; half < 2; ++half) {
                             const auto element = [&](std::uint32_t word) {
-                                return __uint_as_float(half == 0 ? word << 16
-                                                                 : word & 0xffff0000U);
+                                return __uint_as_float(half == 0 ? word << 16 : word & 0xffff0000U);
                             };
                             a_partial = fmaf(element(xw[w]), element(aw[w]), a_partial);
                             b_partial = fmaf(element(xw[w]), element(bw[w]), b_partial);
@@ -555,36 +568,34 @@ __device__ __forceinline__ void normalized_front_body(
         cta.sync();
         if (thread < kPassTokens && first + thread < tokens) {
             const std::uint32_t row = thread;
-            float a_sum = 0.0F;
-            float b_sum = 0.0F;
+            float a_sum             = 0.0F;
+            float b_sum             = 0.0F;
 #pragma unroll
             for (std::uint32_t i = 0; i < kFrontWaves; ++i) {
                 a_sum += a_waves[row][i];
                 b_sum += b_waves[row][i];
             }
-            const hip_bfloat16 ar = static_cast<hip_bfloat16>(a_sum);
-            const hip_bfloat16 br = static_cast<hip_bfloat16>(b_sum);
-            const float a_value = static_cast<float>(ar) + dt_bias[head];
-            const float softplus = a_value > 20.0F ? a_value : log1pf(expf(a_value));
-            const std::size_t output =
-                static_cast<std::size_t>(first + row) * kControlHeads + head;
-            g[output] = -expf(a_log[head]) * softplus;
-            const float b_value = static_cast<float>(br);
-            beta[output] = 1.0F / (1.0F + expf(-b_value));
+            const hip_bfloat16 ar    = static_cast<hip_bfloat16>(a_sum);
+            const hip_bfloat16 br    = static_cast<hip_bfloat16>(b_sum);
+            const float a_value      = static_cast<float>(ar) + dt_bias[head];
+            const float softplus     = a_value > 20.0F ? a_value : log1pf(expf(a_value));
+            const std::size_t output = static_cast<std::size_t>(first + row) * kControlHeads + head;
+            g[output]                = -expf(a_log[head]) * softplus;
+            const float b_value      = static_cast<float>(br);
+            beta[output]             = 1.0F / (1.0F + expf(-b_value));
         }
         cta.sync();
     }
     if constexpr (!kFp8) {
         if (head == 0U) {
             const bool any_nonfinite = __syncthreads_or(nonfinite);
-            const bool any_overflow = __syncthreads_or(overflow);
+            const bool any_overflow  = __syncthreads_or(overflow);
             if (thread == 0U) {
                 *status =
                     (any_nonfinite ? static_cast<std::uint32_t>(linear::Q4G64ActivationNonfinite)
                                    : 0U) |
-                    (any_overflow
-                         ? static_cast<std::uint32_t>(linear::Q4G64ActivationScaleOverflow)
-                         : 0U);
+                    (any_overflow ? static_cast<std::uint32_t>(linear::Q4G64ActivationScaleOverflow)
+                                  : 0U);
                 if (clear_status != nullptr) *clear_status = 0U;
             }
         }
@@ -601,10 +612,10 @@ template <bool kFp8>
 __global__ __launch_bounds__(kControlT1Threads) void gdn_normalized_front_kernel(
     const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
     const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
-    const float* dt_bias, float* g, float* beta, std::uint8_t* low_codes,
-    std::uint8_t* high_codes, std::uint16_t* scale_words, std::uint32_t* status,
-    hip_bfloat16* hidden, std::uint32_t* clear_status, std::uint32_t tokens,
-    float* fp8_scales, CacheWarm warm, FrontFold fold) {
+    const float* dt_bias, float* g, float* beta, std::uint8_t* low_codes, std::uint8_t* high_codes,
+    std::uint16_t* scale_words, std::uint32_t* status, hip_bfloat16* hidden,
+    std::uint32_t* clear_status, std::uint32_t tokens, float* fp8_scales, CacheWarm warm,
+    FrontFold fold) {
     __shared__ FrontShared<kControlT1Threads> shared;
     normalized_front_body<kFp8, kControlT1Threads>(
         persistent::LaunchCta{}, shared, residual, norm, eps, unit_offset, a_weight, b_weight,

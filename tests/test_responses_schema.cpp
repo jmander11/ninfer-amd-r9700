@@ -268,32 +268,32 @@ int test_typed_items_and_tools() {
     const Json body     = {
         {"model", "qwen3.8-27b"},
         {"input",
-             Json::array({Json{{"id", "rs_old"},
-                               {"type", "reasoning"},
-                               {"summary", Json::array()},
-                               {"content", Json::array({Json{{"type", "reasoning_text"},
-                                                             {"text", "need tools"}}})}},
-                          Json{{"id", "fc_old_1"},
-                               {"type", "function_call"},
-                               {"call_id", "call_1"},
-                               {"name", "weather"},
-                               {"arguments", R"({"city":"Paris"})"}},
-                          Json{{"id", "fc_old_2"},
-                               {"type", "function_call"},
-                               {"call_id", "call_2"},
-                               {"name", "weather"},
-                               {"arguments", R"({"city":"Rome"})"}},
-                          Json{{"id", "fco_old"},
-                               {"type", "function_call_output"},
-                               {"call_id", "call_1"},
-                               {"output", R"({"temp":20})"}},
-                          Json{{"type", "message"},
-                               {"role", "user"},
-                               {"content",
-                                Json::array({Json{{"type", "input_image"},
-                                                  {"image_url", "data:image/png;base64,AA=="},
-                                                  {"detail", "auto"}},
-                                             Json{{"type", "input_text"}, {"text", "describe"}}})}}})},
+         Json::array({Json{{"id", "rs_old"},
+                           {"type", "reasoning"},
+                           {"summary", Json::array()},
+                           {"content", Json::array({Json{{"type", "reasoning_text"},
+                                                         {"text", "need tools"}}})}},
+                      Json{{"id", "fc_old_1"},
+                           {"type", "function_call"},
+                           {"call_id", "call_1"},
+                           {"name", "weather"},
+                           {"arguments", R"({"city":"Paris"})"}},
+                      Json{{"id", "fc_old_2"},
+                           {"type", "function_call"},
+                           {"call_id", "call_2"},
+                           {"name", "weather"},
+                           {"arguments", R"({"city":"Rome"})"}},
+                      Json{{"id", "fco_old"},
+                           {"type", "function_call_output"},
+                           {"call_id", "call_1"},
+                           {"output", R"({"temp":20})"}},
+                      Json{{"type", "message"},
+                           {"role", "user"},
+                           {"content",
+                            Json::array({Json{{"type", "input_image"},
+                                              {"image_url", "data:image/png;base64,AA=="},
+                                              {"detail", "auto"}},
+                                         Json{{"type", "input_text"}, {"text", "describe"}}})}}})},
         {"tools", Json::array({function})},
         {"tool_choice", "auto"},
         {"parallel_tool_calls", true},
@@ -332,9 +332,9 @@ int test_explicit_rejections() {
                           "strict_tools_not_supported",
                       "strict tools rejected explicitly");
 
-    Json required           = base;
-    required["tools"]       = Json::array({Json{{"type", "function"}, {"name", "f"}}});
-    required["tool_choice"] = "required";
+    Json required               = base;
+    required["tools"]           = Json::array({Json{{"type", "function"}, {"name", "f"}}});
+    required["tool_choice"]     = "required";
     const auto required_request = parse_responses_request(required, limits());
     failures += check(required_request.generation.tool_choice.mode == ToolChoiceMode::Required &&
                           required_request.tool_choice == "required",
@@ -345,36 +345,37 @@ int test_explicit_rejections() {
                       "required choice activates mandatory-call grammar");
     Json named = required;
     named["tools"].push_back(Json{{"type", "function"}, {"name", "other"}});
-    named["tool_choice"] = Json{{"type", "function"}, {"name", "f"}};
+    named["tool_choice"]     = Json{{"type", "function"}, {"name", "f"}};
     const auto named_request = parse_responses_request(named, limits());
-    const auto named_input = to_prompt_input(named_request.generation, {}, unused_media);
-    failures += check(named_request.generation.tool_choice.mode == ToolChoiceMode::Named &&
-                          named_request.generation.tool_choice.name == "f" &&
-                          named_request.tool_choice == named["tool_choice"] &&
-                          named_input.options.require_tool_call &&
-                          named_input.options.tool_jsons.size() == 1 &&
-                          Json::parse(named_input.options.tool_jsons.front())["function"]["name"] == "f",
-                      "named choice enforces only the selected function");
+    const auto named_input   = to_prompt_input(named_request.generation, {}, unused_media);
+    failures += check(
+        named_request.generation.tool_choice.mode == ToolChoiceMode::Named &&
+            named_request.generation.tool_choice.name == "f" &&
+            named_request.tool_choice == named["tool_choice"] &&
+            named_input.options.require_tool_call && named_input.options.tool_jsons.size() == 1 &&
+            Json::parse(named_input.options.tool_jsons.front())["function"]["name"] == "f",
+        "named choice enforces only the selected function");
     for (const Json& choice : {Json("required"), named["tool_choice"]}) {
-        auto missing_tools = base;
+        auto missing_tools           = base;
         missing_tools["tool_choice"] = choice;
-        failures += check(throws_api([&] { (void)parse_responses_request(missing_tools, limits()); }),
-                          "forced tool choice requires declarations");
+        failures +=
+            check(throws_api([&] { (void)parse_responses_request(missing_tools, limits()); }),
+                  "forced tool choice requires declarations");
     }
-    for (const Json& choice : {Json{{"type", "function"}, {"name", "missing"}},
-                               Json{{"type", "function"}},
-                               Json{{"type", "function"}, {"name", "bad>name"}},
-                               Json{{"type", "web_search"}},
-                               Json{{"type", "function"}, {"function", {{"name", "f"}}}}}) {
+    for (const Json& choice :
+         {Json{{"type", "function"}, {"name", "missing"}}, Json{{"type", "function"}},
+          Json{{"type", "function"}, {"name", "bad>name"}}, Json{{"type", "web_search"}},
+          Json{{"type", "function"}, {"function", {{"name", "f"}}}}}) {
         named["tool_choice"] = choice;
         failures += check(throws_api([&] { (void)parse_responses_request(named, limits()); }),
                           "invalid or unknown flat Responses tool choice rejected");
     }
     for (const auto* choice : {"auto", "none"}) {
         required["tool_choice"] = choice;
-        const auto optional = parse_responses_request(required, limits());
-        failures += check(!to_prompt_input(optional.generation, {}, unused_media).options.require_tool_call,
-                          "auto/none do not require calls");
+        const auto optional     = parse_responses_request(required, limits());
+        failures +=
+            check(!to_prompt_input(optional.generation, {}, unused_media).options.require_tool_call,
+                  "auto/none do not require calls");
     }
 
     Json structured    = base;
@@ -383,9 +384,11 @@ int test_explicit_rejections() {
                           "invalid_output_format",
                       "incomplete structured format rejected");
 
-    structured["text"]["format"] = Json{{"type", "json_schema"}, {"name", "result"},
-        {"strict", true}, {"schema", Json{{"type", "boolean"}}}};
-    auto json_response = parse_responses_request(structured, limits());
+    structured["text"]["format"] = Json{{"type", "json_schema"},
+                                        {"name", "result"},
+                                        {"strict", true},
+                                        {"schema", Json{{"type", "boolean"}}}};
+    auto json_response           = parse_responses_request(structured, limits());
     failures += check(json_response.generation.output_json_schema ==
                           std::optional<std::string>(R"({"type":"boolean"})"),
                       "Responses schema retained");
@@ -410,16 +413,17 @@ int test_explicit_rejections() {
                           "invalid_value",
                       "OpenAI minimum max_output_tokens enforced");
 
-    Json pin          = base;
-    pin["ninfer"]     = Json{{"capture_context_checkpoint", true}};
+    Json pin      = base;
+    pin["ninfer"] = Json{{"capture_context_checkpoint", true}};
     failures += check(parse_responses_request(pin, limits()).generation.capture_context_checkpoint,
                       "Responses ninfer capture flag parsed");
-    Json ninfer_null          = base;
-    ninfer_null["ninfer"]     = nullptr;
-    failures += check(!parse_responses_request(ninfer_null, limits()).generation.capture_context_checkpoint,
-                      "Responses ninfer null is omit");
-    Json unknown_ninfer          = base;
-    unknown_ninfer["ninfer"]     = Json{{"capture_context_checkpoint", true}, {"foo", 1}};
+    Json ninfer_null      = base;
+    ninfer_null["ninfer"] = nullptr;
+    failures +=
+        check(!parse_responses_request(ninfer_null, limits()).generation.capture_context_checkpoint,
+              "Responses ninfer null is omit");
+    Json unknown_ninfer      = base;
+    unknown_ninfer["ninfer"] = Json{{"capture_context_checkpoint", true}, {"foo", 1}};
     failures += check(api_code([&] { (void)parse_responses_request(unknown_ninfer, limits()); }) ==
                           "ninfer_option_not_supported",
                       "Responses unknown ninfer key rejected");
@@ -533,14 +537,14 @@ int test_sse_sequence() {
 }
 
 int test_sse_function_call(const Json& choice) {
-    ResponsesRequest request = parse_responses_request(Json{{"model", "qwen3.8-27b"},
-                                                            {"input", "weather"},
-                                                            {"tools", Json::array({Json{{"type", "function"},
-                                                                                       {"name", "weather"}}})},
-                                                            {"tool_choice", choice},
-                                                            {"max_output_tokens", 32},
-                                                            {"stream", true}},
-                                                       limits());
+    ResponsesRequest request = parse_responses_request(
+        Json{{"model", "qwen3.8-27b"},
+             {"input", "weather"},
+             {"tools", Json::array({Json{{"type", "function"}, {"name", "weather"}}})},
+             {"tool_choice", choice},
+             {"max_output_tokens", 32},
+             {"stream", true}},
+        limits());
     ResponsesEventStream encoder("resp_tool_stream", 123, request, {});
     std::vector<std::string> wire = encoder.start();
     GenerationOutcome outcome;
@@ -589,11 +593,11 @@ int test_input_tokens_schema() {
                       limits());
               }) == "unknown_parameter",
               "input_tokens accepts only model and input");
-    failures += check(!parse_response_input_tokens_request(
-                              Json{{"model", "qwen3.8-27b"}, {"input", "hello"}, {"ninfer", nullptr}},
-                              limits())
-                              .generation.capture_context_checkpoint,
-                      "input_tokens allows ninfer null");
+    failures += check(
+        !parse_response_input_tokens_request(
+             Json{{"model", "qwen3.8-27b"}, {"input", "hello"}, {"ninfer", nullptr}}, limits())
+             .generation.capture_context_checkpoint,
+        "input_tokens allows ninfer null");
     failures += check(throws_api([&] {
                           (void)parse_response_input_tokens_request(
                               Json{{"model", "qwen3.8-27b"},
@@ -609,12 +613,11 @@ int test_system_prepend() {
     int failures = 0;
     ServeOptions server;
 
-    ResponsesRequest instructed =
-        parse_responses_request(Json{{"model", "m"},
-                                     {"input", "hello"},
-                                     {"instructions", "be concise"},
-                                     {"max_output_tokens", 32}},
-                                limits());
+    ResponsesRequest instructed = parse_responses_request(Json{{"model", "m"},
+                                                               {"input", "hello"},
+                                                               {"instructions", "be concise"},
+                                                               {"max_output_tokens", 32}},
+                                                          limits());
     compose_responses_generation_messages(instructed, {});
     failures += check(instructed.generation.messages[0].role == ninfer::ChatRole::Developer,
                       "instructions did not compose as Developer");
@@ -629,9 +632,8 @@ int test_system_prepend() {
                           instructed.input_turns[0].content[0].text == "hello",
                       "Responses input_turns changed when prepending instructions");
 
-    ResponsesRequest follow =
-        parse_responses_request(Json{{"model", "m"}, {"input", "q2"}, {"max_output_tokens", 32}},
-                                limits());
+    ResponsesRequest follow = parse_responses_request(
+        Json{{"model", "m"}, {"input", "q2"}, {"max_output_tokens", 32}}, limits());
     ChatTurn previous_user;
     previous_user.role = ninfer::ChatRole::User;
     ContentPart q1;
@@ -645,9 +647,10 @@ int test_system_prepend() {
     old.text = "old";
     previous_assistant.content.push_back(std::move(old));
     compose_responses_generation_messages(follow, {previous_user, previous_assistant});
-    const ninfer::PromptInput inserted = to_prompt_input(
-        follow.generation, resolve_prompt_semantics(follow.generation, server, effort_capabilities()),
-        unused_media, "P");
+    const ninfer::PromptInput inserted =
+        to_prompt_input(follow.generation,
+                        resolve_prompt_semantics(follow.generation, server, effort_capabilities()),
+                        unused_media, "P");
     failures += check(inserted.messages[0].role == ninfer::ChatRole::System &&
                           joined_text(inserted.messages[0]) == "P",
                       "Responses follow-up did not insert a leading System");

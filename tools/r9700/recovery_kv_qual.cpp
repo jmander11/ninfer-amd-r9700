@@ -80,8 +80,9 @@ CommittedState committed_state(execution::ProgramImplCore& program) {
     CommittedState result{std::vector<std::byte>(state.conv_host_image_bytes()),
                           std::vector<std::byte>(state.recurrent_host_image_bytes()),
                           std::vector<std::byte>(hidden.bytes())};
-    state.pack_slot_to_host(execution::LinearStateSlots::current_state_slot(0, program.max_concurrency),
-                            result.conv.data(), result.recurrent.data(), program.device.stream);
+    state.pack_slot_to_host(
+        execution::LinearStateSlots::current_state_slot(0, program.max_concurrency),
+        result.conv.data(), result.recurrent.data(), program.device.stream);
     HIP_CHECK(hipMemcpyAsync(result.hidden.data(), hidden.data, hidden.bytes(),
                              hipMemcpyDeviceToHost, program.device.stream));
     program.device.synchronize();
@@ -123,19 +124,21 @@ PrefillRun finish_prefill(execution::ProgramImplCore& program, family::PreparedP
 
 bool prefix_equals(const std::vector<ninfer::TokenId>& tokens,
                    const std::vector<ninfer::TokenId>& prefix) {
-    return tokens.size() >= prefix.size() && std::equal(prefix.begin(), prefix.end(), tokens.begin());
+    return tokens.size() >= prefix.size() &&
+           std::equal(prefix.begin(), prefix.end(), tokens.begin());
 }
 
 void exercise_decoded_retries(execution::ProgramImplCore& program, family::Frontend& frontend,
                               const ninfer::PromptInput& input,
                               ninfer::runtime::ResolvedExecutionOptions options) {
     options.requested_output_tokens = 32;
-    auto prompt = family::PreparedPromptAccess::take(frontend.prepare(input));
-    const auto recovery = family::GenerationRecoveryContext::analyze(input);
+    auto prompt                     = family::PreparedPromptAccess::take(frontend.prepare(input));
+    const auto recovery             = family::GenerationRecoveryContext::analyze(input);
     for (std::uint32_t attempt = 1; attempt <= 2; ++attempt) {
         const auto prompt_tokens = static_cast<std::uint32_t>(prompt.token_ids.size());
         const auto insert        = recovery->recovery_insert({}, attempt);
-        auto prepared_retry = frontend.splice_recovery_prompt(prompt.token_ids, input, insert, recovery);
+        auto prepared_retry =
+            frontend.splice_recovery_prompt(prompt.token_ids, input, insert, recovery);
         require(prepared_retry.has_value(), "decoded retry splice was rejected");
         auto retry = family::PreparedPromptAccess::take(std::move(*prepared_retry));
 
@@ -168,8 +171,8 @@ void exercise_decoded_retries(execution::ProgramImplCore& program, family::Front
                 finish_prefill(program, family::PreparedPromptData(retry), std::move(retry_plan));
             require(run.processed == retry.token_ids.size() - prompt_tokens,
                     "decoded retry recomputed tokens before its checkpoint");
-            const auto actual  = committed_state(program);
-            auto continuation  = decode_rounds(program, 2);
+            const auto actual = committed_state(program);
+            auto continuation = decode_rounds(program, 2);
             if (!failed_decode) {
                 expected              = actual;
                 expected_continuation = std::move(continuation);
@@ -211,10 +214,10 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
     options.enable_vision         = false;
     // Decode graphs have their own qualification; this run is the retain/copy/abort/restore
     // sequence and must not depend on graph-allowance calibration.
-    options.use_device_graph            = false;
-    options.speculative.backend         = backend;
-    options.speculative.draft_tokens    = backend == ninfer::SpeculativeBackend::None ? 0 : 3;
-    options.speculative.proposal_head   = ninfer::ProposalHead::Full;
+    options.use_device_graph          = false;
+    options.speculative.backend       = backend;
+    options.speculative.draft_tokens  = backend == ninfer::SpeculativeBackend::None ? 0 : 3;
+    options.speculative.proposal_head = ninfer::ProposalHead::Full;
     // A fixed draft width keeps the control independent of round-time estimates learned during
     // the deliberately discarded decode.
     options.speculative.adaptive_draft = false;
@@ -224,7 +227,7 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
     options.model_id               = reader.identity().model_id;
     options.weights_id             = reader.identity().weights_id;
     options.artifact_file_identity = reader.file_identity();
-    const auto profile = Package::resolve_weights(reader.identity());
+    const auto profile             = Package::resolve_weights(reader.identity());
     auto load = target::bind_artifact(binder, profile, family::startup_features(options));
     load.bindings.linear_widths = target::Variant::ExecutionState::eager_widths(
         std::min(options.prefill_chunk, options.max_context), options.max_concurrency,
@@ -285,7 +288,8 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
     std::uint32_t copied_frontier = 0;
     require(program.copy_reusable_prompt(0, prompt_tokens, copied, copied_frontier),
             "retain left no prompt to copy");
-    require(copied == prompt_ids, "copied prefix included generated tokens or dropped prompt tokens");
+    require(copied == prompt_ids,
+            "copied prefix included generated tokens or dropped prompt tokens");
     require(copied_frontier == program.sequences[0].rewrite_checkpoint.frontier,
             "copied rewrite frontier does not match the resident checkpoint");
 
@@ -295,7 +299,7 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
     require(spliced_prompt.has_value(), "live thinking prompt refused the recovery splice");
     auto spliced = family::PreparedPromptAccess::take(std::move(*spliced_prompt));
     const std::vector<ninfer::TokenId> spliced_ids = spliced.token_ids;
-    const auto spliced_tokens = static_cast<std::uint32_t>(spliced_ids.size());
+    const auto spliced_tokens                      = static_cast<std::uint32_t>(spliced_ids.size());
     require(spliced_tokens > prompt_tokens && prefix_equals(spliced_ids, prompt_ids),
             "splice did not append to the copied prompt");
 
@@ -329,9 +333,9 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
                 stacked == spliced_ids,
             "attempt-2 copy lost the spliced prompt");
     const std::vector<ninfer::TokenId> captured_ledger = program.sequences[0].ledger;
-    const std::uint32_t captured_frontier = program.sequences[0].execution_frontier;
-    const auto captured_rewrite           = program.sequences[0].rewrite_checkpoint;
-    std::uint64_t entry_id                = 0;
+    const std::uint32_t captured_frontier              = program.sequences[0].execution_frontier;
+    const auto captured_rewrite                        = program.sequences[0].rewrite_checkpoint;
+    std::uint64_t entry_id                             = 0;
     require(program.capture_retained_lane(0, &entry_id) && entry_id != 0,
             "retained lane did not capture a RAM checkpoint");
     program.wait_kv_ram_copies();
@@ -368,7 +372,8 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
             "restored bundle missed the spliced prefix: " + plan_text(restored_plan));
     require(program.can_admit_lane(0, restored_plan), "restored lane cannot admit");
     const std::uint32_t restored_reuse = restored_plan.summary().reusable_prompt_tokens;
-    const PrefillRun restored = finish_prefill(program, std::move(spliced), std::move(restored_plan));
+    const PrefillRun restored =
+        finish_prefill(program, std::move(spliced), std::move(restored_plan));
     require(restored.summary.prefix_reuse_path != ninfer::PrefixReusePath::FullReset &&
                 restored.summary.reused_prompt_tokens == restored_reuse &&
                 restored.processed == spliced_tokens - restored_reuse &&

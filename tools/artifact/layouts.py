@@ -124,26 +124,16 @@ class RowPlanes:
     rows: int
 
 
-CONTIGUOUS_LE_V1 = Layout(
-    "contiguous-le-v1", 256, frozenset(("BF16", "FP32", "I32"))
-)
+CONTIGUOUS_LE_V1 = Layout("contiguous-le-v1", 256, frozenset(("BF16", "FP32", "I32")))
 ROW_SPLIT_K128_V1 = Layout(
     "row-split-k128-v1",
     256,
     frozenset(("Q4G64_F16S", "Q5G64_F16S", "Q6G64_F16S", "W8G32_F16S")),
 )
-R9700_Q4G64_N16_K16_V1 = Layout(
-    "r9700-q4g64-n16-k16-v1", 256, frozenset(("Q4G64_F16S",))
-)
-R9700_W8G32_N16_K16_V1 = Layout(
-    "r9700-w8g32-n16-k16-v1", 256, frozenset(("W8G32_F16S",))
-)
-ROW_SCALED_K128_V1 = Layout(
-    "row-scaled-k128-v1", 256, frozenset(("F8E4M3_ROW_F32S",))
-)
-R9700_FP8LUT4_N16K64_V1 = Layout(
-    "r9700-fp8lut4-n16k64-v1", 256, frozenset(("FP8LUT4",))
-)
+R9700_Q4G64_N16_K16_V1 = Layout("r9700-q4g64-n16-k16-v1", 256, frozenset(("Q4G64_F16S",)))
+R9700_W8G32_N16_K16_V1 = Layout("r9700-w8g32-n16-k16-v1", 256, frozenset(("W8G32_F16S",)))
+ROW_SCALED_K128_V1 = Layout("row-scaled-k128-v1", 256, frozenset(("F8E4M3_ROW_F32S",)))
+R9700_FP8LUT4_N16K64_V1 = Layout("r9700-fp8lut4-n16k64-v1", 256, frozenset(("FP8LUT4",)))
 LAYOUTS = MappingProxyType(
     {
         layout.name: layout
@@ -208,9 +198,7 @@ def _shape(value: Sequence[int], *, rank: int | None = None) -> tuple[int, ...]:
     return result
 
 
-def row_split_geometry(
-    format: str | QuantFormat, shape: Sequence[int]
-) -> RowSplitGeometry:
+def row_split_geometry(format: str | QuantFormat, shape: Sequence[int]) -> RowSplitGeometry:
     spec = _format(format)
     if not isinstance(spec, QuantFormat):
         raise ValueError("row-split-k128-v1 requires a grouped quantized format")
@@ -218,9 +206,7 @@ def row_split_geometry(
     k_pad = align_up(k, K_ALIGNMENT)
     groups_per_row = k_pad // spec.group_size
     base_bytes_per_group = spec.group_size if spec.bits == 8 else spec.group_size // 2
-    high_bytes_per_group = (
-        0 if spec.bits in (4, 8) else spec.group_size * (spec.bits - 4) // 8
-    )
+    high_bytes_per_group = 0 if spec.bits in (4, 8) else spec.group_size * (spec.bits - 4) // 8
     base_row_bytes = groups_per_row * base_bytes_per_group
     high_row_bytes = groups_per_row * high_bytes_per_group
     scale_row_bytes = groups_per_row * 2
@@ -258,9 +244,24 @@ def q4_n16k16_geometry(shape: Sequence[int]) -> RowSplitGeometry:
     base_bytes = n * k_pad // 2
     scale_offset = align_up(base_bytes, PLANE_ALIGNMENT)
     scale_bytes = n * groups * 2
-    return RowSplitGeometry(n, k, k_pad, groups, 32, 0, groups * 32, 0,
-                            groups * 2, 0, base_bytes, scale_offset, 0,
-                            scale_offset, scale_bytes, scale_offset + scale_bytes)
+    return RowSplitGeometry(
+        n,
+        k,
+        k_pad,
+        groups,
+        32,
+        0,
+        groups * 32,
+        0,
+        groups * 2,
+        0,
+        base_bytes,
+        scale_offset,
+        0,
+        scale_offset,
+        scale_bytes,
+        scale_offset + scale_bytes,
+    )
 
 
 def w8_n16k16_geometry(shape: Sequence[int]) -> RowSplitGeometry:
@@ -270,8 +271,9 @@ def w8_n16k16_geometry(shape: Sequence[int]) -> RowSplitGeometry:
     return row_split_geometry("W8G32_F16S", shape)
 
 
-def transcode_q4_n16k16(source: bytes | bytearray | memoryview,
-                        shape: Sequence[int], *, inverse: bool = False):
+def transcode_q4_n16k16(
+    source: bytes | bytearray | memoryview, shape: Sequence[int], *, inverse: bool = False
+):
     """Stream an exact Q4 code/FP16-word permutation in bounded N16 blocks.
 
     Forward consumes row-split and yields N16/K16; inverse consumes N16/K16
@@ -287,16 +289,16 @@ def transcode_q4_n16k16(source: bytes | bytearray | memoryview,
     code_block = 16 * groups * 32
     scale_block = 16 * groups * 2
     for offset in range(0, geometry.base_bytes, code_block):
-        raw = np.frombuffer(view[offset:offset + code_block], dtype=np.uint8)
+        raw = np.frombuffer(view[offset : offset + code_block], dtype=np.uint8)
         if inverse:
             block = raw.reshape(groups, 4, 16, 8).transpose(2, 0, 1, 3)
         else:
             block = raw.reshape(16, groups, 4, 8).transpose(1, 2, 0, 3)
         yield block.tobytes()
-    yield bytes(view[geometry.base_bytes:geometry.scale_offset])
+    yield bytes(view[geometry.base_bytes : geometry.scale_offset])
     for offset in range(geometry.scale_offset, geometry.payload_bytes, scale_block):
         # Keep FP16 words as two uninterpreted bytes, including signed zero.
-        raw = np.frombuffer(view[offset:offset + scale_block], dtype=np.uint8)
+        raw = np.frombuffer(view[offset : offset + scale_block], dtype=np.uint8)
         if inverse:
             block = raw.reshape(groups, 16, 2).transpose(1, 0, 2)
         else:
@@ -304,8 +306,9 @@ def transcode_q4_n16k16(source: bytes | bytearray | memoryview,
         yield block.tobytes()
 
 
-def transcode_w8_n16k16(source: bytes | bytearray | memoryview,
-                        shape: Sequence[int], *, inverse: bool = False):
+def transcode_w8_n16k16(
+    source: bytes | bytearray | memoryview, shape: Sequence[int], *, inverse: bool = False
+):
     """Stream an exact W8 code/FP16-word permutation in bounded N16 blocks.
 
     Forward consumes row-split and yields N16/K16; inverse consumes N16/K16
@@ -321,16 +324,16 @@ def transcode_w8_n16k16(source: bytes | bytearray | memoryview,
     code_block = 16 * geometry.k_pad
     scale_block = 16 * groups * 2
     for offset in range(0, geometry.base_bytes, code_block):
-        raw = np.frombuffer(view[offset:offset + code_block], dtype=np.uint8)
+        raw = np.frombuffer(view[offset : offset + code_block], dtype=np.uint8)
         if inverse:
             block = raw.reshape(groups, 2, 16, 16).transpose(2, 0, 1, 3)
         else:
             block = raw.reshape(16, groups, 2, 16).transpose(1, 2, 0, 3)
         yield block.tobytes()
-    yield bytes(view[geometry.base_bytes:geometry.scale_offset])
+    yield bytes(view[geometry.base_bytes : geometry.scale_offset])
     for offset in range(geometry.scale_offset, geometry.payload_bytes, scale_block):
         # Keep FP16 words as two uninterpreted bytes, including signed zero.
-        raw = np.frombuffer(view[offset:offset + scale_block], dtype=np.uint8)
+        raw = np.frombuffer(view[offset : offset + scale_block], dtype=np.uint8)
         if inverse:
             block = raw.reshape(groups, 16, 2).transpose(1, 0, 2)
         else:
@@ -338,9 +341,7 @@ def transcode_w8_n16k16(source: bytes | bytearray | memoryview,
         yield block.tobytes()
 
 
-def row_scaled_geometry(
-    format: str | RowScaledFormat, shape: Sequence[int]
-) -> RowScaledGeometry:
+def row_scaled_geometry(format: str | RowScaledFormat, shape: Sequence[int]) -> RowScaledGeometry:
     spec = _format(format)
     if not isinstance(spec, RowScaledFormat):
         raise ValueError("row-scaled-k128-v1 requires a row-scaled format")
@@ -382,9 +383,16 @@ def fp8lut4_geometry(shape: Sequence[int]) -> CodebookGeometry:
     scale_offset = align_up(group_offset + group_bytes, PLANE_ALIGNMENT)
     scale_bytes = n * 4
     return CodebookGeometry(
-        n=n, k=k, k_pad=k_pad, code_row_bytes=k_pad // 2, code_bytes=code_bytes,
-        group_row_bytes=k_pad // 32, group_offset=group_offset, group_bytes=group_bytes,
-        scale_offset=scale_offset, scale_bytes=scale_bytes,
+        n=n,
+        k=k,
+        k_pad=k_pad,
+        code_row_bytes=k_pad // 2,
+        code_bytes=code_bytes,
+        group_row_bytes=k_pad // 32,
+        group_offset=group_offset,
+        group_bytes=group_bytes,
+        scale_offset=scale_offset,
+        scale_bytes=scale_bytes,
         payload_bytes=scale_offset + scale_bytes,
     )
 
@@ -400,8 +408,12 @@ def fp8lut4_tile_codes(packed: "torch.Tensor") -> "torch.Tensor":
     """Row-major packed codes uint8 [N, K/2] -> N16 x K64 tile order (flat uint8)."""
 
     n, half_k = packed.shape
-    return (packed.reshape(n // 16, 16, half_k // 32, 2, 16)
-            .permute(0, 2, 3, 1, 4).contiguous().reshape(-1))
+    return (
+        packed.reshape(n // 16, 16, half_k // 32, 2, 16)
+        .permute(0, 2, 3, 1, 4)
+        .contiguous()
+        .reshape(-1)
+    )
 
 
 def fp8lut4_tile_groups(groups: "torch.Tensor") -> "torch.Tensor":
@@ -411,8 +423,9 @@ def fp8lut4_tile_groups(groups: "torch.Tensor") -> "torch.Tensor":
     return groups.reshape(n // 16, 16, k32 // 2, 2).permute(0, 2, 3, 1).contiguous().reshape(-1)
 
 
-def encode_fp8lut4_planes(codes: "torch.Tensor", groups: "torch.Tensor",
-                      scales: "torch.Tensor") -> bytes:
+def encode_fp8lut4_planes(
+    codes: "torch.Tensor", groups: "torch.Tensor", scales: "torch.Tensor"
+) -> bytes:
     """Pack exact FP8LUT4 words: codes uint8 [N, K_pad] in 0..15 (bit 3 = sign, bits 0..2 =
     magnitude index), group codes uint8 [N, K_pad / 32], FP32 row multipliers [N]."""
 
@@ -421,7 +434,11 @@ def encode_fp8lut4_planes(codes: "torch.Tensor", groups: "torch.Tensor",
         raise TypeError("FP8LUT4 planes require uint8 codes/groups and FP32 scales")
     n, k_pad = codes.shape
     geometry = fp8lut4_geometry((n, k_pad))
-    if geometry.k_pad != k_pad or tuple(groups.shape) != (n, k_pad // 32) or tuple(scales.shape) != (n,):
+    if (
+        geometry.k_pad != k_pad
+        or tuple(groups.shape) != (n, k_pad // 32)
+        or tuple(scales.shape) != (n,)
+    ):
         raise ValueError("FP8LUT4 planes have inconsistent shapes")
     if bool((codes > 15).any()):
         raise ValueError("FP8LUT4 codes must be four-bit words")
@@ -430,10 +447,11 @@ def encode_fp8lut4_planes(codes: "torch.Tensor", groups: "torch.Tensor",
     c = codes.to("cpu")
     packed = (c[:, 0::2] | (c[:, 1::2] << 4)).contiguous()
     out = bytearray(geometry.payload_bytes)
-    out[:geometry.code_bytes] = fp8lut4_tile_codes(packed).numpy().tobytes()
-    out[geometry.group_offset:geometry.group_offset + geometry.group_bytes] = \
+    out[: geometry.code_bytes] = fp8lut4_tile_codes(packed).numpy().tobytes()
+    out[geometry.group_offset : geometry.group_offset + geometry.group_bytes] = (
         fp8lut4_tile_groups(groups.to("cpu")).numpy().tobytes()
-    out[geometry.scale_offset:] = scales.to("cpu").contiguous().numpy().astype("<f4").tobytes()
+    )
+    out[geometry.scale_offset :] = scales.to("cpu").contiguous().numpy().astype("<f4").tobytes()
     return bytes(out)
 
 
@@ -443,25 +461,38 @@ def decode_fp8lut4(source: Payload, shape: Sequence[int]) -> "torch.Tensor":
 
     _require_torch()
     import numpy as np
+
     geometry = fp8lut4_geometry(shape)
     view = memoryview(source).cast("B")
     if len(view) != geometry.payload_bytes:
-        raise ValueError(f"FP8LUT4 payload has {len(view)} bytes, expected {geometry.payload_bytes}")
+        raise ValueError(
+            f"FP8LUT4 payload has {len(view)} bytes, expected {geometry.payload_bytes}"
+        )
     n, k_pad = geometry.n, geometry.k_pad
-    tiles = np.frombuffer(view[:geometry.code_bytes], dtype=np.uint8)
-    packed = tiles.reshape(n // 16, k_pad // 64, 2, 16, 16).transpose(0, 3, 1, 2, 4).reshape(n, k_pad // 2)
+    tiles = np.frombuffer(view[: geometry.code_bytes], dtype=np.uint8)
+    packed = (
+        tiles.reshape(n // 16, k_pad // 64, 2, 16, 16)
+        .transpose(0, 3, 1, 2, 4)
+        .reshape(n, k_pad // 2)
+    )
     codes = np.empty((n, k_pad), dtype=np.uint8)
     codes[:, 0::2] = packed & 15
     codes[:, 1::2] = packed >> 4
-    groups = np.frombuffer(view[geometry.group_offset:geometry.group_offset + geometry.group_bytes],
-                           dtype=np.uint8).reshape(n // 16, k_pad // 64, 2, 16).transpose(0, 3, 1, 2)
+    groups = (
+        np.frombuffer(
+            view[geometry.group_offset : geometry.group_offset + geometry.group_bytes],
+            dtype=np.uint8,
+        )
+        .reshape(n // 16, k_pad // 64, 2, 16)
+        .transpose(0, 3, 1, 2)
+    )
     groups = groups.reshape(n, k_pad // 32)
-    scales = np.frombuffer(view[geometry.scale_offset:], dtype="<f4").astype(np.float64)
-    words = np.array(fp8lut4_magnitude_table(), dtype=np.uint8)            # [256, 8]
+    scales = np.frombuffer(view[geometry.scale_offset :], dtype="<f4").astype(np.float64)
+    words = np.array(fp8lut4_magnitude_table(), dtype=np.uint8)  # [256, 8]
     lut = torch.tensor(words).view(torch.float8_e4m3fn).to(torch.float64).numpy()
     magnitude = lut[np.repeat(groups, 32, axis=1), codes & 7]
     value = np.where(codes & 8, -magnitude, magnitude) * scales[:, None]
-    return torch.from_numpy(np.ascontiguousarray(value[:, :geometry.k]))
+    return torch.from_numpy(np.ascontiguousarray(value[:, : geometry.k]))
 
 
 def encoded_size(
@@ -515,9 +546,7 @@ def encode_direct(tensor: torch.Tensor, format: str | DirectFormat) -> bytes:
         raise ValueError("direct encoding requires BF16, FP32, or I32")
     expected_dtype = _direct_dtypes()[spec.name]
     if tensor.dtype != expected_dtype:
-        raise TypeError(
-            f"{spec.name} encoding requires {expected_dtype}, got {tensor.dtype}"
-        )
+        raise TypeError(f"{spec.name} encoding requires {expected_dtype}, got {tensor.dtype}")
     if tensor.dim() > 16 or any(dim <= 0 for dim in tensor.shape):
         raise ValueError("contiguous-le-v1 requires rank 0..16 with positive dimensions")
     host = tensor.detach().contiguous().cpu().reshape(-1)
@@ -564,7 +593,9 @@ def decode_direct(
         raise ValueError("contiguous-le-v1 supports rank 0 through 16")
     expected = prod(dims) * spec.word_bytes
     if _payload_length(payload) != expected:
-        raise ValueError(f"direct payload has {_payload_length(payload)} bytes, expected {expected}")
+        raise ValueError(
+            f"direct payload has {_payload_length(payload)} bytes, expected {expected}"
+        )
     target = torch.device(device)
     raw = _payload_tensor(payload, target)
     if sys.byteorder != "little" and target.type == "cpu":
@@ -572,9 +603,7 @@ def decode_direct(
     return raw.view(_direct_dtypes()[spec.name]).reshape(dims)
 
 
-def _exact_uint8_matrix(
-    tensor: torch.Tensor, shape: tuple[int, int], label: str
-) -> torch.Tensor:
+def _exact_uint8_matrix(tensor: torch.Tensor, shape: tuple[int, int], label: str) -> torch.Tensor:
     if tensor.dtype != torch.uint8 or tuple(tensor.shape) != shape:
         raise TypeError(f"{label} must be uint8 with shape {shape}")
     return tensor.detach().contiguous().cpu()
@@ -587,9 +616,7 @@ def _pack_low_nibbles(codes: torch.Tensor) -> torch.Tensor:
     for begin in range(0, groups, chunk):
         end = min(groups, begin + chunk)
         unsigned = codes[begin:end].to(torch.int16) & 0x0F
-        out[begin:end] = (
-            unsigned[:, 0::2] | (unsigned[:, 1::2] << 4)
-        ).to(torch.uint8)
+        out[begin:end] = (unsigned[:, 0::2] | (unsigned[:, 1::2] << 4)).to(torch.uint8)
     return out
 
 
@@ -607,12 +634,8 @@ def _pack_high_bits(codes: torch.Tensor, bits: int) -> torch.Tensor:
     mask = (1 << bits) - 1
     for begin in range(0, groups, chunk):
         end = min(groups, begin + chunk)
-        upper = ((codes[begin:end].to(torch.int32) & mask) >> 4) & (
-            (1 << high_bits) - 1
-        )
-        unpacked = ((upper.unsqueeze(-1) >> shifts) & 1).reshape(
-            end - begin, bytes_per_group, 8
-        )
+        upper = ((codes[begin:end].to(torch.int32) & mask) >> 4) & ((1 << high_bits) - 1)
+        unpacked = ((upper.unsqueeze(-1) >> shifts) & 1).reshape(end - begin, bytes_per_group, 8)
         out[begin:end] = (unpacked * bit_weights).sum(-1).to(torch.uint8)
     return out
 
@@ -671,8 +694,7 @@ def encode_row_split(
     return payload.cpu().numpy().tobytes()
 
 
-def encode_q4_n16k16(codes: torch.Tensor, scales: torch.Tensor,
-                     shape: Sequence[int]) -> bytes:
+def encode_q4_n16k16(codes: torch.Tensor, scales: torch.Tensor, shape: Sequence[int]) -> bytes:
     """Encode represented Q4G64 groups in the production gfx1201 N16/K16 order."""
     _require_torch()
     geometry = q4_n16k16_geometry(shape)
@@ -688,41 +710,68 @@ def encode_q4_n16k16(codes: torch.Tensor, scales: torch.Tensor,
     assert isinstance(spec, QuantFormat)
     base, high = _pack_codes(codes.reshape(-1, 64), spec)
     assert high.numel() == 0
-    tiled_codes = (base.reshape(geometry.n // 16, 16, geometry.groups_per_row, 4, 8)
-                   .permute(0, 2, 3, 1, 4).contiguous().reshape(-1))
-    tiled_scales = (scales.reshape(geometry.n // 16, 16, geometry.groups_per_row)
-                    .permute(0, 2, 1).contiguous().view(torch.uint8).reshape(-1))
+    tiled_codes = (
+        base.reshape(geometry.n // 16, 16, geometry.groups_per_row, 4, 8)
+        .permute(0, 2, 3, 1, 4)
+        .contiguous()
+        .reshape(-1)
+    )
+    tiled_scales = (
+        scales.reshape(geometry.n // 16, 16, geometry.groups_per_row)
+        .permute(0, 2, 1)
+        .contiguous()
+        .view(torch.uint8)
+        .reshape(-1)
+    )
     payload = torch.zeros(geometry.payload_bytes, dtype=torch.uint8, device=codes.device)
-    payload[:geometry.base_bytes].copy_(tiled_codes)
-    payload[geometry.scale_offset:geometry.scale_offset + geometry.scale_bytes].copy_(tiled_scales)
+    payload[: geometry.base_bytes].copy_(tiled_codes)
+    payload[geometry.scale_offset : geometry.scale_offset + geometry.scale_bytes].copy_(
+        tiled_scales
+    )
     return payload.cpu().numpy().tobytes()
 
 
-def decode_q4_n16k16_codes(source: Payload, shape: Sequence[int],
-                            device: torch.device | str = "cpu") -> tuple[torch.Tensor, torch.Tensor]:
+def decode_q4_n16k16_codes(
+    source: Payload, shape: Sequence[int], device: torch.device | str = "cpu"
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Decode production N16/K16 Q4 bytes to logical row/group code and scale tensors."""
     _require_torch()
     geometry = q4_n16k16_geometry(shape)
     if _payload_length(source) != geometry.payload_bytes:
-        raise ValueError(f"N16/K16 payload has {_payload_length(source)} bytes, expected {geometry.payload_bytes}")
+        raise ValueError(
+            f"N16/K16 payload has {_payload_length(source)} bytes, expected {geometry.payload_bytes}"
+        )
     resident = _payload_tensor(source, torch.device(device))
-    base = resident[:geometry.base_bytes]
-    scale = resident[geometry.scale_offset:geometry.scale_offset + geometry.scale_bytes]
-    row_base = (base.reshape(geometry.n // 16, geometry.groups_per_row, 4, 16, 8)
-                .permute(0, 3, 1, 2, 4).contiguous().reshape(-1, 32).to(torch.int16))
+    base = resident[: geometry.base_bytes]
+    scale = resident[geometry.scale_offset : geometry.scale_offset + geometry.scale_bytes]
+    row_base = (
+        base.reshape(geometry.n // 16, geometry.groups_per_row, 4, 16, 8)
+        .permute(0, 3, 1, 2, 4)
+        .contiguous()
+        .reshape(-1, 32)
+        .to(torch.int16)
+    )
     unsigned = torch.empty((row_base.shape[0], 64), dtype=torch.int16, device=row_base.device)
     unsigned[:, 0::2] = row_base & 15
     unsigned[:, 1::2] = (row_base >> 4) & 15
     codes = torch.where((unsigned & 8) != 0, unsigned - 16, unsigned).to(torch.int8)
-    scales = (scale.reshape(geometry.n // 16, geometry.groups_per_row, 16, 2)
-              .permute(0, 2, 1, 3).contiguous().view(torch.float16)
-              .reshape(geometry.n, geometry.groups_per_row))
+    scales = (
+        scale.reshape(geometry.n // 16, geometry.groups_per_row, 16, 2)
+        .permute(0, 2, 1, 3)
+        .contiguous()
+        .view(torch.float16)
+        .reshape(geometry.n, geometry.groups_per_row)
+    )
     return scales, codes.reshape(geometry.n, geometry.groups_per_row, 64)
 
 
-def dequantize_q4_n16k16(source: Payload, shape: Sequence[int],
-                          device: torch.device | str = "cpu", *,
-                          dtype: torch.dtype | None = None) -> torch.Tensor:
+def dequantize_q4_n16k16(
+    source: Payload,
+    shape: Sequence[int],
+    device: torch.device | str = "cpu",
+    *,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
     _require_torch()
     target_dtype = torch.bfloat16 if dtype is None else dtype
     if not target_dtype.is_floating_point:
@@ -730,12 +779,17 @@ def dequantize_q4_n16k16(source: Payload, shape: Sequence[int],
     geometry = q4_n16k16_geometry(shape)
     scales, codes = decode_q4_n16k16_codes(source, shape, device)
     physical = codes.float().mul(scales.float().unsqueeze(-1)).reshape(geometry.n, geometry.k_pad)
-    return physical[:, :geometry.k].to(target_dtype)
+    return physical[:, : geometry.k].to(target_dtype)
 
 
-def dequantize_q4_n16k16_rows(source: Payload, shape: Sequence[int], rows: Sequence[int],
-                               device: torch.device | str = "cpu", *,
-                               dtype: torch.dtype | None = None) -> torch.Tensor:
+def dequantize_q4_n16k16_rows(
+    source: Payload,
+    shape: Sequence[int],
+    rows: Sequence[int],
+    device: torch.device | str = "cpu",
+    *,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
     """Decode selected logical rows without materializing the complete Q4 matrix."""
     _require_torch()
     geometry = q4_n16k16_geometry(shape)
@@ -743,20 +797,23 @@ def dequantize_q4_n16k16_rows(source: Payload, shape: Sequence[int], rows: Seque
     resident = _payload_tensor(source, torch.device(device))
     tile = torch.tensor([row // 16 for row in indices], dtype=torch.long, device=resident.device)
     lane = torch.tensor([row % 16 for row in indices], dtype=torch.long, device=resident.device)
-    base = resident[:geometry.base_bytes].reshape(
-        geometry.n // 16, geometry.groups_per_row, 4, 16, 8)[tile, :, :, lane, :]
+    base = resident[: geometry.base_bytes].reshape(
+        geometry.n // 16, geometry.groups_per_row, 4, 16, 8
+    )[tile, :, :, lane, :]
     packed = base.reshape(-1, 32).to(torch.int16)
     unsigned = torch.empty((packed.shape[0], 64), dtype=torch.int16, device=packed.device)
     unsigned[:, 0::2] = packed & 15
     unsigned[:, 1::2] = (packed >> 4) & 15
     codes = torch.where((unsigned & 8) != 0, unsigned - 16, unsigned).reshape(
-        len(indices), geometry.groups_per_row, 64)
-    scale = resident[geometry.scale_offset:geometry.scale_offset + geometry.scale_bytes].reshape(
-        geometry.n // 16, geometry.groups_per_row, 16, 2)[tile, :, lane, :]
+        len(indices), geometry.groups_per_row, 64
+    )
+    scale = resident[geometry.scale_offset : geometry.scale_offset + geometry.scale_bytes].reshape(
+        geometry.n // 16, geometry.groups_per_row, 16, 2
+    )[tile, :, lane, :]
     scales = scale.contiguous().view(torch.float16).reshape(len(indices), geometry.groups_per_row)
     target_dtype = torch.bfloat16 if dtype is None else dtype
     physical = codes.float().mul(scales.float().unsqueeze(-1)).reshape(len(indices), geometry.k_pad)
-    return physical[:, :geometry.k].to(target_dtype)
+    return physical[:, : geometry.k].to(target_dtype)
 
 
 def _byte_view(payload: bytes | bytearray | memoryview) -> memoryview:
@@ -857,8 +914,7 @@ def gather_row_planes(
         if row_bytes == 0:
             return b""
         return b"".join(
-            plane[index * row_bytes : (index + 1) * row_bytes]
-            for index in indices_list
+            plane[index * row_bytes : (index + 1) * row_bytes] for index in indices_list
         )
 
     return RowPlanes(
@@ -912,28 +968,26 @@ def assemble_row_planes(
         assert isinstance(planes.scale, torch.Tensor)
         if planes.high.device != planes.base.device or planes.scale.device != planes.base.device:
             raise ValueError("tensor row planes must be on the same device")
-        payload = torch.zeros(
-            geometry.payload_bytes, dtype=torch.uint8, device=planes.base.device
-        )
+        payload = torch.zeros(geometry.payload_bytes, dtype=torch.uint8, device=planes.base.device)
         payload[: geometry.base_bytes].copy_(planes.base)
         if geometry.high_bytes:
-            payload[
-                geometry.high_offset : geometry.high_offset + geometry.high_bytes
-            ].copy_(planes.high)
-        payload[
-            geometry.scale_offset : geometry.scale_offset + geometry.scale_bytes
-        ].copy_(planes.scale)
+            payload[geometry.high_offset : geometry.high_offset + geometry.high_bytes].copy_(
+                planes.high
+            )
+        payload[geometry.scale_offset : geometry.scale_offset + geometry.scale_bytes].copy_(
+            planes.scale
+        )
         return payload
 
     payload = bytearray(geometry.payload_bytes)
     payload[: geometry.base_bytes] = bytes(planes.base)
     if geometry.high_bytes:
-        payload[
-            geometry.high_offset : geometry.high_offset + geometry.high_bytes
-        ] = bytes(planes.high)
-    payload[
-        geometry.scale_offset : geometry.scale_offset + geometry.scale_bytes
-    ] = bytes(planes.scale)
+        payload[geometry.high_offset : geometry.high_offset + geometry.high_bytes] = bytes(
+            planes.high
+        )
+    payload[geometry.scale_offset : geometry.scale_offset + geometry.scale_bytes] = bytes(
+        planes.scale
+    )
     return bytes(payload)
 
 
@@ -978,8 +1032,10 @@ def _high_indices(
     bits: int,
     group_size: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    device = torch.device(device_type) if device_index is None else torch.device(
-        device_type, device_index
+    device = (
+        torch.device(device_type)
+        if device_index is None
+        else torch.device(device_type, device_index)
     )
     if bits in (4, 8):
         empty = torch.empty(0, dtype=torch.long, device=device)
@@ -997,9 +1053,7 @@ def _unpack_codes(
     assert isinstance(planes.high, torch.Tensor)
     assert isinstance(planes.scale, torch.Tensor)
     groups = geometry.n * geometry.groups_per_row
-    scales = planes.scale.view(torch.float16).reshape(
-        geometry.n, geometry.groups_per_row
-    )
+    scales = planes.scale.view(torch.float16).reshape(geometry.n, geometry.groups_per_row)
     if spec.bits == 8:
         codes = planes.base.view(torch.int8).reshape(
             geometry.n, geometry.groups_per_row, spec.group_size
@@ -1058,9 +1112,7 @@ def _scales(scale: torch.Tensor) -> torch.Tensor:
 
 def _low_g64(base: torch.Tensor, groups: int) -> torch.Tensor:
     packed = base.reshape(groups, 32).to(torch.int16)
-    return torch.stack((packed & 0x0F, (packed >> 4) & 0x0F), dim=-1).reshape(
-        groups, 64
-    )
+    return torch.stack((packed & 0x0F, (packed >> 4) & 0x0F), dim=-1).reshape(groups, 64)
 
 
 def _dequant4(base, _high, scale, _byte_indices, _shifts):
@@ -1073,9 +1125,7 @@ def _dequant4(base, _high, scale, _byte_indices, _shifts):
 def _dequant5(base, high, scale, byte_indices, shifts):
     scales = _scales(scale)
     groups = scales.numel()
-    upper = (
-        high.reshape(groups, 8).index_select(1, byte_indices).to(torch.int16) >> shifts
-    ) & 1
+    upper = (high.reshape(groups, 8).index_select(1, byte_indices).to(torch.int16) >> shifts) & 1
     unsigned = _low_g64(base, groups) | (upper << 4)
     codes = torch.where((unsigned & 16) != 0, unsigned - 32, unsigned).float()
     return (codes * scales).to(torch.bfloat16)
@@ -1084,9 +1134,7 @@ def _dequant5(base, high, scale, byte_indices, shifts):
 def _dequant6(base, high, scale, byte_indices, shifts):
     scales = _scales(scale)
     groups = scales.numel()
-    upper = (
-        high.reshape(groups, 16).index_select(1, byte_indices).to(torch.int16) >> shifts
-    ) & 3
+    upper = (high.reshape(groups, 16).index_select(1, byte_indices).to(torch.int16) >> shifts) & 3
     unsigned = _low_g64(base, groups) | (upper << 4)
     codes = torch.where((unsigned & 32) != 0, unsigned - 64, unsigned).float()
     return (codes * scales).to(torch.bfloat16)
@@ -1134,9 +1182,7 @@ def dequantize_row_split(
     target = torch.device(device)
     planes = _planes_on_device(source, geometry, target)
     if dtype == torch.bfloat16:
-        byte_indices, shifts = _high_indices(
-            target.type, target.index, spec.bits, spec.group_size
-        )
+        byte_indices, shifts = _high_indices(target.type, target.index, spec.bits, spec.group_size)
         function = (
             _compiled_dequantizer(spec.bits)
             if compiled and target.type == "cuda"
@@ -1145,14 +1191,12 @@ def dequantize_row_split(
         assert isinstance(planes.base, torch.Tensor)
         assert isinstance(planes.high, torch.Tensor)
         assert isinstance(planes.scale, torch.Tensor)
-        physical = function(
-            planes.base, planes.high, planes.scale, byte_indices, shifts
-        ).reshape(geometry.n, geometry.k_pad)
+        physical = function(planes.base, planes.high, planes.scale, byte_indices, shifts).reshape(
+            geometry.n, geometry.k_pad
+        )
         return physical[:, : geometry.k]
     scales, codes = _unpack_codes(planes, spec, geometry)
-    physical = (
-        codes.float() * scales.float().unsqueeze(-1)
-    ).reshape(geometry.n, geometry.k_pad)
+    physical = (codes.float() * scales.float().unsqueeze(-1)).reshape(geometry.n, geometry.k_pad)
     return physical[:, : geometry.k].to(dtype)
 
 

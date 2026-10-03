@@ -14,30 +14,29 @@ namespace ninfer::ops::rope_kernels {
 
 enum class Profile : std::uint8_t { Text1D, TextMrope, Dflash1D, Vision2D };
 
-inline constexpr int kTextD = 256;
-inline constexpr int kTextR = 64;
-inline constexpr int kTextQ = 24;
-inline constexpr int kTextK = 4;
-inline constexpr int kDflashD = 128;
-inline constexpr int kDflashQ = 32;
-inline constexpr int kDflashK = 8;
-inline constexpr int kVisionD = 72;
-inline constexpr int kVisionH = 16;
+inline constexpr int kTextD         = 256;
+inline constexpr int kTextR         = 64;
+inline constexpr int kTextQ         = 24;
+inline constexpr int kTextK         = 4;
+inline constexpr int kDflashD       = 128;
+inline constexpr int kDflashQ       = 32;
+inline constexpr int kDflashK       = 8;
+inline constexpr int kVisionD       = 72;
+inline constexpr int kVisionH       = 16;
 inline constexpr int kCombinedBlock = 256;
-inline constexpr int kSplitHeads = 4;
-inline constexpr int kSplitBlock = kSplitHeads * 32;
+inline constexpr int kSplitHeads    = 4;
+inline constexpr int kSplitBlock    = kSplitHeads * 32;
 
 namespace {
 // Internal linkage: every translation unit carries its own constant copy.
 __device__ __constant__ float kTextFrequency[32] = {
-    1.000000000e+00F, 6.042963902e-01F, 3.651741273e-01F, 2.206734069e-01F,
-    1.333521432e-01F, 8.058421878e-02F, 4.869675252e-02F, 2.942727176e-02F,
-    1.778279410e-02F, 1.074607828e-02F, 6.493816316e-03F, 3.924189758e-03F,
-    2.371373706e-03F, 1.433012570e-03F, 8.659643234e-04F, 5.232991147e-04F,
-    3.162277660e-04F, 1.910952975e-04F, 1.154781985e-04F, 6.978305849e-05F,
-    4.216965034e-05F, 2.548296748e-05F, 1.539926526e-05F, 9.305720409e-06F,
-    5.623413252e-06F, 3.398208329e-06F, 2.053525026e-06F, 1.240937761e-06F,
-    7.498942093e-07F, 4.531583638e-07F, 2.738419634e-07F, 1.654817100e-07F,
+    1.000000000e+00F, 6.042963902e-01F, 3.651741273e-01F, 2.206734069e-01F, 1.333521432e-01F,
+    8.058421878e-02F, 4.869675252e-02F, 2.942727176e-02F, 1.778279410e-02F, 1.074607828e-02F,
+    6.493816316e-03F, 3.924189758e-03F, 2.371373706e-03F, 1.433012570e-03F, 8.659643234e-04F,
+    5.232991147e-04F, 3.162277660e-04F, 1.910952975e-04F, 1.154781985e-04F, 6.978305849e-05F,
+    4.216965034e-05F, 2.548296748e-05F, 1.539926526e-05F, 9.305720409e-06F, 5.623413252e-06F,
+    3.398208329e-06F, 2.053525026e-06F, 1.240937761e-06F, 7.498942093e-07F, 4.531583638e-07F,
+    2.738419634e-07F, 1.654817100e-07F,
 };
 
 __device__ __constant__ double kDflashFrequency[64] = {
@@ -66,29 +65,28 @@ __device__ __constant__ double kDflashFrequency[64] = {
 };
 
 __device__ __constant__ float kVisionFrequency[18] = {
-    1.000000000e+00F, 5.994842503e-01F, 3.593813664e-01F, 2.154434690e-01F,
-    1.291549665e-01F, 7.742636827e-02F, 4.641588834e-02F, 2.782559402e-02F,
-    1.668100537e-02F, 1.000000000e-02F, 5.994842503e-03F, 3.593813664e-03F,
-    2.154434690e-03F, 1.291549665e-03F, 7.742636827e-04F, 4.641588834e-04F,
-    2.782559402e-04F, 1.668100537e-04F,
+    1.000000000e+00F, 5.994842503e-01F, 3.593813664e-01F, 2.154434690e-01F, 1.291549665e-01F,
+    7.742636827e-02F, 4.641588834e-02F, 2.782559402e-02F, 1.668100537e-02F, 1.000000000e-02F,
+    5.994842503e-03F, 3.593813664e-03F, 2.154434690e-03F, 1.291549665e-03F, 7.742636827e-04F,
+    4.641588834e-04F, 2.782559402e-04F, 1.668100537e-04F,
 };
 
 } // namespace
 
 template <Profile P>
-__device__ __forceinline__ void coefficient(const std::int32_t* positions, int tokens,
-                                            int token, int pair, float* sine, float* cosine) {
+__device__ __forceinline__ void coefficient(const std::int32_t* positions, int tokens, int token,
+                                            int pair, float* sine, float* cosine) {
     if constexpr (P == Profile::Dflash1D) {
         constexpr double inv_two_pi = 1.59154943091895336e-01;
-        constexpr double two_pi = 6.28318530717958648e+00;
-        const double angle = static_cast<double>(positions[token]) * kDflashFrequency[pair];
+        constexpr double two_pi     = 6.28318530717958648e+00;
+        const double angle  = static_cast<double>(positions[token]) * kDflashFrequency[pair];
         const float reduced = static_cast<float>(angle - nearbyint(angle * inv_two_pi) * two_pi);
         sincosf(reduced, sine, cosine);
     } else {
-        int axis = 0;
+        int axis        = 0;
         float frequency = 0.0F;
         if constexpr (P == Profile::Vision2D) {
-            axis = pair / 18;
+            axis      = pair / 18;
             frequency = kVisionFrequency[pair % 18];
         } else {
             if constexpr (P == Profile::TextMrope) { axis = pair % 3; }
@@ -102,34 +100,35 @@ __device__ __forceinline__ void coefficient(const std::int32_t* positions, int t
 // Qwen3.8 Text Q/K normalization and RoPE in one pass: one wave per (token, head), eight features
 // per lane. out = RoPE(BF16(x * rsqrt(mean(x^2) + eps) * (w + 1))) with the per-head [256] gain w;
 // only features [0,64) rotate (pair i with i + 32, lanes 0..3 with lanes 4..7).
-constexpr int kQkNormRopeWaves = 4;
+constexpr int kQkNormRopeWaves  = 4;
 constexpr int kQkNormRopeGroups = (kTextQ + kTextK + kQkNormRopeWaves - 1) / kQkNormRopeWaves;
 static_assert((kTextQ + kTextK) % kQkNormRopeWaves == 0);
 
 template <Profile P, class Cta>
-__device__ __forceinline__ void qk_norm_rope_body(
-    const Cta& cta, const std::int32_t* positions, const hip_bfloat16* q, const hip_bfloat16* k,
-    std::int64_t q_stride, std::int64_t k_stride, const hip_bfloat16* q_norm,
-    const hip_bfloat16* k_norm, float eps, hip_bfloat16* qn, hip_bfloat16* kn, int tokens) {
+__device__ __forceinline__ void
+qk_norm_rope_body(const Cta& cta, const std::int32_t* positions, const hip_bfloat16* q,
+                  const hip_bfloat16* k, std::int64_t q_stride, std::int64_t k_stride,
+                  const hip_bfloat16* q_norm, const hip_bfloat16* k_norm, float eps,
+                  hip_bfloat16* qn, hip_bfloat16* kn, int tokens) {
     const int block = static_cast<int>(cta.block().x);
     const int token = block / kQkNormRopeGroups;
-    const int head = (block % kQkNormRopeGroups) * kQkNormRopeWaves +
-                     static_cast<int>(cta.thread()) / 32;
+    const int head =
+        (block % kQkNormRopeGroups) * kQkNormRopeWaves + static_cast<int>(cta.thread()) / 32;
     const int lane = static_cast<int>(cta.thread()) & 31;
     if (token >= tokens) { return; }
-    const bool is_query = head < kTextQ;
-    const hip_bfloat16* source = is_query
-        ? q + static_cast<std::int64_t>(token) * q_stride + static_cast<std::int64_t>(head) * kTextD
-        : k + static_cast<std::int64_t>(token) * k_stride +
-              static_cast<std::int64_t>(head - kTextQ) * kTextD;
-    hip_bfloat16* destination = is_query
-        ? qn + (static_cast<std::int64_t>(token) * kTextQ + head) * kTextD
-        : kn + (static_cast<std::int64_t>(token) * kTextK + head - kTextQ) * kTextD;
-    const uint4 packed = reinterpret_cast<const uint4*>(source)[lane];
-    const uint4 gains = reinterpret_cast<const uint4*>(is_query ? q_norm : k_norm)[lane];
+    const bool is_query        = head < kTextQ;
+    const hip_bfloat16* source = is_query ? q + static_cast<std::int64_t>(token) * q_stride +
+                                                static_cast<std::int64_t>(head) * kTextD
+                                          : k + static_cast<std::int64_t>(token) * k_stride +
+                                                static_cast<std::int64_t>(head - kTextQ) * kTextD;
+    hip_bfloat16* destination =
+        is_query ? qn + (static_cast<std::int64_t>(token) * kTextQ + head) * kTextD
+                 : kn + (static_cast<std::int64_t>(token) * kTextK + head - kTextQ) * kTextD;
+    const uint4 packed           = reinterpret_cast<const uint4*>(source)[lane];
+    const uint4 gains            = reinterpret_cast<const uint4*>(is_query ? q_norm : k_norm)[lane];
     const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
     const std::uint32_t gain_words[4] = {gains.x, gains.y, gains.z, gains.w};
-    const auto bf16 = [](const std::uint32_t (&w)[4], int i) {
+    const auto bf16                   = [](const std::uint32_t (&w)[4], int i) {
         return __uint_as_float((i & 1) ? w[i >> 1] & 0xffff0000U : w[i >> 1] << 16);
     };
     float sumsq = 0.0F;
@@ -153,7 +152,7 @@ __device__ __forceinline__ void qk_norm_rope_body(
 #pragma unroll
         for (int j = 0; j < 2; ++j) {
             const int feature = lane * 8 + i + j;
-            float result = value[i + j];
+            float result      = value[i + j];
             if (feature < kTextR) {
                 float sine = 0.0F, cosine = 0.0F;
                 coefficient<P>(positions, tokens, token, feature % (kTextR / 2), &sine, &cosine);
@@ -169,11 +168,10 @@ __device__ __forceinline__ void qk_norm_rope_body(
 }
 
 template <Profile P>
-__global__ __launch_bounds__(kQkNormRopeWaves * 32)
-void qk_norm_rope_kernel(const std::int32_t* positions, const hip_bfloat16* q,
-                         const hip_bfloat16* k, std::int64_t q_stride, std::int64_t k_stride,
-                         const hip_bfloat16* q_norm, const hip_bfloat16* k_norm, float eps,
-                         hip_bfloat16* qn, hip_bfloat16* kn, int tokens) {
+__global__ __launch_bounds__(kQkNormRopeWaves * 32) void qk_norm_rope_kernel(
+    const std::int32_t* positions, const hip_bfloat16* q, const hip_bfloat16* k,
+    std::int64_t q_stride, std::int64_t k_stride, const hip_bfloat16* q_norm,
+    const hip_bfloat16* k_norm, float eps, hip_bfloat16* qn, hip_bfloat16* kn, int tokens) {
     qk_norm_rope_body<P>(r9700::persistent::LaunchCta{}, positions, q, k, q_stride, k_stride,
                          q_norm, k_norm, eps, qn, kn, tokens);
 }

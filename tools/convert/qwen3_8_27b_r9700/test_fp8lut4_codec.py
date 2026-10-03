@@ -6,7 +6,12 @@ import unittest
 
 import torch
 
-from tools.artifact.layouts import fp8lut4_geometry, fp8lut4_magnitude_table, decode_fp8lut4, encode_fp8lut4_planes
+from tools.artifact.layouts import (
+    fp8lut4_geometry,
+    fp8lut4_magnitude_table,
+    decode_fp8lut4,
+    encode_fp8lut4_planes,
+)
 from tools.artifact.numeric import round_e4m3fn_magnitude
 
 from .fp8lut4_codec import Calibration, encode_chunks, interleave_gate_up, quantize_rows
@@ -16,7 +21,7 @@ class Fp8Lut4CodecTest(unittest.TestCase):
     def test_e4m3_rounding_matches_torch_ties_to_even_with_saturation(self) -> None:
         for numerator in range(0, 520):
             for exponent in range(-30, 10):
-                value = min(numerator * 2.0 ** exponent, 448.0)
+                value = min(numerator * 2.0**exponent, 448.0)
                 expected = torch.tensor(value).to(torch.float8_e4m3fn).view(torch.uint8).item()
                 self.assertEqual(round_e4m3fn_magnitude(numerator, exponent), expected)
 
@@ -25,15 +30,15 @@ class Fp8Lut4CodecTest(unittest.TestCase):
         values = table.view(torch.float8_e4m3fn).to(torch.float64)
         self.assertTrue(bool((values[:, 1:] >= values[:, :-1]).all()))
         self.assertEqual(values[26 * 8].tolist(), [0.0, 0.8125, 1.75, 2.5, 3.5, 4.5, 6.0, 7.5])
-        self.assertEqual(values[255, 7].item(), 448.0)           # (7.5 * 1.875 * 32) saturates
-        self.assertEqual(values[0].tolist(), [0.0] * 8)          # E = -26 flushes to zero
-        self.assertTrue(bool((values[:, 0] == 0).all()))        # every codebook has a zero level
+        self.assertEqual(values[255, 7].item(), 448.0)  # (7.5 * 1.875 * 32) saturates
+        self.assertEqual(values[0].tolist(), [0.0] * 8)  # E = -26 flushes to zero
+        self.assertTrue(bool((values[:, 0] == 0).all()))  # every codebook has a zero level
 
     def test_payload_round_trip_matches_quantized_words(self) -> None:
         generator = torch.Generator().manual_seed(3)
         source = torch.randn(48, 200, generator=generator)  # 48 rows: three 16-row tiles
-        source[:, 17] *= 40.0                                    # outlier column
-        source[5] = 0.0                                          # zero row
+        source[:, 17] *= 40.0  # outlier column
+        source[5] = 0.0  # zero row
         weight = source.to(torch.bfloat16)
         payload = b"".join(encode_chunks(weight, rows_per_chunk=16))
         geometry = fp8lut4_geometry((48, 200))
@@ -43,7 +48,8 @@ class Fp8Lut4CodecTest(unittest.TestCase):
         codes, groups, scales = quantize_rows(padded)
         table = torch.tensor(fp8lut4_magnitude_table(), dtype=torch.uint8)
         magnitude = table.view(torch.float8_e4m3fn).to(torch.float64)[
-            groups.long().repeat_interleave(32, 1), (codes & 7).long()]
+            groups.long().repeat_interleave(32, 1), (codes & 7).long()
+        ]
         expected = torch.where((codes & 8) != 0, -magnitude, magnitude) * scales.double()[:, None]
         self.assertTrue(torch.equal(decoded, expected[:, :200]))
         self.assertTrue(bool((decoded[5] == 0).all()))
@@ -54,15 +60,15 @@ class Fp8Lut4CodecTest(unittest.TestCase):
         # 32 rows x 256 columns: tile (b, s), slot 16 * half + r % 16, 16 bytes per slot.
         codes = torch.zeros(32, 256, dtype=torch.uint8)
         groups = torch.zeros(32, 8, dtype=torch.uint8)
-        codes[21, 2 * 64 + 32 + 6] = 5            # r=21: b=1, s=2, half=1, byte 3 low nibble
-        codes[21, 2 * 64 + 32 + 7] = 9            # same byte, high nibble
-        groups[21, 2 * 2 + 1] = 77                # k/32 = 5 -> s=2, half=1
+        codes[21, 2 * 64 + 32 + 6] = 5  # r=21: b=1, s=2, half=1, byte 3 low nibble
+        codes[21, 2 * 64 + 32 + 7] = 9  # same byte, high nibble
+        groups[21, 2 * 2 + 1] = 77  # k/32 = 5 -> s=2, half=1
         payload = encode_fp8lut4_planes(codes, groups, torch.ones(32))
         geometry = fp8lut4_geometry((32, 256))
         tile = 1 * (256 // 64) + 2
         slot = 16 * 1 + 21 % 16
         self.assertEqual(payload[tile * 512 + slot * 16 + 3], 5 | (9 << 4))
-        self.assertEqual(sum(payload[:geometry.code_bytes]), 5 | (9 << 4))
+        self.assertEqual(sum(payload[: geometry.code_bytes]), 5 | (9 << 4))
         self.assertEqual(payload[geometry.group_offset + tile * 32 + slot], 77)
 
     def test_gate_up_interleave_pairs_features_in_sixteen_row_tiles(self) -> None:
@@ -77,15 +83,17 @@ class Fp8Lut4CodecTest(unittest.TestCase):
         columns = 256
         mixing = torch.randn(columns, columns, generator=generator) * 0.3 + torch.eye(columns)
         inputs = (torch.randn(4096, columns, generator=generator) @ mixing) * torch.exp(
-            torch.randn(columns, generator=generator))
-        inputs[:, 40] = 0.0                                      # never-active input
+            torch.randn(columns, generator=generator)
+        )
+        inputs[:, 40] = 0.0  # never-active input
         weight = torch.randn(32, columns, generator=generator).to(torch.bfloat16)
         calibration = Calibration(inputs.t() @ inputs, 0.01)
         table = torch.tensor(fp8lut4_magnitude_table(), dtype=torch.uint8)
 
         def decoded(codes, groups, scales):
             magnitude = table.view(torch.float8_e4m3fn).to(torch.float64)[
-                groups.long().repeat_interleave(32, 1), (codes & 7).long()]
+                groups.long().repeat_interleave(32, 1), (codes & 7).long()
+            ]
             return torch.where((codes & 8) != 0, -magnitude, magnitude) * scales.double()[:, None]
 
         def output_error(words):

@@ -46,9 +46,7 @@ def preflight_conversion(
 ) -> W8Bf16EmbeddingConversionPreflight:
     model = Path(model_dir)
     w8_bf16_embedding_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
@@ -118,9 +116,7 @@ def convert(
             preflight.object_plan.specs,
         ) as writer:
             if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError(
-                    "W8/BF16-embedding writer plan differs from completed preflight"
-                )
+                raise RuntimeError("W8/BF16-embedding writer plan differs from completed preflight")
             for index, spec in enumerate(w8_bf16_embedding_inventory.OBJECT_SPECS, start=1):
                 if isinstance(spec, w8_bf16_embedding_inventory.ResourceSpec):
                     payload = resource_payloads[spec.name]

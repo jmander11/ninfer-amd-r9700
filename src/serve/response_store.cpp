@@ -84,38 +84,48 @@ using Json = nlohmann::json;
 Json encode_turn(const ChatTurn& turn) {
     Json parts = Json::array();
     for (const auto& part : turn.content) {
-        parts.push_back(Json{{"kind", part.kind}, {"text", part.text}, {"type", part.type_raw},
-            {"source", {{"kind", part.source.kind}, {"value", part.source.value},
-                        {"media_type", part.source.media_type}, {"bytes", part.source.bytes}}}});
+        parts.push_back(Json{{"kind", part.kind},
+                             {"text", part.text},
+                             {"type", part.type_raw},
+                             {"source",
+                              {{"kind", part.source.kind},
+                               {"value", part.source.value},
+                               {"media_type", part.source.media_type},
+                               {"bytes", part.source.bytes}}}});
     }
     Json calls = Json::array();
     for (const auto& call : turn.tool_calls) {
-        calls.push_back(Json{{"id", call.id}, {"name", call.name}, {"arguments", call.arguments_json}});
+        calls.push_back(
+            Json{{"id", call.id}, {"name", call.name}, {"arguments", call.arguments_json}});
     }
-    return Json{{"role", turn.role}, {"parts", parts}, {"calls", calls},
-                {"tool_call_id", turn.tool_call_id}, {"reasoning", turn.reasoning_content}};
+    return Json{{"role", turn.role},
+                {"parts", parts},
+                {"calls", calls},
+                {"tool_call_id", turn.tool_call_id},
+                {"reasoning", turn.reasoning_content}};
 }
 
 ChatTurn decode_turn(const Json& value) {
     ChatTurn turn;
-    turn.role = value.at("role").get<ChatRole>();
-    turn.tool_call_id = value.at("tool_call_id").get<std::string>();
+    turn.role              = value.at("role").get<ChatRole>();
+    turn.tool_call_id      = value.at("tool_call_id").get<std::string>();
     turn.reasoning_content = value.at("reasoning").get<std::string>();
     for (const auto& encoded : value.at("parts")) {
         ContentPart part;
-        part.kind = encoded.at("kind").get<ContentKind>();
-        part.text = encoded.at("text").get<std::string>();
-        part.type_raw = encoded.at("type").get<std::string>();
+        part.kind          = encoded.at("kind").get<ContentKind>();
+        part.text          = encoded.at("text").get<std::string>();
+        part.type_raw      = encoded.at("type").get<std::string>();
         const auto& source = encoded.at("source");
-        part.source.kind = source.at("kind").get<ninfer::product::media_acquire::SourceKind>();
-        part.source.value = source.at("value").get<std::string>();
+        part.source.kind   = source.at("kind").get<ninfer::product::media_acquire::SourceKind>();
+        part.source.value  = source.at("value").get<std::string>();
         part.source.media_type = source.at("media_type").get<std::string>();
-        part.source.bytes = source.at("bytes").get<std::vector<std::uint8_t>>();
+        part.source.bytes      = source.at("bytes").get<std::vector<std::uint8_t>>();
         turn.content.push_back(std::move(part));
     }
     for (const auto& call : value.at("calls")) {
         turn.tool_calls.push_back(ToolCall{call.at("id").get<std::string>(),
-            call.at("name").get<std::string>(), call.at("arguments").get<std::string>()});
+                                           call.at("name").get<std::string>(),
+                                           call.at("arguments").get<std::string>()});
     }
     return turn;
 }
@@ -142,8 +152,8 @@ std::size_t ordered_bytes(const std::vector<std::shared_ptr<const StoredResponse
 // nodes are shared on disk and in memory even after their public parent is deleted.
 struct ResponseStore::DiskStore {
     std::filesystem::path directory;
-    int lock_fd = -1;
-    bool failed = false;
+    int lock_fd             = -1;
+    bool failed             = false;
     std::uint64_t next_file = 1;
     std::unordered_map<const ResponseContextNode*, std::string> nodes;
     std::unordered_map<const StoredResponse*, std::string> records;
@@ -158,7 +168,10 @@ struct ResponseStore::DiskStore {
             disk_error("directory is already in use");
         }
     }
-    ~DiskStore() { if (lock_fd >= 0) { ::close(lock_fd); } }
+
+    ~DiskStore() {
+        if (lock_fd >= 0) { ::close(lock_fd); }
+    }
 
     void sync_directory() {
         const int fd = ::open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
@@ -169,7 +182,7 @@ struct ResponseStore::DiskStore {
     }
 
     void write(const std::string& name, const Json& data) {
-        const auto temporary = directory / (name + ".tmp");
+        const auto temporary    = directory / (name + ".tmp");
         const std::string bytes = data.dump();
         const int fd = ::open(temporary.c_str(), O_CREAT | O_TRUNC | O_WRONLY | O_CLOEXEC, 0600);
         if (fd < 0) { disk_error("cannot write " + name); }
@@ -177,7 +190,10 @@ struct ResponseStore::DiskStore {
         while (offset != bytes.size()) {
             const auto n = ::write(fd, bytes.data() + offset, bytes.size() - offset);
             if (n < 0 && errno == EINTR) { continue; }
-            if (n <= 0) { ::close(fd); disk_error("short write of " + name); }
+            if (n <= 0) {
+                ::close(fd);
+                disk_error("short write of " + name);
+            }
             offset += static_cast<std::size_t>(n);
         }
         const int synced = ::fsync(fd);
@@ -207,7 +223,7 @@ struct ResponseStore::DiskStore {
         std::unordered_set<std::string> ids;
         for (const auto& file : manifest.at("records")) {
             const auto filename = file.get<std::string>();
-            const auto encoded = read(filename);
+            const auto encoded  = read(filename);
             std::string current = encoded.at("context").get<std::string>();
             std::vector<std::pair<std::string, Json>> chain;
             std::unordered_set<std::string> visiting;
@@ -220,18 +236,21 @@ struct ResponseStore::DiskStore {
             ResponseContext context = current.empty() ? nullptr : loaded.at(current);
             for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
                 std::vector<ChatTurn> turns;
-                for (const auto& turn : it->second.at("turns")) { turns.push_back(decode_turn(turn)); }
+                for (const auto& turn : it->second.at("turns")) {
+                    turns.push_back(decode_turn(turn));
+                }
                 context = append_response_context(context, std::move(turns));
                 loaded.emplace(it->first, context);
                 nodes.emplace(context.get(), it->first);
             }
-            auto record = std::make_shared<StoredResponse>();
-            record->id = encoded.at("id").get<std::string>();
-            record->response = encoded.at("response");
-            record->input_items = encoded.at("input_items").get<std::vector<Json>>();
+            auto record               = std::make_shared<StoredResponse>();
+            record->id                = encoded.at("id").get<std::string>();
+            record->response          = encoded.at("response");
+            record->input_items       = encoded.at("input_items").get<std::vector<Json>>();
             record->preserve_thinking = encoded.at("preserve_thinking").get<bool>();
-            record->context = std::move(context);
-            if (record->id.empty() || !record->response.is_object() || !ids.insert(record->id).second) {
+            record->context           = std::move(context);
+            if (record->id.empty() || !record->response.is_object() ||
+                !ids.insert(record->id).second) {
                 disk_error("invalid or duplicate response record");
             }
             records.emplace(record.get(), filename);
@@ -253,7 +272,8 @@ struct ResponseStore::DiskStore {
         Json files = Json::array();
         for (const auto& record : ordered) {
             std::vector<ResponseContext> chain;
-            for (auto node = record->context; node && !live_nodes.contains(node.get()); node = node->parent) {
+            for (auto node = record->context; node && !live_nodes.contains(node.get());
+                 node      = node->parent) {
                 chain.push_back(node);
             }
             for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
@@ -262,11 +282,12 @@ struct ResponseStore::DiskStore {
                 if (const auto known = nodes.find(node.get()); known != nodes.end()) {
                     filename = known->second;
                 } else {
-                    filename = "context-" + std::to_string(next_file++) + ".json";
+                    filename   = "context-" + std::to_string(next_file++) + ".json";
                     Json turns = Json::array();
                     for (const auto& turn : node->turns) { turns.push_back(encode_turn(turn)); }
-                    write(filename, Json{{"parent", node->parent ? live_nodes.at(node->parent.get()) : ""},
-                                         {"turns", turns}});
+                    write(filename,
+                          Json{{"parent", node->parent ? live_nodes.at(node->parent.get()) : ""},
+                               {"turns", turns}});
                 }
                 live_nodes.emplace(node.get(), std::move(filename));
             }
@@ -275,9 +296,13 @@ struct ResponseStore::DiskStore {
                 filename = known->second;
             } else {
                 filename = "response-" + std::to_string(next_file++) + ".json";
-                write(filename, Json{{"id", record->id}, {"response", record->response},
-                    {"input_items", record->input_items}, {"preserve_thinking", record->preserve_thinking},
-                    {"context", record->context ? live_nodes.at(record->context.get()) : ""}});
+                write(
+                    filename,
+                    Json{{"id", record->id},
+                         {"response", record->response},
+                         {"input_items", record->input_items},
+                         {"preserve_thinking", record->preserve_thinking},
+                         {"context", record->context ? live_nodes.at(record->context.get()) : ""}});
             }
             live_records.emplace(record.get(), filename);
             files.push_back(std::move(filename));
@@ -286,19 +311,26 @@ struct ResponseStore::DiskStore {
         sync_directory();
         write("manifest.json", Json{{"version", 1}, {"next_file", next_file}, {"records", files}});
         sync_directory();
-        nodes = std::move(live_nodes);
+        nodes   = std::move(live_nodes);
         records = std::move(live_records);
         // Garbage collection follows publication. Failure leaves harmless orphan
         // payloads, never an incomplete committed manifest, and is retried later.
         std::unordered_set<std::string> retained{"manifest.json", "store.lock"};
-        for (const auto& [node, name] : nodes) { (void)node; retained.insert(name); }
-        for (const auto& [record, name] : records) { (void)record; retained.insert(name); }
+        for (const auto& [node, name] : nodes) {
+            (void)node;
+            retained.insert(name);
+        }
+        for (const auto& [record, name] : records) {
+            (void)record;
+            retained.insert(name);
+        }
         std::error_code error;
         for (std::filesystem::directory_iterator it(directory, error), end; !error && it != end;
              it.increment(error)) {
             const auto name = it->path().filename().string();
             if (!retained.contains(name) &&
-                (name.starts_with("context-") || name.starts_with("response-") || name == "manifest.json.tmp")) {
+                (name.starts_with("context-") || name.starts_with("response-") ||
+                 name == "manifest.json.tmp")) {
                 std::error_code ignored;
                 std::filesystem::remove(it->path(), ignored);
             }
@@ -312,7 +344,7 @@ ResponseStore::ResponseStore(std::size_t max_records, std::size_t max_bytes, std
         throw std::invalid_argument("response store limits must be positive");
     }
     if (!location.empty()) {
-        disk_ = std::make_unique<DiskStore>(std::move(location));
+        disk_        = std::make_unique<DiskStore>(std::move(location));
         auto ordered = disk_->load();
         // Restart with smaller limits evicts oldest public IDs, preserving any
         // ancestry still owned by retained descendants.
@@ -326,7 +358,8 @@ ResponseStore::ResponseStore(std::size_t max_records, std::size_t max_bytes, std
 
 ResponseStore::~ResponseStore() = default;
 
-void ResponseStore::publish_locked(const std::vector<std::shared_ptr<const StoredResponse>>& ordered) {
+void ResponseStore::publish_locked(
+    const std::vector<std::shared_ptr<const StoredResponse>>& ordered) {
     // Allocate the replacement index before the disk commit. A failed payload or
     // manifest write leaves the live in-memory store unchanged.
     std::list<std::string> lru;
@@ -337,9 +370,12 @@ void ResponseStore::publish_locked(const std::vector<std::shared_ptr<const Store
     }
     const auto bytes = ordered_bytes(ordered);
     if (disk_) {
-        if (disk_->failed) { disk_error("store unavailable after an I/O failure; restart required"); }
-        try { disk_->publish(ordered); }
-        catch (...) {
+        if (disk_->failed) {
+            disk_error("store unavailable after an I/O failure; restart required");
+        }
+        try {
+            disk_->publish(ordered);
+        } catch (...) {
             // A rename may have succeeded even when its final directory sync
             // failed. Do not serve divergent memory/disk histories afterward.
             disk_->failed = true;
@@ -353,7 +389,9 @@ void ResponseStore::publish_locked(const std::vector<std::shared_ptr<const Store
 
 std::shared_ptr<const StoredResponse> ResponseStore::get(const std::string& id) {
     std::lock_guard lock(mutex_);
-    if (disk_ && disk_->failed) { disk_error("store unavailable after an I/O failure; restart required"); }
+    if (disk_ && disk_->failed) {
+        disk_error("store unavailable after an I/O failure; restart required");
+    }
     const auto found = records_.find(id);
     if (found == records_.end()) { return {}; }
     const auto response = found->second.response;
@@ -362,8 +400,12 @@ std::shared_ptr<const StoredResponse> ResponseStore::get(const std::string& id) 
         for (const auto& existing : lru_) {
             if (existing != id) { ordered.push_back(records_.at(existing).response); }
         }
-        try { disk_->reorder(ordered); }
-        catch (...) { disk_->failed = true; throw; }
+        try {
+            disk_->reorder(ordered);
+        } catch (...) {
+            disk_->failed = true;
+            throw;
+        }
     }
     lru_.splice(lru_.begin(), lru_, found->second.lru);
     return response;
@@ -389,7 +431,9 @@ void ResponseStore::put(StoredResponse response) {
 
 bool ResponseStore::erase(const std::string& id) {
     std::lock_guard lock(mutex_);
-    if (disk_ && disk_->failed) { disk_error("store unavailable after an I/O failure; restart required"); }
+    if (disk_ && disk_->failed) {
+        disk_error("store unavailable after an I/O failure; restart required");
+    }
     if (!records_.contains(id)) { return false; }
     std::vector<std::shared_ptr<const StoredResponse>> ordered;
     for (const auto& existing : lru_) {

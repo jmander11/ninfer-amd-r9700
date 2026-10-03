@@ -80,7 +80,7 @@ PARAGRAPHS: tuple[str, ...] = (
     "in honestly.",
     "def moving_average(values, window):\n"
     "    if window <= 0:\n"
-    "        raise ValueError(\"window must be positive\")\n"
+    '        raise ValueError("window must be positive")\n'
     "    total = 0.0\n"
     "    result = []\n"
     "    for index, value in enumerate(values):\n"
@@ -154,9 +154,7 @@ def load_tokenizer(tokenizer_path: Path) -> Any:
     try:
         from transformers import AutoTokenizer
     except ImportError as exc:
-        raise SystemExit(
-            "transformers is required; install tools/bench/requirements.txt"
-        ) from exc
+        raise SystemExit("transformers is required; install tools/bench/requirements.txt") from exc
     return AutoTokenizer.from_pretrained(
         str(tokenizer_path),
         local_files_only=True,
@@ -208,10 +206,7 @@ def load_source_paragraphs(source_files: Sequence[str]) -> tuple[list[str], list
 
 
 def format_ids(ids: Sequence[int], per_line: int = 32) -> str:
-    lines = [
-        " ".join(str(v) for v in ids[i : i + per_line])
-        for i in range(0, len(ids), per_line)
-    ]
+    lines = [" ".join(str(v) for v in ids[i : i + per_line]) for i in range(0, len(ids), per_line)]
     return "\n".join(lines) + "\n"
 
 
@@ -250,8 +245,11 @@ def build_manifest(
 
 
 def write_outputs(
-    out_path: Path, manifest_path: Path, ids: Sequence[int], tokens: int,
-    source_provenance: list[dict[str, str]]
+    out_path: Path,
+    manifest_path: Path,
+    ids: Sequence[int],
+    tokens: int,
+    source_provenance: list[dict[str, str]],
 ) -> None:
     ids_text = format_ids(ids)
     manifest = build_manifest(ids, ids_text, tokens, source_provenance)
@@ -273,8 +271,7 @@ def check_outputs(out_path: Path, manifest_path: Path) -> int:
     failures = 0
     if manifest.get("artifact_type") != "ninfer_bench_corpus":
         print(
-            "artifact_type mismatch: "
-            f"{manifest.get('artifact_type')!r} != 'ninfer_bench_corpus'",
+            f"artifact_type mismatch: {manifest.get('artifact_type')!r} != 'ninfer_bench_corpus'",
             file=sys.stderr,
         )
         failures += 1
@@ -289,9 +286,7 @@ def check_outputs(out_path: Path, manifest_path: Path) -> int:
         print(f"ids_sha256 mismatch: {actual_sha} != {manifest.get('ids_sha256')}", file=sys.stderr)
         failures += 1
     if len(ids) != manifest.get("token_count"):
-        print(
-            f"token_count mismatch: {len(ids)} != {manifest.get('token_count')}", file=sys.stderr
-        )
+        print(f"token_count mismatch: {len(ids)} != {manifest.get('token_count')}", file=sys.stderr)
         failures += 1
     if failures == 0:
         print(f"corpus OK: {len(ids)} tokens, sha256 {actual_sha}")
@@ -304,10 +299,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[2]
     parser.add_argument("--out", type=Path, default=repo_root / "bench/fixtures/bench_corpus.ids")
     parser.add_argument("--manifest", type=Path, default=None)
-    parser.add_argument("--tokens", type=int, default=DEFAULT_TOKENS,
-                        help=f"exact corpus token count (default: {DEFAULT_TOKENS})")
-    parser.add_argument("--source-text", action="append", default=[],
-                        help="meaningful text file(s) to use instead of the built-in bank; repeatable")
+    parser.add_argument(
+        "--tokens",
+        type=int,
+        default=DEFAULT_TOKENS,
+        help=f"exact corpus token count (default: {DEFAULT_TOKENS})",
+    )
+    parser.add_argument(
+        "--source-text",
+        action="append",
+        default=[],
+        help="meaningful text file(s) to use instead of the built-in bank; repeatable",
+    )
     parser.add_argument(
         "--check",
         action="store_true",

@@ -58,10 +58,18 @@ def check(path: Path, source: Path) -> dict[str, int | str | bool]:
     stores_b16 = count("global_store_b16")
     stores_b8 = count("global_store_b8")
     exp = count("v_exp_f32_e32") + count("v_exp_f32")
-    forbidden = sum(count(opcode) for opcode in (
-        "scratch_load_b32", "scratch_store_b32", "flat_load_b16", "flat_store_b16",
-        "buffer_load_ushort", "buffer_store_short", "global_store_b32",
-    ))
+    forbidden = sum(
+        count(opcode)
+        for opcode in (
+            "scratch_load_b32",
+            "scratch_store_b32",
+            "flat_load_b16",
+            "flat_store_b16",
+            "buffer_load_ushort",
+            "buffer_store_short",
+            "global_store_b32",
+        )
+    )
     if vgpr > 24 or private != 0:
         raise ValueError(f"resource gate failed: vgpr={vgpr} private={private}")
     if loads_b16 != 4 or stores_b16 != 1 or stores_b8 != 2 or exp != 2:

@@ -92,7 +92,12 @@ def validate_config(config: Mapping[str, object]) -> dict[str, object]:
         "mtp_num_hidden_layers": text["mtp_num_hidden_layers"],
         "vision_token_ids": {
             name: config[name]
-            for name in ("vision_start_token_id", "vision_end_token_id", "image_token_id", "video_token_id")
+            for name in (
+                "vision_start_token_id",
+                "vision_end_token_id",
+                "image_token_id",
+                "video_token_id",
+            )
         },
     }
 
@@ -105,16 +110,15 @@ def materialize_tensor(
     derived = None
     if spec.name in (draft_head.DRAFT_HEAD_OBJECT, draft_head.DRAFT_HEAD_TOKEN_IDS_OBJECT):
         derived = {
-            draft_head.DRAFT_HEAD_TOKEN_IDS_OBJECT:
-                draft_head.materialize_draft_head_token_ids(draft)
+            draft_head.DRAFT_HEAD_TOKEN_IDS_OBJECT: draft_head.materialize_draft_head_token_ids(
+                draft
+            )
         }
     tensor = source_recipe.materialize_recipe(
         source_recipe.RECIPES_BY_NAME[spec.name], reader, derived
     )
     if tuple(tensor.shape) != spec.shape:
-        raise ValueError(
-            f"{spec.name}: materialized shape {tuple(tensor.shape)} != {spec.shape}"
-        )
+        raise ValueError(f"{spec.name}: materialized shape {tuple(tensor.shape)} != {spec.shape}")
     return tensor
 
 

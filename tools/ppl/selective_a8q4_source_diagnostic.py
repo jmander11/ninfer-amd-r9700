@@ -33,11 +33,20 @@ from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import 
 )
 from tools.ppl.compare_q4_group_source import _against
 from tools.ppl.q4_group_source_diagnostic import (
-    MAXIMUM_MEAN_NLL_DELTA, MAXIMUM_NEW_SEVERE_RATE, TERRIBLE_NLL,
-    _source_identity, _write_score, sha256_file, validate_source_metadata,
+    MAXIMUM_MEAN_NLL_DELTA,
+    MAXIMUM_NEW_SEVERE_RATE,
+    TERRIBLE_NLL,
+    _source_identity,
+    _write_score,
+    sha256_file,
+    validate_source_metadata,
 )
 from tools.ppl.selective_q4g128_source_diagnostic import (
-    SELECTED_SOURCE_ROWS, TOKENS, _load_bf16_authority, _load_screen, _scope,
+    SELECTED_SOURCE_ROWS,
+    TOKENS,
+    _load_bf16_authority,
+    _load_screen,
+    _scope,
 )
 from tools.reference.qwen3_8_27b_bf16 import protocol
 
@@ -73,8 +82,12 @@ def quantize_weight_rows(weight, profile: str, *, row_chunk: int = WEIGHT_ROW_CH
     import torch
 
     group, spec, refined = _format(profile)
-    if (weight.device.type != "cpu" or weight.dtype != torch.bfloat16
-            or weight.ndim != 2 or weight.shape[1] % group):
+    if (
+        weight.device.type != "cpu"
+        or weight.dtype != torch.bfloat16
+        or weight.ndim != 2
+        or weight.shape[1] % group
+    ):
         raise ValueError("selected weight must be CPU BF16 rank two with exact group geometry")
     if type(row_chunk) is not int or row_chunk <= 0:
         raise ValueError("weight row chunk must be a positive integer")
@@ -102,8 +115,12 @@ def quantize_activation(activation, group: int):
 
     import torch
 
-    if (activation.dtype != torch.bfloat16 or activation.ndim < 2
-            or activation.shape[-1] % group or group not in (64, 128)):
+    if (
+        activation.dtype != torch.bfloat16
+        or activation.ndim < 2
+        or activation.shape[-1] % group
+        or group not in (64, 128)
+    ):
         raise ValueError("selected activation must be BF16 with exact G64/G128 geometry")
     matrix = activation.reshape(-1, activation.shape[-1])
     values = matrix.float().reshape(matrix.shape[0], matrix.shape[1] // group, group)
@@ -120,7 +137,8 @@ def quantize_activation(activation, group: int):
         raise ValueError("selected activation scale is nonfinite")
     scale32 = scales.float()
     codes = torch.where(
-        scale32[..., None] == 0, torch.zeros_like(values),
+        scale32[..., None] == 0,
+        torch.zeros_like(values),
         torch.round(values / scale32[..., None]).clamp(-127, 127),
     ).to(torch.int8)
     return codes, scales
@@ -136,19 +154,22 @@ def represented_linear(activation, span: QuantizedRowSpan, group: int):
     activation_codes, activation_scales = quantize_activation(matrix, group)
     weight_codes = span.codes
     weight_scales = span.scales
-    if (weight_codes.device != activation.device or weight_scales.device != activation.device
-            or weight_codes.shape[1:] != activation_codes.shape[1:]
-            or weight_scales.shape != weight_codes.shape[:2]):
+    if (
+        weight_codes.device != activation.device
+        or weight_scales.device != activation.device
+        or weight_codes.shape[1:] != activation_codes.shape[1:]
+        or weight_scales.shape != weight_codes.shape[:2]
+    ):
         raise ValueError("selected represented operands differ")
     rows = weight_codes.shape[0]
-    total = torch.zeros((matrix.shape[0], rows), dtype=torch.float32,
-                        device=activation.device)
+    total = torch.zeros((matrix.shape[0], rows), dtype=torch.float32, device=activation.device)
     for index in range(weight_codes.shape[1]):
         # The integer magnitude is below 2^24 for both supported groups, so the
         # FP32 matmul is an exact realization of the signed integer dot.
         dot = activation_codes[:, index].float() @ weight_codes[:, index].float().t()
-        factor = activation_scales[:, index].float()[:, None] * \
-            weight_scales[:, index].float()[None, :]
+        factor = (
+            activation_scales[:, index].float()[:, None] * weight_scales[:, index].float()[None, :]
+        )
         total = torch.addcmul(total, dot, factor)
     return total.to(torch.bfloat16).reshape(*activation_shape[:-1], rows)
 
@@ -181,9 +202,9 @@ class ActivationInclusiveCheckpoint:
             spans = []
             for begin, end in SELECTED_SOURCE_ROWS.get(name, ()):
                 codes, scales = quantize_weight_rows(tensor[begin:end], self.profile)
-                spans.append(QuantizedRowSpan(
-                    begin, end, codes.to(device=device), scales.to(device=device)
-                ))
+                spans.append(
+                    QuantizedRowSpan(begin, end, codes.to(device=device), scales.to(device=device))
+                )
             if spans:
                 self.bindings[id(target)] = (target, tuple(spans))
         return result
@@ -212,7 +233,7 @@ class ScopedLinearDispatcher:
             cursor = 0
             for span in binding[1]:
                 if cursor < span.begin:
-                    parts.append(self.original(activation, weight[cursor:span.begin]))
+                    parts.append(self.original(activation, weight[cursor : span.begin]))
                 parts.append(represented_linear(activation, span, self.checkpoint.group))
                 cursor = span.end
             if cursor < weight.shape[0]:
@@ -243,8 +264,9 @@ def _profile_contract(profile: str) -> dict[str, object]:
     return {
         "activation": f"signed-A8G{group}-rne-clamp-minus127-plus127-fp16-absmax-scale",
         "weight": (
-            "signed-Q4G64-rne-clamp-minus8-plus7-fp16-absmax-scale" if not refined else
-            "signed-Q4G128-eight-step-source-mse-rne-clamp-minus8-plus7-fp16-scale"
+            "signed-Q4G64-rne-clamp-minus8-plus7-fp16-absmax-scale"
+            if not refined
+            else "signed-Q4G128-eight-step-source-mse-rne-clamp-minus8-plus7-fp16-scale"
         ),
         "integer_dot": f"exact signed int8-by-int4 K{group}",
         "group_epilogue": "FP32 dot times FP32(activation FP16 scale times weight FP16 scale)",
@@ -269,21 +291,30 @@ def preflight_payload(args, weight_map, source) -> dict[str, object]:
         "status": "ready_for_activation_inclusive_8k_source_gate",
         "source": dict(source),
         "sampled_source_gate": {
-            "path": str(args.source_screen.resolve()), "sha256": sha256_file(args.source_screen),
+            "path": str(args.source_screen.resolve()),
+            "sha256": sha256_file(args.source_screen),
             "passed": screen["decision"]["sampled_source_gate_pass"],
         },
         "bf16_authority": {
-            "path": str(args.bf16.resolve()), "sha256": sha256_file(args.bf16),
+            "path": str(args.bf16.resolve()),
+            "sha256": sha256_file(args.bf16),
         },
         "profiles": {profile: _profile_contract(profile) for profile in PROFILES},
         "matrix_scope": _scope(),
-        "workload": {"tokens": TOKENS, "skip": "half", "prefill_chunk": 4096,
-                     "schedule": "prefill", "device": args.device,
-                     "scored_positions": 4095},
-        "acceptance": {"maximum_mean_nll_delta": MAXIMUM_MEAN_NLL_DELTA,
-                       "maximum_new_severe_rate": MAXIMUM_NEW_SEVERE_RATE,
-                       "maximum_new_severe_positions": 11,
-                       "severe_threshold_nll": TERRIBLE_NLL},
+        "workload": {
+            "tokens": TOKENS,
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": args.device,
+            "scored_positions": 4095,
+        },
+        "acceptance": {
+            "maximum_mean_nll_delta": MAXIMUM_MEAN_NLL_DELTA,
+            "maximum_new_severe_rate": MAXIMUM_NEW_SEVERE_RATE,
+            "maximum_new_severe_positions": 11,
+            "severe_threshold_nll": TERRIBLE_NLL,
+        },
         "implementation_sha256": _implementation(),
         "limitations": [
             "This executes a source/reference represented formula, not a product kernel.",
@@ -304,6 +335,7 @@ def run(args) -> int:
     _, bf16_nll, bf16_argmax = _load_bf16_authority(args, source)
     if args.preflight_only:
         from tools.ppl.q4_group_source_diagnostic import _atomic_new
+
         payload = preflight_payload(args, weight_map, source)
         _atomic_new(args.out, (json.dumps(payload, indent=2, allow_nan=False) + "\n").encode())
         return 0
@@ -317,8 +349,12 @@ def run(args) -> int:
     )
     checkpoint.validate_metadata()
     scorer = backend.LayerMajorTextScorer(
-        checkpoint, device_index=args.device, prefill_chunk=4096, schedule="prefill",
-        skip_text="half", kv_value_group=None,
+        checkpoint,
+        device_index=args.device,
+        prefill_chunk=4096,
+        schedule="prefill",
+        skip_text="half",
+        kv_value_group=None,
     )
     with ScopedLinearDispatcher(backend, checkpoint):
         vectors = scorer.score(ids)
@@ -335,23 +371,35 @@ def run(args) -> int:
         "formula": _profile_contract(args.profile),
         "source": source,
         "sampled_source_gate": {
-            "path": str(args.source_screen.resolve()), "sha256": sha256_file(args.source_screen),
+            "path": str(args.source_screen.resolve()),
+            "sha256": sha256_file(args.source_screen),
         },
         "bf16_authority": {
-            "path": str(args.bf16.resolve()), "sha256": sha256_file(args.bf16),
+            "path": str(args.bf16.resolve()),
+            "sha256": sha256_file(args.bf16),
         },
         "matrix_scope": _scope(),
-        "workload": {"tokens": TOKENS, "skip": "half", "prefill_chunk": 4096,
-                     "schedule": "prefill", "device": args.device,
-                     "scored_positions": 4095},
+        "workload": {
+            "tokens": TOKENS,
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": args.device,
+            "scored_positions": 4095,
+        },
         "execution": protocol.execution_provenance(torch, args.device, stage_trace_enabled=False),
         "implementation_sha256": _implementation(),
-        "result": {"tokens_scored": len(nlls), "argmax_tokens": len(argmax),
-                   "non_finite": 0,
-                   "terrible_tokens": sum(value >= TERRIBLE_NLL for value in nlls),
-                   "sum_nll": sum(nlls), "mean_nll": sum(nlls) / len(nlls),
-                   "max_nll": max(nlls), "ppl": math.exp(sum(nlls) / len(nlls)),
-                   "score_seconds": vectors.score_seconds},
+        "result": {
+            "tokens_scored": len(nlls),
+            "argmax_tokens": len(argmax),
+            "non_finite": 0,
+            "terrible_tokens": sum(value >= TERRIBLE_NLL for value in nlls),
+            "sum_nll": sum(nlls),
+            "mean_nll": sum(nlls) / len(nlls),
+            "max_nll": max(nlls),
+            "ppl": math.exp(sum(nlls) / len(nlls)),
+            "score_seconds": vectors.score_seconds,
+        },
         "against_bf16": gate,
         "command": [str(Path(sys.argv[0])), *sys.argv[1:]],
         "limitations": [

@@ -59,16 +59,16 @@ struct PrefillContext {
     std::uint32_t text_kv_base;
     const ops::SamplingConfig* sampling;
     Tensor* rewrite_checkpoint_hidden;
-    std::int32_t current_state_slot                         = 0;
-    std::uint32_t mtp_proposal_extent                       = 0;
+    std::int32_t current_state_slot                       = 0;
+    std::uint32_t mtp_proposal_extent                     = 0;
     const qwen3::DFlashDecodeIngress* dflash_host_ingress = nullptr;
-    PagedKVAllocation* text_kv_allocation                   = nullptr;
+    PagedKVAllocation* text_kv_allocation                 = nullptr;
     qwen3::PagedKVPublication* text_kv_publication        = nullptr;
-    std::uint32_t* text_kv_status                           = nullptr;
-    PagedKVAllocation* mtp_kv_allocation                    = nullptr;
+    std::uint32_t* text_kv_status                         = nullptr;
+    PagedKVAllocation* mtp_kv_allocation                  = nullptr;
     qwen3::PagedKVPublication* mtp_kv_publication         = nullptr;
-    std::uint32_t* mtp_kv_status                            = nullptr;
-    PromptEmbeddingStaging* prompt_embedding                = nullptr;
+    std::uint32_t* mtp_kv_status                          = nullptr;
+    PromptEmbeddingStaging* prompt_embedding              = nullptr;
 };
 
 struct OrdinaryBatchContext {
@@ -143,13 +143,13 @@ struct TargetVerifyFrameView {
     Tensor fold_path;
     Tensor draft_selector_ids;
     Tensor draft_selector_q;
-    bool tree_verify = false;
+    bool tree_verify                       = false;
     const GdnReplayRecords* replay_records = nullptr;
     // DFlash chain verification: the device rows of the previous round's deferred fold.
     const ops::GdnDeferredFoldRows* gdn_fold = nullptr;
-    const ops::SamplingConfig* sampling    = nullptr;
-    DFlashFeatureSink* feature_sink        = nullptr;
-    qwen3::ToolMaskExchange* tool_masks = nullptr;
+    const ops::SamplingConfig* sampling      = nullptr;
+    DFlashFeatureSink* feature_sink          = nullptr;
+    qwen3::ToolMaskExchange* tool_masks      = nullptr;
 };
 
 // The prefill owner's DFlash context append addresses the last ingress slot (max_concurrency - 1):
@@ -179,9 +179,8 @@ void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_
 // target_verify_accept's two halves around the target forward: binds the verify controls
 // (replay records, tool masks, sampling, tree) and returns the frame with its live sampler;
 // resolve accepts drafts and publishes the selected continuation hidden.
-[[nodiscard]] TargetVerifyFrameView target_verify_prepare(ExecutionCore& execution,
-                                                          TextContext& card,
-                                                          TargetVerifyFrameView frame);
+[[nodiscard]] TargetVerifyFrameView
+target_verify_prepare(ExecutionCore& execution, TextContext& card, TargetVerifyFrameView frame);
 void target_verify_resolve(ExecutionCore& execution, Tensor& continuation_hidden_store,
                            TextContext& card, TargetVerifyFrameView frame);
 
@@ -241,13 +240,11 @@ void dflash_append_context(PrefillContext& state, const Tensor& features, const 
                            ops::KVCacheAppendPrefixExecutionEnvelope envelope);
 void capture_dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_size,
                                  std::uint32_t k, std::uint32_t verify_width,
-                                 DFlashEnvelopes envelopes,
-                                 DecodeGraphDefinition& definition);
+                                 DFlashEnvelopes envelopes, DecodeGraphDefinition& definition);
 void dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_size, std::uint32_t k,
                          std::uint32_t verify_width, DFlashEnvelopes envelopes,
                          DecodeGraphExecutable* executable);
-void dflash_mixed_batch(DFlashBatchContext& state, DFlashMixedOwner& owner,
-                        std::int32_t batch_size, std::uint32_t k, std::uint32_t verify_width,
-                        DFlashEnvelopes envelopes);
+void dflash_mixed_batch(DFlashBatchContext& state, DFlashMixedOwner& owner, std::int32_t batch_size,
+                        std::uint32_t k, std::uint32_t verify_width, DFlashEnvelopes envelopes);
 
 } // namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule

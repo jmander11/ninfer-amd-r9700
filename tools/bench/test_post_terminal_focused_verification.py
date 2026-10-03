@@ -24,7 +24,8 @@ def test_hybrid_identity_is_the_registered_n16_artifact() -> None:
 def test_selected_dense_build_ignores_inactive_sparse_parameters(tmp_path: Path) -> None:
     cache = tmp_path / "CMakeCache.txt"
     settings = {
-        "CMAKE_BUILD_TYPE": "Release", "CMAKE_GENERATOR": "Ninja",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_GENERATOR": "Ninja",
         "NINFER_R9700_KV_VALUE_GROUP": "16",
         "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
         "NINFER_R9700_W8_ACTIVATION_BITS": "8",

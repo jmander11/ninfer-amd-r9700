@@ -173,11 +173,9 @@ runtime::AdmissionResources Program<Variant>::admission_capacity() const noexcep
 }
 
 template <>
-runtime::PrefillStepResult
-Program<Variant>::start_prefill_lane(std::uint32_t lane, PreparedPrompt&& prompt,
-                                     RequestPlan<Variant>&& plan,
-                                     runtime::TransientRegion transient, const OutputSession* output,
-                                     bool decode_waiting) {
+runtime::PrefillStepResult Program<Variant>::start_prefill_lane(
+    std::uint32_t lane, PreparedPrompt&& prompt, RequestPlan<Variant>&& plan,
+    runtime::TransientRegion transient, const OutputSession* output, bool decode_waiting) {
     return impl_->start_prefill_lane(lane, PreparedPromptAccess::take(std::move(prompt)),
                                      std::move(plan), transient, output, decode_waiting);
 }
@@ -339,9 +337,10 @@ bool Program<Variant>::claim_disk_entry(std::uint64_t entry_id, std::uint32_t ex
                                         std::uint64_t hash_lo, std::uint64_t hash_hi,
                                         std::uint32_t expected_reuse_base,
                                         PrefixReusePath expected_reuse,
-                                         std::uint64_t expected_committed_generation) {
+                                        std::uint64_t expected_committed_generation) {
     return impl_->claim_disk_entry(entry_id, expected_frontier, hash_lo, hash_hi,
-                                   expected_reuse_base, expected_reuse, expected_committed_generation);
+                                   expected_reuse_base, expected_reuse,
+                                   expected_committed_generation);
 }
 
 template <>
@@ -417,7 +416,8 @@ qwen3::detail::KvRamCopySeconds Program<Variant>::harvest_kv_ram_copy_seconds() 
 }
 
 template <>
-std::optional<qwen3::detail::KvDiskSnapshot> Program<Variant>::try_kv_disk_snapshot() const noexcept {
+std::optional<qwen3::detail::KvDiskSnapshot>
+Program<Variant>::try_kv_disk_snapshot() const noexcept {
     return impl_->try_kv_disk_snapshot();
 }
 
@@ -543,8 +543,8 @@ create_program<Variant>(const Variant::ModelView& model, Variant::WeightsProfile
         throw std::invalid_argument(
             "loaded model weights profile does not match the sequence plan");
     }
-    auto impl = std::make_unique<detail::ProgramImpl<Variant>>(
-        model, *plan.impl_, device, std::move(kv_ram_arena));
+    auto impl = std::make_unique<detail::ProgramImpl<Variant>>(model, *plan.impl_, device,
+                                                               std::move(kv_ram_arena));
     plan.impl_.reset();
     return std::unique_ptr<Program<Variant>>(new Program<Variant>(std::move(impl)));
 }

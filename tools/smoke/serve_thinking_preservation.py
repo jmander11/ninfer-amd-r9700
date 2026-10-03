@@ -28,7 +28,9 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def request_json(base_url: str, method: str, path: str, payload: Any | None = None) -> dict[str, Any]:
+def request_json(
+    base_url: str, method: str, path: str, payload: Any | None = None
+) -> dict[str, Any]:
     body = None
     headers = {"Accept": "application/json"}
     if payload is not None:
@@ -107,13 +109,14 @@ def read_events(path: Path) -> list[dict[str, Any]]:
             identity = (value.get("artifact_type"), value.get("schema_version"))
             expected = (REQUEST_LOG_ARTIFACT_TYPE, REQUEST_LOG_SCHEMA_VERSION)
             if identity != expected:
-                raise TestFailure(
-                    f"request log identity {identity!r} does not match {expected!r}")
+                raise TestFailure(f"request log identity {identity!r} does not match {expected!r}")
             events.append(value)
     return events
 
 
-def protocol_events(events: list[dict[str, Any]], event: str, protocol: str) -> list[dict[str, Any]]:
+def protocol_events(
+    events: list[dict[str, Any]], event: str, protocol: str
+) -> list[dict[str, Any]]:
     return [
         item
         for item in events
@@ -126,7 +129,9 @@ def require(condition: bool, message: str) -> None:
         raise TestFailure(message)
 
 
-def exercise(base_url: str, fixture: dict[str, Any], log_path: Path, backend: str) -> dict[str, Any]:
+def exercise(
+    base_url: str, fixture: dict[str, Any], log_path: Path, backend: str
+) -> dict[str, Any]:
     models = request_json(base_url, "GET", "/v1/models")
     entries = models.get("data")
     require(isinstance(entries, list) and len(entries) == 1, "server did not expose one model")
@@ -141,8 +146,7 @@ def exercise(base_url: str, fixture: dict[str, Any], log_path: Path, backend: st
         chat_payload(model, fixture, "second_tool_messages"),
     ]
     chat_responses = [
-        request_json(base_url, "POST", "/v1/chat/completions", payload)
-        for payload in chat_payloads
+        request_json(base_url, "POST", "/v1/chat/completions", payload) for payload in chat_payloads
     ]
     restored_choice = chat_choice(chat_responses[2])
     cold_choice = chat_choice(chat_responses[4])
@@ -159,14 +163,10 @@ def exercise(base_url: str, fixture: dict[str, Any], log_path: Path, backend: st
     closed_payload = chat_payload(model, fixture, "second_tool_messages")
     closed_payload["messages"] = closed_messages
     closed_payload["chat_template_kwargs"] = {"preserve_thinking": False}
-    closed_without_thinking = request_json(
-        base_url, "POST", "/v1/chat/completions", closed_payload
-    )
+    closed_without_thinking = request_json(base_url, "POST", "/v1/chat/completions", closed_payload)
     preserved_payload = dict(closed_payload)
     preserved_payload["chat_template_kwargs"] = {"preserve_thinking": True}
-    closed_with_thinking = request_json(
-        base_url, "POST", "/v1/chat/completions", preserved_payload
-    )
+    closed_with_thinking = request_json(base_url, "POST", "/v1/chat/completions", preserved_payload)
     stripped_prompt_tokens = chat_prompt_tokens(closed_without_thinking)
     preserved_prompt_tokens = chat_prompt_tokens(closed_with_thinking)
     require(
@@ -184,9 +184,7 @@ def exercise(base_url: str, fixture: dict[str, Any], log_path: Path, backend: st
     parent_id = parent.get("id")
     require(isinstance(parent_id, str) and parent_id, "Responses parent id is invalid")
 
-    inherited_payload = response_payload(
-        model, responses_fixture["inherited_child_input"], None
-    )
+    inherited_payload = response_payload(model, responses_fixture["inherited_child_input"], None)
     inherited_payload["previous_response_id"] = parent_id
     request_json(base_url, "POST", "/v1/responses", inherited_payload)
 
@@ -199,7 +197,8 @@ def exercise(base_url: str, fixture: dict[str, Any], log_path: Path, backend: st
     require(len(chat_done) == 7, f"expected 7 Chat request_done events, found {len(chat_done)}")
     paths = [item.get("result", {}).get("prefix_reuse_path") for item in chat_done]
     require(
-        paths == [
+        paths
+        == [
             "full_reset",
             "restore_turn_checkpoint",
             "restore_turn_checkpoint",
@@ -213,9 +212,7 @@ def exercise(base_url: str, fixture: dict[str, Any], log_path: Path, backend: st
     first_restore = chat_done[1]["result"].get("prefix_cache_hit_tokens")
     second_restore = chat_done[2]["result"].get("prefix_cache_hit_tokens")
     require(
-        isinstance(first_restore, int)
-        and first_restore > 0
-        and second_restore == first_restore,
+        isinstance(first_restore, int) and first_restore > 0 and second_restore == first_restore,
         "tool-loop requests did not restore the same turn checkpoint",
     )
     for index in (1, 2):
@@ -227,8 +224,7 @@ def exercise(base_url: str, fixture: dict[str, Any], log_path: Path, backend: st
     require(
         len(chat_start) == 7
         and all(
-            item.get("request", {}).get("preserve_thinking") is False
-            for item in chat_start[:6]
+            item.get("request", {}).get("preserve_thinking") is False for item in chat_start[:6]
         )
         and chat_start[6].get("request", {}).get("preserve_thinking") is True,
         "Chat requests did not resolve preserve_thinking consistently",
@@ -249,9 +245,7 @@ def exercise(base_url: str, fixture: dict[str, Any], log_path: Path, backend: st
     )
     responses_done = protocol_events(events, "request_done", "openai_responses")
     require(len(responses_done) == 3, "expected three Responses request_done events")
-    response_paths = [
-        item.get("result", {}).get("prefix_reuse_path") for item in responses_done
-    ]
+    response_paths = [item.get("result", {}).get("prefix_reuse_path") for item in responses_done]
     # The inherited child continues the parent's resident frontier when the stored response
     # re-renders to the generated tokens, and otherwise restores the parent's response
     # checkpoint at its generation prologue; either way it reuses at least the parent prompt.

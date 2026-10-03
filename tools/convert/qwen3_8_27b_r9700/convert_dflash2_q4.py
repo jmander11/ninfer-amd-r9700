@@ -119,8 +119,9 @@ def _validate_base_objects(actual: tuple[ArtifactObject, ...], expected) -> None
             raise TypeError(f"unsupported registered base spec: {type(spec).__name__}")
 
 
-def preflight(base: str | Path, dflash_model: str | Path,
-              matrix_recipe: str = _CANONICAL_RECIPE) -> Preflight:
+def preflight(
+    base: str | Path, dflash_model: str | Path, matrix_recipe: str = _CANONICAL_RECIPE
+) -> Preflight:
     base_path = Path(base)
     model_path = Path(dflash_model)
     inventory.validate_inventory()
@@ -128,8 +129,10 @@ def preflight(base: str | Path, dflash_model: str | Path,
     source = inventory.validate_source(model_path)
     with Artifact.open(base_path) as artifact:
         expected, output_identity, device_bytes = _expected_base(artifact.identity)
-        output_identity = ArtifactIdentity(inventory.MODEL_ID,
-            inventory.companion_weights_id(artifact.identity.weights_id, matrix_recipe))
+        output_identity = ArtifactIdentity(
+            inventory.MODEL_ID,
+            inventory.companion_weights_id(artifact.identity.weights_id, matrix_recipe),
+        )
         device_bytes += recipe["tensor_encoded_bytes"] - inventory.TENSOR_ENCODED_BYTES
         _validate_base_objects(artifact.objects, expected)
         specs = tuple(_artifact_spec(obj) for obj in artifact.objects) + tuple(
@@ -137,8 +140,12 @@ def preflight(base: str | Path, dflash_model: str | Path,
             for spec in dflash2_matrix_recipes.tensor_specs(inventory.TENSOR_SPECS, matrix_recipe)
         )
         if artifact.identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID:
-            specs = tuple(replace(spec, layout="r9700-w8g32-n16-k16-v1")
-                          if spec.name == "text/output_head" else spec for spec in specs)
+            specs = tuple(
+                replace(spec, layout="r9700-w8g32-n16-k16-v1")
+                if spec.name == "text/output_head"
+                else spec
+                for spec in specs
+            )
         base_identity = artifact.identity
     objects = plan_objects(specs)
     directory = encode_directory(output_identity, objects)
@@ -173,46 +180,77 @@ def _base_authority(path: Path, identity: ArtifactIdentity, artifact_sha256: str
     if identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID:
         receipt_path = Path(str(path.resolve()) + ".conversion.json")
         receipt = json.loads(receipt_path.read_text())
-        if (receipt.get("artifact_type") != "ninfer_r9700_selective_protected_conversion"
-                or receipt.get("schema_version") != 1
-                or receipt.get("identity") != _identity_record(identity)
-                or receipt.get("recipe_id") != selective_protected_inventory.RECIPE_ID
-                or receipt.get("weight_recipe_selected") is not False
-                or receipt.get("changed_formats") != selective_protected_inventory.CHANGED_FORMATS
-                or receipt.get("artifact") != {"path": str(path.resolve()),
-                    "bytes": path.stat().st_size, "sha256": artifact_sha256}):
+        if (
+            receipt.get("artifact_type") != "ninfer_r9700_selective_protected_conversion"
+            or receipt.get("schema_version") != 1
+            or receipt.get("identity") != _identity_record(identity)
+            or receipt.get("recipe_id") != selective_protected_inventory.RECIPE_ID
+            or receipt.get("weight_recipe_selected") is not False
+            or receipt.get("changed_formats") != selective_protected_inventory.CHANGED_FORMATS
+            or receipt.get("artifact")
+            != {
+                "path": str(path.resolve()),
+                "bytes": path.stat().st_size,
+                "sha256": artifact_sha256,
+            }
+        ):
             raise ValueError("selective-protected base conversion authority differs")
-        return {"receipt": {"path": str(receipt_path), "sha256": _sha256(receipt_path)},
-                "recipe_id": receipt["recipe_id"], "source": receipt["source"],
-                "base": receipt["base"]}
+        return {
+            "receipt": {"path": str(receipt_path), "sha256": _sha256(receipt_path)},
+            "recipe_id": receipt["recipe_id"],
+            "source": receipt["source"],
+            "base": receipt["base"],
+        }
     from tools.ppl.run import N16_MIGRATION_PROFILES
+
     if identity.weights_id not in N16_MIGRATION_PROFILES:
         return None
     receipt_path = Path(str(path.resolve()) + ".conversion.json")
     if identity.weights_id == inventory.HYBRID_BASE_WEIGHTS_ID:
         from tools.ppl.run import validate_n16_conversion_receipt
-        receipt = validate_n16_conversion_receipt(path, {
-            "path": str(path.resolve()), "bytes": path.stat().st_size,
-            "sha256": artifact_sha256, "weights_id": identity.weights_id,
-        })
+
+        receipt = validate_n16_conversion_receipt(
+            path,
+            {
+                "path": str(path.resolve()),
+                "bytes": path.stat().st_size,
+                "sha256": artifact_sha256,
+                "weights_id": identity.weights_id,
+            },
+        )
     else:
         from .publish_n16_migration_receipt import validate_receipt
-        receipt = validate_receipt(receipt_path, {
-            "path": str(path.resolve()), "bytes": path.stat().st_size,
-            "sha256": artifact_sha256, "weights_id": identity.weights_id,
-        })
+
+        receipt = validate_receipt(
+            receipt_path,
+            {
+                "path": str(path.resolve()),
+                "bytes": path.stat().st_size,
+                "sha256": artifact_sha256,
+                "weights_id": identity.weights_id,
+            },
+        )
     if not isinstance(receipt, dict):
         raise ValueError("N16 base migration authority differs")
-    values = {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
-              "recipe_id": receipt["recipe_id"],
-              "object_plan_sha256": receipt["object_plan_sha256"],
-              "source_artifact_sha256": receipt["source_artifact_sha256"],
-              "source_receipt_sha256": receipt["source_receipt_sha256"],
-              "transcoder_sha256": receipt["transcoder_sha256"]}
+    values = {
+        "receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
+        "recipe_id": receipt["recipe_id"],
+        "object_plan_sha256": receipt["object_plan_sha256"],
+        "source_artifact_sha256": receipt["source_artifact_sha256"],
+        "source_receipt_sha256": receipt["source_receipt_sha256"],
+        "transcoder_sha256": receipt["transcoder_sha256"],
+    }
     if identity.weights_id == inventory.HYBRID_BASE_WEIGHTS_ID:
-        values.update({key: receipt[key] for key in (
-            "selection_sha256", "source_index_sha256", "source_ranking_sha256",
-        )})
+        values.update(
+            {
+                key: receipt[key]
+                for key in (
+                    "selection_sha256",
+                    "source_index_sha256",
+                    "source_ranking_sha256",
+                )
+            }
+        )
     else:
         values["receipt_producer_sha256"] = receipt["receipt_producer_sha256"]
     return values
@@ -255,13 +293,13 @@ def preflight_summary(checked: Preflight, output: Path | None = None) -> dict[st
             "identity": _identity_record(checked.base_identity),
             "bytes": checked.base_path.stat().st_size,
             "sha256": base_sha256,
-            "authority": _base_authority(
-                checked.base_path, checked.base_identity, base_sha256
-            ),
+            "authority": _base_authority(checked.base_path, checked.base_identity, base_sha256),
             "objects": len(checked.objects) - len(inventory.TENSOR_SPECS),
-            "payload_copy": ("byte_exact_except_losslessly_tiled_output_head"
-                             if checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
-                             else "byte_exact"),
+            "payload_copy": (
+                "byte_exact_except_losslessly_tiled_output_head"
+                if checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
+                else "byte_exact"
+            ),
         },
         "output_identity": _identity_record(checked.output_identity),
         "dflash_source": {
@@ -300,13 +338,10 @@ def preflight_summary(checked: Preflight, output: Path | None = None) -> dict[st
             "resources": len(resource_objects),
             "formats": dict(sorted(Counter(obj.format for obj in tensor_objects).items())),
             "layouts": dict(sorted(Counter(obj.layout for obj in tensor_objects).items())),
-            "encodings": dict(
-                sorted(Counter(obj.encoding for obj in resource_objects).items())
-            ),
+            "encodings": dict(sorted(Counter(obj.encoding for obj in resource_objects).items())),
             "object_bytes": sum(obj.bytes for obj in checked.objects),
             "payload_span_bytes": (
-                checked.objects[-1].offset + checked.objects[-1].bytes
-                if checked.objects else 0
+                checked.objects[-1].offset + checked.objects[-1].bytes if checked.objects else 0
             ),
             "sha256": hashlib.sha256(plan_payload).hexdigest(),
         },
@@ -372,8 +407,11 @@ def _report_value(
     recipe = dict(inventory.matrix_recipe_summary(checked.matrix_recipe))
     recipe.update(
         {
-            "activation_profile": ("compile_selected_W8G32" if recipe["matrix_format"]
-                                   == "W8G32_F16S" else "compile_selected_adaptive_A8G64"),
+            "activation_profile": (
+                "compile_selected_W8G32"
+                if recipe["matrix_format"] == "W8G32_F16S"
+                else "compile_selected_adaptive_A8G64"
+            ),
             "objects": len(inventory.TENSOR_SPECS),
             "source_tensors": len(inventory.SOURCE_NAMES),
         }
@@ -389,12 +427,12 @@ def _report_value(
             "identity": _identity_record(checked.base_identity),
             "bytes": checked.base_path.stat().st_size,
             "sha256": base_sha256,
-            "authority": _base_authority(
-                checked.base_path, checked.base_identity, base_sha256
+            "authority": _base_authority(checked.base_path, checked.base_identity, base_sha256),
+            "payload_copy": (
+                "byte_exact_except_losslessly_tiled_output_head"
+                if checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
+                else "byte_exact"
             ),
-            "payload_copy": ("byte_exact_except_losslessly_tiled_output_head"
-                             if checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
-                             else "byte_exact"),
         },
         "dflash_source": checked.source,
         "dflash_recipe": recipe,
@@ -469,9 +507,7 @@ def convert(
             "identity": _identity_record(checked.base_identity),
             "bytes": checked.base_path.stat().st_size,
             "sha256": base_sha256,
-            "authority": _base_authority(
-                checked.base_path, checked.base_identity, base_sha256
-            ),
+            "authority": _base_authority(checked.base_path, checked.base_identity, base_sha256),
         },
         "dflash_source": checked.source,
         "dflash_matrix_recipe": inventory.matrix_recipe_summary(checked.matrix_recipe),
@@ -492,9 +528,13 @@ def convert(
                 if writer.objects != checked.objects:
                     raise RuntimeError("DFlash2 writer plan differs from completed preflight")
                 for obj in source_artifact.objects:
-                    if (checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
-                            and obj.name == "text/output_head"):
-                        writer.write(obj.name, transcode_w8_n16k16(source_artifact.payload(obj), obj.shape))
+                    if (
+                        checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
+                        and obj.name == "text/output_head"
+                    ):
+                        writer.write(
+                            obj.name, transcode_w8_n16k16(source_artifact.payload(obj), obj.shape)
+                        )
                     else:
                         writer.write(obj.name, _chunks(source_artifact.payload(obj)))
                 for binding in inventory.source_bindings_for_recipe(checked.matrix_recipe):
@@ -606,8 +646,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--dflash-model", required=True, type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--matrix-recipe", choices=[recipe.key for recipe in
-                        dflash2_matrix_recipes.RECIPES], default=_CANONICAL_RECIPE)
+    parser.add_argument(
+        "--matrix-recipe",
+        choices=[recipe.key for recipe in dflash2_matrix_recipes.RECIPES],
+        default=_CANONICAL_RECIPE,
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--preflight-only", action="store_true")
     mode.add_argument("--finalize-report", action="store_true")
@@ -630,8 +673,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             matrix_recipe=args.matrix_recipe,
         )
     else:
-        report = convert(args.base, args.dflash_model, args.out, device=args.device,
-                         matrix_recipe=args.matrix_recipe)
+        report = convert(
+            args.base,
+            args.dflash_model,
+            args.out,
+            device=args.device,
+            matrix_recipe=args.matrix_recipe,
+        )
     print(f"DFlash2 evaluation conversion report: {report}")
 
 

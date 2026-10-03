@@ -111,14 +111,11 @@ def _validate_manifest(manifest: dict[str, object], path: Path) -> tuple[int, st
     }
     for key, expected in required.items():
         if manifest.get(key) != expected:
-            raise ValueError(
-                f"{path}: {key} must be {expected!r}, got {manifest.get(key)!r}"
-            )
+            raise ValueError(f"{path}: {key} must be {expected!r}, got {manifest.get(key)!r}")
     tokenizer_model_id = manifest.get("tokenizer_model_id")
     if tokenizer_model_id is not None and tokenizer_model_id != TOKENIZER_MODEL_ID:
         raise ValueError(
-            f"{path}: tokenizer_model_id must be {TOKENIZER_MODEL_ID!r}, "
-            f"got {tokenizer_model_id!r}"
+            f"{path}: tokenizer_model_id must be {TOKENIZER_MODEL_ID!r}, got {tokenizer_model_id!r}"
         )
     digest = manifest.get("ids_sha256")
     if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
@@ -174,13 +171,9 @@ def load_corpus(ids_path: str | Path) -> CorpusCounts:
     expected_count, expected_digest = _validate_manifest(manifest, manifest_path)
     counts, token_count, ids_sha256 = _count_ids(ids)
     if ids_sha256 != expected_digest:
-        raise ValueError(
-            f"{ids}: SHA-256 {ids_sha256} does not match manifest {expected_digest}"
-        )
+        raise ValueError(f"{ids}: SHA-256 {ids_sha256} does not match manifest {expected_digest}")
     if token_count != expected_count:
-        raise ValueError(
-            f"{ids}: parsed {token_count} tokens, manifest declares {expected_count}"
-        )
+        raise ValueError(f"{ids}: parsed {token_count} tokens, manifest declares {expected_count}")
     return CorpusCounts(
         ids_path=ids.resolve(),
         manifest_path=manifest_path.resolve(),
@@ -254,9 +247,7 @@ def validate_ranking_provenance(
     }
     for key, expected in expected_scalars.items():
         if report.get(key) != expected:
-            raise ValueError(
-                f"{sidecar}: {key} must be {expected!r}, got {report.get(key)!r}"
-            )
+            raise ValueError(f"{sidecar}: {key} must be {expected!r}, got {report.get(key)!r}")
 
     entries = report.get("corpora")
     if not isinstance(entries, list) or not entries:
@@ -268,9 +259,7 @@ def validate_ranking_provenance(
         ids_value = entry.get("ids_path")
         manifest_value = entry.get("manifest_path")
         if not isinstance(ids_value, str) or not isinstance(manifest_value, str):
-            raise ValueError(
-                f"{sidecar}: corpora[{index}] paths must be strings"
-            )
+            raise ValueError(f"{sidecar}: corpora[{index}] paths must be strings")
         corpus = load_corpus(ids_value)
         expected_entry: dict[str, object] = {
             "ids_path": str(corpus.ids_path),
@@ -284,8 +273,7 @@ def validate_ranking_provenance(
             actual = entry.get(key)
             if actual != expected:
                 raise ValueError(
-                    f"{sidecar}: corpora[{index}].{key} must be "
-                    f"{expected!r}, got {actual!r}"
+                    f"{sidecar}: corpora[{index}].{key} must be {expected!r}, got {actual!r}"
                 )
         if Path(manifest_value).resolve() != corpus.manifest_path:
             raise ValueError(
@@ -329,7 +317,8 @@ def _ranking_payload(counts: Sequence[int]) -> bytes:
 
 
 def build_ranking(
-    corpus_paths: Sequence[str | Path], out_path: str | Path,
+    corpus_paths: Sequence[str | Path],
+    out_path: str | Path,
 ) -> tuple[Path, Path]:
     output = Path(out_path)
     sidecar = provenance_path_for(output)
@@ -395,7 +384,10 @@ def build_ranking(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--corpus", action="append", required=True, type=Path,
+        "--corpus",
+        action="append",
+        required=True,
+        type=Path,
         help="Qwen3.8 .ids corpus; its sibling <stem>.manifest.json is mandatory",
     )
     parser.add_argument("--out", required=True, type=Path)

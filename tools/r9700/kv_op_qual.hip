@@ -29,22 +29,18 @@
 
 namespace {
 
-constexpr unsigned kDimension = 256;
-constexpr unsigned kQueryHeads = 24;
-constexpr unsigned kKvHeads = 4;
-constexpr unsigned kQueriesPerKv = kQueryHeads / kKvHeads;
-constexpr unsigned kPageTokens = 64;
-constexpr float kAttentionScale = 1.0F / 16.0F;
+constexpr unsigned kDimension       = 256;
+constexpr unsigned kQueryHeads      = 24;
+constexpr unsigned kKvHeads         = 4;
+constexpr unsigned kQueriesPerKv    = kQueryHeads / kKvHeads;
+constexpr unsigned kPageTokens      = 64;
+constexpr float kAttentionScale     = 1.0F / 16.0F;
 constexpr const char* kRequiredArch = "gfx1201";
 
-[[noreturn]] void fail(const std::string& message) {
-    throw std::runtime_error(message);
-}
+[[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
 void hip_check(hipError_t status, const char* expression, const char* file, int line) {
-    if (status == hipSuccess) {
-        return;
-    }
+    if (status == hipSuccess) { return; }
     std::ostringstream os;
     os << file << ':' << line << ": " << expression << ": " << hipGetErrorString(status);
     fail(os.str());
@@ -55,12 +51,13 @@ void hip_check(hipError_t status, const char* expression, const char* file, int 
 template <typename T>
 class DeviceBuffer {
 public:
-    explicit DeviceBuffer(std::size_t count) {
-        HIP_CHECK(hipMalloc(&data_, count * sizeof(T)));
-    }
-    DeviceBuffer(const DeviceBuffer&) = delete;
+    explicit DeviceBuffer(std::size_t count) { HIP_CHECK(hipMalloc(&data_, count * sizeof(T))); }
+
+    DeviceBuffer(const DeviceBuffer&)            = delete;
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
     ~DeviceBuffer() { (void)hipFree(data_); }
+
     T* get() const { return data_; }
 
 private:
@@ -70,9 +67,12 @@ private:
 class Event {
 public:
     Event() { HIP_CHECK(hipEventCreate(&event_)); }
-    Event(const Event&) = delete;
+
+    Event(const Event&)            = delete;
     Event& operator=(const Event&) = delete;
+
     ~Event() { (void)hipEventDestroy(event_); }
+
     hipEvent_t get() const { return event_; }
 
 private:
@@ -83,50 +83,47 @@ std::string trim(std::string value) {
     while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
         value.pop_back();
     }
-    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
-        return std::isspace(ch) != 0;
-    });
+    const auto first = std::find_if_not(value.begin(), value.end(),
+                                        [](unsigned char ch) { return std::isspace(ch) != 0; });
     return std::string(first, value.end());
 }
 
 std::string read_text_file(const std::string& path) {
     std::ifstream input(path);
     std::string value;
-    if (input) {
-        std::getline(input, value);
-    }
+    if (input) { std::getline(input, value); }
     return trim(value);
 }
 
 std::string normalize_pci(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    if (value.size() == 7 && value[2] == ':' && value[5] == '.') {
-        value = "0000:" + value;
-    }
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (value.size() == 7 && value[2] == ':' && value[5] == '.') { value = "0000:" + value; }
     return value;
 }
 
 void select_r9700() {
     int device_count = 0;
     HIP_CHECK(hipGetDeviceCount(&device_count));
-    const char* requested_env = std::getenv("NINFER_R9700_PCI_BUS_ID");
+    const char* requested_env   = std::getenv("NINFER_R9700_PCI_BUS_ID");
     const std::string requested = requested_env == nullptr ? "" : normalize_pci(requested_env);
+
     struct Candidate {
         int ordinal;
         hipDeviceProp_t properties;
         std::string pci;
     };
+
     std::vector<Candidate> candidates;
     for (int ordinal = 0; ordinal < device_count; ++ordinal) {
         hipDeviceProp_t properties{};
         HIP_CHECK(hipGetDeviceProperties(&properties, ordinal));
         char pci_buffer[32]{};
         HIP_CHECK(hipDeviceGetPCIBusId(pci_buffer, sizeof(pci_buffer), ordinal));
-        const std::string pci = normalize_pci(pci_buffer);
+        const std::string pci   = normalize_pci(pci_buffer);
         const std::string sysfs = "/sys/bus/pci/devices/" + pci;
-        if (properties.integrated == 0 && std::string_view(properties.gcnArchName) == kRequiredArch &&
+        if (properties.integrated == 0 &&
+            std::string_view(properties.gcnArchName) == kRequiredArch &&
             read_text_file(sysfs + "/vendor") == "0x1002" &&
             read_text_file(sysfs + "/device") == "0x7551" &&
             (requested.empty() || requested == pci)) {
@@ -136,17 +133,13 @@ void select_r9700() {
     if (candidates.size() != 1) {
         std::ostringstream os;
         os << "expected exactly one discrete 1002:7551 gfx1201 R9700";
-        if (!requested.empty()) {
-            os << " at " << requested;
-        }
+        if (!requested.empty()) { os << " at " << requested; }
         os << ", found " << candidates.size();
         fail(os.str());
     }
     const auto& selected = candidates.front();
     HIP_CHECK(hipSetDevice(selected.ordinal));
-    if (selected.properties.warpSize != 32) {
-        fail("gfx1201 KV qualification requires wave32");
-    }
+    if (selected.properties.warpSize != 32) { fail("gfx1201 KV qualification requires wave32"); }
     std::cout << "device: pci=" << selected.pci << " arch=" << selected.properties.gcnArchName
               << " wave=" << selected.properties.warpSize
               << " vram_mib=" << selected.properties.totalGlobalMem / (1024 * 1024) << '\n';
@@ -155,77 +148,64 @@ void select_r9700() {
 template <unsigned Group, bool TokenFastest>
 struct Layout {
     static_assert(Group == 16 || Group == 32);
-    static constexpr unsigned kGroups = kDimension / Group;
+    static constexpr unsigned kGroups        = kDimension / Group;
     static constexpr unsigned kBytesPerGroup = Group / 2;
 
-    __host__ __device__ static std::size_t key(std::size_t token,
-                                               unsigned head,
-                                               unsigned feature,
+    __host__ __device__ static std::size_t key(std::size_t token, unsigned head, unsigned feature,
                                                std::size_t physical_tokens) {
-        const std::size_t page = token / kPageTokens;
+        const std::size_t page    = token / kPageTokens;
         const std::size_t in_page = token % kPageTokens;
-        const std::size_t pages = physical_tokens / kPageTokens;
+        const std::size_t pages   = physical_tokens / kPageTokens;
         if constexpr (TokenFastest) {
-            return in_page + kPageTokens *
-                                 (static_cast<std::size_t>(feature) + kDimension *
-                                                                      (page + pages * head));
+            return in_page + kPageTokens * (static_cast<std::size_t>(feature) +
+                                            kDimension * (page + pages * head));
         }
-        return feature + kDimension *
-                             (in_page + kPageTokens * (static_cast<std::size_t>(head) + kKvHeads * page));
+        return feature + kDimension * (in_page + kPageTokens * (static_cast<std::size_t>(head) +
+                                                                kKvHeads * page));
     }
 
-    __host__ __device__ static std::size_t value_byte(std::size_t token,
-                                                      unsigned head,
-                                                      unsigned group,
-                                                      unsigned byte,
+    __host__ __device__ static std::size_t value_byte(std::size_t token, unsigned head,
+                                                      unsigned group, unsigned byte,
                                                       std::size_t physical_tokens) {
-        const std::size_t page = token / kPageTokens;
+        const std::size_t page    = token / kPageTokens;
         const std::size_t in_page = token % kPageTokens;
-        const std::size_t pages = physical_tokens / kPageTokens;
+        const std::size_t pages   = physical_tokens / kPageTokens;
         const std::size_t feature = static_cast<std::size_t>(group) * kBytesPerGroup + byte;
         if constexpr (TokenFastest) {
-            return in_page + kPageTokens *
-                                 (feature + (kGroups * kBytesPerGroup) * (page + pages * head));
+            return in_page +
+                   kPageTokens * (feature + (kGroups * kBytesPerGroup) * (page + pages * head));
         }
-        return feature + (kGroups * kBytesPerGroup) *
-                             (in_page + kPageTokens * (static_cast<std::size_t>(head) + kKvHeads * page));
+        return feature +
+               (kGroups * kBytesPerGroup) *
+                   (in_page + kPageTokens * (static_cast<std::size_t>(head) + kKvHeads * page));
     }
 
-    __host__ __device__ static std::size_t scale(std::size_t token,
-                                                 unsigned head,
-                                                 unsigned group,
+    __host__ __device__ static std::size_t scale(std::size_t token, unsigned head, unsigned group,
                                                  std::size_t physical_tokens) {
-        const std::size_t page = token / kPageTokens;
+        const std::size_t page    = token / kPageTokens;
         const std::size_t in_page = token % kPageTokens;
-        const std::size_t pages = physical_tokens / kPageTokens;
+        const std::size_t pages   = physical_tokens / kPageTokens;
         if constexpr (TokenFastest) {
-            return in_page + kPageTokens *
-                                 (static_cast<std::size_t>(group) + kGroups * (page + pages * head));
+            return in_page + kPageTokens * (static_cast<std::size_t>(group) +
+                                            kGroups * (page + pages * head));
         }
-        return group + kGroups *
-                           (in_page + kPageTokens * (static_cast<std::size_t>(head) + kKvHeads * page));
+        return group + kGroups * (in_page +
+                                  kPageTokens * (static_cast<std::size_t>(head) + kKvHeads * page));
     }
 };
 
-std::size_t host_physical_token(std::size_t logical,
-                                const std::vector<std::uint32_t>& pages,
+std::size_t host_physical_token(std::size_t logical, const std::vector<std::uint32_t>& pages,
                                 std::size_t physical_tokens) {
     const std::size_t logical_page = logical / kPageTokens;
-    if (logical_page >= pages.size()) {
-        fail("host page oracle logical index is out of range");
-    }
-    const std::size_t token = static_cast<std::size_t>(pages[logical_page]) * kPageTokens +
-                              logical % kPageTokens;
-    if (token >= physical_tokens) {
-        fail("host page oracle physical index is out of range");
-    }
+    if (logical_page >= pages.size()) { fail("host page oracle logical index is out of range"); }
+    const std::size_t token =
+        static_cast<std::size_t>(pages[logical_page]) * kPageTokens + logical % kPageTokens;
+    if (token >= physical_tokens) { fail("host page oracle physical index is out of range"); }
     return token;
 }
 
 template <unsigned Group, bool TokenFastest>
-std::size_t host_key_offset(std::size_t token,
-                            unsigned head,
-                            unsigned feature,
+std::size_t host_key_offset(std::size_t token, unsigned head, unsigned feature,
                             std::size_t physical_tokens) {
     if (token >= physical_tokens || head >= kKvHeads || feature >= kDimension) {
         fail("host key layout oracle index is out of range");
@@ -234,12 +214,9 @@ std::size_t host_key_offset(std::size_t token,
 }
 
 template <unsigned Group, bool TokenFastest>
-std::size_t host_value_offset(std::size_t token,
-                              unsigned head,
-                              unsigned group,
-                              unsigned byte,
+std::size_t host_value_offset(std::size_t token, unsigned head, unsigned group, unsigned byte,
                               std::size_t physical_tokens) {
-    constexpr unsigned groups = kDimension / Group;
+    constexpr unsigned groups          = kDimension / Group;
     constexpr unsigned bytes_per_group = Group / 2;
     if (token >= physical_tokens || head >= kKvHeads || group >= groups ||
         byte >= bytes_per_group) {
@@ -249,9 +226,7 @@ std::size_t host_value_offset(std::size_t token,
 }
 
 template <unsigned Group, bool TokenFastest>
-std::size_t host_scale_offset(std::size_t token,
-                              unsigned head,
-                              unsigned group,
+std::size_t host_scale_offset(std::size_t token, unsigned head, unsigned group,
                               std::size_t physical_tokens) {
     constexpr unsigned groups = kDimension / Group;
     if (token >= physical_tokens || head >= kKvHeads || group >= groups) {
@@ -294,7 +269,8 @@ std::vector<float> make_values(std::size_t tokens) {
     for (std::size_t token = 0; token < tokens; ++token) {
         for (unsigned head = 0; head < kKvHeads; ++head) {
             for (unsigned feature = 0; feature < kDimension; ++feature) {
-                const int wave = static_cast<int>((token * 17 + head * 23 + feature * 11) % 113) - 56;
+                const int wave =
+                    static_cast<int>((token * 17 + head * 23 + feature * 11) % 113) - 56;
                 result[(token * kKvHeads + head) * kDimension + feature] =
                     represented_bf16(static_cast<float>(wave) / 40.0F);
             }
@@ -321,10 +297,10 @@ void inject_codec_edge_corpus(std::vector<float>& keys, std::vector<float>& valu
     // intrinsic in isolation.  The independent host codec supplies the expected packed bytes.
     const std::size_t h0 = 0;
     const std::size_t h1 = kDimension;
-    keys[h0 + 0] = -0.0F;
-    keys[h0 + 1] = 0.0F;
-    keys[h0 + 2] = 1000.0F;   // finite E4M3FN saturation to +448
-    keys[h0 + 3] = -1000.0F;  // finite E4M3FN saturation to -448
+    keys[h0 + 0]         = -0.0F;
+    keys[h0 + 1]         = 0.0F;
+    keys[h0 + 2]         = 1000.0F;  // finite E4M3FN saturation to +448
+    keys[h0 + 3]         = -1000.0F; // finite E4M3FN saturation to -448
 
     // Scale is exactly one because lane zero is seven.  The remaining lanes exercise the
     // RNE ties-to-even quotient boundary and canonical signed-zero value encoding.
@@ -339,8 +315,7 @@ void inject_codec_edge_corpus(std::vector<float>& keys, std::vector<float>& valu
     // positive-zero scale and all-zero packed codes.  Clear the entire group first so no
     // ordinary corpus value masks this condition.
     for (unsigned lane = 0; lane < Group; ++lane) {
-        values[h1 + lane] = lane == 1U ? -std::ldexp(1.0F, -126)
-                                       : std::ldexp(1.0F, -126);
+        values[h1 + lane] = lane == 1U ? -std::ldexp(1.0F, -126) : std::ldexp(1.0F, -126);
     }
 }
 
@@ -351,14 +326,20 @@ std::vector<float> make_probability_corpus(std::size_t context) {
     std::vector<float> result(static_cast<std::size_t>(kQueryHeads) * context);
     for (unsigned head = 0; head < kQueryHeads; ++head) {
         std::vector<double> weights(context);
-        double sum = 0.0;
+        double sum             = 0.0;
         const std::size_t peak = (head * 37U + 11U) % context;
         for (std::size_t logical = 0; logical < context; ++logical) {
             double logit = 0.0;
             switch (head % 3U) {
-                case 0: logit = logical == peak ? 0.0 : -18.0; break;
-                case 1: logit = -static_cast<double>((logical * 17U + head * 13U) % 23U); break;
-                default: logit = logical == peak ? 0.0 : -80.0 - static_cast<double>(logical % 5U); break;
+            case 0:
+                logit = logical == peak ? 0.0 : -18.0;
+                break;
+            case 1:
+                logit = -static_cast<double>((logical * 17U + head * 13U) % 23U);
+                break;
+            default:
+                logit = logical == peak ? 0.0 : -80.0 - static_cast<double>(logical % 5U);
+                break;
             }
             weights[logical] = std::exp(logit);
             sum += weights[logical];
@@ -372,15 +353,12 @@ std::vector<float> make_probability_corpus(std::size_t context) {
 }
 
 template <unsigned Group, bool KTokenFastest, bool VTokenFastest, bool ScaleTokenFastest>
-void append_oracle(const std::vector<float>& source_keys,
-                   const std::vector<float>& source_values,
+void append_oracle(const std::vector<float>& source_keys, const std::vector<float>& source_values,
                    const std::vector<std::uint32_t>& logical_positions,
-                   const std::vector<std::uint32_t>& pages,
-                   std::size_t physical_tokens,
-                   std::vector<std::uint8_t>& keys,
-                   std::vector<std::uint8_t>& values,
+                   const std::vector<std::uint32_t>& pages, std::size_t physical_tokens,
+                   std::vector<std::uint8_t>& keys, std::vector<std::uint8_t>& values,
                    std::vector<std::uint16_t>& scales) {
-    namespace oracle = ninfer::test::fp8_int4_kv_oracle;
+    namespace oracle                     = ninfer::test::fp8_int4_kv_oracle;
     const std::size_t represented_tokens = logical_positions.size() * kKvHeads;
     const oracle::Fp8Keys encoded_keys =
         oracle::encode_keys(source_keys, represented_tokens, kDimension);
@@ -392,19 +370,18 @@ void append_oracle(const std::vector<float>& source_keys,
         for (unsigned head = 0; head < kKvHeads; ++head) {
             const std::size_t represented_token = input_token * kKvHeads + head;
             for (unsigned feature = 0; feature < kDimension; ++feature) {
-                keys[host_key_offset<Group, KTokenFastest>(
-                    token, head, feature, physical_tokens)] =
+                keys[host_key_offset<Group, KTokenFastest>(token, head, feature, physical_tokens)] =
                     encoded_keys.codes[represented_token * kDimension + feature];
             }
             for (unsigned group = 0; group < Layout<Group, ScaleTokenFastest>::kGroups; ++group) {
-                scales[host_scale_offset<Group, ScaleTokenFastest>(
-                    token, head, group, physical_tokens)] =
-                    encoded_values.fp16_scales[represented_token *
-                                                    Layout<Group, ScaleTokenFastest>::kGroups +
-                                                group];
+                scales[host_scale_offset<Group, ScaleTokenFastest>(token, head, group,
+                                                                   physical_tokens)] =
+                    encoded_values
+                        .fp16_scales[represented_token * Layout<Group, ScaleTokenFastest>::kGroups +
+                                     group];
                 for (unsigned byte = 0; byte < Group / 2; ++byte) {
-                    values[host_value_offset<Group, VTokenFastest>(
-                        token, head, group, byte, physical_tokens)] =
+                    values[host_value_offset<Group, VTokenFastest>(token, head, group, byte,
+                                                                   physical_tokens)] =
                         encoded_values.packed_codes[represented_token * (kDimension / 2) +
                                                     group * (Group / 2) + byte];
                 }
@@ -414,68 +391,57 @@ void append_oracle(const std::vector<float>& source_keys,
 }
 
 template <unsigned Group, bool KTokenFastest, bool VTokenFastest, bool ScaleTokenFastest>
-std::vector<double> attention_oracle(const std::vector<float>& query,
-                                     const std::vector<std::uint8_t>& keys,
-                                     const std::vector<std::uint8_t>& values,
-                                     const std::vector<std::uint16_t>& scales,
-                                     const std::vector<std::uint32_t>& pages,
-                                     std::size_t context,
-                                     std::size_t physical_tokens) {
+std::vector<double>
+attention_oracle(const std::vector<float>& query, const std::vector<std::uint8_t>& keys,
+                 const std::vector<std::uint8_t>& values, const std::vector<std::uint16_t>& scales,
+                 const std::vector<std::uint32_t>& pages, std::size_t context,
+                 std::size_t physical_tokens) {
     namespace oracle = ninfer::test::fp8_int4_kv_oracle;
     std::vector<double> output(kQueryHeads * kDimension);
     for (unsigned query_head = 0; query_head < kQueryHeads; ++query_head) {
         const unsigned kv_head = query_head / kQueriesPerKv;
-        oracle::Fp8Keys logical_keys{context,
-                                     kDimension,
+        oracle::Fp8Keys logical_keys{context, kDimension,
                                      std::vector<std::uint8_t>(context * kDimension)};
         oracle::Int4Values logical_values{
-            context,
-            kDimension,
-            Group,
-            std::vector<std::uint8_t>(context * kDimension / 2),
+            context, kDimension, Group, std::vector<std::uint8_t>(context * kDimension / 2),
             std::vector<std::uint16_t>(context * Layout<Group, ScaleTokenFastest>::kGroups)};
         for (std::size_t logical = 0; logical < context; ++logical) {
             const std::size_t token = host_physical_token(logical, pages, physical_tokens);
             for (unsigned feature = 0; feature < kDimension; ++feature) {
                 logical_keys.codes[logical * kDimension + feature] =
-                    keys[host_key_offset<Group, KTokenFastest>(
-                        token, kv_head, feature, physical_tokens)];
+                    keys[host_key_offset<Group, KTokenFastest>(token, kv_head, feature,
+                                                               physical_tokens)];
             }
             for (unsigned group = 0; group < Layout<Group, ScaleTokenFastest>::kGroups; ++group) {
-                logical_values.fp16_scales[logical * Layout<Group, ScaleTokenFastest>::kGroups + group] =
-                    scales[host_scale_offset<Group, ScaleTokenFastest>(
-                        token, kv_head, group, physical_tokens)];
+                logical_values
+                    .fp16_scales[logical * Layout<Group, ScaleTokenFastest>::kGroups + group] =
+                    scales[host_scale_offset<Group, ScaleTokenFastest>(token, kv_head, group,
+                                                                       physical_tokens)];
                 for (unsigned byte = 0; byte < Group / 2; ++byte) {
-                    logical_values.packed_codes[logical * (kDimension / 2) + group * (Group / 2) +
-                                                byte] =
-                        values[host_value_offset<Group, VTokenFastest>(
-                            token, kv_head, group, byte, physical_tokens)];
+                    logical_values
+                        .packed_codes[logical * (kDimension / 2) + group * (Group / 2) + byte] =
+                        values[host_value_offset<Group, VTokenFastest>(token, kv_head, group, byte,
+                                                                       physical_tokens)];
                 }
             }
         }
-        const std::span<const float> represented_query(
-            query.data() + query_head * kDimension, kDimension);
+        const std::span<const float> represented_query(query.data() + query_head * kDimension,
+                                                       kDimension);
         const std::vector<double> head_output = oracle::attention_fp64(
             represented_query, logical_keys, logical_values, static_cast<double>(kAttentionScale));
-        std::copy(head_output.begin(),
-                  head_output.end(),
-                  output.begin() + query_head * kDimension);
+        std::copy(head_output.begin(), head_output.end(), output.begin() + query_head * kDimension);
     }
     return output;
 }
 
 template <typename Launch>
 double time_ms(int iterations, Launch&& launch) {
-    for (int i = 0; i < 3; ++i) {
-        launch();
-    }
+    for (int i = 0; i < 3; ++i) { launch(); }
     HIP_CHECK(hipDeviceSynchronize());
     Event start;
     Event stop;
     HIP_CHECK(hipEventRecord(start.get()));
-    for (int i = 0; i < iterations; ++i) {
-        launch();
-    }
+    for (int i = 0; i < iterations; ++i) { launch(); }
     HIP_CHECK(hipEventRecord(stop.get()));
     HIP_CHECK(hipEventSynchronize(stop.get()));
     float total = 0.0F;
@@ -484,17 +450,17 @@ double time_ms(int iterations, Launch&& launch) {
 }
 
 template <unsigned Group, bool KTokenFastest, bool VTokenFastest, bool ScaleTokenFastest>
-void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
-                 bool timing_only, bool transaction_timing_only = false) {
-    constexpr std::string_view key_layout_name = KTokenFastest ? "token" : "feature";
+void run_variant(std::size_t context, int iterations, std::uint32_t query_rows, bool timing_only,
+                 bool transaction_timing_only = false) {
+    constexpr std::string_view key_layout_name   = KTokenFastest ? "token" : "feature";
     constexpr std::string_view value_layout_name = VTokenFastest ? "token" : "feature";
     constexpr std::string_view scale_layout_name = ScaleTokenFastest ? "token" : "feature";
-    const std::vector<std::uint32_t> pages = make_fragmented_pages(context);
-    const std::size_t physical_pages = pages.size() + 2;
-    const std::size_t physical_tokens = physical_pages * kPageTokens;
+    const std::vector<std::uint32_t> pages       = make_fragmented_pages(context);
+    const std::size_t physical_pages             = pages.size() + 2;
+    const std::size_t physical_tokens            = physical_pages * kPageTokens;
     std::vector<std::uint32_t> positions(context);
     std::iota(positions.begin(), positions.end(), 0U);
-    std::vector<float> source_keys = make_keys(context);
+    std::vector<float> source_keys   = make_keys(context);
     std::vector<float> source_values = make_values(context);
     inject_codec_edge_corpus<Group>(source_keys, source_values);
     const std::vector<float> base_query = make_query();
@@ -514,25 +480,20 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     for (std::uint32_t row = 0; row < query_rows; ++row) {
         // A descending causal prefix followed by the full frontier is the ragged prefill shape.
         // At short tails it clamps to one rather than manufacturing an invalid empty cache.
-        row_contexts[row] = std::max<std::size_t>(1U, context - (query_rows - 1U - row));
+        row_contexts[row]  = std::max<std::size_t>(1U, context - (query_rows - 1U - row));
         row_positions[row] = static_cast<std::int32_t>(row_contexts[row] - 1U);
     }
 
-    const std::size_t key_size = physical_tokens * kKvHeads * kDimension;
+    const std::size_t key_size   = physical_tokens * kKvHeads * kDimension;
     const std::size_t value_size = physical_tokens * kKvHeads * kDimension / 2;
     const std::size_t scale_size =
         physical_tokens * kKvHeads * Layout<Group, ScaleTokenFastest>::kGroups;
     std::vector<std::uint8_t> expected_keys(key_size, 0xa5U);
     std::vector<std::uint8_t> expected_values(value_size, 0x5aU);
     std::vector<std::uint16_t> expected_scales(scale_size, 0xa5a5U);
-    append_oracle<Group, KTokenFastest, VTokenFastest, ScaleTokenFastest>(source_keys,
-                                       source_values,
-                                       positions,
-                                       pages,
-                                       physical_tokens,
-                                       expected_keys,
-                                       expected_values,
-                                       expected_scales);
+    append_oracle<Group, KTokenFastest, VTokenFastest, ScaleTokenFastest>(
+        source_keys, source_values, positions, pages, physical_tokens, expected_keys,
+        expected_values, expected_scales);
 
     std::vector<hip_bfloat16> bf16_source_keys;
     std::vector<hip_bfloat16> bf16_source_values;
@@ -560,26 +521,17 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     DeviceBuffer<float> d_qk_wmma_scores(static_cast<std::size_t>(kQueryHeads) * context);
     DeviceBuffer<float> d_probabilities(static_cast<std::size_t>(kQueryHeads) * context);
     DeviceBuffer<float> d_pv_output(query.size());
-    HIP_CHECK(hipMemcpy(d_source_keys.get(),
-                        bf16_source_keys.data(),
-                        bf16_source_keys.size() * sizeof(hip_bfloat16),
+    HIP_CHECK(hipMemcpy(d_source_keys.get(), bf16_source_keys.data(),
+                        bf16_source_keys.size() * sizeof(hip_bfloat16), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_source_values.get(), bf16_source_values.data(),
+                        bf16_source_values.size() * sizeof(hip_bfloat16), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_query.get(), bf16_query.data(), bf16_query.size() * sizeof(hip_bfloat16),
                         hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_source_values.get(),
-                        bf16_source_values.data(),
-                        bf16_source_values.size() * sizeof(hip_bfloat16),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(
-        d_query.get(), bf16_query.data(), bf16_query.size() * sizeof(hip_bfloat16),
-        hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_row_positions.get(), row_positions.data(),
                         row_positions.size() * sizeof(std::int32_t), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_positions.get(),
-                        positions.data(),
-                        positions.size() * sizeof(std::uint32_t),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_pages.get(),
-                        pages.data(),
-                        pages.size() * sizeof(std::uint32_t),
+    HIP_CHECK(hipMemcpy(d_positions.get(), positions.data(),
+                        positions.size() * sizeof(std::uint32_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_pages.get(), pages.data(), pages.size() * sizeof(std::uint32_t),
                         hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(d_keys.get(), 0xa5, key_size));
     HIP_CHECK(hipMemset(d_values.get(), 0x5a, value_size));
@@ -593,31 +545,6 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     }
     {
         const ninfer::ops::r9700::kv::Fp8Int4KvAppendArgs invalid_layout{
-            .keys = d_source_keys.get(), .values = d_source_values.get(),
-            .positions = d_positions.get(), .tokens = context, .kv_heads = kKvHeads,
-            .page_table = d_pages.get(), .page_table_pages = static_cast<std::uint32_t>(pages.size()),
-            .physical_tokens = physical_tokens, .key_codes = d_keys.get(),
-            .value_codes = d_values.get(), .value_scale_bits = d_scales.get(),
-            .status = d_append_status.get(), .value_group = Group,
-            .key_layout = static_cast<ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout>(255U),
-        };
-        if (ninfer::ops::r9700::kv::fp8_int4_kv_append(invalid_layout, nullptr) !=
-            hipErrorInvalidValue) {
-            fail("A2 append accepted an invalid plane layout selector");
-        }
-    }
-
-    const auto launch_append = [&] {
-        constexpr auto key_layout = KTokenFastest
-                                          ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
-        constexpr auto value_layout = VTokenFastest
-                                          ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
-        constexpr auto scale_layout = ScaleTokenFastest
-                                          ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
-        const ninfer::ops::r9700::kv::Fp8Int4KvAppendArgs args{
             .keys             = d_source_keys.get(),
             .values           = d_source_values.get(),
             .positions        = d_positions.get(),
@@ -631,8 +558,40 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
             .value_scale_bits = d_scales.get(),
             .status           = d_append_status.get(),
             .value_group      = Group,
-            .key_layout       = key_layout,
-            .value_layout     = value_layout,
+            .key_layout       = static_cast<ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout>(255U),
+        };
+        if (ninfer::ops::r9700::kv::fp8_int4_kv_append(invalid_layout, nullptr) !=
+            hipErrorInvalidValue) {
+            fail("A2 append accepted an invalid plane layout selector");
+        }
+    }
+
+    const auto launch_append = [&] {
+        constexpr auto key_layout =
+            KTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+        constexpr auto value_layout =
+            VTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+        constexpr auto scale_layout =
+            ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                              : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+        const ninfer::ops::r9700::kv::Fp8Int4KvAppendArgs args{
+            .keys               = d_source_keys.get(),
+            .values             = d_source_values.get(),
+            .positions          = d_positions.get(),
+            .tokens             = context,
+            .kv_heads           = kKvHeads,
+            .page_table         = d_pages.get(),
+            .page_table_pages   = static_cast<std::uint32_t>(pages.size()),
+            .physical_tokens    = physical_tokens,
+            .key_codes          = d_keys.get(),
+            .value_codes        = d_values.get(),
+            .value_scale_bits   = d_scales.get(),
+            .status             = d_append_status.get(),
+            .value_group        = Group,
+            .key_layout         = key_layout,
+            .value_layout       = value_layout,
             .value_scale_layout = scale_layout,
         };
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_append(args, nullptr));
@@ -643,43 +602,41 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     // setup append used by this fixture's byte oracle.
     const std::size_t appended_rows = std::min<std::size_t>(query_rows, context);
     const auto launch_append_suffix = [&] {
-        constexpr auto key_layout = KTokenFastest
-                                          ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
-        constexpr auto value_layout = VTokenFastest
-                                          ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
-        constexpr auto scale_layout = ScaleTokenFastest
-                                          ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
-        const std::size_t first = context - appended_rows;
+        constexpr auto key_layout =
+            KTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+        constexpr auto value_layout =
+            VTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+        constexpr auto scale_layout =
+            ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                              : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+        const std::size_t first         = context - appended_rows;
         const std::size_t source_offset = first * kKvHeads * kDimension;
         const ninfer::ops::r9700::kv::Fp8Int4KvAppendArgs args{
-            .keys             = d_source_keys.get() + source_offset,
-            .values           = d_source_values.get() + source_offset,
-            .positions        = d_positions.get() + first,
-            .tokens           = appended_rows,
-            .first_position   = static_cast<std::uint32_t>(first),
-            .kv_heads         = kKvHeads,
-            .page_table       = d_pages.get(),
-            .page_table_pages = static_cast<std::uint32_t>(pages.size()),
-            .physical_tokens  = physical_tokens,
-            .key_codes        = d_keys.get(),
-            .value_codes      = d_values.get(),
-            .value_scale_bits = d_scales.get(),
-            .status           = d_append_status.get(),
-            .value_group      = Group,
-            .key_layout       = key_layout,
-            .value_layout     = value_layout,
+            .keys               = d_source_keys.get() + source_offset,
+            .values             = d_source_values.get() + source_offset,
+            .positions          = d_positions.get() + first,
+            .tokens             = appended_rows,
+            .first_position     = static_cast<std::uint32_t>(first),
+            .kv_heads           = kKvHeads,
+            .page_table         = d_pages.get(),
+            .page_table_pages   = static_cast<std::uint32_t>(pages.size()),
+            .physical_tokens    = physical_tokens,
+            .key_codes          = d_keys.get(),
+            .value_codes        = d_values.get(),
+            .value_scale_bits   = d_scales.get(),
+            .status             = d_append_status.get(),
+            .value_group        = Group,
+            .key_layout         = key_layout,
+            .value_layout       = value_layout,
             .value_scale_layout = scale_layout,
         };
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_append(args, nullptr));
     };
     launch_append();
     std::uint32_t append_status = 0;
-    HIP_CHECK(hipMemcpy(&append_status,
-                        d_append_status.get(),
-                        sizeof(append_status),
+    HIP_CHECK(hipMemcpy(&append_status, d_append_status.get(), sizeof(append_status),
                         hipMemcpyDeviceToHost));
     if (append_status != ninfer::ops::r9700::kv::Fp8Int4KvAppendOk) {
         fail("A2 append reported a device codec/address error");
@@ -689,9 +646,7 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     std::vector<std::uint16_t> actual_scales(scale_size);
     HIP_CHECK(hipMemcpy(actual_keys.data(), d_keys.get(), key_size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(actual_values.data(), d_values.get(), value_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(actual_scales.data(),
-                        d_scales.get(),
-                        scale_size * sizeof(std::uint16_t),
+    HIP_CHECK(hipMemcpy(actual_scales.data(), d_scales.get(), scale_size * sizeof(std::uint16_t),
                         hipMemcpyDeviceToHost));
     if (actual_keys != expected_keys || actual_values != expected_values ||
         actual_scales != expected_scales) {
@@ -702,34 +657,50 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
                                    ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
                                    : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
     const auto launch_qk_vector = [&] {
-        const ninfer::ops::r9700::kv::Fp8KvQkArgs args{
-            .query = d_query.get(), .key_codes = d_keys.get(), .page_table = d_pages.get(),
-            .page_table_pages = static_cast<std::uint32_t>(pages.size()), .context = context,
-            .physical_tokens = physical_tokens, .query_heads = kQueryHeads, .kv_heads = kKvHeads,
-            .q_to_kv = kQueriesPerKv, .attention_scale = kAttentionScale, .key_layout = qk_layout,
-            .scores = d_qk_scores.get()};
+        const ninfer::ops::r9700::kv::Fp8KvQkArgs args{.query      = d_query.get(),
+                                                       .key_codes  = d_keys.get(),
+                                                       .page_table = d_pages.get(),
+                                                       .page_table_pages =
+                                                           static_cast<std::uint32_t>(pages.size()),
+                                                       .context         = context,
+                                                       .physical_tokens = physical_tokens,
+                                                       .query_heads     = kQueryHeads,
+                                                       .kv_heads        = kKvHeads,
+                                                       .q_to_kv         = kQueriesPerKv,
+                                                       .attention_scale = kAttentionScale,
+                                                       .key_layout      = qk_layout,
+                                                       .scores          = d_qk_scores.get()};
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_kv_qk_vector(args, nullptr));
     };
     {
         const ninfer::ops::r9700::kv::Fp8KvQkArgs invalid_pages{
-            .query = d_query.get(), .key_codes = d_keys.get(), .page_table = d_pages.get(),
-            .page_table_pages = static_cast<std::uint32_t>(pages.size() - 1U), .context = context,
-            .physical_tokens = physical_tokens, .query_heads = kQueryHeads, .kv_heads = kKvHeads,
-            .q_to_kv = kQueriesPerKv, .attention_scale = kAttentionScale, .key_layout = qk_layout,
-            .scores = d_qk_scores.get()};
-        if (ninfer::ops::r9700::kv::fp8_kv_qk_vector(invalid_pages, nullptr) != hipErrorInvalidValue ||
-            ninfer::ops::r9700::kv::fp8_kv_qk_wmma(invalid_pages, nullptr) != hipErrorInvalidValue) {
+            .query            = d_query.get(),
+            .key_codes        = d_keys.get(),
+            .page_table       = d_pages.get(),
+            .page_table_pages = static_cast<std::uint32_t>(pages.size() - 1U),
+            .context          = context,
+            .physical_tokens  = physical_tokens,
+            .query_heads      = kQueryHeads,
+            .kv_heads         = kKvHeads,
+            .q_to_kv          = kQueriesPerKv,
+            .attention_scale  = kAttentionScale,
+            .key_layout       = qk_layout,
+            .scores           = d_qk_scores.get()};
+        if (ninfer::ops::r9700::kv::fp8_kv_qk_vector(invalid_pages, nullptr) !=
+                hipErrorInvalidValue ||
+            ninfer::ops::r9700::kv::fp8_kv_qk_wmma(invalid_pages, nullptr) !=
+                hipErrorInvalidValue) {
             fail("A3 QK did not reject an undersized page table");
         }
-        auto empty = invalid_pages;
+        auto empty             = invalid_pages;
         empty.page_table_pages = static_cast<std::uint32_t>(pages.size());
-        empty.context = 0;
+        empty.context          = 0;
         if (ninfer::ops::r9700::kv::fp8_kv_qk_vector(empty, nullptr) != hipErrorInvalidValue ||
             ninfer::ops::r9700::kv::fp8_kv_qk_wmma(empty, nullptr) != hipErrorInvalidValue) {
             fail("A3 QK did not reject an empty causal context");
         }
-        auto nonfinite_scale = empty;
-        nonfinite_scale.context = context;
+        auto nonfinite_scale            = empty;
+        nonfinite_scale.context         = context;
         nonfinite_scale.attention_scale = std::numeric_limits<float>::infinity();
         if (ninfer::ops::r9700::kv::fp8_kv_qk_vector(nonfinite_scale, nullptr) !=
                 hipErrorInvalidValue ||
@@ -737,10 +708,9 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
                 hipErrorInvalidValue) {
             fail("A3 QK accepted a nonfinite attention scale");
         }
-        auto invalid_layout = empty;
-        invalid_layout.context = context;
-        invalid_layout.key_layout =
-            static_cast<ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout>(255U);
+        auto invalid_layout       = empty;
+        invalid_layout.context    = context;
+        invalid_layout.key_layout = static_cast<ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout>(255U);
         if (ninfer::ops::r9700::kv::fp8_kv_qk_vector(invalid_layout, nullptr) !=
                 hipErrorInvalidValue ||
             ninfer::ops::r9700::kv::fp8_kv_qk_wmma(invalid_layout, nullptr) !=
@@ -752,10 +722,10 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
         DeviceBuffer<std::uint32_t> d_corrupt_qk_pages(corrupt_pages.size());
         HIP_CHECK(hipMemcpy(d_corrupt_qk_pages.get(), corrupt_pages.data(),
                             corrupt_pages.size() * sizeof(std::uint32_t), hipMemcpyHostToDevice));
-        auto corrupt_map = empty;
-        corrupt_map.context = context;
+        auto corrupt_map       = empty;
+        corrupt_map.context    = context;
         corrupt_map.page_table = d_corrupt_qk_pages.get();
-        corrupt_map.scores = d_qk_scores.get();
+        corrupt_map.scores     = d_qk_scores.get();
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_kv_qk_vector(corrupt_map, nullptr));
         corrupt_map.scores = d_qk_wmma_scores.get();
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_kv_qk_wmma(corrupt_map, nullptr));
@@ -767,7 +737,7 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
                             corrupt_wmma.size() * sizeof(float), hipMemcpyDeviceToHost));
         for (unsigned head = 0; head < kQueryHeads; ++head) {
             for (std::size_t logical = 0; logical < context; ++logical) {
-                const bool mapped_bad = logical < kPageTokens;
+                const bool mapped_bad   = logical < kPageTokens;
                 const std::size_t index = static_cast<std::size_t>(head) * context + logical;
                 if (std::isnan(corrupt_vector[index]) != mapped_bad ||
                     std::isnan(corrupt_wmma[index]) != mapped_bad) {
@@ -790,14 +760,16 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
             const unsigned kv_head = query_head / kQueriesPerKv;
             for (std::size_t logical = 0; logical < context; ++logical) {
                 const std::size_t physical = host_physical_token(logical, pages, physical_tokens);
-                double expected = 0.0;
+                double expected            = 0.0;
                 for (unsigned feature = 0; feature < kDimension; ++feature) {
-                    expected += static_cast<double>(query[query_head * kDimension + feature]) *
-                                oracle::decode_e4m3fn(actual_keys[host_key_offset<Group, KTokenFastest>(
-                                    physical, kv_head, feature, physical_tokens)]);
+                    expected +=
+                        static_cast<double>(query[query_head * kDimension + feature]) *
+                        oracle::decode_e4m3fn(actual_keys[host_key_offset<Group, KTokenFastest>(
+                            physical, kv_head, feature, physical_tokens)]);
                 }
                 expected *= static_cast<double>(kAttentionScale);
-                const float actual = actual_qk[static_cast<std::size_t>(query_head) * context + logical];
+                const float actual =
+                    actual_qk[static_cast<std::size_t>(query_head) * context + logical];
                 if (std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
                     std::ostringstream os;
                     os << "A3 vector QK mismatch at head=" << query_head << " token=" << logical
@@ -812,21 +784,32 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     HIP_CHECK(hipMemcpy(d_probabilities.get(), probability_corpus.data(),
                         probability_corpus.size() * sizeof(float), hipMemcpyHostToDevice));
     const ninfer::ops::r9700::kv::Int4KvPvArgs pv_args{
-        .probabilities = d_probabilities.get(), .value_codes = d_values.get(),
-        .value_scale_bits = d_scales.get(), .page_table = d_pages.get(),
-        .page_table_pages = static_cast<std::uint32_t>(pages.size()), .context = context,
-        .physical_tokens = physical_tokens, .query_heads = kQueryHeads, .kv_heads = kKvHeads,
-        .q_to_kv = kQueriesPerKv, .value_group = Group,
-        .value_layout = VTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
-        .value_scale_layout = ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
-        .output = d_pv_output.get()};
+        .probabilities      = d_probabilities.get(),
+        .value_codes        = d_values.get(),
+        .value_scale_bits   = d_scales.get(),
+        .page_table         = d_pages.get(),
+        .page_table_pages   = static_cast<std::uint32_t>(pages.size()),
+        .context            = context,
+        .physical_tokens    = physical_tokens,
+        .query_heads        = kQueryHeads,
+        .kv_heads           = kKvHeads,
+        .q_to_kv            = kQueriesPerKv,
+        .value_group        = Group,
+        .value_layout       = VTokenFastest
+                                  ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                                  : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+        .value_scale_layout = ScaleTokenFastest
+                                  ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                                  : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+        .output             = d_pv_output.get()};
     {
-        auto invalid_pages = pv_args;
+        auto invalid_pages             = pv_args;
         invalid_pages.page_table_pages = static_cast<std::uint32_t>(pages.size() - 1U);
-        if (ninfer::ops::r9700::kv::int4_kv_pv_vector(invalid_pages, nullptr) != hipErrorInvalidValue) {
+        if (ninfer::ops::r9700::kv::int4_kv_pv_vector(invalid_pages, nullptr) !=
+            hipErrorInvalidValue) {
             fail("A3 PV did not reject an undersized page table");
         }
-        auto empty = pv_args;
+        auto empty    = pv_args;
         empty.context = 0;
         if (ninfer::ops::r9700::kv::int4_kv_pv_vector(empty, nullptr) != hipErrorInvalidValue) {
             fail("A3 PV did not reject an empty causal context");
@@ -848,49 +831,63 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
         HIP_CHECK(hipMemcpy(actual_pv.data(), d_pv_output.get(), actual_pv.size() * sizeof(float),
                             hipMemcpyDeviceToHost));
         for (unsigned query_head = 0; query_head < kQueryHeads; ++query_head) {
-        const unsigned kv_head = query_head / kQueriesPerKv;
-        for (unsigned feature = 0; feature < kDimension; ++feature) {
-            double expected = 0.0;
-            float serial = 0.0F;
-            for (std::size_t logical = 0; logical < context; ++logical) {
-                const std::size_t physical = host_physical_token(logical, pages, physical_tokens);
-                const std::uint8_t packed = actual_values[host_value_offset<Group, VTokenFastest>(
-                    physical, kv_head, feature / Group, (feature % Group) / 2U, physical_tokens)];
-                int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
-                code = code >= 8 ? code - 16 : code;
-                const std::uint16_t bits = actual_scales[host_scale_offset<Group, ScaleTokenFastest>(
-                    physical, kv_head, feature / Group, physical_tokens)];
-                _Float16 scale{};
-                std::memcpy(&scale, &bits, sizeof(bits));
-                expected += static_cast<double>(probability_corpus[
-                                static_cast<std::size_t>(query_head) * context + logical]) *
-                            static_cast<double>(code) * static_cast<float>(scale);
-                serial = std::fma(probability_corpus[
-                                      static_cast<std::size_t>(query_head) * context + logical],
-                                  static_cast<float>(code) * static_cast<float>(scale), serial);
+            const unsigned kv_head = query_head / kQueriesPerKv;
+            for (unsigned feature = 0; feature < kDimension; ++feature) {
+                double expected = 0.0;
+                float serial    = 0.0F;
+                for (std::size_t logical = 0; logical < context; ++logical) {
+                    const std::size_t physical =
+                        host_physical_token(logical, pages, physical_tokens);
+                    const std::uint8_t packed =
+                        actual_values[host_value_offset<Group, VTokenFastest>(
+                            physical, kv_head, feature / Group, (feature % Group) / 2U,
+                            physical_tokens)];
+                    int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
+                    code     = code >= 8 ? code - 16 : code;
+                    const std::uint16_t bits =
+                        actual_scales[host_scale_offset<Group, ScaleTokenFastest>(
+                            physical, kv_head, feature / Group, physical_tokens)];
+                    _Float16 scale{};
+                    std::memcpy(&scale, &bits, sizeof(bits));
+                    expected +=
+                        static_cast<double>(
+                            probability_corpus[static_cast<std::size_t>(query_head) * context +
+                                               logical]) *
+                        static_cast<double>(code) * static_cast<float>(scale);
+                    serial =
+                        std::fma(probability_corpus[static_cast<std::size_t>(query_head) * context +
+                                                    logical],
+                                 static_cast<float>(code) * static_cast<float>(scale), serial);
+                }
+                const float actual = actual_pv[query_head * kDimension + feature];
+                if (!std::isfinite(actual) ||
+                    std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
+                    std::ostringstream os;
+                    os << "A3 vector PV mismatch at head=" << query_head << " feature=" << feature
+                       << ": got " << actual << " expected " << expected;
+                    fail(os.str());
+                }
+                // Supplementary order-preservation evidence, not the FP64 mathematical oracle.
+                if (std::memcmp(&actual, &serial, sizeof(float)) != 0)
+                    fail("A3 vector PV changed the serial FP32 FMA result");
             }
-            const float actual = actual_pv[query_head * kDimension + feature];
-            if (!std::isfinite(actual) ||
-                std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
-                std::ostringstream os;
-                os << "A3 vector PV mismatch at head=" << query_head << " feature=" << feature
-                   << ": got " << actual << " expected " << expected;
-                fail(os.str());
-            }
-            // Supplementary order-preservation evidence, not the FP64 mathematical oracle.
-            if (std::memcmp(&actual, &serial, sizeof(float)) != 0)
-                fail("A3 vector PV changed the serial FP32 FMA result");
-        }
         }
     }
 
     const auto launch_qk_wmma = [&] {
-        const ninfer::ops::r9700::kv::Fp8KvQkArgs args{
-            .query = d_query.get(), .key_codes = d_keys.get(), .page_table = d_pages.get(),
-            .page_table_pages = static_cast<std::uint32_t>(pages.size()), .context = context,
-            .physical_tokens = physical_tokens, .query_heads = kQueryHeads, .kv_heads = kKvHeads,
-            .q_to_kv = kQueriesPerKv, .attention_scale = kAttentionScale, .key_layout = qk_layout,
-            .scores = d_qk_wmma_scores.get()};
+        const ninfer::ops::r9700::kv::Fp8KvQkArgs args{.query      = d_query.get(),
+                                                       .key_codes  = d_keys.get(),
+                                                       .page_table = d_pages.get(),
+                                                       .page_table_pages =
+                                                           static_cast<std::uint32_t>(pages.size()),
+                                                       .context         = context,
+                                                       .physical_tokens = physical_tokens,
+                                                       .query_heads     = kQueryHeads,
+                                                       .kv_heads        = kKvHeads,
+                                                       .q_to_kv         = kQueriesPerKv,
+                                                       .attention_scale = kAttentionScale,
+                                                       .key_layout      = qk_layout,
+                                                       .scores          = d_qk_wmma_scores.get()};
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_kv_qk_wmma(args, nullptr));
     };
     if (!timing_only) {
@@ -903,12 +900,14 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
             const unsigned kv_head = query_head / kQueriesPerKv;
             for (std::size_t logical = 0; logical < context; ++logical) {
                 const std::size_t physical = host_physical_token(logical, pages, physical_tokens);
-                double expected = 0.0;
+                double expected            = 0.0;
                 for (unsigned feature = 0; feature < kDimension; ++feature) {
-                    const std::uint8_t q_code = oracle::encode_e4m3fn(query[query_head * kDimension + feature]);
-                    expected += oracle::decode_e4m3fn(q_code) *
-                                oracle::decode_e4m3fn(actual_keys[host_key_offset<Group, KTokenFastest>(
-                                    physical, kv_head, feature, physical_tokens)]);
+                    const std::uint8_t q_code =
+                        oracle::encode_e4m3fn(query[query_head * kDimension + feature]);
+                    expected +=
+                        oracle::decode_e4m3fn(q_code) *
+                        oracle::decode_e4m3fn(actual_keys[host_key_offset<Group, KTokenFastest>(
+                            physical, kv_head, feature, physical_tokens)]);
                 }
                 expected *= static_cast<double>(kAttentionScale);
                 const std::size_t index = static_cast<std::size_t>(query_head) * context + logical;
@@ -924,72 +923,110 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
 
     const auto launch_attention = [&] {
         const ninfer::ops::r9700::kv::Fp8Int4KvAttentionArgs args{
-            .query = d_query.get(), .key_codes = d_keys.get(), .value_codes = d_values.get(),
-            .value_scale_bits = d_scales.get(), .page_table = d_pages.get(),
-            .page_table_pages = static_cast<std::uint32_t>(pages.size()), .context = context,
-            .physical_tokens = physical_tokens, .query_heads = kQueryHeads, .kv_heads = kKvHeads,
-            .q_to_kv = kQueriesPerKv, .value_group = Group,
-            .query_rows = query_rows, .row_positions = d_row_positions.get(),
-            .attention_scale = kAttentionScale, .key_layout = qk_layout,
-            .value_layout = VTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
-            .value_scale_layout = ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+            .query            = d_query.get(),
+            .key_codes        = d_keys.get(),
+            .value_codes      = d_values.get(),
+            .value_scale_bits = d_scales.get(),
+            .page_table       = d_pages.get(),
+            .page_table_pages = static_cast<std::uint32_t>(pages.size()),
+            .context          = context,
+            .physical_tokens  = physical_tokens,
+            .query_heads      = kQueryHeads,
+            .kv_heads         = kKvHeads,
+            .q_to_kv          = kQueriesPerKv,
+            .value_group      = Group,
+            .query_rows       = query_rows,
+            .row_positions    = d_row_positions.get(),
+            .attention_scale  = kAttentionScale,
+            .key_layout       = qk_layout,
+            .value_layout     = VTokenFastest
+                                    ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                                    : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+            .value_scale_layout =
+                ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                                  : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
             .output = d_output.get()};
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(args, nullptr));
     };
     const auto launch_attention_wmma = [&] {
         const ninfer::ops::r9700::kv::Fp8Int4KvAttentionArgs args{
-            .query = d_query.get(), .key_codes = d_keys.get(), .value_codes = d_values.get(),
-            .value_scale_bits = d_scales.get(), .page_table = d_pages.get(),
-            .page_table_pages = static_cast<std::uint32_t>(pages.size()), .context = context,
-            .physical_tokens = physical_tokens, .query_heads = kQueryHeads, .kv_heads = kKvHeads,
-            .q_to_kv = kQueriesPerKv, .value_group = Group,
-            .query_rows = query_rows, .row_positions = d_row_positions.get(),
-            .attention_scale = kAttentionScale, .key_layout = qk_layout,
-            .value_layout = VTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
-            .value_scale_layout = ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+            .query            = d_query.get(),
+            .key_codes        = d_keys.get(),
+            .value_codes      = d_values.get(),
+            .value_scale_bits = d_scales.get(),
+            .page_table       = d_pages.get(),
+            .page_table_pages = static_cast<std::uint32_t>(pages.size()),
+            .context          = context,
+            .physical_tokens  = physical_tokens,
+            .query_heads      = kQueryHeads,
+            .kv_heads         = kKvHeads,
+            .q_to_kv          = kQueriesPerKv,
+            .value_group      = Group,
+            .query_rows       = query_rows,
+            .row_positions    = d_row_positions.get(),
+            .attention_scale  = kAttentionScale,
+            .key_layout       = qk_layout,
+            .value_layout     = VTokenFastest
+                                    ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                                    : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+            .value_scale_layout =
+                ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                                  : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
             .score_workspace = d_qk_wmma_scores.get(),
-            .output = d_wmma_attention_output.get()};
+            .output          = d_wmma_attention_output.get()};
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(args, nullptr));
     };
     {
         const ninfer::ops::r9700::kv::Fp8Int4KvAttentionArgs invalid_args{
-            .query = d_query.get(), .key_codes = d_keys.get(), .value_codes = d_values.get(),
-            .value_scale_bits = d_scales.get(), .page_table = d_pages.get(),
-            .page_table_pages = static_cast<std::uint32_t>(pages.size() - 1U), .context = context,
-            .physical_tokens = physical_tokens, .query_heads = kQueryHeads, .kv_heads = kKvHeads,
-            .q_to_kv = kQueriesPerKv, .value_group = Group,
-            .query_rows = query_rows, .row_positions = d_row_positions.get(),
-            .attention_scale = kAttentionScale,
-            .key_layout = qk_layout,
-            .value_layout = VTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
-            .value_scale_layout = ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+            .query            = d_query.get(),
+            .key_codes        = d_keys.get(),
+            .value_codes      = d_values.get(),
+            .value_scale_bits = d_scales.get(),
+            .page_table       = d_pages.get(),
+            .page_table_pages = static_cast<std::uint32_t>(pages.size() - 1U),
+            .context          = context,
+            .physical_tokens  = physical_tokens,
+            .query_heads      = kQueryHeads,
+            .kv_heads         = kKvHeads,
+            .q_to_kv          = kQueriesPerKv,
+            .value_group      = Group,
+            .query_rows       = query_rows,
+            .row_positions    = d_row_positions.get(),
+            .attention_scale  = kAttentionScale,
+            .key_layout       = qk_layout,
+            .value_layout     = VTokenFastest
+                                    ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                                    : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+            .value_scale_layout =
+                ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                                  : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest,
             .score_workspace = d_qk_wmma_scores.get(),
-            .output = d_output.get()};
+            .output          = d_output.get()};
         if (ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(invalid_args, nullptr) !=
                 hipErrorInvalidValue ||
             ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(invalid_args, nullptr) !=
                 hipErrorInvalidValue) {
             fail("A3 attention routes did not reject an undersized page table");
         }
-        auto empty = invalid_args;
+        auto empty             = invalid_args;
         empty.page_table_pages = static_cast<std::uint32_t>(pages.size());
-        empty.context = 0;
+        empty.context          = 0;
         if (ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(empty, nullptr) !=
                 hipErrorInvalidValue ||
             ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(empty, nullptr) !=
                 hipErrorInvalidValue) {
             fail("A3 attention routes did not reject an empty causal context");
         }
-        auto nonfinite_scale = invalid_args;
+        auto nonfinite_scale             = invalid_args;
         nonfinite_scale.page_table_pages = static_cast<std::uint32_t>(pages.size());
-        nonfinite_scale.attention_scale = std::numeric_limits<float>::infinity();
+        nonfinite_scale.attention_scale  = std::numeric_limits<float>::infinity();
         if (ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(nonfinite_scale, nullptr) !=
                 hipErrorInvalidValue ||
             ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(nonfinite_scale, nullptr) !=
                 hipErrorInvalidValue) {
             fail("A3 attention routes accepted a nonfinite attention scale");
         }
-        auto invalid_layout = invalid_args;
+        auto invalid_layout             = invalid_args;
         invalid_layout.page_table_pages = static_cast<std::uint32_t>(pages.size());
         invalid_layout.value_scale_layout =
             static_cast<ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout>(255U);
@@ -1004,13 +1041,13 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
         DeviceBuffer<std::uint32_t> d_corrupt_pages(corrupt_pages.size());
         HIP_CHECK(hipMemcpy(d_corrupt_pages.get(), corrupt_pages.data(),
                             corrupt_pages.size() * sizeof(std::uint32_t), hipMemcpyHostToDevice));
-        auto corrupt_args = invalid_args;
-        corrupt_args.page_table = d_corrupt_pages.get();
+        auto corrupt_args             = invalid_args;
+        corrupt_args.page_table       = d_corrupt_pages.get();
         corrupt_args.page_table_pages = static_cast<std::uint32_t>(corrupt_pages.size());
         HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(corrupt_args, nullptr));
         std::vector<float> corrupt_output(query.size());
-        HIP_CHECK(hipMemcpy(corrupt_output.data(), d_output.get(), corrupt_output.size() * sizeof(float),
-                            hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(corrupt_output.data(), d_output.get(),
+                            corrupt_output.size() * sizeof(float), hipMemcpyDeviceToHost));
         if (!std::all_of(corrupt_output.begin(), corrupt_output.end(),
                          [](float value) { return std::isnan(value); })) {
             fail("fused A3 did not expose a corrupt mapped page as invalid output");
@@ -1027,36 +1064,36 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
         // value must not silently turn into an empty reduction or read past the captured cache
         // frontier. It poisons only its affected row, leaving other launched rows observable.
         std::vector<std::int32_t> corrupt_positions = row_positions;
-        corrupt_positions.front() = -1;
+        corrupt_positions.front()                   = -1;
         DeviceBuffer<std::int32_t> d_corrupt_positions(corrupt_positions.size());
         HIP_CHECK(hipMemcpy(d_corrupt_positions.get(), corrupt_positions.data(),
                             corrupt_positions.size() * sizeof(std::int32_t),
                             hipMemcpyHostToDevice));
-        auto corrupt_frontier_args = invalid_args;
+        auto corrupt_frontier_args             = invalid_args;
         corrupt_frontier_args.page_table_pages = static_cast<std::uint32_t>(pages.size());
-        corrupt_frontier_args.row_positions = d_corrupt_positions.get();
-        HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(corrupt_frontier_args,
-                                                                        nullptr));
-        HIP_CHECK(hipMemcpy(corrupt_output.data(), d_output.get(), corrupt_output.size() * sizeof(float),
-                            hipMemcpyDeviceToHost));
+        corrupt_frontier_args.row_positions    = d_corrupt_positions.get();
+        HIP_CHECK(
+            ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(corrupt_frontier_args, nullptr));
+        HIP_CHECK(hipMemcpy(corrupt_output.data(), d_output.get(),
+                            corrupt_output.size() * sizeof(float), hipMemcpyDeviceToHost));
         const std::size_t row_width = base_query.size();
         if (!std::all_of(corrupt_output.begin(), corrupt_output.begin() + row_width,
                          [](float value) { return std::isnan(value); }) ||
-            (query_rows > 1U && std::all_of(corrupt_output.begin() + row_width,
-                                             corrupt_output.end(),
-                                             [](float value) { return std::isnan(value); }))) {
+            (query_rows > 1U &&
+             std::all_of(corrupt_output.begin() + row_width, corrupt_output.end(),
+                         [](float value) { return std::isnan(value); }))) {
             fail("fused A3 did not isolate a negative causal position to its row");
         }
         corrupt_frontier_args.output = d_wmma_attention_output.get();
-        HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(corrupt_frontier_args,
-                                                                      nullptr));
+        HIP_CHECK(
+            ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(corrupt_frontier_args, nullptr));
         HIP_CHECK(hipMemcpy(corrupt_output.data(), d_wmma_attention_output.get(),
                             corrupt_output.size() * sizeof(float), hipMemcpyDeviceToHost));
         if (!std::all_of(corrupt_output.begin(), corrupt_output.begin() + row_width,
                          [](float value) { return std::isnan(value); }) ||
-            (query_rows > 1U && std::all_of(corrupt_output.begin() + row_width,
-                                             corrupt_output.end(),
-                                             [](float value) { return std::isnan(value); }))) {
+            (query_rows > 1U &&
+             std::all_of(corrupt_output.begin() + row_width, corrupt_output.end(),
+                         [](float value) { return std::isnan(value); }))) {
             fail("WMMA A3 did not isolate a negative causal position to its row");
         }
         corrupt_positions.front() = static_cast<std::int32_t>(context);
@@ -1064,17 +1101,17 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
                             corrupt_positions.size() * sizeof(std::int32_t),
                             hipMemcpyHostToDevice));
         corrupt_frontier_args.output = d_output.get();
-        HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(corrupt_frontier_args,
-                                                                        nullptr));
-        HIP_CHECK(hipMemcpy(corrupt_output.data(), d_output.get(), corrupt_output.size() * sizeof(float),
-                            hipMemcpyDeviceToHost));
+        HIP_CHECK(
+            ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(corrupt_frontier_args, nullptr));
+        HIP_CHECK(hipMemcpy(corrupt_output.data(), d_output.get(),
+                            corrupt_output.size() * sizeof(float), hipMemcpyDeviceToHost));
         if (!std::all_of(corrupt_output.begin(), corrupt_output.begin() + row_width,
                          [](float value) { return std::isnan(value); })) {
             fail("fused A3 did not reject a causal position at its captured frontier");
         }
         corrupt_frontier_args.output = d_wmma_attention_output.get();
-        HIP_CHECK(ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(corrupt_frontier_args,
-                                                                      nullptr));
+        HIP_CHECK(
+            ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(corrupt_frontier_args, nullptr));
         HIP_CHECK(hipMemcpy(corrupt_output.data(), d_wmma_attention_output.get(),
                             corrupt_output.size() * sizeof(float), hipMemcpyDeviceToHost));
         if (!std::all_of(corrupt_output.begin(), corrupt_output.begin() + row_width,
@@ -1082,21 +1119,20 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
             fail("WMMA A3 did not reject a causal position at its captured frontier");
         }
     }
-    double max_absolute = 0.0;
-    double max_relative = 0.0;
+    double max_absolute      = 0.0;
+    double max_relative      = 0.0;
     double wmma_max_absolute = 0.0;
     double wmma_max_relative = 0.0;
     if (!timing_only) {
         launch_attention();
         std::vector<float> actual_output(query.size());
-        HIP_CHECK(hipMemcpy(actual_output.data(),
-                            d_output.get(),
-                            actual_output.size() * sizeof(float),
-                            hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(actual_output.data(), d_output.get(),
+                            actual_output.size() * sizeof(float), hipMemcpyDeviceToHost));
         std::vector<double> expected_output;
         expected_output.reserve(query.size());
         for (std::uint32_t row = 0; row < query_rows; ++row) {
-            const auto row_begin = query.begin() + static_cast<std::size_t>(row) * base_query.size();
+            const auto row_begin =
+                query.begin() + static_cast<std::size_t>(row) * base_query.size();
             const std::vector<float> row_query(row_begin, row_begin + base_query.size());
             const std::vector<double> row_expected =
                 attention_oracle<Group, KTokenFastest, VTokenFastest, ScaleTokenFastest>(
@@ -1105,15 +1141,15 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
             expected_output.insert(expected_output.end(), row_expected.begin(), row_expected.end());
         }
         for (std::size_t i = 0; i < actual_output.size(); ++i) {
-            const double absolute = std::abs(static_cast<double>(actual_output[i]) - expected_output[i]);
+            const double absolute =
+                std::abs(static_cast<double>(actual_output[i]) - expected_output[i]);
             const double relative = absolute / std::max(std::abs(expected_output[i]), 1.0e-6);
-            max_absolute = std::max(max_absolute, absolute);
-            max_relative = std::max(max_relative, relative);
+            max_absolute          = std::max(max_absolute, absolute);
+            max_relative          = std::max(max_relative, relative);
             if (absolute > 2.0e-4 && relative > 2.0e-4) {
                 std::ostringstream os;
-                os << "A3 output mismatch at " << i << ": got " << actual_output[i]
-                   << " expected " << expected_output[i] << " abs=" << absolute
-                   << " rel=" << relative;
+                os << "A3 output mismatch at " << i << ": got " << actual_output[i] << " expected "
+                   << expected_output[i] << " abs=" << absolute << " rel=" << relative;
                 fail(os.str());
             }
         }
@@ -1125,16 +1161,16 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
             const double absolute =
                 std::abs(static_cast<double>(actual_wmma_output[i]) - expected_output[i]);
             const double relative = absolute / std::max(std::abs(expected_output[i]), 1.0e-6);
-            wmma_max_absolute = std::max(wmma_max_absolute, absolute);
-            wmma_max_relative = std::max(wmma_max_relative, relative);
+            wmma_max_absolute     = std::max(wmma_max_absolute, absolute);
+            wmma_max_relative     = std::max(wmma_max_relative, relative);
             // FP8 Q is a private native-WMMA profile checked directly against the represented
             // BF16-input oracle. This admission threshold is Op-local; model PPL/token gates
             // remain mandatory before it can replace the BF16-Q score-streaming baseline.
             if (absolute > 5.0e-3 && relative > 5.0e-3) {
                 std::ostringstream os;
-                os << "A3 WMMA attention mismatch at " << i << ": got "
-                   << actual_wmma_output[i] << " expected " << expected_output[i]
-                   << " abs=" << absolute << " rel=" << relative;
+                os << "A3 WMMA attention mismatch at " << i << ": got " << actual_wmma_output[i]
+                   << " expected " << expected_output[i] << " abs=" << absolute
+                   << " rel=" << relative;
                 fail(os.str());
             }
         }
@@ -1148,22 +1184,19 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
         launch_append_suffix();
         launch_attention();
     };
-    const double setup_append_ms = time_ms(iterations, launch_append);
+    const double setup_append_ms  = time_ms(iterations, launch_append);
     const double suffix_append_ms = time_ms(iterations, launch_append_suffix);
-    const double qk_vector_ms = transaction_timing_only
-                                    ? std::numeric_limits<double>::quiet_NaN()
-                                    : time_ms(iterations, launch_qk_vector);
-    const double qk_wmma_ms = transaction_timing_only
-                                  ? std::numeric_limits<double>::quiet_NaN()
-                                  : time_ms(iterations, launch_qk_wmma);
-    const double pv_vector_ms = transaction_timing_only
-                                    ? std::numeric_limits<double>::quiet_NaN()
-                                    : time_ms(iterations, launch_pv_vector);
+    const double qk_vector_ms = transaction_timing_only ? std::numeric_limits<double>::quiet_NaN()
+                                                        : time_ms(iterations, launch_qk_vector);
+    const double qk_wmma_ms   = transaction_timing_only ? std::numeric_limits<double>::quiet_NaN()
+                                                        : time_ms(iterations, launch_qk_wmma);
+    const double pv_vector_ms = transaction_timing_only ? std::numeric_limits<double>::quiet_NaN()
+                                                        : time_ms(iterations, launch_pv_vector);
     const double attention_ms = time_ms(iterations, launch_attention);
     const double append_attention_ms = time_ms(iterations, launch_append_attention);
-    const double attention_wmma_ms = transaction_timing_only
-                                         ? std::numeric_limits<double>::quiet_NaN()
-                                         : time_ms(iterations, launch_attention_wmma);
+    const double attention_wmma_ms   = transaction_timing_only
+                                           ? std::numeric_limits<double>::quiet_NaN()
+                                           : time_ms(iterations, launch_attention_wmma);
 
     // Long runs use the cross-page speculative path. Tail runs use the same exact three-plane
     // operation with a self-copy, which exercises a valid causal frontier without inventing
@@ -1172,8 +1205,8 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     const std::vector<std::uint32_t> selected_path =
         context >= 66 ? std::vector<std::uint32_t>{0U, 3U, 8U, 9U, 10U}
                       : std::vector<std::uint32_t>{0U};
-    std::vector<std::uint8_t> expected_compact_keys = actual_keys;
-    std::vector<std::uint8_t> expected_compact_values = actual_values;
+    std::vector<std::uint8_t> expected_compact_keys    = actual_keys;
+    std::vector<std::uint8_t> expected_compact_values  = actual_values;
     std::vector<std::uint16_t> expected_compact_scales = actual_scales;
     for (std::size_t selected = 0; selected < selected_path.size(); ++selected) {
         if (selected_path[selected] < selected) {
@@ -1206,29 +1239,35 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     }
 
     DeviceBuffer<std::uint32_t> d_selected_path(selected_path.size());
-    HIP_CHECK(hipMemcpy(d_selected_path.get(),
-                        selected_path.data(),
-                        selected_path.size() * sizeof(std::uint32_t),
-                        hipMemcpyHostToDevice));
-    const auto compact_key_layout = KTokenFastest
-                                    ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                    : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
-    const auto compact_value_layout = VTokenFastest
-                                      ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                      : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
-    const auto compact_scale_layout = ScaleTokenFastest
-                                      ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
-                                      : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+    HIP_CHECK(hipMemcpy(d_selected_path.get(), selected_path.data(),
+                        selected_path.size() * sizeof(std::uint32_t), hipMemcpyHostToDevice));
+    const auto compact_key_layout =
+        KTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                      : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+    const auto compact_value_layout =
+        VTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                      : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+    const auto compact_scale_layout =
+        ScaleTokenFastest ? ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest
+                          : ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
     HIP_CHECK(hipMemset(d_append_status.get(), 0, sizeof(std::uint32_t)));
     const ninfer::ops::r9700::kv::Fp8Int4KvCompactArgs compact_args{
-        .prefix = compact_prefix, .selected_path = d_selected_path.get(),
-        .selected_count = selected_path.size(), .page_table = d_pages.get(),
-        .page_table_pages = static_cast<std::uint32_t>(pages.size()),
-        .physical_tokens = physical_tokens, .kv_heads = kKvHeads, .key_codes = d_keys.get(),
-        .value_codes = d_values.get(), .value_scale_bits = d_scales.get(),
-        .status = d_append_status.get(), .value_group = Group, .key_layout = compact_key_layout,
-        .value_layout = compact_value_layout, .value_scale_layout = compact_scale_layout};
-    auto empty_compact = compact_args;
+        .prefix             = compact_prefix,
+        .selected_path      = d_selected_path.get(),
+        .selected_count     = selected_path.size(),
+        .page_table         = d_pages.get(),
+        .page_table_pages   = static_cast<std::uint32_t>(pages.size()),
+        .physical_tokens    = physical_tokens,
+        .kv_heads           = kKvHeads,
+        .key_codes          = d_keys.get(),
+        .value_codes        = d_values.get(),
+        .value_scale_bits   = d_scales.get(),
+        .status             = d_append_status.get(),
+        .value_group        = Group,
+        .key_layout         = compact_key_layout,
+        .value_layout       = compact_value_layout,
+        .value_scale_layout = compact_scale_layout};
+    auto empty_compact           = compact_args;
     empty_compact.selected_count = 0;
     if (ninfer::ops::r9700::kv::fp8_int4_kv_compact(empty_compact, nullptr) !=
         hipErrorInvalidValue) {
@@ -1251,18 +1290,11 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     std::vector<std::uint8_t> actual_compact_keys(key_size);
     std::vector<std::uint8_t> actual_compact_values(value_size);
     std::vector<std::uint16_t> actual_compact_scales(scale_size);
-    HIP_CHECK(hipMemcpy(actual_compact_keys.data(),
-                        d_keys.get(),
-                        key_size,
-                        hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(actual_compact_values.data(),
-                        d_values.get(),
-                        value_size,
-                        hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(actual_compact_scales.data(),
-                        d_scales.get(),
-                        scale_size * sizeof(std::uint16_t),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual_compact_keys.data(), d_keys.get(), key_size, hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(actual_compact_values.data(), d_values.get(), value_size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual_compact_scales.data(), d_scales.get(),
+                        scale_size * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
     if (actual_compact_keys != expected_compact_keys ||
         actual_compact_values != expected_compact_values ||
         actual_compact_scales != expected_compact_scales) {
@@ -1271,17 +1303,12 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
 
     const auto read_append_status = [&] {
         std::uint32_t status = 0;
-        HIP_CHECK(hipMemcpy(&status,
-                            d_append_status.get(),
-                            sizeof(status),
-                            hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(&status, d_append_status.get(), sizeof(status), hipMemcpyDeviceToHost));
         return status;
     };
     std::vector<hip_bfloat16> overflowing_values(source_values.size(), hip_bfloat16(524288.0F));
-    HIP_CHECK(hipMemcpy(d_source_values.get(),
-                        overflowing_values.data(),
-                        overflowing_values.size() * sizeof(hip_bfloat16),
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_source_values.get(), overflowing_values.data(),
+                        overflowing_values.size() * sizeof(hip_bfloat16), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(d_append_status.get(), 0, sizeof(std::uint32_t)));
     launch_append();
     if ((read_append_status() & ninfer::ops::r9700::kv::Fp8Int4KvAppendScaleOverflow) == 0U) {
@@ -1289,11 +1316,9 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     }
 
     std::vector<std::uint32_t> invalid_positions = positions;
-    invalid_positions.front() = 1U;
-    HIP_CHECK(hipMemcpy(d_positions.get(),
-                        invalid_positions.data(),
-                        invalid_positions.size() * sizeof(std::uint32_t),
-                        hipMemcpyHostToDevice));
+    invalid_positions.front()                    = 1U;
+    HIP_CHECK(hipMemcpy(d_positions.get(), invalid_positions.data(),
+                        invalid_positions.size() * sizeof(std::uint32_t), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(d_append_status.get(), 0, sizeof(std::uint32_t)));
     launch_append();
     if ((read_append_status() & ninfer::ops::r9700::kv::Fp8Int4KvAppendInvalidPosition) == 0U) {
@@ -1303,35 +1328,25 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
     // Keep positions valid so this case reaches the independent physical-page address guard.
     // A corrupted page ID must not be conflated with the contiguous-suffix status bit.
     std::vector<std::uint32_t> invalid_pages = pages;
-    invalid_pages.front() = static_cast<std::uint32_t>(physical_pages);
-    HIP_CHECK(hipMemcpy(d_positions.get(),
-                        positions.data(),
-                        positions.size() * sizeof(std::uint32_t),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_pages.get(),
-                        invalid_pages.data(),
-                        invalid_pages.size() * sizeof(std::uint32_t),
-                        hipMemcpyHostToDevice));
+    invalid_pages.front()                    = static_cast<std::uint32_t>(physical_pages);
+    HIP_CHECK(hipMemcpy(d_positions.get(), positions.data(),
+                        positions.size() * sizeof(std::uint32_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_pages.get(), invalid_pages.data(),
+                        invalid_pages.size() * sizeof(std::uint32_t), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(d_append_status.get(), 0, sizeof(std::uint32_t)));
     launch_append();
     if ((read_append_status() & ninfer::ops::r9700::kv::Fp8Int4KvAppendInvalidAddress) == 0U) {
         fail("A2 append did not report an invalid physical page address");
     }
-    HIP_CHECK(hipMemcpy(d_pages.get(),
-                        pages.data(),
-                        pages.size() * sizeof(std::uint32_t),
+    HIP_CHECK(hipMemcpy(d_pages.get(), pages.data(), pages.size() * sizeof(std::uint32_t),
                         hipMemcpyHostToDevice));
 
     std::vector<hip_bfloat16> nonfinite_values = bf16_source_values;
-    nonfinite_values.front().data = 0x7fc0U;
-    HIP_CHECK(hipMemcpy(d_source_values.get(),
-                        nonfinite_values.data(),
-                        nonfinite_values.size() * sizeof(hip_bfloat16),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_positions.get(),
-                        positions.data(),
-                        positions.size() * sizeof(std::uint32_t),
-                        hipMemcpyHostToDevice));
+    nonfinite_values.front().data              = 0x7fc0U;
+    HIP_CHECK(hipMemcpy(d_source_values.get(), nonfinite_values.data(),
+                        nonfinite_values.size() * sizeof(hip_bfloat16), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_positions.get(), positions.data(),
+                        positions.size() * sizeof(std::uint32_t), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(d_append_status.get(), 0, sizeof(std::uint32_t)));
     launch_append();
     if ((read_append_status() & ninfer::ops::r9700::kv::Fp8Int4KvAppendNonfiniteInput) == 0U) {
@@ -1340,29 +1355,23 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
 
     std::cout << "variant G" << Group << " K=" << key_layout_name << " V=" << value_layout_name
               << " S=" << scale_layout_name << ": PASS"
-              << (context >= 66 ? " A2[63/64/65]=exact" : " A2=tail-exact")
-              << " edge_codec=exact"
-              << " rows=" << query_rows
-              << " tree_compact=exact"
+              << (context >= 66 ? " A2[63/64/65]=exact" : " A2=tail-exact") << " edge_codec=exact"
+              << " rows=" << query_rows << " tree_compact=exact"
               << (timing_only ? " A3_oracle=prior-qualified" : " A3_oracle=exact")
-              << " A3_max_abs=" << std::scientific << max_absolute
-              << " A3_max_rel=" << max_relative << std::fixed
-              << " A3_wmma_max_abs=" << std::scientific << wmma_max_absolute
+              << " A3_max_abs=" << std::scientific << max_absolute << " A3_max_rel=" << max_relative
+              << std::fixed << " A3_wmma_max_abs=" << std::scientific << wmma_max_absolute
               << " A3_wmma_max_rel=" << wmma_max_relative << std::fixed
               << " setup_append_ms=" << std::setprecision(4) << setup_append_ms
-              << " suffix_append_T=" << appended_rows
-              << " suffix_append_ms=" << suffix_append_ms
-              << " qk_vector_ms=" << qk_vector_ms
-              << " qk_wmma_ms=" << qk_wmma_ms
-              << " pv_vector_ms=" << pv_vector_ms
-              << " attention_ms=" << attention_ms
+              << " suffix_append_T=" << appended_rows << " suffix_append_ms=" << suffix_append_ms
+              << " qk_vector_ms=" << qk_vector_ms << " qk_wmma_ms=" << qk_wmma_ms
+              << " pv_vector_ms=" << pv_vector_ms << " attention_ms=" << attention_ms
               << " append_attention_ms=" << append_attention_ms
               << " attention_wmma_ms=" << attention_wmma_ms << '\n';
 }
 
 std::size_t parse_positive(const char* value, const char* option) {
-    errno = 0;
-    char* end = nullptr;
+    errno                           = 0;
+    char* end                       = nullptr;
     const unsigned long long parsed = std::strtoull(value, &end, 10);
     if (errno != 0 || end == value || *end != '\0' || parsed == 0 ||
         parsed > std::numeric_limits<std::size_t>::max()) {
@@ -1372,15 +1381,15 @@ std::size_t parse_positive(const char* value, const char* option) {
 }
 
 struct Options {
-    std::size_t context = 256;
-    int iterations = 20;
-    std::uint32_t rows = 1;
-    bool timing_only = false;
+    std::size_t context          = 256;
+    int iterations               = 20;
+    std::uint32_t rows           = 1;
+    bool timing_only             = false;
     bool transaction_timing_only = false;
-    int group = 0;
-    int key_order = -1;
-    int value_order = -1;
-    int scale_order = -1;
+    int group                    = 0;
+    int key_order                = -1;
+    int value_order              = -1;
+    int scale_order              = -1;
 };
 
 int parse_order(const char* value, const char* option) {
@@ -1411,7 +1420,7 @@ Options parse_options(int argc, char** argv) {
         } else if (argument == "--timing-only") {
             options.timing_only = true;
         } else if (argument == "--transaction-timing-only") {
-            options.timing_only = true;
+            options.timing_only             = true;
             options.transaction_timing_only = true;
         } else if (argument == "--group" && i + 1 < argc) {
             const std::size_t group = parse_positive(argv[++i], "--group");
@@ -1445,8 +1454,8 @@ Options parse_options(int argc, char** argv) {
     if (options.transaction_timing_only && options.rows > options.context) {
         fail("--transaction-timing-only requires T rows to fit in the visible context");
     }
-    const bool any_variant = options.group != 0 || options.key_order >= 0 ||
-                             options.value_order >= 0 || options.scale_order >= 0;
+    const bool any_variant      = options.group != 0 || options.key_order >= 0 ||
+                                  options.value_order >= 0 || options.scale_order >= 0;
     const bool complete_variant = options.group != 0 && options.key_order >= 0 &&
                                   options.value_order >= 0 && options.scale_order >= 0;
     if (any_variant && !complete_variant) {
@@ -1455,8 +1464,7 @@ Options parse_options(int argc, char** argv) {
     return options;
 }
 
-template <unsigned Group, bool KeyTokenFastest, bool ValueTokenFastest,
-          bool ScaleTokenFastest>
+template <unsigned Group, bool KeyTokenFastest, bool ValueTokenFastest, bool ScaleTokenFastest>
 bool run_selected_variant(const Options& options) {
     if (options.group != static_cast<int>(Group) ||
         options.key_order != static_cast<int>(KeyTokenFastest) ||
@@ -1470,7 +1478,7 @@ bool run_selected_variant(const Options& options) {
     return true;
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
     try {
@@ -1478,50 +1486,64 @@ int main(int argc, char** argv) {
         select_r9700();
         std::cout << "kv_op: D=" << kDimension << " Hq=" << kQueryHeads << " Hkv=" << kKvHeads
                   << " page=" << kPageTokens << " context=" << options.context
-                  << " rows=" << options.rows
-                  << " iterations=" << options.iterations
+                  << " rows=" << options.rows << " iterations=" << options.iterations
                   << (options.timing_only ? " (ROCm 10 timing-only; prior oracle required)\n"
                                           : " (ROCm 10 full oracle)\n");
         if (options.group != 0) {
-            const bool ran =
-                run_selected_variant<16, false, false, false>(options) ||
-                run_selected_variant<16, false, false, true>(options) ||
-                run_selected_variant<16, false, true, false>(options) ||
-                run_selected_variant<16, false, true, true>(options) ||
-                run_selected_variant<16, true, false, false>(options) ||
-                run_selected_variant<16, true, false, true>(options) ||
-                run_selected_variant<16, true, true, false>(options) ||
-                run_selected_variant<16, true, true, true>(options) ||
-                run_selected_variant<32, false, false, false>(options) ||
-                run_selected_variant<32, false, false, true>(options) ||
-                run_selected_variant<32, false, true, false>(options) ||
-                run_selected_variant<32, false, true, true>(options) ||
-                run_selected_variant<32, true, false, false>(options) ||
-                run_selected_variant<32, true, false, true>(options) ||
-                run_selected_variant<32, true, true, false>(options) ||
-                run_selected_variant<32, true, true, true>(options);
+            const bool ran = run_selected_variant<16, false, false, false>(options) ||
+                             run_selected_variant<16, false, false, true>(options) ||
+                             run_selected_variant<16, false, true, false>(options) ||
+                             run_selected_variant<16, false, true, true>(options) ||
+                             run_selected_variant<16, true, false, false>(options) ||
+                             run_selected_variant<16, true, false, true>(options) ||
+                             run_selected_variant<16, true, true, false>(options) ||
+                             run_selected_variant<16, true, true, true>(options) ||
+                             run_selected_variant<32, false, false, false>(options) ||
+                             run_selected_variant<32, false, false, true>(options) ||
+                             run_selected_variant<32, false, true, false>(options) ||
+                             run_selected_variant<32, false, true, true>(options) ||
+                             run_selected_variant<32, true, false, false>(options) ||
+                             run_selected_variant<32, true, false, true>(options) ||
+                             run_selected_variant<32, true, true, false>(options) ||
+                             run_selected_variant<32, true, true, true>(options);
             if (!ran) { fail("selected layout did not match a compiled variant"); }
             std::cout << "kv_op_qualification: PASS\n";
             return 0;
         }
         // Each plane independently owns its physical order. Run the complete eight-layout
         // cross-product for both supported V groups; no all-planes-coupled shortcut is admitted.
-        run_variant<16, false, false, false>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<16, false, false, true>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<16, false, true, false>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<16, false, true, true>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<16, true, false, false>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<16, true, false, true>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<16, true, true, false>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<16, true, true, true>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<32, false, false, false>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<32, false, false, true>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<32, false, true, false>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<32, false, true, true>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<32, true, false, false>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<32, true, false, true>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<32, true, true, false>(options.context, options.iterations, options.rows, options.timing_only);
-        run_variant<32, true, true, true>(options.context, options.iterations, options.rows, options.timing_only);
+        run_variant<16, false, false, false>(options.context, options.iterations, options.rows,
+                                             options.timing_only);
+        run_variant<16, false, false, true>(options.context, options.iterations, options.rows,
+                                            options.timing_only);
+        run_variant<16, false, true, false>(options.context, options.iterations, options.rows,
+                                            options.timing_only);
+        run_variant<16, false, true, true>(options.context, options.iterations, options.rows,
+                                           options.timing_only);
+        run_variant<16, true, false, false>(options.context, options.iterations, options.rows,
+                                            options.timing_only);
+        run_variant<16, true, false, true>(options.context, options.iterations, options.rows,
+                                           options.timing_only);
+        run_variant<16, true, true, false>(options.context, options.iterations, options.rows,
+                                           options.timing_only);
+        run_variant<16, true, true, true>(options.context, options.iterations, options.rows,
+                                          options.timing_only);
+        run_variant<32, false, false, false>(options.context, options.iterations, options.rows,
+                                             options.timing_only);
+        run_variant<32, false, false, true>(options.context, options.iterations, options.rows,
+                                            options.timing_only);
+        run_variant<32, false, true, false>(options.context, options.iterations, options.rows,
+                                            options.timing_only);
+        run_variant<32, false, true, true>(options.context, options.iterations, options.rows,
+                                           options.timing_only);
+        run_variant<32, true, false, false>(options.context, options.iterations, options.rows,
+                                            options.timing_only);
+        run_variant<32, true, false, true>(options.context, options.iterations, options.rows,
+                                           options.timing_only);
+        run_variant<32, true, true, false>(options.context, options.iterations, options.rows,
+                                           options.timing_only);
+        run_variant<32, true, true, true>(options.context, options.iterations, options.rows,
+                                          options.timing_only);
         std::cout << "kv_op_qualification: PASS\n";
         return 0;
     } catch (const std::exception& error) {

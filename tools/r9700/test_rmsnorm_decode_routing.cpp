@@ -16,8 +16,8 @@ int main() {
     if (rmsnorm_k5120_row_cta_selected(5120U, 0U)) {
         throw std::runtime_error("empty row count was selected");
     }
-    for (const std::uint32_t features : {0U, 1U, 128U, 256U, 5119U, 5121U, 6144U,
-                                         std::numeric_limits<std::uint32_t>::max()}) {
+    for (const std::uint32_t features :
+         {0U, 1U, 128U, 256U, 5119U, 5121U, 6144U, std::numeric_limits<std::uint32_t>::max()}) {
         for (std::uint32_t rows = 1U; rows <= 24U; ++rows) {
             if (rmsnorm_k5120_row_cta_selected(features, rows)) {
                 throw std::runtime_error("off-domain feature width did not retain fallback");

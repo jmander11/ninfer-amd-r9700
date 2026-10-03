@@ -42,12 +42,20 @@ class PostHybridProfileBucketTest(unittest.TestCase):
         dispatches += _rows("gdn", "ordinary_kernel<true>", 48)
         attribution = {
             "operator_attribution": [
-                {"execution_category": "base_text_prefill", "stage": "attention",
-                 "operator_family": "dense_attention", "calls": 48,
-                 "summed_duration_ms": 48.0},
-                {"execution_category": "base_text_prefill", "stage": "gdn",
-                 "operator_family": "gdn_recurrence", "calls": 48,
-                 "summed_duration_ms": 48.0},
+                {
+                    "execution_category": "base_text_prefill",
+                    "stage": "attention",
+                    "operator_family": "dense_attention",
+                    "calls": 48,
+                    "summed_duration_ms": 48.0,
+                },
+                {
+                    "execution_category": "base_text_prefill",
+                    "stage": "gdn",
+                    "operator_family": "gdn_recurrence",
+                    "calls": 48,
+                    "summed_duration_ms": 48.0,
+                },
             ],
             "kernel_execution_categories": [
                 {"category": "base_text_prefill", "independent_summed_duration_ms": 890.0}

@@ -22,26 +22,26 @@ using TokenTileF8 = __attribute__((__vector_size__(8 * sizeof(float)))) float;
 // Ks K slices of contiguous ascending G64 ranges; Pd G64 groups of global loads in flight.
 template <unsigned Mt, unsigned Tf, unsigned Rf, unsigned Rb, unsigned Ks, unsigned Pd>
 struct TokenTileConfig {
-    static_assert(Mt >= 1 && Mt <= 4 && Tf >= 1 && Mt % Tf == 0 && Rf >= 1 && Rb >= 1 &&
-                  Ks >= 1 && (Pd == 1 || Pd == 2) && (Rf * Rb == 1 || Rf * Rb % 2 == 0));
+    static_assert(Mt >= 1 && Mt <= 4 && Tf >= 1 && Mt % Tf == 0 && Rf >= 1 && Rb >= 1 && Ks >= 1 &&
+                  (Pd == 1 || Pd == 2) && (Rf * Rb == 1 || Rf * Rb % 2 == 0));
     static constexpr unsigned Tf_ = Tf, Rf_ = Rf, Ks_ = Ks, Pd_ = Pd;
-    static constexpr unsigned TokenWaves = Mt / Tf;
-    static constexpr unsigned SliceWaves = TokenWaves * Rb;
-    static constexpr unsigned Waves = SliceWaves * Ks;
-    static constexpr unsigned Threads = 32U * Waves;
+    static constexpr unsigned TokenWaves   = Mt / Tf;
+    static constexpr unsigned SliceWaves   = TokenWaves * Rb;
+    static constexpr unsigned Waves        = SliceWaves * Ks;
+    static constexpr unsigned Threads      = 32U * Waves;
     static constexpr unsigned SliceThreads = 32U * SliceWaves;
-    static constexpr unsigned Tokens = 16U * Mt;
-    static constexpr unsigned RowTiles = Rf * Rb;
-    static constexpr unsigned Rows = 16U * RowTiles;
+    static constexpr unsigned Tokens       = 16U * Mt;
+    static constexpr unsigned RowTiles     = Rf * Rb;
+    static constexpr unsigned Rows         = 16U * RowTiles;
     // Per slice and group: one unit is 16 bytes of each activation plane (32 K of one token), one
     // 16-byte quarter of a 512-byte Q4N16K16 tile-group, or one FP16 scale.
     static constexpr unsigned ActivationUnits = 2U * Tokens;
-    static constexpr unsigned WeightUnits = 32U * RowTiles;
-    static constexpr unsigned ScaleUnits = Tokens + Rows;
+    static constexpr unsigned WeightUnits     = 32U * RowTiles;
+    static constexpr unsigned ScaleUnits      = Tokens + Rows;
     static constexpr unsigned ActivationLoads =
         (ActivationUnits + SliceThreads - 1U) / SliceThreads;
-    static constexpr unsigned WeightLoads = (WeightUnits + SliceThreads - 1U) / SliceThreads;
-    static constexpr unsigned ScaleLoads = (ScaleUnits + SliceThreads - 1U) / SliceThreads;
+    static constexpr unsigned WeightLoads  = (WeightUnits + SliceThreads - 1U) / SliceThreads;
+    static constexpr unsigned ScaleLoads   = (ScaleUnits + SliceThreads - 1U) / SliceThreads;
     static constexpr unsigned Accumulators = Tf * Rf;
 };
 
@@ -49,8 +49,10 @@ struct TokenTileConfig {
 // rows so the two half-waves read disjoint bank halves; a 16-row array already does.
 template <unsigned Rows>
 __device__ __forceinline__ unsigned token_tile_lds_index(unsigned pair, unsigned row) {
-    if constexpr (Rows >= 32U) return pair * Rows + (row ^ ((pair & 1U) << 4U));
-    else return pair * Rows + row;
+    if constexpr (Rows >= 32U)
+        return pair * Rows + (row ^ ((pair & 1U) << 4U));
+    else
+        return pair * Rows + row;
 }
 
 template <unsigned Rows>
@@ -88,37 +90,37 @@ struct TokenTilePlan {
 };
 
 template <class S>
-__device__ __forceinline__ TokenTilePlan<S> token_tile_plan(
-    const std::uint16_t* activation_scales, const std::uint16_t* weight_scales,
-    unsigned slice_thread, unsigned tokens, unsigned row_base, unsigned groups) {
+__device__ __forceinline__ TokenTilePlan<S>
+token_tile_plan(const std::uint16_t* activation_scales, const std::uint16_t* weight_scales,
+                unsigned slice_thread, unsigned tokens, unsigned row_base, unsigned groups) {
     TokenTilePlan<S> plan;
     // Rows of a partial token tile stage the last real token: their products are never stored.
     const auto staged = [&](unsigned token) { return token < tokens ? token : tokens - 1U; };
 #pragma unroll
     for (unsigned i = 0; i < S::ActivationLoads; ++i) {
-        const unsigned unit = (slice_thread + i * S::SliceThreads) % S::ActivationUnits;
-        plan.activation[i] = staged(unit >> 1U) * (groups * 32U) + (unit & 1U) * 16U;
+        const unsigned unit    = (slice_thread + i * S::SliceThreads) % S::ActivationUnits;
+        plan.activation[i]     = staged(unit >> 1U) * (groups * 32U) + (unit & 1U) * 16U;
         plan.activation_lds[i] = token_tile_lds_index<64>((unit & 1U) * 2U, unit >> 1U);
     }
 #pragma unroll
     for (unsigned i = 0; i < S::WeightLoads; ++i) {
-        const unsigned unit = (slice_thread + i * S::SliceThreads) % S::WeightUnits;
+        const unsigned unit   = (slice_thread + i * S::SliceThreads) % S::WeightUnits;
         const unsigned within = unit & 31U;
-        plan.weight[i] = (row_base / 16U + (unit >> 5U)) * groups * 512U + within * 16U;
-        plan.weight_lds[i] = token_tile_lds_index<S::Rows>(
-            within >> 3U, (unit >> 5U) * 16U + (within & 7U) * 2U);
+        plan.weight[i]        = (row_base / 16U + (unit >> 5U)) * groups * 512U + within * 16U;
+        plan.weight_lds[i] =
+            token_tile_lds_index<S::Rows>(within >> 3U, (unit >> 5U) * 16U + (within & 7U) * 2U);
     }
 #pragma unroll
     for (unsigned i = 0; i < S::ScaleLoads; ++i) {
         const unsigned unit = (slice_thread + i * S::SliceThreads) % S::ScaleUnits;
-        const bool token = unit < S::Tokens;
-        const unsigned row = row_base + unit - S::Tokens;
-        plan.scale_base[i] = reinterpret_cast<const std::uint8_t*>(
-            token ? activation_scales : weight_scales);
-        plan.scale[i] = token ? staged(unit) * groups * 2U
-                              : ((row >> 4U) * groups * 16U + (row & 15U)) * 2U;
+        const bool token    = unit < S::Tokens;
+        const unsigned row  = row_base + unit - S::Tokens;
+        plan.scale_base[i] =
+            reinterpret_cast<const std::uint8_t*>(token ? activation_scales : weight_scales);
+        plan.scale[i] =
+            token ? staged(unit) * groups * 2U : ((row >> 4U) * groups * 16U + (row & 15U)) * 2U;
         plan.scale_stride[i] = token ? 2U : 32U;
-        plan.scale_lds[i] = token ? unit : 64U + unit - S::Tokens;
+        plan.scale_lds[i]    = token ? unit : 64U + unit - S::Tokens;
     }
     return plan;
 }
@@ -129,9 +131,9 @@ __device__ __forceinline__ const T& token_tile_at(const void* base, std::uint32_
 }
 
 template <class S>
-__device__ __forceinline__ TokenTileLoad<S> token_tile_load(
-    const std::uint8_t* low, const std::uint8_t* high, const std::uint8_t* codes,
-    const TokenTilePlan<S>& plan, unsigned group) {
+__device__ __forceinline__ TokenTileLoad<S>
+token_tile_load(const std::uint8_t* low, const std::uint8_t* high, const std::uint8_t* codes,
+                const TokenTilePlan<S>& plan, unsigned group) {
     TokenTileLoad<S> loaded;
     // Scales first: loads complete in order, so their conversion never waits for the code planes.
 #pragma unroll
@@ -143,7 +145,7 @@ __device__ __forceinline__ TokenTileLoad<S> token_tile_load(
     }
 #pragma unroll
     for (unsigned i = 0; i < S::ActivationLoads; ++i) {
-        loaded.activation_low[i] = token_tile_at<uint4>(low, plan.activation[i] + group * 32U);
+        loaded.activation_low[i]  = token_tile_at<uint4>(low, plan.activation[i] + group * 32U);
         loaded.activation_high[i] = token_tile_at<uint4>(high, plan.activation[i] + group * 32U);
     }
 #pragma unroll
@@ -165,17 +167,17 @@ __device__ __forceinline__ void token_tile_store(TokenTileStage<S::Rows>& stage,
 #pragma unroll
     for (unsigned i = 0; i < S::ActivationLoads; ++i) {
         const unsigned first = plan.activation_lds[i], second = (first + 64U) ^ 16U;
-        const auto& lo = loaded.activation_low[i];
-        const auto& hi = loaded.activation_high[i];
-        stage.activation_low[first] = token_tile_u64(lo.x, lo.y);
-        stage.activation_low[second] = token_tile_u64(lo.z, lo.w);
-        stage.activation_high[first] = token_tile_u64(hi.x, hi.y);
+        const auto& lo                = loaded.activation_low[i];
+        const auto& hi                = loaded.activation_high[i];
+        stage.activation_low[first]   = token_tile_u64(lo.x, lo.y);
+        stage.activation_low[second]  = token_tile_u64(lo.z, lo.w);
+        stage.activation_high[first]  = token_tile_u64(hi.x, hi.y);
         stage.activation_high[second] = token_tile_u64(hi.z, hi.w);
     }
 #pragma unroll
     for (unsigned i = 0; i < S::WeightLoads; ++i) {
-        const auto& w = loaded.weights[i];
-        stage.weights[plan.weight_lds[i]] = token_tile_u64(w.x, w.y);
+        const auto& w                          = loaded.weights[i];
+        stage.weights[plan.weight_lds[i]]      = token_tile_u64(w.x, w.y);
         stage.weights[plan.weight_lds[i] + 1U] = token_tile_u64(w.z, w.w);
     }
 #pragma unroll
@@ -192,10 +194,10 @@ __device__ __forceinline__ TokenTileI2 token_tile_fragment(std::uint64_t value) 
 // One G64 group of the wave's Tf x Rf fragments: the production prefill CTA's exact integer chain
 // (high from 0x04B40000, <<4, low) and its FP32 scale product and FMA.
 template <class S>
-__device__ __forceinline__ void token_tile_group(
-    const TokenTileStage<S::Rows>& stage, unsigned wave_token, unsigned wave_row, unsigned axis,
-    unsigned lane_group, const TokenTileI8& high_origin,
-    TokenTileF8 (&totals)[S::Tf_][S::Rf_]) {
+__device__ __forceinline__ void
+token_tile_group(const TokenTileStage<S::Rows>& stage, unsigned wave_token, unsigned wave_row,
+                 unsigned axis, unsigned lane_group, const TokenTileI8& high_origin,
+                 TokenTileF8 (&totals)[S::Tf_][S::Rf_]) {
     constexpr unsigned Tf = S::Tf_, Rf = S::Rf_;
     TokenTileI2 low[2][Tf], high[2][Tf], weights[2][Rf];
 #pragma unroll
@@ -204,8 +206,8 @@ __device__ __forceinline__ void token_tile_group(
 #pragma unroll
         for (unsigned f = 0; f < Tf; ++f) {
             const unsigned index = token_tile_lds_index<64>(pair, wave_token + f * 16U + axis);
-            low[half][f] = token_tile_fragment(stage.activation_low[index]);
-            high[half][f] = token_tile_fragment(stage.activation_high[index]);
+            low[half][f]         = token_tile_fragment(stage.activation_low[index]);
+            high[half][f]        = token_tile_fragment(stage.activation_high[index]);
         }
 #pragma unroll
         for (unsigned r = 0; r < Rf; ++r)
@@ -228,13 +230,13 @@ __device__ __forceinline__ void token_tile_group(
         for (unsigned r = 0; r < Rf; ++r) {
             TokenTileI8 dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
                 true, high[0][f], true, weights[0][r], high_origin, false);
-            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, high[1][f], true, weights[1][r], dot, false);
+            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, high[1][f], true,
+                                                                   weights[1][r], dot, false);
             dot = dot << 4;
-            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, low[0][f], true, weights[0][r], dot, false);
-            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, low[1][f], true, weights[1][r], dot, false);
+            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false, low[0][f], true,
+                                                                   weights[0][r], dot, false);
+            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false, low[1][f], true,
+                                                                   weights[1][r], dot, false);
 #pragma unroll
             for (unsigned e = 0; e < 8U; ++e)
                 totals[f][r][e] = fmaf(__int_as_float(dot[e]) - 12582912.0F,
@@ -261,7 +263,7 @@ struct TokenTileShared {
     union {
         TokenTileStage<S::Rows> stage[S::Ks_][2];
         // Later slices' sums, [(slice-1, wave, accumulator)][element][lane]; one slot when Ks=1.
-        float partial[S::Ks_ > 1U ? (S::Ks_ - 1U) * S::SliceWaves * S::Accumulators : 1U][8][32];
+        float partial[S::Ks_ > 1U ? (S::Ks_ - 1U) * S::SliceWaves* S::Accumulators : 1U][8][32];
     };
 };
 
@@ -276,43 +278,43 @@ __global__ __launch_bounds__(S::Threads) void a8q4_token_tile_kernel(
     constexpr unsigned Tf = S::Tf_, Rf = S::Rf_, Ks = S::Ks_, Pd = S::Pd_;
     __shared__ TokenTileShared<S> shared;
     const unsigned thread = threadIdx.x, lane = thread & 31U;
-    const unsigned wave = __builtin_amdgcn_readfirstlane(thread >> 5U);
+    const unsigned wave  = __builtin_amdgcn_readfirstlane(thread >> 5U);
     const unsigned slice = wave / S::SliceWaves, slice_wave = wave % S::SliceWaves;
     const unsigned slice_thread = slice_wave * 32U + lane;
     const unsigned axis = lane & 15U, lane_group = lane >> 4U;
-    const unsigned row_base = blockIdx.x * S::Rows;
-    const unsigned wave_token = (slice_wave % S::TokenWaves) * Tf * 16U;
-    const unsigned wave_row = (slice_wave / S::TokenWaves) * Rf * 16U;
+    const unsigned row_base    = blockIdx.x * S::Rows;
+    const unsigned wave_token  = (slice_wave % S::TokenWaves) * Tf * 16U;
+    const unsigned wave_row    = (slice_wave / S::TokenWaves) * Rf * 16U;
     const auto for_each_output = [&](auto&& visit) {
-#pragma unroll
+#    pragma unroll
         for (unsigned f = 0; f < Tf; ++f)
-#pragma unroll
+#    pragma unroll
             for (unsigned r = 0; r < Rf; ++r)
-#pragma unroll
+#    pragma unroll
                 for (unsigned e = 0; e < 8U; ++e) {
                     const unsigned token = wave_token + f * 16U + lane_group * 8U + e;
                     if (token < tokens)
-                        visit(f, r, e, output[static_cast<std::size_t>(token) * rows + row_base +
-                                              wave_row + r * 16U + axis]);
+                        visit(f, r, e,
+                              output[static_cast<std::size_t>(token) * rows + row_base + wave_row +
+                                     r * 16U + axis]);
                 }
     };
     if (*status != Q4G64ActivationOk) {
         if (slice != 0U) return;
-        for_each_output([](unsigned, unsigned, unsigned, hip_bfloat16& target) {
-            target.data = 0x7fc1;
-        });
+        for_each_output(
+            [](unsigned, unsigned, unsigned, hip_bfloat16& target) { target.data = 0x7fc1; });
         return;
     }
     const unsigned slice_groups = groups / Ks, first = slice * slice_groups;
-    const TokenTilePlan<S> plan = token_tile_plan<S>(activation_scales, weight_scales,
-                                                     slice_thread, tokens, row_base, groups);
-    const auto load = [&](unsigned group) {
+    const TokenTilePlan<S> plan = token_tile_plan<S>(activation_scales, weight_scales, slice_thread,
+                                                     tokens, row_base, groups);
+    const auto load             = [&](unsigned group) {
         return token_tile_load<S>(low, high, codes, plan, first + group);
     };
     TokenTileStage<S::Rows>(&stage)[2] = shared.stage[slice];
     TokenTileF8 totals[Tf][Rf]{};
     TokenTileI8 high_origin;
-#pragma unroll
+#    pragma unroll
     for (unsigned e = 0; e < 8U; ++e) high_origin[e] = 0x04B40000;
     const auto compute = [&](unsigned bank) {
         token_tile_group<S>(stage[bank], wave_token, wave_row, axis, lane_group, high_origin,
@@ -356,28 +358,29 @@ __global__ __launch_bounds__(S::Threads) void a8q4_token_tile_kernel(
     if constexpr (Ks > 1U) {
         token_tile_barrier();
         if (slice != 0U) {
-#pragma unroll
+#    pragma unroll
             for (unsigned f = 0; f < Tf; ++f)
-#pragma unroll
+#    pragma unroll
                 for (unsigned r = 0; r < Rf; ++r)
-#pragma unroll
+#    pragma unroll
                     for (unsigned e = 0; e < 8U; ++e)
-                        shared.partial[((slice - 1U) * S::SliceWaves + slice_wave) *
-                                           S::Accumulators + f * Rf + r][e][lane] =
-                            totals[f][r][e];
+                        shared
+                            .partial[((slice - 1U) * S::SliceWaves + slice_wave) * S::Accumulators +
+                                     f * Rf + r][e][lane] = totals[f][r][e];
         }
         token_tile_barrier();
         if (slice != 0U) return;
-#pragma unroll
+#    pragma unroll
         for (unsigned s = 0; s + 1U < Ks; ++s)
-#pragma unroll
+#    pragma unroll
             for (unsigned f = 0; f < Tf; ++f)
-#pragma unroll
+#    pragma unroll
                 for (unsigned r = 0; r < Rf; ++r)
-#pragma unroll
+#    pragma unroll
                     for (unsigned e = 0; e < 8U; ++e)
-                        totals[f][r][e] += shared.partial[(s * S::SliceWaves + slice_wave) *
-                                                          S::Accumulators + f * Rf + r][e][lane];
+                        totals[f][r][e] +=
+                            shared.partial[(s * S::SliceWaves + slice_wave) * S::Accumulators +
+                                           f * Rf + r][e][lane];
     }
     for_each_output([&](unsigned f, unsigned r, unsigned e, hip_bfloat16& target) {
         const hip_bfloat16 projection = static_cast<hip_bfloat16>(totals[f][r][e]);
@@ -388,8 +391,16 @@ __global__ __launch_bounds__(S::Threads) void a8q4_token_tile_kernel(
             target = projection;
     });
 #else
-    (void)low; (void)high; (void)activation_scales; (void)status; (void)codes;
-    (void)weight_scales; (void)output; (void)tokens; (void)rows; (void)groups;
+    (void)low;
+    (void)high;
+    (void)activation_scales;
+    (void)status;
+    (void)codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
+    (void)groups;
 #endif
 }
-}
+} // namespace ninfer::ops::r9700::linear::detail

@@ -46,9 +46,8 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
  *   BF16-rounded projection boundary, not bitwise equality with T1, is shared across the two
  *   routes. Hidden and weight storage are 16-byte aligned.
  */
-void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
-                                  const Weight& b_weight, const Tensor& A_log,
-                                  const Tensor& dt_bias, Tensor& g, Tensor& beta,
-                                  hipStream_t stream);
+void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight, const Weight& b_weight,
+                               const Tensor& A_log, const Tensor& dt_bias, Tensor& g, Tensor& beta,
+                               hipStream_t stream);
 
 } // namespace ninfer::ops

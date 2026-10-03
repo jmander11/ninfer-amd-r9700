@@ -45,9 +45,8 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
  * arguments may overlap either state.
  */
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk,
-                     const Tensor& ssm_state_in, Tensor& ssm_state_out, Tensor& out,
-                     hipStream_t stream);
+                     const Tensor& beta, float scale, bool normalize_qk, const Tensor& ssm_state_in,
+                     Tensor& ssm_state_out, Tensor& out, hipStream_t stream);
 
 /**
  * Diagnostic ordinary recurrence form. In addition to the normal final state and output, writes
@@ -56,10 +55,11 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
  * contract is T=129 and prefix_tokens=128: it compares the wide-prefill prefix with the exact
  * restored append frontier without adding a second production recurrence route.
  */
-void gated_delta_net_trace_prefix_state(
-    const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g, const Tensor& beta,
-    float scale, bool normalize_qk, Tensor& ssm_state, Tensor& out,
-    Tensor& prefix_state, std::int32_t prefix_tokens, hipStream_t stream);
+void gated_delta_net_trace_prefix_state(const Tensor& q, const Tensor& k, const Tensor& v,
+                                        const Tensor& g, const Tensor& beta, float scale,
+                                        bool normalize_qk, Tensor& ssm_state, Tensor& out,
+                                        Tensor& prefix_state, std::int32_t prefix_tokens,
+                                        hipStream_t stream);
 
 /**
  * Snapshot form for B independent recurrences. q/k are contiguous BF16 [128,Hqk,W,B], v/out are
@@ -105,8 +105,9 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
  * in HBM. Tree mode requires that caller-owned workspace; sequential record allocates no arena
  * workspace.
  */
-[[nodiscard]] std::size_t gated_delta_net_replay_record_workspace_capacity_bytes(
-    std::int32_t value_heads, std::int32_t batch, std::int32_t width);
+[[nodiscard]] std::size_t
+gated_delta_net_replay_record_workspace_capacity_bytes(std::int32_t value_heads, std::int32_t batch,
+                                                       std::int32_t width);
 
 void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tensor& v,
                                    const Tensor& g, const Tensor& beta, float scale,
@@ -114,7 +115,6 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                                    const Tensor& initial_state_slots, Tensor& key_record,
                                    Tensor& value_record, Tensor& gate_record, Tensor& out,
                                    hipStream_t stream, const Tensor* parent_index = nullptr,
-                                   WorkspaceArena* workspace = nullptr,
-                                   const CacheWarm& warm = {});
+                                   WorkspaceArena* workspace = nullptr, const CacheWarm& warm = {});
 
 } // namespace ninfer::ops

@@ -65,21 +65,25 @@ class A8Q4PrefillTrafficTest(unittest.TestCase):
         self.assertEqual(old.waves, m64.waves)
         self.assertLess(m32.total_requested_bytes, old.total_requested_bytes)
         self.assertLess(m64.total_requested_bytes, m32.total_requested_bytes)
-        self.assertGreater(m64.logical_ops_per_requested_byte,
-                           m32.logical_ops_per_requested_byte)
+        self.assertGreater(m64.logical_ops_per_requested_byte, m32.logical_ops_per_requested_byte)
 
     def test_m64_n256_halves_activation_rereads_at_exact_production_rows(self) -> None:
-        weights = {(7168, 5120): 32, (4096, 5120): 48, (12288, 5120): 48,
-                   (5120, 6144): 65, (34816, 5120): 65, (5120, 17408): 65,
-                   (5120, 10240): 1, (1024, 5120): 0}
+        weights = {
+            (7168, 5120): 32,
+            (4096, 5120): 48,
+            (12288, 5120): 48,
+            (5120, 6144): 65,
+            (34816, 5120): 65,
+            (5120, 17408): 65,
+            (5120, 10240): 1,
+            (1024, 5120): 0,
+        }
         production_total = challenger_total = 0
         for (rows, columns), count in weights.items():
             production = requested_traffic(Shape(2048, rows, columns), M64_N128)
             challenger = requested_traffic(Shape(2048, rows, columns), M64_N256)
-            self.assertEqual(challenger.activation_code_bytes * 2,
-                             production.activation_code_bytes)
-            self.assertEqual(challenger.weight_code_bytes,
-                             production.weight_code_bytes)
+            self.assertEqual(challenger.activation_code_bytes * 2, production.activation_code_bytes)
+            self.assertEqual(challenger.weight_code_bytes, production.weight_code_bytes)
             self.assertEqual(challenger.output_bytes, production.output_bytes)
             self.assertEqual(challenger.static_lds_bytes, 12928)
             production_total += count * production.total_requested_bytes
@@ -135,8 +139,7 @@ class A8Q4PrefillTrafficTest(unittest.TestCase):
         self.assertGreater(traffic.issued_iu8_ops, traffic.logical_ops)
 
     def test_w8_real_shapes_preserve_waves_and_reduce_requests(self) -> None:
-        for rows, columns in ((12288, 5120), (5120, 17408),
-                              (5120, 6144), (7168, 5120)):
+        for rows, columns in ((12288, 5120), (5120, 17408), (5120, 6144), (7168, 5120)):
             shape = Shape(4096, rows, columns)
             old = requested_w8_traffic(shape, W8_OLD_WAVE16)
             cta = requested_w8_traffic(shape, W8_M64_N64)

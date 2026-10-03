@@ -78,7 +78,9 @@ def exact_role_inventory() -> dict[str, dict[str, object]]:
             raise ValueError(f"role {role} does not have one fixed shape")
         if any(q4[name].shape != shape or fp8[name].shape != shape for name, shape in objects):
             raise ValueError(f"role {role} differs from the exact converter inventories")
-        q4_bytes = sum(encoded_size(q4[name].layout, q4[name].format, q4[name].shape) for name in names)
+        q4_bytes = sum(
+            encoded_size(q4[name].layout, q4[name].format, q4[name].shape) for name in names
+        )
         fp8_bytes = sum(
             encoded_size(fp8[name].layout, fp8[name].format, fp8[name].shape) for name in names
         )
@@ -154,8 +156,11 @@ def validate_qualifier(
     if any(
         report.get(field) is not True
         for field in (
-            "direct_weight_binding", "outer_vector_scales", "nonfinite_status_poisoning",
-            "q4_nonfinite_status_poisoning", "no_clobber_rejection",
+            "direct_weight_binding",
+            "outer_vector_scales",
+            "nonfinite_status_poisoning",
+            "q4_nonfinite_status_poisoning",
+            "no_clobber_rejection",
         )
     ):
         raise ValueError(f"{qualification_id}: correctness/rejection gate failed")
@@ -231,8 +236,12 @@ def _select_roles(candidates: Sequence[Mapping[str, object]], budget: int) -> tu
 
 
 def decide(
-    *, gate: Mapping[str, object], hybrid: Mapping[str, object], capacity: Mapping[str, object],
-    qualifiers: Mapping[str, Mapping[str, object]], provenance: Mapping[str, object]
+    *,
+    gate: Mapping[str, object],
+    hybrid: Mapping[str, object],
+    capacity: Mapping[str, object],
+    qualifiers: Mapping[str, Mapping[str, object]],
+    provenance: Mapping[str, object],
 ) -> dict[str, object]:
     if (
         gate.get("schema") != GATE_SCHEMA
@@ -256,9 +265,14 @@ def decide(
     candidates = []
     for role, exact in inventory.items():
         observed = by_role[role]
-        if any(observed.get(field) != exact[field] for field in ("object_count", "objects", "added_resident_bytes")):
+        if any(
+            observed.get(field) != exact[field]
+            for field in ("object_count", "objects", "added_resident_bytes")
+        ):
             raise ValueError(f"hybrid {role} inventory differs")
-        candidates.append({**exact, "q4_measured_service_ns": int(observed["q4_measured_service_ns"])})
+        candidates.append(
+            {**exact, "q4_measured_service_ns": int(observed["q4_measured_service_ns"])}
+        )
 
     gate_inventory = gate.get("inventory")
     if not isinstance(gate_inventory, Mapping) or any(
@@ -302,11 +316,9 @@ def decide(
     for cell in gate_cells:
         key = (int(cell["prefill_chunk"]), int(cell["kv_value_group"]), int(cell["concurrency"]))
         maximum = direct_budgets[key]
-        if (
-            int(cell["maximum_fp8_over_q4_bytes"]) != maximum
-            or int(cell["capacity_slack_bytes"])
-            != maximum - int(inventory[GATE_ROLE]["added_resident_bytes"])
-        ):
+        if int(cell["maximum_fp8_over_q4_bytes"]) != maximum or int(
+            cell["capacity_slack_bytes"]
+        ) != maximum - int(inventory[GATE_ROLE]["added_resident_bytes"]):
             raise ValueError("gate-up capacity arithmetic differs from direct planner authority")
     minimum_slack = min(int(cell["capacity_slack_bytes"]) for cell in gate_cells)
     non_gate = [item for item in candidates if item["role"] != GATE_ROLE]
@@ -318,7 +330,10 @@ def decide(
         qualification_id: validate_qualifier(qualifiers[qualification_id], qualification_id)
         for qualification_id in QUALIFICATIONS
     }
-    selected_items = [inventory[role] | {"q4_measured_service_ns": by_role[role]["q4_measured_service_ns"]} for role in selected]
+    selected_items = [
+        inventory[role] | {"q4_measured_service_ns": by_role[role]["q4_measured_service_ns"]}
+        for role in selected
+    ]
     added = sum(int(item["added_resident_bytes"]) for item in selected_items)
     total_added = int(inventory[GATE_ROLE]["added_resident_bytes"]) + added
     roles = []
@@ -336,27 +351,38 @@ def decide(
         additional_saving += saving
         if timing["fp8_over_q4_time_ratio"] >= 1.0:
             reasons.append(f"{qualification_id}_matched_fp8_path_is_not_faster")
-        roles.append({**item, "qualification_id": qualification_id, "matched_measurement": timing,
-                      "projected_fp8_service_ns": projected_fp8, "projected_saving_ns": saving})
+        roles.append(
+            {
+                **item,
+                "qualification_id": qualification_id,
+                "matched_measurement": timing,
+                "projected_fp8_service_ns": projected_fp8,
+                "projected_saving_ns": saving,
+            }
+        )
     capacity_cells = []
     for cell in gate_cells:
         maximum = int(cell["maximum_fp8_over_q4_bytes"])
         slack = maximum - total_added
-        capacity_cells.append({
-            "prefill_chunk": int(cell["prefill_chunk"]),
-            "kv_value_group": int(cell["kv_value_group"]),
-            "concurrency": int(cell["concurrency"]),
-            "maximum_fp8_over_q4_bytes": maximum,
-            "total_selected_added_resident_bytes": total_added,
-            "capacity_slack_bytes": slack,
-            "capacity_preserved": slack >= 0,
-        })
+        capacity_cells.append(
+            {
+                "prefill_chunk": int(cell["prefill_chunk"]),
+                "kv_value_group": int(cell["kv_value_group"]),
+                "concurrency": int(cell["concurrency"]),
+                "maximum_fp8_over_q4_bytes": maximum,
+                "total_selected_added_resident_bytes": total_added,
+                "capacity_slack_bytes": slack,
+                "capacity_preserved": slack >= 0,
+            }
+        )
     if any(not cell["capacity_preserved"] for cell in capacity_cells):
         reasons.append("selected_roles_exceed_at_least_one_capacity_envelope")
     gate_projection = gate.get("whole_p2048_projection")
     if not isinstance(gate_projection, Mapping):
         raise ValueError("gate-up projection absent")
-    projected_prefill = float(gate_projection["projected_prefill_seconds"]) - additional_saving / 1e9
+    projected_prefill = (
+        float(gate_projection["projected_prefill_seconds"]) - additional_saving / 1e9
+    )
     projected_total = float(gate_projection["projected_total_seconds"]) - additional_saving / 1e9
     if additional_saving <= 0:
         reasons.append("additional_roles_do_not_improve_projected_whole")
@@ -380,14 +406,23 @@ def decide(
         },
         "qualifications": measurements,
         "capacity": {
-            "all_cells_preserve_minimum_startup": all(cell["capacity_preserved"] for cell in capacity_cells),
-            "cells": sorted(capacity_cells, key=lambda x: (x["prefill_chunk"], x["kv_value_group"], x["concurrency"])),
+            "all_cells_preserve_minimum_startup": all(
+                cell["capacity_preserved"] for cell in capacity_cells
+            ),
+            "cells": sorted(
+                capacity_cells,
+                key=lambda x: (x["prefill_chunk"], x["kv_value_group"], x["concurrency"]),
+            ),
         },
         "whole_p2048_projection": {
             "gate_up_projected_prefill_seconds": gate_projection["projected_prefill_seconds"],
             "gate_up_projected_total_seconds": gate_projection["projected_total_seconds"],
-            "additional_measured_q4_service_ns": sum(int(item["q4_measured_service_ns"]) for item in selected_items),
-            "additional_projected_fp8_service_ns": sum(float(item["projected_fp8_service_ns"]) for item in roles),
+            "additional_measured_q4_service_ns": sum(
+                int(item["q4_measured_service_ns"]) for item in selected_items
+            ),
+            "additional_projected_fp8_service_ns": sum(
+                float(item["projected_fp8_service_ns"]) for item in roles
+            ),
             "additional_projected_saving_ns": additional_saving,
             "projected_prefill_seconds": projected_prefill,
             "projected_prefill_tok_s": TOKENS / projected_prefill,
@@ -414,14 +449,22 @@ def main() -> int:
         parser.add_argument(f"--{name.replace('_', '-')}-sha256", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    paths = {name.replace("-", "_"): getattr(args, name.replace("-", "_")) for name in ("gate-decision", "hybrid", "capacity")}
+    paths = {
+        name.replace("-", "_"): getattr(args, name.replace("-", "_"))
+        for name in ("gate-decision", "hybrid", "capacity")
+    }
     paths.update({name: getattr(args, name) for name in QUALIFICATIONS})
     expected = {name: getattr(args, f"{name}_sha256") for name in paths}
     loaded = {name: _load_bound(path, expected[name]) for name, path in paths.items()}
-    provenance = {name: {"path": str(path), "sha256": expected[name]} for name, path in paths.items()}
+    provenance = {
+        name: {"path": str(path), "sha256": expected[name]} for name, path in paths.items()
+    }
     report = decide(
-        gate=loaded["gate_decision"], hybrid=loaded["hybrid"], capacity=loaded["capacity"],
-        qualifiers={name: loaded[name] for name in QUALIFICATIONS}, provenance=provenance,
+        gate=loaded["gate_decision"],
+        hybrid=loaded["hybrid"],
+        capacity=loaded["capacity"],
+        qualifiers={name: loaded[name] for name in QUALIFICATIONS},
+        provenance=provenance,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)

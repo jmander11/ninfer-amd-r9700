@@ -47,15 +47,11 @@ class E4M3RowwiseScalarOracleTest(unittest.TestCase):
             codec.decode_e4m3_rowwise_reference(bytes([0x7F]) + bytes(259), 1, 1)
         with self.assertRaisesRegex(ValueError, "zero-scale"):
             codec.decode_e4m3_rowwise_reference(bytes([1]) + bytes(259), 1, 1)
-        nonzero_k_padding = bytearray(
-            codec.encode_e4m3_rowwise_reference([1.0], 1, 1)
-        )
+        nonzero_k_padding = bytearray(codec.encode_e4m3_rowwise_reference([1.0], 1, 1))
         nonzero_k_padding[1] = 1
         with self.assertRaisesRegex(ValueError, "K128 padding"):
             codec.decode_e4m3_rowwise_reference(bytes(nonzero_k_padding), 1, 1)
-        nonzero_plane_padding = bytearray(
-            codec.encode_e4m3_rowwise_reference([1.0], 1, 1)
-        )
+        nonzero_plane_padding = bytearray(codec.encode_e4m3_rowwise_reference([1.0], 1, 1))
         nonzero_plane_padding[128] = 1
         with self.assertRaisesRegex(ValueError, "alignment padding"):
             codec.decode_e4m3_rowwise_reference(bytes(nonzero_plane_padding), 1, 1)
@@ -68,9 +64,7 @@ class E4M3RowwiseVectorizedCodecTest(unittest.TestCase):
             values = [rng.gauss(0.0, 0.021) for _ in range(2 * columns)]
             matrix = torch.tensor(values, dtype=torch.bfloat16).reshape(2, columns)
             represented = matrix.float().reshape(-1).tolist()
-            expected = codec.encode_e4m3_rowwise_reference(
-                represented, 2, columns
-            )
+            expected = codec.encode_e4m3_rowwise_reference(represented, 2, columns)
             actual = encode_e4m3_rowwise(matrix)
             self.assertEqual(actual, expected, f"K={columns}")
             self.assertEqual(
@@ -79,9 +73,7 @@ class E4M3RowwiseVectorizedCodecTest(unittest.TestCase):
                 f"streamed K={columns}",
             )
             decoded = decode_e4m3_rowwise(actual, 2, columns)
-            scalar_decoded, _, _ = codec.decode_e4m3_rowwise_reference(
-                actual, 2, columns
-            )
+            scalar_decoded, _, _ = codec.decode_e4m3_rowwise_reference(actual, 2, columns)
             self.assertEqual(decoded.reshape(-1).tolist(), scalar_decoded)
             metrics = error_metrics(matrix, decoded)
             self.assertLess(metrics["relative_l2"], 0.03)
@@ -110,9 +102,7 @@ class E4M3RowwiseRealSourceTest(unittest.TestCase):
         from safetensors import safe_open
 
         root = Path(os.environ["NINFER_QWEN38_BF16_MODEL"])
-        index = json.loads((root / "model.safetensors.index.json").read_text())[
-            "weight_map"
-        ]
+        index = json.loads((root / "model.safetensors.index.json").read_text())["weight_map"]
         cases = {
             "model.language_model.layers.0.mlp.gate_proj.weight": (17408, 5120),
             "model.language_model.layers.3.self_attn.o_proj.weight": (5120, 6144),
@@ -124,9 +114,7 @@ class E4M3RowwiseRealSourceTest(unittest.TestCase):
                 view = source.get_slice(name)
                 self.assertEqual(tuple(view.get_shape()), expected_shape)
                 sample = view[:8, :]
-            decoded = decode_e4m3_rowwise(
-                encode_e4m3_rowwise(sample), *sample.shape
-            )
+            decoded = decode_e4m3_rowwise(encode_e4m3_rowwise(sample), *sample.shape)
             metrics = error_metrics(sample, decoded)
             self.assertLess(metrics["relative_l2"], 0.03, name)
 

@@ -20,7 +20,7 @@ struct VisionWeightPlan {
 
 struct VisionMatrixFormats {
     artifact::NumericFormat source_q4 = artifact::NumericFormat::W8G32_F16S;
-    artifact::NumericFormat other = artifact::NumericFormat::W8G32_F16S;
+    artifact::NumericFormat other     = artifact::NumericFormat::W8G32_F16S;
 };
 
 struct VisionBackboneConfig {

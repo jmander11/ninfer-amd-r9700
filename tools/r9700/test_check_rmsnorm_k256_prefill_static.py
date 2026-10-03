@@ -7,8 +7,14 @@ from tools.r9700.check_rmsnorm_k256_prefill_static import check
 SYMBOL = "_ZN6ninfer3ops5r97005eager12_GLOBAL__N_128rmsnorm_k256_token8_kernelEv"
 
 
-def fixture(*, operation: str = "global_load_b128 v[0:3], v0, off", vgprs: int = 24,
-            occupancy: int = 16, lds: int = 0, scratch: int = 0) -> str:
+def fixture(
+    *,
+    operation: str = "global_load_b128 v[0:3], v0, off",
+    vgprs: int = 24,
+    occupancy: int = 16,
+    lds: int = 0,
+    scratch: int = 0,
+) -> str:
     return f"""\t.globl {SYMBOL} ; -- Begin function {SYMBOL}
 {SYMBOL}:
   {operation}
@@ -46,8 +52,12 @@ class StaticCheckTest(unittest.TestCase):
             self.run_check(fixture(operation="global_load_b128 v[0:3], v0, off\n  s_barrier"))
 
     def test_rejects_resources(self):
-        for text in (fixture(vgprs=65), fixture(occupancy=11), fixture(lds=16),
-                     fixture(scratch=16)):
+        for text in (
+            fixture(vgprs=65),
+            fixture(occupancy=11),
+            fixture(lds=16),
+            fixture(scratch=16),
+        ):
             with self.subTest(text=text):
                 with self.assertRaisesRegex(ValueError, "resources|must be zero"):
                     self.run_check(text)

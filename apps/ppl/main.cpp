@@ -44,15 +44,17 @@ std::vector<ninfer::TokenId> load_ids(const std::string& path, std::uint32_t lim
     std::vector<ninfer::TokenId> ids;
     std::string word;
     while (input >> word) {
-        char* end                      = nullptr;
-        const unsigned long value      = std::strtoul(word.c_str(), &end, 10);
+        char* end                 = nullptr;
+        const unsigned long value = std::strtoul(word.c_str(), &end, 10);
         if (end == word.c_str() || *end != '\0' || value > 2147483647ul) {
             throw std::invalid_argument("invalid corpus token id: " + word);
         }
         ids.push_back(static_cast<ninfer::TokenId>(value));
         if (limit > 0 && ids.size() >= limit) { break; }
     }
-    if (ids.size() < 2) { throw std::invalid_argument("corpus must contain at least two token ids"); }
+    if (ids.size() < 2) {
+        throw std::invalid_argument("corpus must contain at least two token ids");
+    }
     return ids;
 }
 
@@ -88,10 +90,9 @@ void write_sidecar(const std::string& json_path, std::string_view suffix,
 }
 
 void write_cell_json(const std::string& path, const std::string& scheme, const std::string& weights,
-                      const ninfer::LoadSummary& load, std::uint32_t prefill_chunk,
-                      bool use_device_graph,
-                      ninfer::SpeculativeBackend spec, std::uint32_t draft_tokens,
-                      const ninfer::ScoreResult& score) {
+                     const ninfer::LoadSummary& load, std::uint32_t prefill_chunk,
+                     bool use_device_graph, ninfer::SpeculativeBackend spec,
+                     std::uint32_t draft_tokens, const ninfer::ScoreResult& score) {
     std::ostringstream body;
     body << std::setprecision(17);
     body << "{\n"
@@ -100,41 +101,35 @@ void write_cell_json(const std::string& path, const std::string& scheme, const s
          << "  \"model_id\": " << json_escape(load.model_id) << ",\n"
          << "  \"weights_id\": " << json_escape(load.weights_id) << ",\n"
          << "  \"kv_format\": \"fp8-k-int4-v\",\n"
-         << "  \"kv_value_group\": "
-         << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup << ",\n"
+         << "  \"kv_value_group\": " << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup
+         << ",\n"
          << "  \"kv_plane_layouts\": {\"key\": \""
-         << ninfer::targets::qwen3::detail::kR9700TextKVKeyPlaneLayoutName
-         << "\", \"value\": \""
+         << ninfer::targets::qwen3::detail::kR9700TextKVKeyPlaneLayoutName << "\", \"value\": \""
          << ninfer::targets::qwen3::detail::kR9700TextKVValuePlaneLayoutName
          << "\", \"value_scale\": \""
-         << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName
-         << "\"},\n"
-         << "  \"q4_activation_bits\": "
-         << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
-         << "  \"q4_activation_profile\": \""
-         << ninfer::ops::r9700::linear::kQ4ActivationProfile << "\",\n"
+         << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName << "\"},\n"
+         << "  \"q4_activation_bits\": " << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
+         << "  \"q4_activation_profile\": \"" << ninfer::ops::r9700::linear::kQ4ActivationProfile
+         << "\",\n"
          << "  \"q4_prefill_gate_up_a4\": "
          << (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false") << ",\n"
-         << "  \"q4_prefill_cta_profile\": \""
-         << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << "\",\n"
-         << "  \"w8_activation_bits\": "
-         << ninfer::ops::r9700::linear::kW8ActivationBits << ",\n"
+         << "  \"q4_prefill_cta_profile\": \"" << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile
+         << "\",\n"
+         << "  \"w8_activation_bits\": " << ninfer::ops::r9700::linear::kW8ActivationBits << ",\n"
          << "  \"split512_enabled\": "
          << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false") << ",\n"
          << "  \"decode_attention_profile\": \"packed-t1to6-split512-t4tree-v1\",\n"
          << "  \"packed_decode_min_context\": "
          << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext << ",\n"
-         << "  \"split512_min_context\": "
-         << ninfer::ops::r9700::kv::kSplit512MinimumContext << ",\n"
+         << "  \"split512_min_context\": " << ninfer::ops::r9700::kv::kSplit512MinimumContext
+         << ",\n"
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
          << "  \"xattention_qualification\": true,\n"
-         << "  \"xattention_profile\": \"b128-s"
-         << NINFER_R9700_XATTENTION_STRIDE << "-tau"
+         << "  \"xattention_profile\": \"b128-s" << NINFER_R9700_XATTENTION_STRIDE << "-tau"
          << NINFER_R9700_XATTENTION_TAU_PERMILLE << "\",\n"
          << "  \"xattention_find_block\": 128,\n"
          << "  \"xattention_stride\": " << NINFER_R9700_XATTENTION_STRIDE << ",\n"
-         << "  \"xattention_tau_permille\": "
-         << NINFER_R9700_XATTENTION_TAU_PERMILLE << ",\n"
+         << "  \"xattention_tau_permille\": " << NINFER_R9700_XATTENTION_TAU_PERMILLE << ",\n"
 #else
          << "  \"xattention_qualification\": false,\n"
 #endif
@@ -219,21 +214,23 @@ int main(int argc, char** argv) {
         std::string out_json;
         ninfer::ScoreOptions score_options;
         ninfer::SpeculativeOptions speculative;
-        std::uint32_t tokens            = 0;
-        std::uint32_t max_context       = 4096;
-        std::uint32_t prefill_chunk     = ninfer::kDefaultPrefillChunk;
-        int device                      = 0;
-        bool help                       = false;
-        bool encode                     = false;
-        bool enable_vision              = false;
-        bool enable_thinking            = false;
-        bool score_last_message         = false;
-        bool skip_set                   = false;
-        bool use_device_graph             = true;
+        std::uint32_t tokens        = 0;
+        std::uint32_t max_context   = 4096;
+        std::uint32_t prefill_chunk = ninfer::kDefaultPrefillChunk;
+        int device                  = 0;
+        bool help                   = false;
+        bool encode                 = false;
+        bool enable_vision          = false;
+        bool enable_thinking        = false;
+        bool score_last_message     = false;
+        bool skip_set               = false;
+        bool use_device_graph       = true;
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg(argv[i]);
             auto value = [&](const char* flag) -> const char* {
-                if (i + 1 >= argc) { throw std::invalid_argument(std::string(flag) + " requires a value"); }
+                if (i + 1 >= argc) {
+                    throw std::invalid_argument(std::string(flag) + " requires a value");
+                }
                 return argv[++i];
             };
             if (arg == "-h" || arg == "--help") {
@@ -258,7 +255,8 @@ int main(int argc, char** argv) {
             } else if (arg == "--spec") {
                 speculative.backend = ninfer::product::parse_speculative_backend(value("--spec"));
             } else if (arg == "--draft-tokens") {
-                speculative.draft_tokens = static_cast<std::uint32_t>(std::stoul(value("--draft-tokens")));
+                speculative.draft_tokens =
+                    static_cast<std::uint32_t>(std::stoul(value("--draft-tokens")));
             } else if (arg == "--dflash-verify-width") {
                 speculative.dflash_verify_width =
                     static_cast<std::uint32_t>(std::stoul(value("--dflash-verify-width")));
@@ -291,8 +289,10 @@ int main(int argc, char** argv) {
         if (help) {
             std::cout
                 << "Usage: ninfer-ppl --weights <artifact.ninfer> --ids <corpus.ids> [options]\n"
-                << "       ninfer-ppl --weights <artifact.ninfer> --messages <messages.json> [--vision] [options]\n"
-                << "       ninfer-ppl --encode --weights <artifact.ninfer> --text <file> --ids <out.ids>\n"
+                << "       ninfer-ppl --weights <artifact.ninfer> --messages <messages.json> "
+                   "[--vision] [options]\n"
+                << "       ninfer-ppl --encode --weights <artifact.ninfer> --text <file> --ids "
+                   "<out.ids>\n"
                 << "  --scheme <name>             cell name (default: r9700-fp8k-int4v)\n"
                 << "  --schedule <prefill|decode> default prefill (causal Text attention)\n"
                 << "  --skip <half|n>             warmup tokens not scored (default: half)\n"
@@ -341,10 +341,10 @@ int main(int argc, char** argv) {
         std::vector<ninfer::TokenId> ids;
         if (!ids_path.empty()) { ids = load_ids(ids_path, tokens); }
         ninfer::EngineOptions options;
-        options.artifact_path    = weights;
-        options.device           = device;
-        options.max_context      = ids.empty() ? max_context : static_cast<std::uint32_t>(ids.size());
-        options.kv_capacity      = ninfer::KvCapacityPolicy::explicit_capacity(options.max_context);
+        options.artifact_path = weights;
+        options.device        = device;
+        options.max_context   = ids.empty() ? max_context : static_cast<std::uint32_t>(ids.size());
+        options.kv_capacity   = ninfer::KvCapacityPolicy::explicit_capacity(options.max_context);
         options.max_concurrency  = 1;
         options.prefill_chunk    = prefill_chunk;
         options.speculative      = speculative;

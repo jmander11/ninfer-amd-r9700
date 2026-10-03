@@ -32,12 +32,12 @@
 
 namespace ninfer::targets::qwen3 {
 
-inline constexpr float kAdaptiveEwma              = 32.0f;
-inline constexpr float kAdaptiveEwmaAlpha         = 2.0f / (kAdaptiveEwma + 1.0f);
-inline constexpr float kAdaptiveDiscount          = 1.0f - kAdaptiveEwmaAlpha;
-inline constexpr float kAdaptiveBetaPrior         = 1.0f;
-inline constexpr std::uint32_t kAdaptiveTBins     = 16;
-inline constexpr float kAdaptiveSwitchSeconds     = 0.001f;
+inline constexpr float kAdaptiveEwma          = 32.0f;
+inline constexpr float kAdaptiveEwmaAlpha     = 2.0f / (kAdaptiveEwma + 1.0f);
+inline constexpr float kAdaptiveDiscount      = 1.0f - kAdaptiveEwmaAlpha;
+inline constexpr float kAdaptiveBetaPrior     = 1.0f;
+inline constexpr std::uint32_t kAdaptiveTBins = 16;
+inline constexpr float kAdaptiveSwitchSeconds = 0.001f;
 // Deepest tracked hop: DFlash chains up to K7.
 inline constexpr std::uint32_t kAdaptiveMaximumHops = 7;
 // DFlash: a newly reached hop starts from the continued r with this Beta weight,
@@ -45,13 +45,13 @@ inline constexpr std::uint32_t kAdaptiveMaximumHops = 7;
 inline constexpr float kAdaptiveContinuedPriorWeight = 4.0f;
 
 struct AdaptiveDraftState {
-    std::uint32_t live_k      = 0;
-    std::uint32_t rounds_at_k = 0;
-    std::uint32_t observed    = 0;
+    std::uint32_t live_k              = 0;
+    std::uint32_t rounds_at_k         = 0;
+    std::uint32_t observed            = 0;
     float alpha[kAdaptiveMaximumHops] = {};
     float beta[kAdaptiveMaximumHops]  = {};
-    std::uint8_t r_seen       = 0;
-    std::uint64_t rounds_hist[16] = {};
+    std::uint8_t r_seen               = 0;
+    std::uint64_t rounds_hist[16]     = {};
 };
 
 struct AdaptiveRoundTimeState {
@@ -73,13 +73,13 @@ struct AdaptiveDraftConfig {
     std::uint32_t length_tokens              = 0;
     float switch_seconds                     = kAdaptiveSwitchSeconds;
     // DFlash target-only rows still publish one token. MTP retains its policy.
-    bool count_target_only_rows              = false;
+    bool count_target_only_rows = false;
     // DFlash: unseen deeper hops continue the deepest observed r_i.
-    bool extrapolate_unseen_hops             = false;
+    bool extrapolate_unseen_hops = false;
 };
 
-[[nodiscard]] inline std::vector<std::uint32_t>
-adaptive_draft_ks(SpeculativeBackend backend, std::uint32_t n, bool adaptive) {
+[[nodiscard]] inline std::vector<std::uint32_t> adaptive_draft_ks(SpeculativeBackend backend,
+                                                                  std::uint32_t n, bool adaptive) {
     if (!adaptive || backend == SpeculativeBackend::None || n == 0) { return {n}; }
     std::vector<std::uint32_t> out;
     if (backend == SpeculativeBackend::Mtp) {
@@ -91,8 +91,8 @@ adaptive_draft_ks(SpeculativeBackend backend, std::uint32_t n, bool adaptive) {
     return out;
 }
 
-[[nodiscard]] inline std::uint32_t
-adaptive_k_index(std::span<const std::uint32_t> captured_ks, std::uint32_t k) {
+[[nodiscard]] inline std::uint32_t adaptive_k_index(std::span<const std::uint32_t> captured_ks,
+                                                    std::uint32_t k) {
     for (std::uint32_t i = 0; i < captured_ks.size(); ++i) {
         if (captured_ks[i] == k) { return i; }
     }
@@ -104,10 +104,11 @@ adaptive_k_index(std::span<const std::uint32_t> captured_ks, std::uint32_t k) {
     return max_concurrency * (1U + max_planned_topology);
 }
 
-[[nodiscard]] inline std::uint32_t
-adaptive_topology_class(std::uint32_t k_index, std::uint32_t k_stride,
-                        std::uint32_t planned_topology, std::uint32_t max_concurrency,
-                        std::uint32_t batch_size) {
+[[nodiscard]] inline std::uint32_t adaptive_topology_class(std::uint32_t k_index,
+                                                           std::uint32_t k_stride,
+                                                           std::uint32_t planned_topology,
+                                                           std::uint32_t max_concurrency,
+                                                           std::uint32_t batch_size) {
     return k_index * k_stride + planned_topology * max_concurrency + (batch_size - 1U);
 }
 
@@ -120,8 +121,8 @@ adaptive_snap_captured_k(std::span<const std::uint32_t> captured_ks, std::uint32
     return captured_ks.back();
 }
 
-[[nodiscard]] inline std::uint32_t
-adaptive_batch_k(std::span<const std::uint32_t> row_k, std::span<const std::uint32_t> captured_ks) {
+[[nodiscard]] inline std::uint32_t adaptive_batch_k(std::span<const std::uint32_t> row_k,
+                                                    std::span<const std::uint32_t> captured_ks) {
     std::uint32_t batch_k = 0;
     for (std::uint32_t k : row_k) { batch_k = std::max(batch_k, k); }
     return adaptive_snap_captured_k(captured_ks, batch_k);
@@ -199,8 +200,11 @@ namespace detail {
     float r               = 0.0f;
     const std::uint32_t n = std::min(k, kAdaptiveMaximumHops);
     for (std::uint32_t i = 0; i < n; ++i) {
-        if (r_seen_at(state, i)) { r = r_mean(state, i); }
-        else if (i == 0) { return e; }
+        if (r_seen_at(state, i)) {
+            r = r_mean(state, i);
+        } else if (i == 0) {
+            return e;
+        }
         run *= r;
         e += run;
     }
@@ -300,8 +304,8 @@ inline void t_lookup(const AdaptiveRoundTimeState* st, std::uint32_t k, std::uin
 
 [[nodiscard]] inline float adaptive_t_hat(const AdaptiveRoundTimeState& st, std::uint32_t k,
                                           std::uint32_t length_tokens) {
-    float t        = 0.0f;
-    bool measured  = false;
+    float t       = 0.0f;
+    bool measured = false;
     detail::t_lookup(&st, k, length_tokens, t, measured);
     (void)measured;
     return t;
@@ -354,8 +358,7 @@ inline void adaptive_assign_live_k(std::span<AdaptiveDraftState*> states, std::u
 }
 
 [[nodiscard]] inline std::uint32_t
-adaptive_select_k(const AdaptiveDraftConfig& cfg,
-                  std::span<const AdaptiveDraftState* const> states,
+adaptive_select_k(const AdaptiveDraftConfig& cfg, std::span<const AdaptiveDraftState* const> states,
                   std::span<const std::uint32_t> row_cap, std::uint32_t cap_k,
                   std::uint32_t live_k) {
     if (cfg.captured_ks.empty() || states.empty()) { return cap_k; }
@@ -368,12 +371,10 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
         bool measured = false;
         detail::t_lookup(cfg.round_time, k, cfg.length_tokens, t, measured);
         if (!measured || !(t > 0.0f)) { continue; }
-        const float e = detail::row_sum_e(states, row_cap, k, false,
-                                          cfg.count_target_only_rows,
+        const float e = detail::row_sum_e(states, row_cap, k, false, cfg.count_target_only_rows,
                                           cfg.extrapolate_unseen_hops);
         if (!(e > 0.0f)) { continue; }
-        const float t_eff =
-            t + ((live_k != 0 && k != live_k) ? cfg.switch_seconds : 0.0f);
+        const float t_eff = t + ((live_k != 0 && k != live_k) ? cfg.switch_seconds : 0.0f);
         if (!(t_eff > 0.0f)) { continue; }
         const float sc = e / t_eff;
         if (sc > best_s) {
@@ -393,12 +394,10 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
             break;
         }
     }
-    if (probe == 0) {
-        return best != 0 ? best : cfg.captured_ks.front();
-    }
+    if (probe == 0) { return best != 0 ? best : cfg.captured_ks.front(); }
 
-    float t_lb       = 0.0f;
-    bool probe_meas  = false;
+    float t_lb      = 0.0f;
+    bool probe_meas = false;
     detail::t_lookup(cfg.round_time, probe, cfg.length_tokens, t_lb, probe_meas);
     if (!(t_lb > 0.0f) && best != 0) {
         bool dummy = false;
@@ -406,13 +405,9 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
     }
     if (!(t_lb > 0.0f)) { return probe; }
 
-    const float e_opt = detail::row_sum_e(states, row_cap, probe, true,
-                                         cfg.count_target_only_rows);
-    const float t_eff =
-        t_lb + ((live_k != 0 && probe != live_k) ? cfg.switch_seconds : 0.0f);
-    if (!(e_opt > 0.0f) || !(t_eff > 0.0f)) {
-        return best != 0 ? best : probe;
-    }
+    const float e_opt = detail::row_sum_e(states, row_cap, probe, true, cfg.count_target_only_rows);
+    const float t_eff = t_lb + ((live_k != 0 && probe != live_k) ? cfg.switch_seconds : 0.0f);
+    if (!(e_opt > 0.0f) || !(t_eff > 0.0f)) { return best != 0 ? best : probe; }
     const float sc_opt = e_opt / t_eff;
     if (best == 0 || sc_opt > best_s) { return probe; }
     return best;
@@ -422,50 +417,49 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
 // allowance. Preserve normal exploration within the logical envelope; an extra
 // padded route requires a measured cost at this exact batch size and enough
 // physical context in every row. The caller owns the per-C round-time state.
-[[nodiscard]] inline std::uint32_t adaptive_dflash_physical_k(
-    const AdaptiveDraftConfig& cfg,
-    std::span<const AdaptiveDraftState* const> states,
-    std::span<const std::uint32_t> logical_extents,
-    std::uint32_t physical_context_extent, std::uint32_t live_k) {
+[[nodiscard]] inline std::uint32_t
+adaptive_dflash_physical_k(const AdaptiveDraftConfig& cfg,
+                           std::span<const AdaptiveDraftState* const> states,
+                           std::span<const std::uint32_t> logical_extents,
+                           std::uint32_t physical_context_extent, std::uint32_t live_k) {
     if (cfg.captured_ks.empty()) { return 0; }
     const auto logical_k = adaptive_batch_k(logical_extents, cfg.captured_ks);
     std::vector<std::uint32_t> eligible;
     for (const auto k : cfg.captured_ks) {
-        if (k <= logical_k ||
-            (k <= physical_context_extent && cfg.round_time != nullptr &&
-             adaptive_t_measured(*cfg.round_time, k))) {
+        if (k <= logical_k || (k <= physical_context_extent && cfg.round_time != nullptr &&
+                               adaptive_t_measured(*cfg.round_time, k))) {
             eligible.push_back(k);
         }
     }
-    AdaptiveDraftConfig physical = cfg;
-    physical.captured_ks = eligible;
-    physical.count_target_only_rows = true;
+    AdaptiveDraftConfig physical     = cfg;
+    physical.captured_ks             = eligible;
+    physical.count_target_only_rows  = true;
     physical.extrapolate_unseen_hops = true;
     return adaptive_select_k(physical, states, logical_extents, eligible.back(), live_k);
 }
 
-[[nodiscard]] inline std::uint32_t
-adaptive_select_batch_k(std::span<const AdaptiveDraftState* const> states,
-                        std::span<const std::uint32_t> row_k,
-                        std::span<const std::uint32_t> captured_ks,
-                        const AdaptiveRoundTimeState* round_time, std::uint32_t length_tokens,
-                        std::uint32_t live_k) {
+[[nodiscard]] inline std::uint32_t adaptive_select_batch_k(
+    std::span<const AdaptiveDraftState* const> states, std::span<const std::uint32_t> row_k,
+    std::span<const std::uint32_t> captured_ks, const AdaptiveRoundTimeState* round_time,
+    std::uint32_t length_tokens, std::uint32_t live_k) {
     AdaptiveDraftConfig cfg;
-    cfg.captured_ks   = captured_ks;
-    cfg.round_time    = round_time;
-    cfg.length_tokens = length_tokens;
+    cfg.captured_ks           = captured_ks;
+    cfg.round_time            = round_time;
+    cfg.length_tokens         = length_tokens;
     const std::uint32_t cap_k = adaptive_batch_k(row_k, captured_ks);
     return adaptive_select_k(cfg, states, row_k, cap_k, live_k);
 }
 
 [[nodiscard]] inline std::uint32_t
 adaptive_batch_next(AdaptiveBatchKState& batch, std::span<const AdaptiveDraftState* const> states,
-                    std::span<const std::uint32_t> row_k, std::span<const std::uint32_t> captured_ks,
+                    std::span<const std::uint32_t> row_k,
+                    std::span<const std::uint32_t> captured_ks,
                     const AdaptiveRoundTimeState* round_time, std::uint32_t length_tokens) {
     const std::uint32_t next = adaptive_select_batch_k(states, row_k, captured_ks, round_time,
                                                        length_tokens, batch.live_k);
-    if (batch.live_k != 0 && next == batch.live_k) { batch.rounds_at_k += 1; }
-    else {
+    if (batch.live_k != 0 && next == batch.live_k) {
+        batch.rounds_at_k += 1;
+    } else {
         batch.live_k      = next;
         batch.rounds_at_k = 0;
     }
@@ -484,9 +478,9 @@ inline std::uint32_t adaptive_draft_next(const AdaptiveDraftConfig& cfg, Adaptiv
     const std::uint32_t row_cap[] = {budget_extent};
     const std::uint32_t cap_k =
         detail::clamp_to_budget(cfg.captured_ks, budget_extent, budget_extent);
-    const std::uint32_t picked = adaptive_select_k(
-        cfg, std::span<const AdaptiveDraftState* const>(&ptr, 1),
-        std::span<const std::uint32_t>(row_cap, 1), cap_k, state.live_k);
+    const std::uint32_t picked =
+        adaptive_select_k(cfg, std::span<const AdaptiveDraftState* const>(&ptr, 1),
+                          std::span<const std::uint32_t>(row_cap, 1), cap_k, state.live_k);
     const std::uint32_t next = detail::clamp_to_budget(cfg.captured_ks, picked, budget_extent);
     if (next != state.live_k) {
         state.live_k      = next;

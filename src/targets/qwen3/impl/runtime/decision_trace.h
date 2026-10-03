@@ -47,8 +47,7 @@ inline float bf16_to_float(std::uint16_t bits) {
     return value;
 }
 
-inline RankedBf16 rank_bf16(std::span<const std::uint16_t> logits,
-                            std::int32_t valid_rows) {
+inline RankedBf16 rank_bf16(std::span<const std::uint16_t> logits, std::int32_t valid_rows) {
     if (valid_rows < 2 || logits.size() < static_cast<std::size_t>(valid_rows)) {
         throw std::invalid_argument("decision trace requires at least two valid BF16 logits");
     }
@@ -56,8 +55,8 @@ inline RankedBf16 rank_bf16(std::span<const std::uint16_t> logits,
                            std::int32_t current_token) {
         return value > current || (value == current && token < current_token);
     };
-    float first       = -std::numeric_limits<float>::infinity();
-    float second      = -std::numeric_limits<float>::infinity();
+    float first               = -std::numeric_limits<float>::infinity();
+    float second              = -std::numeric_limits<float>::infinity();
     std::int32_t first_token  = std::numeric_limits<std::int32_t>::max();
     std::int32_t second_token = std::numeric_limits<std::int32_t>::max();
     std::uint16_t first_bits  = 0;
@@ -107,12 +106,9 @@ inline bool enabled() { return !output_path().empty(); }
 inline std::string ranked_json(const RankedBf16& ranked) {
     std::ostringstream out;
     out << std::setprecision(std::numeric_limits<float>::max_digits10)
-        << "{\"top1_token\":" << ranked.top1_token
-        << ",\"top1_bf16_bits\":" << ranked.top1_bits
-        << ",\"top1_logit\":" << ranked.top1_logit
-        << ",\"top2_token\":" << ranked.top2_token
-        << ",\"top2_bf16_bits\":" << ranked.top2_bits
-        << ",\"top2_logit\":" << ranked.top2_logit
+        << "{\"top1_token\":" << ranked.top1_token << ",\"top1_bf16_bits\":" << ranked.top1_bits
+        << ",\"top1_logit\":" << ranked.top1_logit << ",\"top2_token\":" << ranked.top2_token
+        << ",\"top2_bf16_bits\":" << ranked.top2_bits << ",\"top2_logit\":" << ranked.top2_logit
         << ",\"margin\":" << ranked.margin << '}';
     return out.str();
 }
@@ -152,8 +148,7 @@ public:
             std::lock_guard<std::mutex> lock(mutex_);
             output_ << "\n  ]\n}\n";
             output_.flush();
-        } catch (...) {
-        }
+        } catch (...) {}
     }
 
     void append(std::string_view event) {
@@ -194,8 +189,8 @@ inline void require_bf16_logits(const Tensor& logits, std::int32_t columns,
 }
 
 inline std::vector<std::uint16_t> copy_logits(const Tensor& logits, std::int32_t columns) {
-    const std::size_t elements = static_cast<std::size_t>(logits.ne[0]) *
-                                 static_cast<std::size_t>(columns);
+    const std::size_t elements =
+        static_cast<std::size_t>(logits.ne[0]) * static_cast<std::size_t>(columns);
     std::vector<std::uint16_t> host(elements);
     HIP_CHECK(hipMemcpy(host.data(), logits.data, elements * sizeof(std::uint16_t),
                         hipMemcpyDeviceToHost));
@@ -210,10 +205,10 @@ inline void record_ordinary(const Tensor& logits, const qwen3::OrdinaryDecodeIng
     const std::vector<std::uint16_t> host = copy_logits(logits, batch_size);
     const std::size_t stride              = static_cast<std::size_t>(logits.ne[0]);
     for (std::int32_t row = 0; row < batch_size; ++row) {
-        const RankedBf16 ranked = rank_bf16(
-            std::span<const std::uint16_t>(host.data() + static_cast<std::size_t>(row) * stride,
-                                           stride),
-            token_domain);
+        const RankedBf16 ranked =
+            rank_bf16(std::span<const std::uint16_t>(
+                          host.data() + static_cast<std::size_t>(row) * stride, stride),
+                      token_domain);
         const std::int32_t input_position = ingress.cache_positions[static_cast<std::size_t>(row)];
         std::ostringstream event;
         event << "{\"kind\":\"ordinary\",\"logits_stage\":\"pre_sample\",\"lane\":"
@@ -268,50 +263,43 @@ inline void record_dflash(const Tensor& logits, const Tensor& target_argmax,
                         host_verify_ids.size() * sizeof(std::int32_t), hipMemcpyDeviceToHost));
     const std::size_t stride = static_cast<std::size_t>(logits.ne[0]);
     for (std::int32_t row = 0; row < batch_size; ++row) {
-        const std::uint32_t count = live_columns[static_cast<std::size_t>(row)];
+        const std::uint32_t count         = live_columns[static_cast<std::size_t>(row)];
         const std::int32_t licensed_count = egress.licensed_counts[static_cast<std::size_t>(row)];
-        if (count == 0 || count > static_cast<std::uint32_t>(verify_width) ||
-            licensed_count <= 0 || licensed_count > verify_width) {
+        if (count == 0 || count > static_cast<std::uint32_t>(verify_width) || licensed_count <= 0 ||
+            licensed_count > verify_width) {
             throw std::logic_error("target decision trace received invalid DFlash extents");
         }
-        const std::int32_t base = ingress.execution_frontiers[static_cast<std::size_t>(row)];
+        const std::int32_t base     = ingress.execution_frontiers[static_cast<std::size_t>(row)];
         const std::int32_t accepted = egress.accepted_drafts[static_cast<std::size_t>(row)];
         const std::int32_t accepted_column = resolved_accepted_column(
             tree_verify, accepted, egress.accepted_column[static_cast<std::size_t>(row)]);
         std::ostringstream event;
-        event << "{\"kind\":\"dflash\",\"lane\":"
-              << ingress.lanes[static_cast<std::size_t>(row)]
-              << ",\"token_domain\":" << token_domain
-              << ",\"verify_width\":" << verify_width
+        event << "{\"kind\":\"dflash\",\"lane\":" << ingress.lanes[static_cast<std::size_t>(row)]
+              << ",\"token_domain\":" << token_domain << ",\"verify_width\":" << verify_width
               << ",\"physical_verify_width\":" << physical_verify_width
               << ",\"tree_verify\":" << (tree_verify ? "true" : "false")
               << ",\"anchor\":" << ingress.anchors[static_cast<std::size_t>(row)]
-              << ",\"base_frontier\":" << base
-              << ",\"context_frontier\":"
+              << ",\"base_frontier\":" << base << ",\"context_frontier\":"
               << ingress.context_frontiers[static_cast<std::size_t>(row)]
-              << ",\"proposal_extent\":"
-              << ingress.proposal_extents[static_cast<std::size_t>(row)]
-              << ",\"accepted_drafts\":" << accepted
-              << ",\"accepted_column\":" << accepted_column
+              << ",\"proposal_extent\":" << ingress.proposal_extents[static_cast<std::size_t>(row)]
+              << ",\"accepted_drafts\":" << accepted << ",\"accepted_column\":" << accepted_column
               << ",\"licensed_tokens\":[";
         for (std::int32_t i = 0; i < licensed_count; ++i) {
             if (i != 0) { event << ','; }
             event << egress.licensed_tokens[static_cast<std::size_t>(row) *
-                                                   static_cast<std::size_t>(verify_width) +
-                                               static_cast<std::size_t>(i)];
+                                                static_cast<std::size_t>(verify_width) +
+                                            static_cast<std::size_t>(i)];
         }
         event << "],\"next_frontier\":" << (static_cast<std::int64_t>(base) + licensed_count)
               << ",\"columns\":[";
         for (std::uint32_t column = 0; column < count; ++column) {
             if (column != 0) { event << ','; }
-            const std::size_t flat = static_cast<std::size_t>(row) *
-                                         static_cast<std::size_t>(verify_width) +
-                                     column;
+            const std::size_t flat =
+                static_cast<std::size_t>(row) * static_cast<std::size_t>(verify_width) + column;
             const RankedBf16 ranked = rank_bf16(
                 std::span<const std::uint16_t>(host_logits.data() + flat * stride, stride),
                 token_domain);
-            event << "{\"column\":" << column
-                  << ",\"logits_stage\":\"pre_accept_target_verify\""
+            event << "{\"column\":" << column << ",\"logits_stage\":\"pre_accept_target_verify\""
                   << ",\"verify_token\":" << host_verify_ids[flat]
                   << ",\"input_cache_position\":" << host_positions[flat]
                   << ",\"absolute_frontier\":" << absolute_frontier(host_positions[flat])

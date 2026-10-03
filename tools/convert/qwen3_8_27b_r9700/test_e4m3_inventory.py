@@ -25,9 +25,7 @@ class E4M3InventoryTest(unittest.TestCase):
         e4m3_inventory.validate_inventory()
         self.assertEqual(len(e4m3_inventory.TENSOR_SPECS), 1118)
         self.assertEqual(len(e4m3_inventory.OBJECT_SPECS), 1124)
-        self.assertEqual(
-            e4m3_inventory.RESOURCE_SPECS, source_inventory.RESOURCE_SPECS
-        )
+        self.assertEqual(e4m3_inventory.RESOURCE_SPECS, source_inventory.RESOURCE_SPECS)
         for source, candidate in zip(
             source_inventory.TENSOR_SPECS,
             e4m3_inventory.TENSOR_SPECS,
@@ -48,9 +46,7 @@ class E4M3InventoryTest(unittest.TestCase):
 
     def test_gate_up_fixture_spec_is_the_exact_inventory_object(self) -> None:
         inventory_spec = next(
-            spec
-            for spec in e4m3_inventory.TENSOR_SPECS
-            if spec.name == FIXTURE_SPEC.name
+            spec for spec in e4m3_inventory.TENSOR_SPECS if spec.name == FIXTURE_SPEC.name
         )
         self.assertEqual(
             (

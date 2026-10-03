@@ -48,15 +48,11 @@ def preflight_conversion(
 ) -> W8MseConversionPreflight:
     model = Path(model_dir)
     w8_mse_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
-    object_plan = family_conversion.build_object_plan(
-        w8_mse_inventory.OBJECT_SPECS, resource_map
-    )
+    object_plan = family_conversion.build_object_plan(w8_mse_inventory.OBJECT_SPECS, resource_map)
     ranking = build_draft_ranking.validate_ranking_provenance(draft_ranking)
     draft = draft_head.compute_shortlist(ranking.ranking_path, model)
     return W8MseConversionPreflight(
@@ -110,9 +106,7 @@ def convert(
             preflight.object_plan.specs,
         ) as writer:
             if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError(
-                    "W8 source-MSE writer plan differs from completed preflight"
-                )
+                raise RuntimeError("W8 source-MSE writer plan differs from completed preflight")
             for index, spec in enumerate(w8_mse_inventory.OBJECT_SPECS, start=1):
                 if isinstance(spec, w8_mse_inventory.ResourceSpec):
                     payload = resource_payloads[spec.name]

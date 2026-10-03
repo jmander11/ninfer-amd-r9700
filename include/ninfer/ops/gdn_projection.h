@@ -17,8 +17,7 @@ namespace ninfer::ops {
  */
 void gdn_input_projection_decode(const Tensor& hidden, const Weight& query_key,
                                  const Weight& value_z, Tensor& query_key_output,
-                                 Tensor& value_z_output,
-                                 const DeviceSpan& activation_workspace,
+                                 Tensor& value_z_output, const DeviceSpan& activation_workspace,
                                  hipStream_t stream);
 
 } // namespace ninfer::ops

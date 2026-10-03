@@ -10,8 +10,7 @@ namespace ninfer {
 namespace {
 
 std::string hip_error_message(const char* prefix, hipError_t error) {
-    return std::string(prefix) + ": " + hipGetErrorName(error) + ": " +
-           hipGetErrorString(error);
+    return std::string(prefix) + ": " + hipGetErrorName(error) + ": " + hipGetErrorString(error);
 }
 
 void log_hip_error(const char* operation, hipError_t error) noexcept {
@@ -45,29 +44,37 @@ void hip_check(hipError_t error, const char* expr, const char* file, int line) {
 }
 
 DeviceContext::DeviceContext(int device_id) : device(device_id) {
-    int count = 0;
+    int count        = 0;
     hipError_t error = hipGetDeviceCount(&count);
-    if (error != hipSuccess) { throw std::runtime_error(hip_error_message("hipGetDeviceCount", error)); }
+    if (error != hipSuccess) {
+        throw std::runtime_error(hip_error_message("hipGetDeviceCount", error));
+    }
     if (count <= 0) { throw std::runtime_error("no HIP devices available"); }
     if (device_id < 0 || device_id >= count) { throw std::runtime_error("invalid HIP device id"); }
 
     error = hipSetDevice(device_id);
     if (error != hipSuccess) { throw std::runtime_error(hip_error_message("hipSetDevice", error)); }
     error = hipSetDeviceFlags(hipDeviceScheduleBlockingSync);
-    if (error != hipSuccess) { throw std::runtime_error(hip_error_message("hipSetDeviceFlags", error)); }
+    if (error != hipSuccess) {
+        throw std::runtime_error(hip_error_message("hipSetDeviceFlags", error));
+    }
     error = hipGetDeviceProperties(&props, device_id);
-    if (error != hipSuccess) { throw std::runtime_error(hip_error_message("hipGetDeviceProperties", error)); }
+    if (error != hipSuccess) {
+        throw std::runtime_error(hip_error_message("hipGetDeviceProperties", error));
+    }
     if (!is_gfx1201() || props.warpSize != 32) {
         throw std::runtime_error("NInfer requires wave32 gfx1201");
     }
 
     hipStream_t compute = nullptr;
-    hipStream_t load = nullptr;
-    hipStream_t copy = nullptr;
-    hipEvent_t order = nullptr;
-    hipEvent_t wait = nullptr;
-    error = hipStreamCreateWithFlags(&compute, hipStreamNonBlocking);
-    if (error != hipSuccess) { throw std::runtime_error(hip_error_message("create compute stream", error)); }
+    hipStream_t load    = nullptr;
+    hipStream_t copy    = nullptr;
+    hipEvent_t order    = nullptr;
+    hipEvent_t wait     = nullptr;
+    error               = hipStreamCreateWithFlags(&compute, hipStreamNonBlocking);
+    if (error != hipSuccess) {
+        throw std::runtime_error(hip_error_message("create compute stream", error));
+    }
     error = hipStreamCreateWithFlags(&load, hipStreamNonBlocking);
     if (error != hipSuccess) {
         destroy_stream(compute);
@@ -94,11 +101,11 @@ DeviceContext::DeviceContext(int device_id) : device(device_id) {
         destroy_stream(compute);
         throw std::runtime_error(hip_error_message("create host-wait event", error));
     }
-    stream = compute;
-    load_stream = load;
-    copy_stream = copy;
+    stream           = compute;
+    load_stream      = load;
+    copy_stream      = copy;
     copy_order_event = order;
-    host_wait = wait;
+    host_wait        = wait;
 }
 
 DeviceContext::~DeviceContext() {
@@ -117,11 +124,11 @@ DeviceContext::DeviceContext(DeviceContext&& other) noexcept
     : device(other.device), stream(other.stream), load_stream(other.load_stream),
       copy_stream(other.copy_stream), copy_order_event(other.copy_order_event),
       host_wait(other.host_wait), props(other.props) {
-    other.stream = nullptr;
-    other.load_stream = nullptr;
-    other.copy_stream = nullptr;
+    other.stream           = nullptr;
+    other.load_stream      = nullptr;
+    other.copy_stream      = nullptr;
     other.copy_order_event = nullptr;
-    other.host_wait = nullptr;
+    other.host_wait        = nullptr;
 }
 
 DeviceContext& DeviceContext::operator=(DeviceContext&& other) noexcept {
@@ -135,18 +142,18 @@ DeviceContext& DeviceContext::operator=(DeviceContext&& other) noexcept {
     destroy_stream(copy_stream);
     destroy_stream(load_stream);
     destroy_stream(stream);
-    device = other.device;
-    props = other.props;
-    stream = other.stream;
-    load_stream = other.load_stream;
-    copy_stream = other.copy_stream;
-    copy_order_event = other.copy_order_event;
-    host_wait = other.host_wait;
-    other.stream = nullptr;
-    other.load_stream = nullptr;
-    other.copy_stream = nullptr;
+    device                 = other.device;
+    props                  = other.props;
+    stream                 = other.stream;
+    load_stream            = other.load_stream;
+    copy_stream            = other.copy_stream;
+    copy_order_event       = other.copy_order_event;
+    host_wait              = other.host_wait;
+    other.stream           = nullptr;
+    other.load_stream      = nullptr;
+    other.copy_stream      = nullptr;
     other.copy_order_event = nullptr;
-    other.host_wait = nullptr;
+    other.host_wait        = nullptr;
     return *this;
 }
 
@@ -185,7 +192,9 @@ DeviceEventTimer::DeviceEventTimer(const DeviceContext& context) : stream_(conte
     hipError_t error = hipSetDevice(context.device);
     if (error != hipSuccess) { throw std::runtime_error(hip_error_message("hipSetDevice", error)); }
     error = hipEventCreate(&start_);
-    if (error != hipSuccess) { throw std::runtime_error(hip_error_message("create timer start", error)); }
+    if (error != hipSuccess) {
+        throw std::runtime_error(hip_error_message("create timer start", error));
+    }
     error = hipEventCreate(&stop_);
     if (error != hipSuccess) {
         destroy_event(start_);
@@ -201,30 +210,33 @@ DeviceEventTimer::~DeviceEventTimer() {
 DeviceEventTimer::DeviceEventTimer(DeviceEventTimer&& other) noexcept
     : stream_(other.stream_), start_(other.start_), stop_(other.stop_) {
     other.stream_ = nullptr;
-    other.start_ = nullptr;
-    other.stop_ = nullptr;
+    other.start_  = nullptr;
+    other.stop_   = nullptr;
 }
 
 DeviceEventTimer& DeviceEventTimer::operator=(DeviceEventTimer&& other) noexcept {
     if (this == &other) { return *this; }
     destroy_event(stop_);
     destroy_event(start_);
-    stream_ = other.stream_;
-    start_ = other.start_;
-    stop_ = other.stop_;
+    stream_       = other.stream_;
+    start_        = other.start_;
+    stop_         = other.stop_;
     other.stream_ = nullptr;
-    other.start_ = nullptr;
-    other.stop_ = nullptr;
+    other.start_  = nullptr;
+    other.stop_   = nullptr;
     return *this;
 }
 
 void DeviceEventTimer::start() { HIP_CHECK(hipEventRecord(start_, stream_)); }
+
 void DeviceEventTimer::record_stop() { HIP_CHECK(hipEventRecord(stop_, stream_)); }
+
 float DeviceEventTimer::elapsed_ms() const {
     float milliseconds = 0.0F;
     HIP_CHECK(hipEventElapsedTime(&milliseconds, start_, stop_));
     return milliseconds;
 }
+
 float DeviceEventTimer::stop_ms() {
     record_stop();
     HIP_CHECK(hipEventSynchronize(stop_));

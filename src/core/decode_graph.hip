@@ -13,8 +13,7 @@ namespace {
 
 void log_hip_error(const char* op, hipError_t error) noexcept {
     if (error != hipSuccess) {
-        std::fprintf(stderr, "HIP cleanup failed during %s: %s\n", op,
-                     hipGetErrorString(error));
+        std::fprintf(stderr, "HIP cleanup failed during %s: %s\n", op, hipGetErrorString(error));
     }
 }
 
@@ -50,16 +49,17 @@ std::string describe_graph_node(hipGraphNode_t node) {
         if (hipGraphKernelNodeGetParams(node, &params) == hipSuccess) {
             const char* name = hipKernelNameRefByPtr(params.func, nullptr);
             out << " kernel=" << (name != nullptr ? name : "unknown")
-                << " grid=" << params.gridDim.x << ',' << params.gridDim.y << ',' << params.gridDim.z
-                << " block=" << params.blockDim.x << ',' << params.blockDim.y << ','
-                << params.blockDim.z << " shared_bytes=" << params.sharedMemBytes;
+                << " grid=" << params.gridDim.x << ',' << params.gridDim.y << ','
+                << params.gridDim.z << " block=" << params.blockDim.x << ',' << params.blockDim.y
+                << ',' << params.blockDim.z << " shared_bytes=" << params.sharedMemBytes;
         }
     } else if (type == hipGraphNodeTypeMemcpy) {
         hipMemcpy3DParms params{};
         if (hipGraphMemcpyNodeGetParams(node, &params) == hipSuccess) {
-            out << " memcpy_kind=" << static_cast<int>(params.kind) << " extent="
-                << params.extent.width << ',' << params.extent.height << ',' << params.extent.depth
-                << " src_pitch=" << params.srcPtr.pitch << " dst_pitch=" << params.dstPtr.pitch;
+            out << " memcpy_kind=" << static_cast<int>(params.kind)
+                << " extent=" << params.extent.width << ',' << params.extent.height << ','
+                << params.extent.depth << " src_pitch=" << params.srcPtr.pitch
+                << " dst_pitch=" << params.dstPtr.pitch;
         }
     } else if (type == hipGraphNodeTypeMemset) {
         hipMemsetParams params{};
@@ -162,8 +162,7 @@ void DecodeGraphExecutable::update(const DecodeGraphDefinition& definition) {
 
     hipGraphNode_t error_node = nullptr;
     hipGraphExecUpdateResult result{};
-    const hipError_t error =
-        hipGraphExecUpdate(exec_, definition.graph_, &error_node, &result);
+    const hipError_t error = hipGraphExecUpdate(exec_, definition.graph_, &error_node, &result);
     if (error != hipSuccess || result != hipGraphExecUpdateSuccess) {
         throw std::runtime_error(
             "HIP Graph executable update failed: " + std::string(hipGetErrorString(error)) +

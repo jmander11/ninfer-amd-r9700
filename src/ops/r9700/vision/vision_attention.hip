@@ -16,13 +16,13 @@
 namespace ninfer::ops {
 namespace {
 
-constexpr int kHeadDim      = 72;
-constexpr int kHeads        = 16;
-constexpr int kMatrixTile   = 16;
-constexpr int kWave         = 32;
+constexpr int kHeadDim       = 72;
+constexpr int kHeads         = 16;
+constexpr int kMatrixTile    = 16;
+constexpr int kWave          = 32;
 constexpr int kWavesPerBlock = 8;
-constexpr int kQueryTile    = kWavesPerBlock * kMatrixTile;
-constexpr int kThreads      = kWave * kWavesPerBlock;
+constexpr int kQueryTile     = kWavesPerBlock * kMatrixTile;
+constexpr int kThreads       = kWave * kWavesPerBlock;
 // Keys staged per iteration; the score and value products run over these two 16-key subtiles.
 constexpr int kKeyTile      = 32;
 constexpr int kKeySubtiles  = kKeyTile / kMatrixTile;
@@ -31,10 +31,10 @@ constexpr int kPaddedDim    = kFeatureTiles * kMatrixTile;
 constexpr int kChunk        = 8; // BF16 elements per 16-byte vector
 constexpr int kChunks       = kHeadDim / kChunk;
 // LDS row pitches (elements): 16-byte aligned rows, offset to spread banks.
-constexpr int kKeyPitch     = kPaddedDim + kChunk;
-constexpr int kValuePitch   = kKeyTile + kChunk;
-constexpr float kScale      = 0.11785113019775792073F;
-constexpr float kLog2Scale  = kScale * 1.44269504088896340736F;
+constexpr int kKeyPitch    = kPaddedDim + kChunk;
+constexpr int kValuePitch  = kKeyTile + kChunk;
+constexpr float kScale     = 0.11785113019775792073F;
+constexpr float kLog2Scale = kScale * 1.44269504088896340736F;
 static_assert(kHeadDim % kChunk == 0);
 
 using Bf16Fragment = short __attribute__((ext_vector_type(8)));
@@ -46,6 +46,7 @@ struct alignas(16) VisionAttentionTile {
     std::int32_t end;
     std::int32_t reserved;
 };
+
 static_assert(sizeof(VisionAttentionTile) == 16);
 
 __global__ void vision_attention_prepare_tiles(const std::int32_t* cu_seqlens, int segments,
@@ -79,18 +80,17 @@ __device__ __forceinline__ short bf16_bits(float value) {
 // product as a BF16 high part plus its BF16 residual.
 __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
     const hip_bfloat16* __restrict__ q, const hip_bfloat16* __restrict__ k,
-    const hip_bfloat16* __restrict__ v, const VisionAttentionTile* __restrict__ tiles,
-    int patches, int uniform_segment_length, hip_bfloat16* __restrict__ output,
-    std::int64_t q_stride_t, std::int64_t k_stride_t, std::int64_t v_stride_t) {
+    const hip_bfloat16* __restrict__ v, const VisionAttentionTile* __restrict__ tiles, int patches,
+    int uniform_segment_length, hip_bfloat16* __restrict__ output, std::int64_t q_stride_t,
+    std::int64_t k_stride_t, std::int64_t v_stride_t) {
     VisionAttentionTile tile;
     if (tiles != nullptr) {
         tile = tiles[blockIdx.x];
     } else if (uniform_segment_length > 0) {
-        const int tiles_per_segment =
-            (uniform_segment_length + kQueryTile - 1) / kQueryTile;
-        const int segment = static_cast<int>(blockIdx.x) / tiles_per_segment;
-        const int within  = static_cast<int>(blockIdx.x) - segment * tiles_per_segment;
-        const int begin   = segment * uniform_segment_length;
+        const int tiles_per_segment = (uniform_segment_length + kQueryTile - 1) / kQueryTile;
+        const int segment           = static_cast<int>(blockIdx.x) / tiles_per_segment;
+        const int within            = static_cast<int>(blockIdx.x) - segment * tiles_per_segment;
+        const int begin             = segment * uniform_segment_length;
         tile = {begin + within * kQueryTile, begin, begin + uniform_segment_length, 0};
     } else {
         tile = {static_cast<int>(blockIdx.x) * kQueryTile, 0, patches, 0};
@@ -100,13 +100,13 @@ __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
     __shared__ __attribute__((aligned(16))) short keys[kKeyTile * kKeyPitch];
     __shared__ __attribute__((aligned(16))) short values_t[kPaddedDim * kValuePitch];
 
-    const int tid   = static_cast<int>(threadIdx.x);
-    const int wave  = tid / kWave;
-    const int lane  = tid % kWave;
-    const int half  = lane / kMatrixTile;
-    const int axis  = lane % kMatrixTile;
-    const int head  = static_cast<int>(blockIdx.y);
-    const int query = tile.q0 + wave * kMatrixTile + axis;
+    const int tid          = static_cast<int>(threadIdx.x);
+    const int wave         = tid / kWave;
+    const int lane         = tid % kWave;
+    const int half         = lane / kMatrixTile;
+    const int axis         = lane % kMatrixTile;
+    const int head         = static_cast<int>(blockIdx.y);
+    const int query        = tile.q0 + wave * kMatrixTile + axis;
     const bool query_valid = query < tile.end;
 
     // Padding features 72..79 of K and of V^T stay zero for every key tile.
@@ -121,7 +121,7 @@ __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
     Bf16Fragment query_fragment[kFeatureTiles];
 #pragma unroll
     for (int feature_tile = 0; feature_tile < kFeatureTiles; ++feature_tile) {
-        const int chunk = feature_tile * 2 + half;
+        const int chunk              = feature_tile * 2 + half;
         query_fragment[feature_tile] = Bf16Fragment{};
         if (query_valid && chunk < kChunks) {
             query_fragment[feature_tile] = *reinterpret_cast<const Bf16Fragment*>(
@@ -172,8 +172,8 @@ __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
 #pragma unroll
             for (int feature_tile = 0; feature_tile < kFeatureTiles; ++feature_tile) {
                 const Bf16Fragment key_fragment = *reinterpret_cast<const Bf16Fragment*>(
-                    &keys[(key_tile * kMatrixTile + axis) * kKeyPitch +
-                          feature_tile * kMatrixTile + half * kChunk]);
+                    &keys[(key_tile * kMatrixTile + axis) * kKeyPitch + feature_tile * kMatrixTile +
+                          half * kChunk]);
                 score[key_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
                     key_fragment, query_fragment[feature_tile], score[key_tile]);
             }
@@ -185,27 +185,28 @@ __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
 #pragma unroll
             for (int item = 0; item < 8; ++item) {
                 const int key = key_base + key_tile * kMatrixTile + half * kChunk + item;
-                const float scaled = key < tile.end ? score[key_tile][item] * kLog2Scale : -INFINITY;
+                const float scaled =
+                    key < tile.end ? score[key_tile][item] * kLog2Scale : -INFINITY;
                 score[key_tile][item] = scaled;
-                tile_maximum = fmaxf(tile_maximum, scaled);
+                tile_maximum          = fmaxf(tile_maximum, scaled);
             }
         }
         tile_maximum = fmaxf(tile_maximum, __shfl_xor(tile_maximum, kMatrixTile, kWave));
         const float next_maximum = fmaxf(maximum, tile_maximum);
-        const float alpha = exp2f(maximum - next_maximum);
-        float tile_sum = 0.0F;
+        const float alpha        = exp2f(maximum - next_maximum);
+        float tile_sum           = 0.0F;
 #pragma unroll
         for (int key_tile = 0; key_tile < kKeySubtiles; ++key_tile) {
 #pragma unroll
             for (int item = 0; item < 8; ++item) {
                 const float probability = exp2f(score[key_tile][item] - next_maximum);
-                score[key_tile][item] = probability;
+                score[key_tile][item]   = probability;
                 tile_sum += probability;
             }
         }
         tile_sum += __shfl_xor(tile_sum, kMatrixTile, kWave);
         denominator = denominator * alpha + tile_sum;
-        maximum = next_maximum;
+        maximum     = next_maximum;
 #pragma unroll
         for (int dimension_tile = 0; dimension_tile < kFeatureTiles; ++dimension_tile) {
             attended[dimension_tile] *= alpha;
@@ -277,8 +278,7 @@ void require_qkv(const Tensor& tensor, std::int32_t patches, const char* label) 
     constexpr std::int64_t element = sizeof(hip_bfloat16);
     if (tensor.nb[0] != element || tensor.nb[1] != element * kHeadDim ||
         tensor.nb[2] < element * kHeadDim * kHeads || tensor.nb[2] % element != 0) {
-        throw std::invalid_argument(std::string("vision_attention: invalid ") + label +
-                                    " strides");
+        throw std::invalid_argument(std::string("vision_attention: invalid ") + label + " strides");
     }
     if (tensor.data == nullptr) {
         throw std::invalid_argument(std::string("vision_attention: ") + label +
@@ -295,8 +295,8 @@ std::int64_t stride_elements(const Tensor& tensor, int dimension) {
 }
 
 void launch_attention(const Tensor& q, const Tensor& k, const Tensor& v,
-                      const VisionAttentionTile* tiles, int uniform_segment_length,
-                      int query_tiles, Tensor& out, hipStream_t stream) {
+                      const VisionAttentionTile* tiles, int uniform_segment_length, int query_tiles,
+                      Tensor& out, hipStream_t stream) {
     const dim3 grid(static_cast<unsigned>(query_tiles), static_cast<unsigned>(kHeads), 1U);
     vision_attention_wave32_kernel<<<grid, kThreads, 0, stream>>>(
         static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
@@ -322,9 +322,8 @@ std::size_t vision_attention_workspace_capacity_bytes(std::int32_t min_patches,
     return layout.peak_bytes(1);
 }
 
-void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
-                      const Tensor& cu_seqlens, WorkspaceArena& workspace, Tensor& out,
-                      hipStream_t stream) {
+void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& cu_seqlens,
+                      WorkspaceArena& workspace, Tensor& out, hipStream_t stream) {
     const int patches  = q.ne[2];
     const int segments = cu_seqlens.ne[0] - 1;
     if (patches <= 0) { throw std::invalid_argument("vision_attention: P must be positive"); }
@@ -340,18 +339,18 @@ void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
         !cu_seqlens.is_contiguous() || cu_seqlens.data == nullptr) {
         throw std::invalid_argument("vision_attention: cu_seqlens must be contiguous I32 [S+1]");
     }
-    auto scope = workspace.scope();
+    auto scope               = workspace.scope();
     Tensor descriptor_tensor = allocate_workspace(workspace, patches, segments);
     VisionAttentionTile* descriptors =
         descriptor_tensor.data == nullptr
             ? nullptr
             : static_cast<VisionAttentionTile*>(descriptor_tensor.data);
-    const int query_tiles = descriptors == nullptr ? (patches + kQueryTile - 1) / kQueryTile
-                                                   : descriptor_tensor.ne[1];
+    const int query_tiles =
+        descriptors == nullptr ? (patches + kQueryTile - 1) / kQueryTile : descriptor_tensor.ne[1];
     if (descriptors != nullptr) {
         vision_attention_prepare_tiles<<<1, 256, 0, stream>>>(
-            static_cast<const std::int32_t*>(cu_seqlens.data), segments, descriptors,
-            query_tiles, patches);
+            static_cast<const std::int32_t*>(cu_seqlens.data), segments, descriptors, query_tiles,
+            patches);
         HIP_CHECK(hipGetLastError());
     }
     launch_attention(q, k, v, descriptors, 0, query_tiles, out, stream);
@@ -371,7 +370,7 @@ void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
     if (segment_length <= 0 || patches % segment_length != 0) {
         throw std::invalid_argument("vision_attention: invalid uniform segment length");
     }
-    const int segments = patches / segment_length;
+    const int segments    = patches / segment_length;
     const int query_tiles = segments * ((segment_length + kQueryTile - 1) / kQueryTile);
     launch_attention(q, k, v, nullptr, segment_length, query_tiles, out, stream);
 }

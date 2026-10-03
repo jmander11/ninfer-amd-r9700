@@ -187,9 +187,7 @@ def _attention(
     all_key_positions = torch.arange(keys.shape[0], device=query.device)
     for begin in range(0, rows, ATTENTION_QUERY_ROWS):
         end = min(rows, begin + ATTENTION_QUERY_ROWS)
-        absolute_query = torch.arange(
-            query_begin + begin, query_begin + end, device=query.device
-        )
+        absolute_query = torch.arange(query_begin + begin, query_begin + end, device=query.device)
         allowed = all_key_positions.unsqueeze(0) <= absolute_query.unsqueeze(1)
         for kv_head in range(KV_HEADS):
             q0 = kv_head * Q_PER_KV
@@ -201,20 +199,29 @@ def _attention(
             scores = scores.masked_fill(~allowed[:, None, :], -torch.inf)
             if detail_trace:
                 detail_trace.capture_attention_kernel_detail(
-                    "masked-qk-fp32", kv_head, scores,
-                    query_begin + begin, query_begin + end,
+                    "masked-qk-fp32",
+                    kv_head,
+                    scores,
+                    query_begin + begin,
+                    query_begin + end,
                 )
             probabilities = torch.softmax(scores, dim=-1, dtype=torch.float32)
             if detail_trace:
                 detail_trace.capture_attention_kernel_detail(
-                    "softmax-fp32", kv_head, probabilities,
-                    query_begin + begin, query_begin + end,
+                    "softmax-fp32",
+                    kv_head,
+                    probabilities,
+                    query_begin + begin,
+                    query_begin + end,
                 )
             attended = _attention_pv(probabilities, v)
             if detail_trace:
                 detail_trace.capture_attention_kernel_detail(
-                    "pv-fp32", kv_head, attended,
-                    query_begin + begin, query_begin + end,
+                    "pv-fp32",
+                    kv_head,
+                    attended,
+                    query_begin + begin,
+                    query_begin + end,
                 )
             output[begin:end, q0:q1] = _bf16(attended)
     return output
@@ -255,9 +262,7 @@ def _gdn_recurrence_naive(
     """Explicit FP32 state-transition authority, used by every T=1 decode span."""
     rows = q.shape[0]
     output = torch.empty_like(value, dtype=torch.bfloat16)
-    head_map = torch.arange(GDN_VALUE_HEADS, device=q.device) // (
-        GDN_VALUE_HEADS // GDN_KEY_HEADS
-    )
+    head_map = torch.arange(GDN_VALUE_HEADS, device=q.device) // (GDN_VALUE_HEADS // GDN_KEY_HEADS)
     current = state
     for row in range(rows):
         key = k[row].float().index_select(0, head_map)
@@ -409,9 +414,7 @@ class LayerMajorTextScorer:
             if self.trace:
                 self.trace.capture_attention_detail(layer, "v-projection", value, begin, end)
             positions = torch.arange(begin, end, device=self.device, dtype=torch.int32)
-            query = _rope(
-                _rmsnorm(query, weights[root + "self_attn.q_norm.weight"]), positions
-            )
+            query = _rope(_rmsnorm(query, weights[root + "self_attn.q_norm.weight"]), positions)
             key = _rope(_rmsnorm(key, weights[root + "self_attn.k_norm.weight"]), positions)
             if self.trace:
                 self.trace.capture_attention_detail(layer, "rope-q", query, begin, end)
@@ -429,20 +432,19 @@ class LayerMajorTextScorer:
                 quantized_cache.append(begin, key, value)
                 represented_keys, represented_values = quantized_cache.read(end)
             attended = _attention(
-                query, represented_keys, represented_values, begin,
+                query,
+                represented_keys,
+                represented_values,
+                begin,
                 self.trace if layer == 3 else None,
             )
             if self.trace:
-                self.trace.capture_attention_detail(
-                    layer, "attended-output", attended, begin, end
-                )
+                self.trace.capture_attention_detail(layer, "attended-output", attended, begin, end)
             gated = _bf16(torch.sigmoid(gate.float()) * attended.float()).reshape(
                 end - begin, Q_HEADS * HEAD_DIM
             )
             if self.trace:
-                self.trace.capture_attention_detail(
-                    layer, "gated-flatten", gated, begin, end
-                )
+                self.trace.capture_attention_detail(layer, "gated-flatten", gated, begin, end)
             update = _linear(gated, weights[root + "self_attn.o_proj.weight"])
             if self.trace:
                 self.trace.capture_attention_detail(
@@ -450,9 +452,7 @@ class LayerMajorTextScorer:
                 )
             residual = _residual(x, update)
             if self.trace:
-                self.trace.capture_attention_detail(
-                    layer, "post-residual", residual, begin, end
-                )
+                self.trace.capture_attention_detail(layer, "post-residual", residual, begin, end)
             hidden[begin:end] = residual
 
     def _gdn_layer(
@@ -482,9 +482,11 @@ class LayerMajorTextScorer:
             b = _linear(normalized, weights[root + "linear_attn.in_proj_b.weight"]).float()
             z = _linear(normalized, weights[root + "linear_attn.in_proj_z.weight"])
             sequence = torch.cat((conv_state.t(), qkv.float()), dim=0)
-            convolved = F.conv1d(
-                sequence.t().unsqueeze(0), conv_weight, groups=CONV_CHANNELS
-            ).squeeze(0).t()
+            convolved = (
+                F.conv1d(sequence.t().unsqueeze(0), conv_weight, groups=CONV_CHANNELS)
+                .squeeze(0)
+                .t()
+            )
             conv_state = sequence[-(CONV_WIDTH - 1) :].t().contiguous()
             qkv = _bf16(F.silu(convolved))
             (q0, q1), (k0, k1), (v0, v1) = GDN_QKV_RANGES
@@ -497,9 +499,7 @@ class LayerMajorTextScorer:
             )
             decay = -torch.exp(a_log) * softplus
             beta = torch.sigmoid(b)
-            recurrent, state = _gdn_recurrence(
-                query, key, value, decay, beta, state
-            )
+            recurrent, state = _gdn_recurrence(query, key, value, decay, beta, state)
             recurrent = _rmsnorm(
                 recurrent,
                 weights[root + "linear_attn.norm.weight"],
@@ -529,20 +529,24 @@ class LayerMajorTextScorer:
         update = _linear(activated, weights[root + "mlp.down_proj.weight"])
         hidden[begin:end] = _residual(x, update)
 
-    def _score_output(self, hidden: torch.Tensor, ids: list[int], skip: int) -> tuple[list[float], list[int]]:
+    def _score_output(
+        self, hidden: torch.Tensor, ids: list[int], skip: int
+    ) -> tuple[list[float], list[int]]:
         norm = self.checkpoint.load("model.language_model.norm.weight", self.device)
         for begin in range(0, hidden.shape[0], self.prefill_chunk):
             end = min(hidden.shape[0], begin + self.prefill_chunk)
             hidden[begin:end] = _rmsnorm(hidden[begin:end], norm)
         del norm
-        if self.trace: self.trace.capture_hidden("final-norm", hidden)
+        if self.trace:
+            self.trace.capture_hidden("final-norm", hidden)
         head = self.checkpoint.load("lm_head.weight", self.device)
         nlls: list[float] = []
         argmax_ids: list[int] = []
         for begin in range(skip, hidden.shape[0], LOGIT_ROWS):
             end = min(hidden.shape[0], begin + LOGIT_ROWS)
             logits = _linear(hidden[begin:end], head)[:, :TOKEN_DOMAIN]
-            if self.trace: self.trace.capture_logits(begin, end, logits)
+            if self.trace:
+                self.trace.capture_logits(begin, end, logits)
             logits_fp32 = logits.float()
             targets = torch.tensor(ids[begin + 1 : end + 1], device=self.device, dtype=torch.long)
             nll = torch.logsumexp(logits_fp32, dim=-1) - logits_fp32.gather(
@@ -561,7 +565,8 @@ class LayerMajorTextScorer:
         # The last prompt token has no teacher-forced target and cannot affect an earlier causal
         # output. Excluding it saves one hidden row while preserving every represented score.
         hidden = self.checkpoint.embedding_rows(ids[:-1], self.device)
-        if self.trace: self.trace.capture_hidden("embedding", hidden)
+        if self.trace:
+            self.trace.capture_hidden("embedding", hidden)
         torch.cuda.synchronize(self.device)
         started = time.perf_counter()
         with torch.inference_mode():
@@ -571,10 +576,15 @@ class LayerMajorTextScorer:
                     self._full_attention_layer(hidden, layer, weights, prefix)
                 else:
                     self._gdn_layer(hidden, layer, weights, prefix)
-                if self.trace: self.trace.capture_hidden(f"layer-{layer:02d}.{'attention' if layer in FULL_ATTENTION_LAYERS else 'gdn'}", hidden)
+                if self.trace:
+                    self.trace.capture_hidden(
+                        f"layer-{layer:02d}.{'attention' if layer in FULL_ATTENTION_LAYERS else 'gdn'}",
+                        hidden,
+                    )
                 for begin, end in self._spans(hidden.shape[0], prefix):
                     self._mlp_span(hidden, begin, end, layer, weights)
-                if self.trace: self.trace.capture_hidden(f"layer-{layer:02d}.mlp", hidden)
+                if self.trace:
+                    self.trace.capture_hidden(f"layer-{layer:02d}.mlp", hidden)
                 del weights
                 gc.collect()
                 torch.cuda.empty_cache()

@@ -12,7 +12,7 @@
 // Device-side per-token E4M3 row encoder shared by the activation producers and fused fronts.
 namespace ninfer::ops::r9700::linear::fp8_encode {
 
-constexpr std::uint32_t kWaveSize = 32U;
+constexpr std::uint32_t kWaveSize  = 32U;
 constexpr float kE4M3FiniteMaximum = 448.0F;
 
 template <std::uint32_t Threads>
@@ -37,8 +37,8 @@ __device__ __forceinline__ void encode_rows(const Cta& cta, EncodeShared<Threads
     const std::uint32_t thread = cta.thread();
     const std::uint32_t lane = thread % kWaveSize, wave = thread / kWaveSize;
     const auto exists = [&](std::uint32_t v) { return v * Threads + thread < Vectors; };
-    float maximum = 0.0F;
-    unsigned bad = 0U;
+    float maximum     = 0.0F;
+    unsigned bad      = 0U;
 #pragma unroll
     for (std::uint32_t v = 0; v < V; ++v) {
         if (!exists(v)) continue;
@@ -55,11 +55,11 @@ __device__ __forceinline__ void encode_rows(const Cta& cta, EncodeShared<Threads
     }
     if (lane == 0U) {
         shared.wave_maxima[wave] = maximum;
-        shared.wave_bad[wave] = bad;
+        shared.wave_bad[wave]    = bad;
     }
     cta.sync();
     float row_maximum = 0.0F;
-    unsigned row_bad = 0U;
+    unsigned row_bad  = 0U;
 #pragma unroll
     for (std::uint32_t index = 0; index < Threads / kWaveSize; ++index) {
         row_maximum = fmaxf(row_maximum, shared.wave_maxima[index]);
@@ -93,7 +93,7 @@ __device__ __forceinline__ void unpack8(uint4 packed, float (&values)[8]) {
     const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
 #pragma unroll
     for (int w = 0; w < 4; ++w) {
-        values[2 * w] = __uint_as_float(words[w] << 16);
+        values[2 * w]     = __uint_as_float(words[w] << 16);
         values[2 * w + 1] = __uint_as_float(words[w] & 0xffff0000U);
     }
 }

@@ -23,14 +23,15 @@ using fp8_encode::encode_rows;
 using fp8_encode::EncodeShared;
 using fp8_encode::unpack8;
 
-inline constexpr std::uint32_t kWaveSize      = 32U;
-inline constexpr std::uint32_t kBlockSize     = 256U;
-inline constexpr float kE4M3FiniteMaximum     = 448.0F;
+inline constexpr std::uint32_t kWaveSize  = 32U;
+inline constexpr std::uint32_t kBlockSize = 256U;
+inline constexpr float kE4M3FiniteMaximum = 448.0F;
 
 // ---- Arbitrary-width rows, one CTA per row (kBlockSize threads at launch). The row maximum and
 // nonfinite flag are order-independent and the codes elementwise, so any CTA width of at most
 // kWaveSize waves encodes the row identically.
 inline constexpr std::uint32_t kQuantizeMaximumWaves = kWaveSize;
+
 struct QuantizeShared {
     float wave_maxima[kQuantizeMaximumWaves];
     unsigned wave_bad[kQuantizeMaximumWaves];
@@ -39,28 +40,28 @@ struct QuantizeShared {
 };
 
 template <class Cta>
-__device__ __forceinline__ void quantize_activation_row(
-    const Cta& cta, QuantizeShared& shared, std::uint32_t token, const hip_bfloat16* input,
-    std::uint8_t* codes, float* scales, std::uint32_t* status, std::uint32_t columns,
-    std::uint32_t padded) {
+__device__ __forceinline__ void
+quantize_activation_row(const Cta& cta, QuantizeShared& shared, std::uint32_t token,
+                        const hip_bfloat16* input, std::uint8_t* codes, float* scales,
+                        std::uint32_t* status, std::uint32_t columns, std::uint32_t padded) {
     const std::uint32_t thread = cta.thread(), threads = cta.threads();
     const std::uint32_t lane = thread % kWaveSize;
     const std::uint32_t wave = thread / kWaveSize;
-    float local_maximum = 0.0F;
-    unsigned local_bad  = 0U;
-    const auto observe = [&](float value) {
+    float local_maximum      = 0.0F;
+    unsigned local_bad       = 0U;
+    const auto observe       = [&](float value) {
         local_bad |= static_cast<unsigned>(!isfinite(value));
         if (isfinite(value)) local_maximum = fmaxf(local_maximum, fabsf(value));
     };
     // Eight-column 16-byte rows when every token row is aligned; the codec is unchanged.
-    const bool vectorized = columns % 8U == 0U &&
-        reinterpret_cast<std::uintptr_t>(input) % 16U == 0U;
+    const bool vectorized =
+        columns % 8U == 0U && reinterpret_cast<std::uintptr_t>(input) % 16U == 0U;
     const hip_bfloat16* row = input + static_cast<std::size_t>(token) * columns;
     if (vectorized) {
         const auto* vectors = reinterpret_cast<const uint4*>(row);
 #pragma unroll 4
         for (std::uint32_t i = thread; i < columns / 8U; i += threads) {
-            const uint4 packed = vectors[i];
+            const uint4 packed           = vectors[i];
             const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
 #pragma unroll
             for (int w = 0; w < 4; ++w) {
@@ -81,49 +82,49 @@ __device__ __forceinline__ void quantize_activation_row(
 
     if (lane == 0U) {
         shared.wave_maxima[wave] = local_maximum;
-        shared.wave_bad[wave] = local_bad;
+        shared.wave_bad[wave]    = local_bad;
     }
     cta.sync();
 
     if (wave == 0U) {
         const std::uint32_t waves = threads / kWaveSize;
-        float maximum = lane < waves ? shared.wave_maxima[lane] : 0.0F;
-        unsigned bad  = lane < waves ? shared.wave_bad[lane] : 0U;
+        float maximum             = lane < waves ? shared.wave_maxima[lane] : 0.0F;
+        unsigned bad              = lane < waves ? shared.wave_bad[lane] : 0U;
 #pragma unroll
         for (std::uint32_t delta = kWaveSize / 2U; delta != 0U; delta >>= 1U) {
             maximum = fmaxf(maximum, __shfl_down(maximum, delta, kWaveSize));
             bad |= __shfl_down(bad, delta, kWaveSize);
         }
         if (lane == 0U) {
-            shared.token_bad = bad != 0U;
+            shared.token_bad   = bad != 0U;
             shared.token_scale = bad != 0U ? 0.0F : maximum / kE4M3FiniteMaximum;
-            scales[token] = shared.token_scale;
-            status[token] = bad != 0U ? Fp8ActivationNonfinite : Fp8ActivationOk;
+            scales[token]      = shared.token_scale;
+            status[token]      = bad != 0U ? Fp8ActivationNonfinite : Fp8ActivationOk;
         }
     }
     cta.sync();
 
     const float token_scale = shared.token_scale;
-    const auto encode = [&](float value) {
+    const auto encode       = [&](float value) {
         return static_cast<std::uint8_t>(
             __hip_cvt_float_to_fp8(value / token_scale, __HIP_SATFINITE, __HIP_E4M3));
     };
-    const bool encoded = shared.token_bad == 0U && token_scale != 0.0F;
+    const bool encoded     = shared.token_bad == 0U && token_scale != 0.0F;
     std::uint8_t* code_row = codes + static_cast<std::size_t>(token) * padded;
-    std::uint32_t tail = 0U;
+    std::uint32_t tail     = 0U;
     if (vectorized) {
         const auto* vectors = reinterpret_cast<const uint4*>(row);
         for (std::uint32_t i = thread; i < columns / 8U; i += threads) {
             std::uint32_t packed_codes[2] = {0U, 0U};
             if (encoded) {
-                const uint4 packed = vectors[i];
+                const uint4 packed           = vectors[i];
                 const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
 #pragma unroll
                 for (int w = 0; w < 4; ++w) {
                     const std::uint32_t pair =
                         static_cast<std::uint32_t>(encode(__uint_as_float(words[w] << 16))) |
-                        (static_cast<std::uint32_t>(
-                             encode(__uint_as_float(words[w] & 0xffff0000U))) << 8U);
+                        (static_cast<std::uint32_t>(encode(__uint_as_float(words[w] & 0xffff0000U)))
+                         << 8U);
                     packed_codes[w / 2] |= pair << (16U * (w % 2));
                 }
             }
@@ -141,20 +142,19 @@ __device__ __forceinline__ void quantize_activation_row(
 // A resident grid strides over tokens: grids beyond about 2048 waves paid a ~30 us dispatch
 // penalty on gfx1201 whatever the row width. Each token row is quantized independently.
 template <class Cta>
-__device__ __forceinline__ void quantize_activation_body(
-    const Cta& cta, QuantizeShared& shared, const hip_bfloat16* input, std::uint8_t* codes,
-    float* scales, std::uint32_t* status, std::uint32_t tokens, std::uint32_t columns,
-    std::uint32_t padded, const CacheWarm& warm, std::uint32_t work_ctas) {
+__device__ __forceinline__ void
+quantize_activation_body(const Cta& cta, QuantizeShared& shared, const hip_bfloat16* input,
+                         std::uint8_t* codes, float* scales, std::uint32_t* status,
+                         std::uint32_t tokens, std::uint32_t columns, std::uint32_t padded,
+                         const CacheWarm& warm, std::uint32_t work_ctas) {
     const std::uint32_t block = cta.block().x;
     if (block >= work_ctas) {
-        warm_cache(warm, block - work_ctas, cta.grid().x - work_ctas, cta.thread(),
-                   cta.threads());
+        warm_cache(warm, block - work_ctas, cta.grid().x - work_ctas, cta.thread(), cta.threads());
         return;
     }
     for (std::uint32_t token = block; token < tokens; token += work_ctas) {
-        quantize_activation_row(cta, shared, token, input, codes, scales, status, columns,
-                                padded);
-        cta.sync();  // the next row reuses the context's reduction storage
+        quantize_activation_row(cta, shared, token, input, codes, scales, status, columns, padded);
+        cta.sync(); // the next row reuses the context's reduction storage
     }
 }
 
@@ -167,8 +167,8 @@ __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
 // 640-thread row, per-thread FMA sum of squares, wave butterfly, then the wave sums in ascending
 // order.
 inline constexpr std::uint32_t kNormFeatures = 5120U;
-inline constexpr std::uint32_t kNormThreads = kNormFeatures / 8U;
-inline constexpr std::uint32_t kNormWaves = kNormThreads / kWaveSize;
+inline constexpr std::uint32_t kNormThreads  = kNormFeatures / 8U;
+inline constexpr std::uint32_t kNormWaves    = kNormThreads / kWaveSize;
 
 __device__ __forceinline__ float norm_vector_sumsq(const float (&values)[8]) {
     float sumsq = 0.0F;
@@ -177,16 +177,16 @@ __device__ __forceinline__ float norm_vector_sumsq(const float (&values)[8]) {
 #pragma unroll
     for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
         sumsq += __shfl_xor(sumsq, width, kWaveSize);
-    return sumsq;  // identical in every lane
+    return sumsq; // identical in every lane
 }
 
 __device__ __forceinline__ void norm_vector_apply(float (&values)[8], uint4 gains, float inverse,
                                                   bool unit_offset) {
     const std::uint32_t gain_words[4] = {gains.x, gains.y, gains.z, gains.w};
-    const float offset = unit_offset ? 1.0F : 0.0F;
+    const float offset                = unit_offset ? 1.0F : 0.0F;
 #pragma unroll
     for (int w = 0; w < 4; ++w) {
-        const float low_gain = __uint_as_float(gain_words[w] << 16) + offset;
+        const float low_gain  = __uint_as_float(gain_words[w] << 16) + offset;
         const float high_gain = __uint_as_float(gain_words[w] & 0xffff0000U) + offset;
         values[2 * w] = static_cast<float>(hip_bfloat16(values[2 * w] * inverse * low_gain));
         values[2 * w + 1] =
@@ -204,8 +204,7 @@ template <std::uint32_t Threads, class Cta>
 __device__ __forceinline__ void quantize_normalized_body(
     const Cta& cta, NormalizedShared<Threads>& shared, const hip_bfloat16* input,
     const hip_bfloat16* weight, float eps, bool unit_offset, std::uint8_t* codes, float* scales,
-    std::uint32_t* status, hip_bfloat16* normalized, const CacheWarm& warm,
-    std::uint32_t tokens) {
+    std::uint32_t* status, hip_bfloat16* normalized, const CacheWarm& warm, std::uint32_t tokens) {
     static_assert(Threads % kWaveSize == 0U);
     constexpr std::uint32_t V = (kNormThreads + Threads - 1U) / Threads;
     const std::uint32_t block = cta.block().x;
@@ -216,7 +215,7 @@ __device__ __forceinline__ void quantize_normalized_body(
     const std::uint32_t thread = cta.thread();
     const std::uint32_t lane = thread % kWaveSize, wave = thread / kWaveSize;
     const auto exists = [&](std::uint32_t v) { return v * Threads + thread < kNormThreads; };
-    const auto* rows = reinterpret_cast<const uint4*>(input);
+    const auto* rows  = reinterpret_cast<const uint4*>(input);
     const auto* gains = reinterpret_cast<const uint4*>(weight);
     const std::uint32_t token = block;
     float values[V][8];
@@ -246,9 +245,9 @@ __device__ __forceinline__ void quantize_normalized_body(
                 words[w] = (__float_as_uint(values[v][2 * w]) >> 16) |
                            (__float_as_uint(values[v][2 * w + 1]) & 0xffff0000U);
             }
-            reinterpret_cast<uint4*>(normalized)[static_cast<std::size_t>(token) * kNormThreads +
-                                                 vector] = uint4{words[0], words[1], words[2],
-                                                                 words[3]};
+            reinterpret_cast<uint4*>(
+                normalized)[static_cast<std::size_t>(token) * kNormThreads + vector] =
+                uint4{words[0], words[1], words[2], words[3]};
         }
     }
     encode_rows<Threads, V, kNormThreads>(cta, shared.encode, values, token, codes, scales,
@@ -265,9 +264,9 @@ __device__ __forceinline__ void gate_vector(const hip_bfloat16* gate, const floa
                                             std::size_t offset, float (&values)[8]) {
     float gates[8];
     unpack8(*reinterpret_cast<const uint4*>(gate + offset), gates);
-    const float4 low = *reinterpret_cast<const float4*>(attention + offset);
+    const float4 low  = *reinterpret_cast<const float4*>(attention + offset);
     const float4 high = *reinterpret_cast<const float4*>(attention + offset + 4U);
-    const float x[8] = {low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w};
+    const float x[8]  = {low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w};
 #pragma unroll
     for (int i = 0; i < 8; ++i) {
         const float represented = static_cast<float>(hip_bfloat16(x[i]));
@@ -276,13 +275,13 @@ __device__ __forceinline__ void gate_vector(const hip_bfloat16* gate, const floa
 }
 
 template <std::uint32_t Vectors, std::uint32_t Threads, class Cta>
-__device__ __forceinline__ void quantize_gated_body(
-    const Cta& cta, EncodeShared<Threads>& shared, const hip_bfloat16* gate,
-    const float* attention, std::uint8_t* codes, float* scales, std::uint32_t* status,
-    const CacheWarm& warm, std::uint32_t tokens) {
-    constexpr std::uint32_t V = (Vectors + Threads - 1U) / Threads;
+__device__ __forceinline__ void
+quantize_gated_body(const Cta& cta, EncodeShared<Threads>& shared, const hip_bfloat16* gate,
+                    const float* attention, std::uint8_t* codes, float* scales,
+                    std::uint32_t* status, const CacheWarm& warm, std::uint32_t tokens) {
+    constexpr std::uint32_t V       = (Vectors + Threads - 1U) / Threads;
     constexpr std::uint32_t columns = 8U * Vectors;
-    const std::uint32_t block = cta.block().x;
+    const std::uint32_t block       = cta.block().x;
     if (block >= tokens) {
         warm_cache(warm, block - tokens, cta.grid().x - tokens, cta.thread(), cta.threads());
         return;
@@ -304,8 +303,8 @@ __global__ __launch_bounds__(Threads) void fp8_quantize_gated_kernel(
     const hip_bfloat16* gate, const float* attention, std::uint8_t* codes, float* scales,
     std::uint32_t* status, CacheWarm warm, std::uint32_t tokens) {
     __shared__ EncodeShared<Threads> shared;
-    quantize_gated_body<Threads, Threads>(persistent::LaunchCta{}, shared, gate, attention,
-                                          codes, scales, status, warm, tokens);
+    quantize_gated_body<Threads, Threads>(persistent::LaunchCta{}, shared, gate, attention, codes,
+                                          scales, status, warm, tokens);
 }
 
 // ---- Gated per-head RMSNorm of the GDN recurrent output x [T, 48 x 128] with gate z:
@@ -313,13 +312,11 @@ __global__ __launch_bounds__(Threads) void fp8_quantize_gated_kernel(
 // (eight features each), so vector j sits in lane j % 32 at any CTA width.
 inline constexpr std::uint32_t kGatedNormColumns = 6144U;
 inline constexpr std::uint32_t kGatedNormThreads = kGatedNormColumns / 8U;
-inline constexpr std::uint32_t kGatedNormHead = 128U;
+inline constexpr std::uint32_t kGatedNormHead    = 128U;
 
-__device__ __forceinline__ void gated_norm_vector(const hip_bfloat16* input,
-                                                  const hip_bfloat16* gate,
-                                                  const hip_bfloat16* weight, float eps,
-                                                  std::uint32_t token, std::uint32_t vector,
-                                                  float (&values)[8]) {
+__device__ __forceinline__ void
+gated_norm_vector(const hip_bfloat16* input, const hip_bfloat16* gate, const hip_bfloat16* weight,
+                  float eps, std::uint32_t token, std::uint32_t vector, float (&values)[8]) {
     const std::size_t offset = static_cast<std::size_t>(token) * kGatedNormThreads + vector;
     float x[8], z[8], w[8];
     unpack8(reinterpret_cast<const uint4*>(input)[offset], x);
@@ -328,15 +325,19 @@ __device__ __forceinline__ void gated_norm_vector(const hip_bfloat16* input,
     float sumsq = 0.0F;
 #pragma unroll
     for (int i = 0; i < 8; ++i) sumsq = fmaf(x[i], x[i], sumsq);
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
+    sumsq += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
+    sumsq += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
+    sumsq += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
+    sumsq += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
     const float inverse = rsqrtf(sumsq / static_cast<float>(kGatedNormHead) + eps);
 #pragma unroll
     for (int i = 0; i < 8; ++i) {
         const float silu = z[i] / (1.0F + expf(-z[i]));
-        values[i] = static_cast<float>(hip_bfloat16(x[i] * inverse * w[i] * silu));
+        values[i]        = static_cast<float>(hip_bfloat16(x[i] * inverse * w[i] * silu));
     }
 }
 

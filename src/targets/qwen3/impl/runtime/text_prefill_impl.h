@@ -15,17 +15,16 @@ DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state) {
     if (!state.execution.io.dflash_decode || state.dflash_host_ingress == nullptr) {
         throw std::logic_error("DFlash prefill controls are unavailable");
     }
-    return dflash_feature_sink(
-        state, [&state](const Tensor& features, const Tensor& positions) {
-            auto& frame      = *state.execution.io.dflash_decode;
-            const auto slot  = frame.lanes.ne[0] - 1;
-            Tensor count = frame.append_counts.slice(0, slot, 1);
-            Tensor lane  = frame.lanes.slice(0, slot, 1);
-            Tensor row   = frame.dflash_kv_table_rows.slice(0, slot, 1);
-            ops::set_i32_scalar(count, features.ne[1], state.execution.device.stream);
-            const auto exact = static_cast<std::uint32_t>(features.ne[1]);
-            dflash_append_context(state, features, positions, count, lane, row, {exact, exact});
-        });
+    return dflash_feature_sink(state, [&state](const Tensor& features, const Tensor& positions) {
+        auto& frame     = *state.execution.io.dflash_decode;
+        const auto slot = frame.lanes.ne[0] - 1;
+        Tensor count    = frame.append_counts.slice(0, slot, 1);
+        Tensor lane     = frame.lanes.slice(0, slot, 1);
+        Tensor row      = frame.dflash_kv_table_rows.slice(0, slot, 1);
+        ops::set_i32_scalar(count, features.ne[1], state.execution.device.stream);
+        const auto exact = static_cast<std::uint32_t>(features.ne[1]);
+        dflash_append_context(state, features, positions, count, lane, row, {exact, exact});
+    });
 }
 
 void configure_text_card(TextContext& card, const ExecutionCore& execution,
@@ -77,8 +76,8 @@ PrefillChunkResult prefill_text_chunk(
     PrefillContext& state, std::span<const TokenId> ids, std::uint32_t nominal_length,
     std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end) {
     TextContext card(state.execution.device, state.execution.model,
-                     state.execution.linear_execution, state.execution.work,
-                     state.text_kv, state.execution.linear_attention, state.execution.io,
+                     state.execution.linear_execution, state.execution.work, state.text_kv,
+                     state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
                      state.text_kv_base, state.mtp_kv, state.mtp_cache);
     attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
@@ -95,8 +94,8 @@ PrefillChunkResult prefill_mrope_text_chunk(
     PrefillContext& state, const PreparedPromptData& prompt, std::uint32_t nominal_length,
     std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end) {
     TextContext card(state.execution.device, state.execution.model,
-                     state.execution.linear_execution, state.execution.work,
-                     state.text_kv, state.execution.linear_attention, state.execution.io,
+                     state.execution.linear_execution, state.execution.work, state.text_kv,
+                     state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
                      state.text_kv_base, state.mtp_kv, state.mtp_cache);
     attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
@@ -114,8 +113,8 @@ prefill_multimodal_chunk(PrefillContext& state, const PreparedPromptData& prompt
                          std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier,
                          bool finalize_at_end) {
     TextContext card(state.execution.device, state.execution.model,
-                     state.execution.linear_execution, state.execution.work,
-                     state.text_kv, state.execution.linear_attention, state.execution.io,
+                     state.execution.linear_execution, state.execution.work, state.text_kv,
+                     state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
                      state.text_kv_base, state.mtp_kv, state.mtp_cache);
     attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);

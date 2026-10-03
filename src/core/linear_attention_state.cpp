@@ -235,8 +235,7 @@ std::size_t LinearAttentionStatePool::conv_slot_bytes() const noexcept {
 }
 
 std::size_t LinearAttentionStatePool::recurrent_slot_bytes() const noexcept {
-    return Tensor(nullptr, DType::FP32,
-                  {spec.key_head_dim, spec.value_head_dim, spec.value_heads})
+    return Tensor(nullptr, DType::FP32, {spec.key_head_dim, spec.value_head_dim, spec.value_heads})
         .bytes();
 }
 
@@ -265,8 +264,8 @@ void LinearAttentionStatePool::pack_slot_to_host(std::int32_t slot, void* conv_d
     auto* rec_out                = static_cast<unsigned char*>(recurrent_dst);
     for (std::uint32_t layer = 0; layer < layer_count(); ++layer) {
         HIP_CHECK(hipMemcpyAsync(rec_out + static_cast<std::size_t>(layer) * rec_bytes,
-                                 recurrent_slot(layer, slot).data, rec_bytes,
-                                 hipMemcpyDeviceToHost, stream));
+                                 recurrent_slot(layer, slot).data, rec_bytes, hipMemcpyDeviceToHost,
+                                 stream));
         HIP_CHECK(hipMemcpyAsync(conv_out + static_cast<std::size_t>(layer) * conv_bytes,
                                  conv_slot(layer, slot).data, conv_bytes, hipMemcpyDeviceToHost,
                                  stream));

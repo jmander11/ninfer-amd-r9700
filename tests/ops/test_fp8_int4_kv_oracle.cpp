@@ -28,9 +28,7 @@ void expect_throws(Function&& function, const char* message) {
         function();
         expect(false, message);
     } catch (const Exception&) {
-    } catch (...) {
-        expect(false, message);
-    }
+    } catch (...) { expect(false, message); }
 }
 
 void test_e4m3fn_all_words_and_rne() {
@@ -105,7 +103,7 @@ void test_int4_storage_and_groups() {
 
     std::vector<float> fixture(32);
     for (std::size_t lane = 0; lane < 16; ++lane) {
-        fixture[lane] = static_cast<float>(static_cast<int>(lane) - 8) / 8.0F;
+        fixture[lane]      = static_cast<float>(static_cast<int>(lane) - 8) / 8.0F;
         fixture[16 + lane] = static_cast<float>(static_cast<int>(lane) - 7) * 2.0F;
     }
     const Int4Values g16 = encode_values(fixture, 1, 32, 16);
@@ -124,7 +122,7 @@ void test_int4_storage_and_groups() {
            "zero group must have zero scale and codes");
 
     std::vector<float> underflow_source(16, std::ldexp(1.0F, -24));
-    underflow_source[3] = -underflow_source[3];
+    underflow_source[3]        = -underflow_source[3];
     const Int4Values underflow = encode_values(underflow_source, 1, 16, 16);
     expect(underflow.fp16_scales[0] == 0x0000U &&
                std::all_of(underflow.packed_codes.begin(), underflow.packed_codes.end(),
@@ -134,7 +132,7 @@ void test_int4_storage_and_groups() {
                        [](float value) { return value != 0.0F && std::isfinite(value); }),
            "scale-underflow fixture must remain finite and nonzero");
 
-    Int4Values invalid = zero;
+    Int4Values invalid      = zero;
     invalid.packed_codes[0] = 0x08U;
     expect_throws<std::invalid_argument>([&] { (void)invalid.at(0, 0); },
                                          "reserved symmetric INT4 -8 must be rejected");
@@ -153,21 +151,21 @@ void test_attention_decodes_storage_then_evaluates_fp64() {
     query[0] = 1.0F;
 
     std::vector<float> key_source(2 * dimension, 0.0F);
-    key_source[0] = 1.0625F;             // midpoint encodes to 1.0
-    key_source[dimension] = -1.0625F;    // midpoint encodes to -1.0
-    const Fp8Keys keys = encode_keys(key_source, 2, dimension);
+    key_source[0]         = 1.0625F;  // midpoint encodes to 1.0
+    key_source[dimension] = -1.0625F; // midpoint encodes to -1.0
+    const Fp8Keys keys    = encode_keys(key_source, 2, dimension);
 
     std::vector<float> value_source(2 * dimension, 0.0F);
     std::fill(value_source.begin(), value_source.begin() + dimension, 1.0F);
     std::fill(value_source.begin() + dimension, value_source.end(), -2.0F);
-    const Int4Values values = encode_values(value_source, 2, dimension, 16);
+    const Int4Values values          = encode_values(value_source, 2, dimension, 16);
     const std::vector<double> actual = attention_fp64(query, keys, values, 1.0);
 
     const double score0 = keys.at(0, 0);
     const double score1 = keys.at(1, 0);
-    const double p0 = std::exp(score0 - std::max(score0, score1)) /
-                      (std::exp(score0 - std::max(score0, score1)) +
-                       std::exp(score1 - std::max(score0, score1)));
+    const double p0 =
+        std::exp(score0 - std::max(score0, score1)) /
+        (std::exp(score0 - std::max(score0, score1)) + std::exp(score1 - std::max(score0, score1)));
     const double expected = p0 * values.at(0, 0) + (1.0 - p0) * values.at(1, 0);
     for (double lane : actual) {
         expect(std::abs(lane - expected) <= 2.0 * std::numeric_limits<double>::epsilon(),
@@ -175,8 +173,8 @@ void test_attention_decodes_storage_then_evaluates_fp64() {
     }
 
     // This guards against accidentally using the pre-quantized key in the formula.
-    const double source_p0 = std::exp(1.0625 - 1.0625) /
-                             (std::exp(1.0625 - 1.0625) + std::exp(-1.0625 - 1.0625));
+    const double source_p0 =
+        std::exp(1.0625 - 1.0625) / (std::exp(1.0625 - 1.0625) + std::exp(-1.0625 - 1.0625));
     const double source_result = source_p0 * values.at(0, 0) + (1.0 - source_p0) * values.at(1, 0);
     expect(std::abs(actual[0] - source_result) > 1.0e-4,
            "attention oracle must not consume unrepresented key source values");
@@ -189,16 +187,15 @@ void test_greedy_token_is_an_exact_separate_gate() {
     std::vector<float> key(dimension, 0.0F);
     key[0] = 1.0F;
     std::vector<float> value(dimension, 0.0F);
-    value[0] = 1.0F;
-    const Fp8Keys keys = encode_keys(key, 1, dimension);
+    value[0]                = 1.0F;
+    const Fp8Keys keys      = encode_keys(key, 1, dimension);
     const Int4Values values = encode_values(value, 1, dimension, 16);
 
     std::vector<float> weights(3 * dimension, 0.0F);
-    weights[0] = 1.0F;
-    weights[dimension] = std::nextafter(1.0F, 2.0F);
-    weights[2 * dimension] = -1.0F;
-    const GreedyResult near_tie =
-        attention_greedy_fp64(query, keys, values, 1.0, weights, 3);
+    weights[0]                  = 1.0F;
+    weights[dimension]          = std::nextafter(1.0F, 2.0F);
+    weights[2 * dimension]      = -1.0F;
+    const GreedyResult near_tie = attention_greedy_fp64(query, keys, values, 1.0, weights, 3);
     expect(near_tie.token == 1, "positive one-ULP logit margin must select token one exactly");
     expect(near_tie.logits[1] > near_tie.logits[0] &&
                near_tie.logits[1] - near_tie.logits[0] < 1.0e-5,
@@ -211,9 +208,8 @@ void test_greedy_token_is_an_exact_separate_gate() {
                tolerant_but_wrong[0] > tolerant_but_wrong[1],
            "float tolerance must not stand in for exact greedy-token identity");
 
-    weights[dimension] = 1.0F;
-    const GreedyResult exact_tie =
-        attention_greedy_fp64(query, keys, values, 1.0, weights, 3);
+    weights[dimension]           = 1.0F;
+    const GreedyResult exact_tie = attention_greedy_fp64(query, keys, values, 1.0, weights, 3);
     expect(exact_tie.token == 0, "exact logit tie must deterministically choose lowest token id");
 }
 
@@ -225,7 +221,6 @@ int main() {
     test_int4_storage_and_groups();
     test_attention_decodes_storage_then_evaluates_fp64();
     test_greedy_token_is_an_exact_separate_gate();
-    std::cout << (failures == 0 ? "OK" : "FAIL")
-              << " fp8-e4m3-k/int4-v host oracle correctness\n";
+    std::cout << (failures == 0 ? "OK" : "FAIL") << " fp8-e4m3-k/int4-v host oracle correctness\n";
     return failures == 0 ? 0 : 1;
 }

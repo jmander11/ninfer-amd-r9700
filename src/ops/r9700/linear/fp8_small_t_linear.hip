@@ -40,12 +40,12 @@ bool valid_activation(const Fp8ActivationWorkspace& activation) noexcept {
 KernelArgs kernel_args(const Fp8RowScaledWeight& weight,
                        const Fp8ActivationWorkspace& activation) noexcept {
     KernelArgs args;
-    args.first = weight;
-    args.activation = activation.codes;
+    args.first        = weight;
+    args.activation   = activation.codes;
     args.token_scales = activation.scales;
-    args.status = activation.status;
-    args.tokens = activation.tokens;
-    args.columns = activation.columns;
+    args.status       = activation.status;
+    args.tokens       = activation.tokens;
+    args.columns      = activation.columns;
     return args;
 }
 
@@ -72,15 +72,15 @@ hipError_t fp8_small_t_pair_split(const Fp8SmallTPairSplitArgs& pair,
                                   const Fp8ActivationWorkspace& activation,
                                   hipStream_t stream) noexcept {
     if (!valid_weight(pair.first) || !valid_weight(pair.second) ||
-        pair.first.rows != pair.second.rows || pair.split == 0U ||
-        pair.split >= pair.first.rows || !valid_activation(activation) ||
-        pair.first_leading == nullptr || pair.first_trailing == nullptr ||
-        pair.second_leading == nullptr || pair.second_trailing == nullptr) {
+        pair.first.rows != pair.second.rows || pair.split == 0U || pair.split >= pair.first.rows ||
+        !valid_activation(activation) || pair.first_leading == nullptr ||
+        pair.first_trailing == nullptr || pair.second_leading == nullptr ||
+        pair.second_trailing == nullptr) {
         return hipErrorInvalidValue;
     }
     KernelArgs args = kernel_args(pair.first, activation);
-    args.second = pair.second;
-    args.split = pair.split;
+    args.second     = pair.second;
+    args.split      = pair.split;
     args.outputs[0] = pair.first_leading;
     args.outputs[1] = pair.first_trailing;
     args.outputs[2] = pair.second_leading;

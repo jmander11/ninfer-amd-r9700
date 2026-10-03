@@ -151,15 +151,15 @@ struct DensePostMixerPayload {
     Weight gate_up;
     Weight down;
     ops::LinearExecution* gate_up_execution = nullptr;
-    ops::LinearExecution* down_execution = nullptr;
+    ops::LinearExecution* down_execution    = nullptr;
 };
 
 struct FullAttentionProjectionPayload {
     Weight query_key;
     Weight gate_value;
-    ops::LinearExecution* query_key_execution = nullptr;
+    ops::LinearExecution* query_key_execution  = nullptr;
     ops::LinearExecution* gate_value_execution = nullptr;
-    ops::LinearExecution* output_execution = nullptr;
+    ops::LinearExecution* output_execution     = nullptr;
 };
 
 struct GdnInputProjectionPayload {
@@ -187,8 +187,8 @@ struct MtpAttentionPayload {
 
 using RuntimeModelView =
     qwen3::ModelView<FullAttentionProjectionPayload, GdnProjectionPayload, DensePostMixerPayload,
-                       MtpAttentionPayload, DensePostMixerPayload,
-                       qwen3::DFlash2Weights<kDFlash2Layers>, kFullAttentionLayers, kGdnLayers>;
+                     MtpAttentionPayload, DensePostMixerPayload,
+                     qwen3::DFlash2Weights<kDFlash2Layers>, kFullAttentionLayers, kGdnLayers>;
 using FullAttentionWeights = RuntimeModelView::FullLayer;
 using GdnWeights           = RuntimeModelView::GdnLayer;
 using MtpWeights           = RuntimeModelView::MtpLayer;

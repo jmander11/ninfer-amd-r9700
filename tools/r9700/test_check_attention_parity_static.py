@@ -31,12 +31,16 @@ class AttentionParityStaticTest(unittest.TestCase):
         self.assertGreaterEqual(location, 0)
         with tempfile.TemporaryDirectory() as temporary:
             mutated = Path(temporary) / "mutated.s"
-            mutated.write_text(text[:location] + ".vgpr_count:     236" +
-                               text[location + len(marker):],
-                               encoding="utf-8")
-            result = subprocess.run(["python3", str(CHECK), str(mutated)],
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True)
+            mutated.write_text(
+                text[:location] + ".vgpr_count:     236" + text[location + len(marker) :],
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["python3", str(CHECK), str(mutated)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
             self.assertNotEqual(result.returncode, 0)
 
 

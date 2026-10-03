@@ -211,4 +211,3 @@ the `quality/clang-tidy-backlog` branch, so `4051ebf0..26ba4203` are not descend
   `8dba51cc` small-T reduce kernel (the split-KV merges here use separate scalars and barriers),
   and the `test_attn_input_proj` sanitizer cases (`ninfer_r9700_target_variant_attention_projection_qual`
   is an empty entry point).
-

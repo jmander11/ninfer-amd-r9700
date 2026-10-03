@@ -22,22 +22,18 @@ int main() {
         load.weights_id = "r9700-integer";
         ninfer::MemorySummary memory;
         const std::string server_record = ninfer::serve::format_server_start_json(
-            "qual", 1, options, {}, "qwen3.8-27b-r9700", load, memory, environment,
-            std::nullopt);
+            "qual", 1, options, {}, "qwen3.8-27b-r9700", load, memory, environment, std::nullopt);
         const std::string schema_field =
-            "\"schema_version\":" +
-            std::to_string(ninfer::serve::kRequestLogSchemaVersion);
+            "\"schema_version\":" + std::to_string(ninfer::serve::kRequestLogSchemaVersion);
         if (server_record.find(schema_field) == std::string::npos ||
-            server_record.find("\"kv_cache_format\":\"fp8-k-int4-v\"") ==
-                std::string::npos) {
+            server_record.find("\"kv_cache_format\":\"fp8-k-int4-v\"") == std::string::npos) {
             throw std::runtime_error("server-start JSON does not expose the fixed HIP contract");
         }
         std::cout << "serve_environment: PASS gpu=" << environment.gpu_name
                   << " arch=" << environment.architecture_name
                   << " hip_compile=" << environment.hip_compile_version
                   << " hip_runtime=" << environment.hip_runtime_version
-                  << " hip_driver=" << environment.hip_driver_version
-                  << " fixed_kv=fp8-k-int4-v\n";
+                  << " hip_driver=" << environment.hip_driver_version << " fixed_kv=fp8-k-int4-v\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "serve_environment: FAIL: " << error.what() << '\n';

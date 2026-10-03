@@ -395,11 +395,7 @@ _DRAFT_CONTRACT = _draft_contract()
 _MTP_CONTRACT = _mtp_contract()
 _VISION_CONTRACT = _vision_contract()
 _OBJECT_CONTRACT: tuple[_ExpectedObject, ...] = (
-    _RESOURCE_CONTRACT
-    + _TEXT_CONTRACT
-    + _DRAFT_CONTRACT
-    + _MTP_CONTRACT
-    + _VISION_CONTRACT
+    _RESOURCE_CONTRACT + _TEXT_CONTRACT + _DRAFT_CONTRACT + _MTP_CONTRACT + _VISION_CONTRACT
 )
 
 
@@ -468,9 +464,7 @@ def _validate_inventory(artifact: Artifact) -> None:
     if actual_names != expected_names:
         missing = sorted(expected_names - actual_names)
         extra = sorted(actual_names - expected_names)
-        raise BindingError(
-            f"artifact object names differ; missing={missing!r}, extra={extra!r}"
-        )
+        raise BindingError(f"artifact object names differ; missing={missing!r}, extra={extra!r}")
     for actual in artifact.objects:
         expected = expected_by_name[actual.name]
         if isinstance(expected, candidate_inventory.TensorSpec):
@@ -480,21 +474,29 @@ def _validate_inventory(artifact: Artifact) -> None:
                 expected.format,
                 expected.layout,
             )
-            if not isinstance(actual, TensorObject) or (
-                actual.name,
-                actual.shape,
-                actual.format,
-                actual.layout,
-            ) != signature:
+            if (
+                not isinstance(actual, TensorObject)
+                or (
+                    actual.name,
+                    actual.shape,
+                    actual.format,
+                    actual.layout,
+                )
+                != signature
+            ):
                 raise BindingError(
                     f"object {actual.name!r} does not match tensor signature {signature!r}"
                 )
         else:
             signature = (expected.name, expected.encoding)
-            if not isinstance(actual, ResourceObject) or (
-                actual.name,
-                actual.encoding,
-            ) != signature:
+            if (
+                not isinstance(actual, ResourceObject)
+                or (
+                    actual.name,
+                    actual.encoding,
+                )
+                != signature
+            ):
                 raise BindingError(
                     f"object {actual.name!r} does not match resource signature {signature!r}"
                 )
@@ -513,9 +515,7 @@ def _row_view(
         raise BindingError("logical row view is outside its physical block")
     expected_shape = (row_end - row_begin, block.shape[1])
     if shape != expected_shape:
-        raise BindingError(
-            f"logical row view shape is {shape}, expected {expected_shape}"
-        )
+        raise BindingError(f"logical row view shape is {shape}, expected {expected_shape}")
     view = LogicalRowView(block, row_begin, row_end - row_begin, shape)
     views.append(view)
     return view
@@ -564,12 +564,8 @@ class ArtifactBinding:
                     query=_row_view(query_key, 0, 6144, (6144, 5120), row_views),
                     key=_row_view(query_key, 6144, 7168, (1024, 5120), row_views),
                     gate_value=gate_value,
-                    output_gate=_row_view(
-                        gate_value, 0, 6144, (6144, 5120), row_views
-                    ),
-                    value=_row_view(
-                        gate_value, 6144, 7168, (1024, 5120), row_views
-                    ),
+                    output_gate=_row_view(gate_value, 0, 6144, (6144, 5120), row_views),
+                    value=_row_view(gate_value, 6144, 7168, (1024, 5120), row_views),
                     query_norm=blocks[prefix + "attention/query_norm"],
                     key_norm=blocks[prefix + "attention/key_norm"],
                     output=blocks[prefix + "attention/output"],
@@ -579,9 +575,7 @@ class ArtifactBinding:
                 query_key = blocks[prefix + "gdn/query_key"]
                 value_z = blocks[prefix + "gdn/value_z"]
                 convolution_storage = blocks[prefix + "gdn/convolution"]
-                convolution = AxisView(
-                    convolution_storage, (1, 0), (10240, 4)
-                )
+                convolution = AxisView(convolution_storage, (1, 0), (10240, 4))
                 axis_views.append(convolution)
                 gdn = GdnBinding(
                     a_log=blocks[prefix + "gdn/a_log"],
@@ -592,9 +586,7 @@ class ArtifactBinding:
                     b_projection=blocks[prefix + "gdn/b_projection"],
                     query_key=query_key,
                     query=_row_view(query_key, 0, 2048, (2048, 5120), row_views),
-                    key=_row_view(
-                        query_key, 2048, 4096, (2048, 5120), row_views
-                    ),
+                    key=_row_view(query_key, 2048, 4096, (2048, 5120), row_views),
                     value_z=value_z,
                     value=_row_view(value_z, 0, 6144, (6144, 5120), row_views),
                     norm=blocks[prefix + "gdn/norm"],
@@ -613,12 +605,8 @@ class ArtifactBinding:
                     post_attention_norm=blocks[prefix + "post_attention_norm"],
                     mlp=MlpBinding(
                         gate_up=gate_up,
-                        gate=_row_view(
-                            gate_up, 0, 17408, (17408, 5120), row_views
-                        ),
-                        up=_row_view(
-                            gate_up, 17408, 34816, (17408, 5120), row_views
-                        ),
+                        gate=_row_view(gate_up, 0, 17408, (17408, 5120), row_views),
+                        up=_row_view(gate_up, 17408, 34816, (17408, 5120), row_views),
                         down=blocks[prefix + "mlp/down"],
                     ),
                 )
@@ -648,18 +636,10 @@ class ArtifactBinding:
                 input_norm=blocks["mtp/layer/input_norm"],
                 attention=MtpAttentionBinding(
                     query_key_gate_value=mtp_qkgv,
-                    query=_row_view(
-                        mtp_qkgv, 0, 6144, (6144, 5120), row_views
-                    ),
-                    key=_row_view(
-                        mtp_qkgv, 6144, 7168, (1024, 5120), row_views
-                    ),
-                    output_gate=_row_view(
-                        mtp_qkgv, 7168, 13312, (6144, 5120), row_views
-                    ),
-                    value=_row_view(
-                        mtp_qkgv, 13312, 14336, (1024, 5120), row_views
-                    ),
+                    query=_row_view(mtp_qkgv, 0, 6144, (6144, 5120), row_views),
+                    key=_row_view(mtp_qkgv, 6144, 7168, (1024, 5120), row_views),
+                    output_gate=_row_view(mtp_qkgv, 7168, 13312, (6144, 5120), row_views),
+                    value=_row_view(mtp_qkgv, 13312, 14336, (1024, 5120), row_views),
                     query_norm=blocks["mtp/layer/attention/query_norm"],
                     key_norm=blocks["mtp/layer/attention/key_norm"],
                     output=blocks["mtp/layer/attention/output"],
@@ -667,12 +647,8 @@ class ArtifactBinding:
                 post_attention_norm=blocks["mtp/layer/post_attention_norm"],
                 mlp=MlpBinding(
                     gate_up=mtp_gate_up,
-                    gate=_row_view(
-                        mtp_gate_up, 0, 17408, (17408, 5120), row_views
-                    ),
-                    up=_row_view(
-                        mtp_gate_up, 17408, 34816, (17408, 5120), row_views
-                    ),
+                    gate=_row_view(mtp_gate_up, 0, 17408, (17408, 5120), row_views),
+                    up=_row_view(mtp_gate_up, 17408, 34816, (17408, 5120), row_views),
                     down=blocks["mtp/layer/mlp/down"],
                 ),
             ),
@@ -688,9 +664,7 @@ class ArtifactBinding:
                     attention_qkv=blocks[prefix + "attention/qkv"],
                     attention_qkv_bias=blocks[prefix + "attention/qkv_bias"],
                     attention_output=blocks[prefix + "attention/output"],
-                    attention_output_bias=blocks[
-                        prefix + "attention/output_bias"
-                    ],
+                    attention_output_bias=blocks[prefix + "attention/output_bias"],
                     mlp_fc1=blocks[prefix + "mlp/fc1"],
                     mlp_fc1_bias=blocks[prefix + "mlp/fc1_bias"],
                     mlp_fc2=blocks[prefix + "mlp/fc2"],
@@ -773,13 +747,9 @@ class ArtifactBinding:
         try:
             import torch
         except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "binding a Qwen3.8 candidate artifact requires PyTorch"
-            ) from exc
+            raise RuntimeError("binding a Qwen3.8 candidate artifact requires PyTorch") from exc
         block = self.text.draft_head.token_ids
-        token_ids = decode_direct(
-            self.payload(block), block.format, block.shape, device="cpu"
-        )
+        token_ids = decode_direct(self.payload(block), block.format, block.shape, device="cpu")
         if token_ids.dtype != torch.int32 or tuple(token_ids.shape) != (131072,):
             raise BindingError("draft token IDs must be I32[131072]")
         if int(token_ids.min()) < 0 or int(token_ids.max()) >= TOKENIZER_VOCAB_SIZE:
@@ -827,21 +797,23 @@ class VisionArtifactBinding:
         layers = []
         for layer in VISION_LAYERS:
             prefix = f"vision/layers/{layer}/"
-            layers.append(VisionLayerBinding(
-                index=layer,
-                attention_qkv=blocks[prefix + "attention/qkv"],
-                attention_qkv_bias=blocks[prefix + "attention/qkv_bias"],
-                attention_output=blocks[prefix + "attention/output"],
-                attention_output_bias=blocks[prefix + "attention/output_bias"],
-                mlp_fc1=blocks[prefix + "mlp/fc1"],
-                mlp_fc1_bias=blocks[prefix + "mlp/fc1_bias"],
-                mlp_fc2=blocks[prefix + "mlp/fc2"],
-                mlp_fc2_bias=blocks[prefix + "mlp/fc2_bias"],
-                norm1_weight=blocks[prefix + "norm1/weight"],
-                norm1_bias=blocks[prefix + "norm1/bias"],
-                norm2_weight=blocks[prefix + "norm2/weight"],
-                norm2_bias=blocks[prefix + "norm2/bias"],
-            ))
+            layers.append(
+                VisionLayerBinding(
+                    index=layer,
+                    attention_qkv=blocks[prefix + "attention/qkv"],
+                    attention_qkv_bias=blocks[prefix + "attention/qkv_bias"],
+                    attention_output=blocks[prefix + "attention/output"],
+                    attention_output_bias=blocks[prefix + "attention/output_bias"],
+                    mlp_fc1=blocks[prefix + "mlp/fc1"],
+                    mlp_fc1_bias=blocks[prefix + "mlp/fc1_bias"],
+                    mlp_fc2=blocks[prefix + "mlp/fc2"],
+                    mlp_fc2_bias=blocks[prefix + "mlp/fc2_bias"],
+                    norm1_weight=blocks[prefix + "norm1/weight"],
+                    norm1_bias=blocks[prefix + "norm1/bias"],
+                    norm2_weight=blocks[prefix + "norm2/weight"],
+                    norm2_bias=blocks[prefix + "norm2/bias"],
+                )
+            )
         self.vision = VisionBinding(
             patch_embedding=blocks["vision/patch_embedding"],
             patch_embedding_bias=blocks["vision/patch_embedding_bias"],

@@ -34,8 +34,7 @@ namespace ninfer::ops {
  */
 void set_i32_scalar(Tensor& destination, std::int32_t value, hipStream_t stream);
 void assign_i32_scalar(const Tensor& source, Tensor& destination, hipStream_t stream);
-void add_i32_scalars(const Tensor& lhs, const Tensor& rhs, Tensor& destination,
-                     hipStream_t stream);
+void add_i32_scalars(const Tensor& lhs, const Tensor& rhs, Tensor& destination, hipStream_t stream);
 void increment_i32_scalar(Tensor& scalar, hipStream_t stream);
 void increment_i64_scalar(Tensor& scalar, hipStream_t stream);
 

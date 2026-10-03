@@ -16,7 +16,7 @@
 namespace {
 
 constexpr std::int32_t kMaxContext = 97;
-constexpr std::int32_t kSentinel = static_cast<std::int32_t>(0x5a17c3e9U);
+constexpr std::int32_t kSentinel   = static_cast<std::int32_t>(0x5a17c3e9U);
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
@@ -28,9 +28,7 @@ template <class Function>
 void require_invalid(Function&& function, const char* label) {
     try {
         function();
-    } catch (const std::invalid_argument&) {
-        return;
-    }
+    } catch (const std::invalid_argument&) { return; }
     fail(std::string(label) + " did not reject its invalid contract");
 }
 
@@ -49,9 +47,7 @@ struct I32Device {
         return values;
     }
 
-    [[nodiscard]] std::int32_t* data() const {
-        return static_cast<std::int32_t*>(storage.data());
-    }
+    [[nodiscard]] std::int32_t* data() const { return static_cast<std::int32_t*>(storage.data()); }
 
     ninfer::DeviceBuffer storage;
     std::size_t count;
@@ -80,8 +76,7 @@ void require_exact(const std::vector<std::int32_t>& actual,
     for (std::size_t index = 0; index < actual.size(); ++index) {
         if (actual[index] != expected[index]) {
             fail(label + " mismatch at " + std::to_string(index) + ": got " +
-                 std::to_string(actual[index]) + ", expected " +
-                 std::to_string(expected[index]));
+                 std::to_string(actual[index]) + ", expected " + std::to_string(expected[index]));
         }
     }
 }
@@ -101,7 +96,7 @@ void qualify_case(std::int32_t k, std::int32_t batch, hipStream_t stream) {
     std::vector<std::int32_t> expected_alignment(verify.size());
     std::vector<std::int32_t> expected_extents(static_cast<std::size_t>(batch));
     std::vector<std::int32_t> expected_positions(static_cast<std::size_t>(pitch * steps),
-                                                  kSentinel);
+                                                 kSentinel);
     std::vector<std::int32_t> expected_rope(static_cast<std::size_t>(pitch * steps), kSentinel);
     std::vector<std::int32_t> expected_valid(static_cast<std::size_t>(pitch * steps), kSentinel);
 
@@ -109,7 +104,7 @@ void qualify_case(std::int32_t k, std::int32_t batch, hipStream_t stream) {
         accepted[static_cast<std::size_t>(row)] =
             row == 0 ? 0 : (row == batch - 1 ? k : (row * 3 + k) % (k + 1));
         licensed[static_cast<std::size_t>(row)] = accepted[static_cast<std::size_t>(row)] + 1;
-        anchors[static_cast<std::size_t>(row)] = 90000 + k * 101 + row * 17;
+        anchors[static_cast<std::size_t>(row)]  = 90000 + k * 101 + row * 17;
         frontiers[static_cast<std::size_t>(row)] =
             row == batch - 1 ? kMaxContext - 1 : 5 + ((row * 11 + k * 7) % 61);
         const std::int32_t extra =
@@ -118,7 +113,7 @@ void qualify_case(std::int32_t k, std::int32_t batch, hipStream_t stream) {
         rope_deltas[static_cast<std::size_t>(row)] = row * 5 - 13;
         for (std::int32_t column = 0; column < width; ++column) {
             const std::size_t offset = static_cast<std::size_t>(row * width + column);
-            verify[offset] = 1000 + k * 100 + row * 19 + column * 3;
+            verify[offset]           = 1000 + k * 100 + row * 19 + column * 3;
         }
         for (std::int32_t column = 0; column < width; ++column) {
             const std::size_t offset = static_cast<std::size_t>(row * width + column);
@@ -127,17 +122,18 @@ void qualify_case(std::int32_t k, std::int32_t batch, hipStream_t stream) {
                     ? verify[static_cast<std::size_t>(row * width + column + 1)]
                     : anchors[static_cast<std::size_t>(row)];
         }
-        const std::int32_t remaining = budgets[static_cast<std::size_t>(row)] -
-                                       licensed[static_cast<std::size_t>(row)];
+        const std::int32_t remaining =
+            budgets[static_cast<std::size_t>(row)] - licensed[static_cast<std::size_t>(row)];
         const std::int32_t budget_extent = remaining > 1 ? remaining - 1 : 0;
         const std::int32_t context_extent =
             std::max(kMaxContext - frontiers[static_cast<std::size_t>(row)] - 1, 0);
         expected_extents[static_cast<std::size_t>(row)] =
             std::min({k, budget_extent, context_extent});
         for (std::int32_t step = 0; step < steps; ++step) {
-            const std::size_t offset = static_cast<std::size_t>(step * pitch + row);
+            const std::size_t offset   = static_cast<std::size_t>(step * pitch + row);
             expected_positions[offset] = frontiers[static_cast<std::size_t>(row)] + step;
-            expected_rope[offset] = expected_positions[offset] + rope_deltas[static_cast<std::size_t>(row)];
+            expected_rope[offset] =
+                expected_positions[offset] + rope_deltas[static_cast<std::size_t>(row)];
             expected_valid[offset] =
                 step + 1 < expected_extents[static_cast<std::size_t>(row)] ? 1 : 0;
         }
@@ -168,22 +164,22 @@ void qualify_case(std::int32_t k, std::int32_t batch, hipStream_t stream) {
     d_rope.upload(std::vector<std::int32_t>(expected_rope.size(), kSentinel), stream);
     d_valid.upload(std::vector<std::int32_t>(expected_valid.size(), kSentinel), stream);
 
-    ninfer::Tensor t_verify = matrix_tensor(d_verify, width, batch);
-    ninfer::Tensor t_anchors = vector_tensor(d_anchors, batch);
-    ninfer::Tensor t_accepted = vector_tensor(d_accepted, batch);
-    ninfer::Tensor t_frontiers = vector_tensor(d_frontiers, batch);
-    ninfer::Tensor t_budgets = vector_tensor(d_budgets, batch);
-    ninfer::Tensor t_licensed = vector_tensor(d_licensed, batch);
+    ninfer::Tensor t_verify      = matrix_tensor(d_verify, width, batch);
+    ninfer::Tensor t_anchors     = vector_tensor(d_anchors, batch);
+    ninfer::Tensor t_accepted    = vector_tensor(d_accepted, batch);
+    ninfer::Tensor t_frontiers   = vector_tensor(d_frontiers, batch);
+    ninfer::Tensor t_budgets     = vector_tensor(d_budgets, batch);
+    ninfer::Tensor t_licensed    = vector_tensor(d_licensed, batch);
     ninfer::Tensor t_rope_deltas = vector_tensor(d_rope_deltas, batch);
-    ninfer::Tensor t_alignment = matrix_tensor(d_alignment, width, batch);
-    ninfer::Tensor t_extents = vector_tensor(d_extents, batch);
-    ninfer::Tensor t_positions = pitched_tensor(d_positions, batch, steps, pitch);
-    ninfer::Tensor t_rope = pitched_tensor(d_rope, batch, steps, pitch);
-    ninfer::Tensor t_valid = pitched_tensor(d_valid, batch, steps, pitch);
+    ninfer::Tensor t_alignment   = matrix_tensor(d_alignment, width, batch);
+    ninfer::Tensor t_extents     = vector_tensor(d_extents, batch);
+    ninfer::Tensor t_positions   = pitched_tensor(d_positions, batch, steps, pitch);
+    ninfer::Tensor t_rope        = pitched_tensor(d_rope, batch, steps, pitch);
+    ninfer::Tensor t_valid       = pitched_tensor(d_valid, batch, steps, pitch);
 
-    ninfer::ops::mtp_prepare_next_round(
-        t_verify, t_anchors, t_accepted, t_frontiers, t_budgets, t_licensed, t_rope_deltas,
-        t_alignment, t_extents, t_positions, t_rope, t_valid, kMaxContext, stream);
+    ninfer::ops::mtp_prepare_next_round(t_verify, t_anchors, t_accepted, t_frontiers, t_budgets,
+                                        t_licensed, t_rope_deltas, t_alignment, t_extents,
+                                        t_positions, t_rope, t_valid, kMaxContext, stream);
 
     const std::string label = "K=" + std::to_string(k) + "/B=" + std::to_string(batch);
     require_exact(d_alignment.download(stream), expected_alignment, label + " alignment");
@@ -201,31 +197,30 @@ void qualify_case(std::int32_t k, std::int32_t batch, hipStream_t stream) {
 
     if (k == 1 && batch == 1) {
         ninfer::Tensor bad_width = t_verify;
-        bad_width.ne[0] = 1;
+        bad_width.ne[0]          = 1;
         require_invalid(
             [&] {
-                ninfer::ops::mtp_prepare_next_round(
-                    bad_width, t_anchors, t_accepted, t_frontiers, t_budgets, t_licensed,
-                    t_rope_deltas, t_alignment, t_extents, t_positions, t_rope, t_valid,
-                    kMaxContext, stream);
+                ninfer::ops::mtp_prepare_next_round(bad_width, t_anchors, t_accepted, t_frontiers,
+                                                    t_budgets, t_licensed, t_rope_deltas,
+                                                    t_alignment, t_extents, t_positions, t_rope,
+                                                    t_valid, kMaxContext, stream);
             },
             "T=1");
         ninfer::Tensor bad_stride = t_positions;
-        bad_stride.nb[1] = 0;
+        bad_stride.nb[1]          = 0;
         require_invalid(
             [&] {
-                ninfer::ops::mtp_prepare_next_round(
-                    t_verify, t_anchors, t_accepted, t_frontiers, t_budgets, t_licensed,
-                    t_rope_deltas, t_alignment, t_extents, bad_stride, t_rope, t_valid,
-                    kMaxContext, stream);
+                ninfer::ops::mtp_prepare_next_round(t_verify, t_anchors, t_accepted, t_frontiers,
+                                                    t_budgets, t_licensed, t_rope_deltas,
+                                                    t_alignment, t_extents, bad_stride, t_rope,
+                                                    t_valid, kMaxContext, stream);
             },
             "short AR stride");
         require_invalid(
             [&] {
                 ninfer::ops::mtp_prepare_next_round(
                     t_verify, t_anchors, t_accepted, t_frontiers, t_budgets, t_licensed,
-                    t_rope_deltas, t_alignment, t_extents, t_positions, t_rope, t_valid, 0,
-                    stream);
+                    t_rope_deltas, t_alignment, t_extents, t_positions, t_rope, t_valid, 0, stream);
             },
             "zero max context");
     }
@@ -244,7 +239,8 @@ int main() {
                 qualify_case(k, batch, device.stream);
             }
         }
-        std::cout << "mtp_round: PASS exact K=1..5 B=1..8 pitched-padding and immutable-input oracle\n";
+        std::cout
+            << "mtp_round: PASS exact K=1..5 B=1..8 pitched-padding and immutable-input oracle\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "mtp_round: FAIL: " << error.what() << '\n';

@@ -106,9 +106,7 @@ StorageLayout parse_layout(std::string_view name) {
     if (name == "r9700-w8g32-n16-k16-v1") { return StorageLayout::R9700W8G32N16K16V1; }
     if (name == "row-scaled-k128-v1") { return StorageLayout::RowScaledK128V1; }
     if (name == "r9700-fp8lut4-n16k64-v1") { return StorageLayout::R9700Fp8Lut4N16K64V1; }
-    if (name == "r9700-q4g64-n16-k16-v1") {
-        return StorageLayout::R9700Q4G64N16K16V1;
-    }
+    if (name == "r9700-q4g64-n16-k16-v1") { return StorageLayout::R9700Q4G64N16K16V1; }
     throw ArtifactError("unknown tensor layout: " + std::string(name));
 }
 
@@ -190,7 +188,7 @@ public:
             throw std::system_error(errno, std::generic_category(), "open " + path.string());
         }
 
-        struct stat status {};
+        struct stat status{};
 
         if (::fstat(fd, &status) != 0) {
             const int error = errno;
@@ -213,9 +211,9 @@ public:
                 throw std::system_error(error, std::generic_category(), "mmap " + path.string());
             }
         }
-        fd_   = fd;
-        data_ = static_cast<const std::byte*>(mapping);
-        size_ = size;
+        fd_     = fd;
+        data_   = static_cast<const std::byte*>(mapping);
+        size_   = size;
         status_ = status;
     }
 
@@ -266,7 +264,7 @@ private:
     int fd_                = -1;
     const std::byte* data_ = nullptr;
     std::size_t size_      = 0;
-    struct stat status_ {};
+    struct stat status_{};
 };
 
 } // namespace

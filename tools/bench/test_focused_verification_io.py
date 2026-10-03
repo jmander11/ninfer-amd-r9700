@@ -74,9 +74,9 @@ def test_success_is_exclusively_published_and_validated(
             ),
         )
         publication.publish_success(route_path, closure, pending, output, 29)
-        assert publication.validate_report(
-            json.loads(output.read_text()), closure
-        ) == selected_route
+        assert (
+            publication.validate_report(json.loads(output.read_text()), closure) == selected_route
+        )
         assert not pending.exists()
 
 
@@ -172,7 +172,9 @@ def test_pending_is_inode_owned_before_write_fsync(
                 {"prefill_chunk": 4096},
             ),
         )
-        monkeypatch.setattr(publication.os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError("fsync")))
+        monkeypatch.setattr(
+            publication.os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError("fsync"))
+        )
         with pytest.raises(OSError, match="fsync"):
             publication.publish_success(route_path, closure, pending, output, 29)
         assert not pending.exists()

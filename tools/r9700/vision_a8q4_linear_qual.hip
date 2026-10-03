@@ -10,6 +10,7 @@ int main() {
             std::uint32_t tokens;
             const char* name;
         };
+
         // One 1920x1080 image: P=8256 patches, 2064 merged tokens; one 768x512 image: P=1536.
         const std::vector<Case> cases{
             {{1152U, 1536U, 0U, 0U}, 8256U, "patch"},
@@ -24,10 +25,12 @@ int main() {
             {{1152U, 4304U, 0U, 0U}, 1536U, "fc2"},
         };
         double wave_total = 0.0;
-        double cta_total = 0.0;
+        double cta_total  = 0.0;
         for (const Case& c : cases) {
             const PrefillResult numerical = run_prefill_case(c.shape, c.tokens, false, false);
-            if (numerical.maximum_bf16_steps > 2U) { fail("vision A8Q4 FP64-oracle criterion failed"); }
+            if (numerical.maximum_bf16_steps > 2U) {
+                fail("vision A8Q4 FP64-oracle criterion failed");
+            }
             const PrefillResult timing = run_prefill_case(c.shape, c.tokens, false, true);
             std::cout << c.name << " N=" << c.shape.rows << " K=" << c.shape.columns
                       << " T=" << c.tokens << " oracle_bf16_steps=" << numerical.maximum_bf16_steps

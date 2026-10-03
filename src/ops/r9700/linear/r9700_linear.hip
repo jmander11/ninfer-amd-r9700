@@ -14,30 +14,30 @@
 namespace ninfer::ops::r9700::linear {
 namespace {
 
-constexpr std::uint32_t kThreads = 256;
-constexpr std::uint32_t kW8Group = 32;
-constexpr std::uint32_t kKAlignment = 128;
-constexpr std::uint32_t kWaveSize = 32;
-constexpr std::uint32_t kWavesPerDecodeBlock = kThreads / kWaveSize;
-constexpr std::uint32_t kWavesPerPrefillBlock = 16;
-constexpr std::uint32_t kPrefillThreads = kWavesPerPrefillBlock * kWaveSize;
-constexpr std::uint32_t kCooperativeTile = 256;
-constexpr std::uint32_t kWmmaTile = 16;
-constexpr std::uint32_t kQ4Group = 64;
-constexpr std::uint32_t kA8Q4PrefillTokenTile = 64;
-constexpr std::uint32_t kA8Q4PrefillRowTile = 64;
-constexpr std::uint32_t kA8Q4PrefillWaves = 16;
-constexpr std::uint32_t kA8Q4PrefillThreads = kA8Q4PrefillWaves * kWaveSize;
-constexpr std::uint32_t kA8Q4M128PrefillTokenTile = 128;
-constexpr std::uint32_t kA8Q4M128PrefillWaves = 32;
-constexpr std::uint32_t kA8Q4M128PrefillThreads = kA8Q4M128PrefillWaves * kWaveSize;
+constexpr std::uint32_t kThreads                   = 256;
+constexpr std::uint32_t kW8Group                   = 32;
+constexpr std::uint32_t kKAlignment                = 128;
+constexpr std::uint32_t kWaveSize                  = 32;
+constexpr std::uint32_t kWavesPerDecodeBlock       = kThreads / kWaveSize;
+constexpr std::uint32_t kWavesPerPrefillBlock      = 16;
+constexpr std::uint32_t kPrefillThreads            = kWavesPerPrefillBlock * kWaveSize;
+constexpr std::uint32_t kCooperativeTile           = 256;
+constexpr std::uint32_t kWmmaTile                  = 16;
+constexpr std::uint32_t kQ4Group                   = 64;
+constexpr std::uint32_t kA8Q4PrefillTokenTile      = 64;
+constexpr std::uint32_t kA8Q4PrefillRowTile        = 64;
+constexpr std::uint32_t kA8Q4PrefillWaves          = 16;
+constexpr std::uint32_t kA8Q4PrefillThreads        = kA8Q4PrefillWaves * kWaveSize;
+constexpr std::uint32_t kA8Q4M128PrefillTokenTile  = 128;
+constexpr std::uint32_t kA8Q4M128PrefillWaves      = 32;
+constexpr std::uint32_t kA8Q4M128PrefillThreads    = kA8Q4M128PrefillWaves * kWaveSize;
 constexpr std::uint32_t kA8Q4M128ProductionThreads = 8U * kWaveSize;
-constexpr std::uint32_t kA8W8PrefillTokenTile = 64;
-constexpr std::uint32_t kA8W8PrefillRowTile = 64;
-constexpr std::uint32_t kA8W8PrefillWaves = 16;
-constexpr std::uint32_t kA8W8PrefillThreads = kA8W8PrefillWaves * kWaveSize;
-constexpr std::uint32_t kQ4KAlignment = 128;
-constexpr std::size_t kQ4PlaneAlignment = 256;
+constexpr std::uint32_t kA8W8PrefillTokenTile      = 64;
+constexpr std::uint32_t kA8W8PrefillRowTile        = 64;
+constexpr std::uint32_t kA8W8PrefillWaves          = 16;
+constexpr std::uint32_t kA8W8PrefillThreads        = kA8W8PrefillWaves * kWaveSize;
+constexpr std::uint32_t kQ4KAlignment              = 128;
+constexpr std::size_t kQ4PlaneAlignment            = 256;
 
 constexpr std::size_t align_up(std::size_t value, std::size_t alignment) noexcept {
     return (value + alignment - 1U) / alignment * alignment;
@@ -58,23 +58,23 @@ bool aligned_qword(const void* pointer) noexcept {
 }
 
 bool q4_padded_columns(std::uint32_t columns, std::uint32_t* padded) noexcept {
-    if (columns == 0U || columns > std::numeric_limits<std::uint32_t>::max() -
-                                      (kQ4KAlignment - 1U)) return false;
+    if (columns == 0U || columns > std::numeric_limits<std::uint32_t>::max() - (kQ4KAlignment - 1U))
+        return false;
     *padded = (columns + kQ4KAlignment - 1U) / kQ4KAlignment * kQ4KAlignment;
     return true;
 }
 
-bool q4_layout_bytes(std::uint32_t rows, std::uint32_t columns,
-                     std::uint32_t padded_columns, std::size_t* code_bytes,
-                     std::size_t* scale_bytes) noexcept {
+bool q4_layout_bytes(std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns,
+                     std::size_t* code_bytes, std::size_t* scale_bytes) noexcept {
     std::uint32_t expected_padded = 0;
     if (rows == 0U || !q4_padded_columns(columns, &expected_padded) ||
-        padded_columns != expected_padded) return false;
+        padded_columns != expected_padded)
+        return false;
     std::size_t elements = 0;
     if (!checked_mul(rows, padded_columns, &elements)) return false;
-    *code_bytes = elements / 2U;
+    *code_bytes              = elements / 2U;
     const std::size_t groups = padded_columns / kQ4Group;
-    std::size_t scale_words = 0;
+    std::size_t scale_words  = 0;
     return checked_mul(rows, groups, &scale_words) &&
            checked_mul(scale_words, sizeof(std::uint16_t), scale_bytes);
 }
@@ -83,17 +83,17 @@ bool q4_layout_bytes(std::uint32_t rows, std::uint32_t columns,
 // [N/16][K/64][four K16 pairs][16 rows][packed-u64].  The scale plane uses
 // the matching [N/16][K/64][16 rows] order.  This is a byte permutation of
 // the logical [N,K] codes and [N,K/64] scales; no runtime repack exists.
-__host__ __device__ constexpr std::size_t q4_n16k16_pair_index(
-    std::uint32_t row, std::uint32_t group, std::uint32_t pair,
-    std::uint32_t groups) noexcept {
-    return (((static_cast<std::size_t>(row >> 4U) * groups + group) * 4U + pair) *
-            16U + (row & 15U));
+__host__ __device__ constexpr std::size_t q4_n16k16_pair_index(std::uint32_t row,
+                                                               std::uint32_t group,
+                                                               std::uint32_t pair,
+                                                               std::uint32_t groups) noexcept {
+    return (((static_cast<std::size_t>(row >> 4U) * groups + group) * 4U + pair) * 16U +
+            (row & 15U));
 }
 
-__host__ __device__ constexpr std::size_t q4_n16k16_scale_index(
-    std::uint32_t row, std::uint32_t group, std::uint32_t groups) noexcept {
-    return ((static_cast<std::size_t>(row >> 4U) * groups + group) * 16U +
-            (row & 15U));
+__host__ __device__ constexpr std::size_t
+q4_n16k16_scale_index(std::uint32_t row, std::uint32_t group, std::uint32_t groups) noexcept {
+    return ((static_cast<std::size_t>(row >> 4U) * groups + group) * 16U + (row & 15U));
 }
 
 bool byte_interval(const void* pointer, std::size_t bytes, std::uintptr_t* begin,
@@ -109,17 +109,19 @@ bool ranges_overlap(const void* lhs, std::size_t lhs_bytes, const void* rhs,
                     std::size_t rhs_bytes) noexcept {
     std::uintptr_t lhs_begin = 0, lhs_end = 0, rhs_begin = 0, rhs_end = 0;
     if (!byte_interval(lhs, lhs_bytes, &lhs_begin, &lhs_end) ||
-        !byte_interval(rhs, rhs_bytes, &rhs_begin, &rhs_end)) return true;
+        !byte_interval(rhs, rhs_bytes, &rhs_begin, &rhs_end))
+        return true;
     return lhs_begin < rhs_end && rhs_begin < lhs_end;
 }
 
 bool valid_q4_workspace(const Q4G64ActivationWorkspace& workspace) noexcept {
     std::size_t code_bytes = 0, scale_bytes = 0;
     if (workspace.status == nullptr ||
-        !q4_layout_bytes(workspace.tokens, workspace.columns, workspace.padded_columns,
-                         &code_bytes, &scale_bytes) ||
+        !q4_layout_bytes(workspace.tokens, workspace.columns, workspace.padded_columns, &code_bytes,
+                         &scale_bytes) ||
         workspace.codes == nullptr || workspace.scales == nullptr ||
-        workspace.code_bytes != code_bytes || workspace.scale_bytes != scale_bytes) return false;
+        workspace.code_bytes != code_bytes || workspace.scale_bytes != scale_bytes)
+        return false;
     return !ranges_overlap(workspace.codes, code_bytes, workspace.scales, scale_bytes) &&
            !ranges_overlap(workspace.codes, code_bytes, workspace.status, sizeof(std::uint32_t)) &&
            !ranges_overlap(workspace.scales, scale_bytes, workspace.status, sizeof(std::uint32_t));
@@ -129,27 +131,27 @@ bool valid_q4_linear_args(const Q4G64LinearArgs& args) noexcept {
     std::size_t activation_code_bytes = 0, activation_scale_bytes = 0;
     std::size_t weight_code_bytes = 0, weight_scale_bytes = 0;
     if (args.activation_codes == nullptr || args.activation_scales == nullptr ||
-        args.activation_status == nullptr ||
-        args.weight_codes == nullptr || args.weight_scales == nullptr || args.output == nullptr ||
+        args.activation_status == nullptr || args.weight_codes == nullptr ||
+        args.weight_scales == nullptr || args.output == nullptr ||
         !aligned_dword(args.activation_codes) || !aligned_qword(args.weight_codes) ||
         args.rows % 16U != 0U ||
-        !q4_layout_bytes(args.tokens, args.columns, args.padded_columns,
-                         &activation_code_bytes, &activation_scale_bytes) ||
-        !q4_layout_bytes(args.rows, args.columns, args.padded_columns,
-                         &weight_code_bytes, &weight_scale_bytes) ||
+        !q4_layout_bytes(args.tokens, args.columns, args.padded_columns, &activation_code_bytes,
+                         &activation_scale_bytes) ||
+        !q4_layout_bytes(args.rows, args.columns, args.padded_columns, &weight_code_bytes,
+                         &weight_scale_bytes) ||
         args.activation_code_bytes != activation_code_bytes ||
         args.activation_scale_bytes != activation_scale_bytes ||
         args.weight_code_bytes != weight_code_bytes ||
-        args.weight_scale_bytes != weight_scale_bytes) return false;
+        args.weight_scale_bytes != weight_scale_bytes)
+        return false;
     std::size_t output_elements = 0, output_bytes = 0;
     if (!checked_mul(args.tokens, args.rows, &output_elements) ||
-        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes)) return false;
-    const void* pointers[] = {args.activation_codes, args.activation_scales,
-                              args.activation_status, args.weight_codes,
-                              args.weight_scales};
+        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes))
+        return false;
+    const void* pointers[] = {args.activation_codes, args.activation_scales, args.activation_status,
+                              args.weight_codes, args.weight_scales};
     const std::size_t sizes[] = {activation_code_bytes, activation_scale_bytes,
-                                 sizeof(std::uint32_t), weight_code_bytes,
-                                 weight_scale_bytes};
+                                 sizeof(std::uint32_t), weight_code_bytes, weight_scale_bytes};
     for (unsigned index = 0; index < 5U; ++index) {
         if (ranges_overlap(args.output, output_bytes, pointers[index], sizes[index])) return false;
         for (unsigned other = index + 1U; other < 5U; ++other) {
@@ -171,10 +173,9 @@ bool valid_a8_workspace(const A8G64ActivationWorkspace& workspace) noexcept {
         workspace.high_code_bytes != plane_bytes || workspace.scale_bytes != scale_bytes) {
         return false;
     }
-    const void* pointers[] = {workspace.low_codes, workspace.high_codes, workspace.scales,
-                              workspace.status};
-    const std::size_t sizes[] = {plane_bytes, plane_bytes, scale_bytes,
-                                 sizeof(std::uint32_t)};
+    const void* pointers[]    = {workspace.low_codes, workspace.high_codes, workspace.scales,
+                                 workspace.status};
+    const std::size_t sizes[] = {plane_bytes, plane_bytes, scale_bytes, sizeof(std::uint32_t)};
     for (unsigned index = 0; index < 4U; ++index) {
         for (unsigned other = index + 1U; other < 4U; ++other) {
             if (ranges_overlap(pointers[index], sizes[index], pointers[other], sizes[other])) {
@@ -185,22 +186,19 @@ bool valid_a8_workspace(const A8G64ActivationWorkspace& workspace) noexcept {
     return true;
 }
 
-bool valid_a8q4_linear_args(const A8Q4G64LinearArgs& args,
-                             bool allow_accumulate = false) noexcept {
+bool valid_a8q4_linear_args(const A8Q4G64LinearArgs& args, bool allow_accumulate = false) noexcept {
     std::size_t activation_plane_bytes = 0, activation_scale_bytes = 0;
     std::size_t weight_code_bytes = 0, weight_scale_bytes = 0;
-    if ((args.accumulate_output && !allow_accumulate) ||
-        args.activation_low_codes == nullptr || args.activation_high_codes == nullptr ||
-        args.activation_scales == nullptr || args.activation_status == nullptr ||
-        args.weight_codes == nullptr ||
+    if ((args.accumulate_output && !allow_accumulate) || args.activation_low_codes == nullptr ||
+        args.activation_high_codes == nullptr || args.activation_scales == nullptr ||
+        args.activation_status == nullptr || args.weight_codes == nullptr ||
         args.weight_scales == nullptr || args.output == nullptr ||
-        !aligned_dword(args.activation_low_codes) ||
-        !aligned_dword(args.activation_high_codes) || !aligned_qword(args.weight_codes) ||
-        args.rows % 16U != 0U ||
-        !q4_layout_bytes(args.tokens, args.columns, args.padded_columns,
-                         &activation_plane_bytes, &activation_scale_bytes) ||
-        !q4_layout_bytes(args.rows, args.columns, args.padded_columns,
-                         &weight_code_bytes, &weight_scale_bytes) ||
+        !aligned_dword(args.activation_low_codes) || !aligned_dword(args.activation_high_codes) ||
+        !aligned_qword(args.weight_codes) || args.rows % 16U != 0U ||
+        !q4_layout_bytes(args.tokens, args.columns, args.padded_columns, &activation_plane_bytes,
+                         &activation_scale_bytes) ||
+        !q4_layout_bytes(args.rows, args.columns, args.padded_columns, &weight_code_bytes,
+                         &weight_scale_bytes) ||
         args.activation_low_code_bytes != activation_plane_bytes ||
         args.activation_high_code_bytes != activation_plane_bytes ||
         args.activation_scale_bytes != activation_scale_bytes ||
@@ -210,13 +208,14 @@ bool valid_a8q4_linear_args(const A8Q4G64LinearArgs& args,
     }
     std::size_t output_elements = 0, output_bytes = 0;
     if (!checked_mul(args.tokens, args.rows, &output_elements) ||
-        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes)) return false;
-    const void* pointers[] = {args.activation_low_codes, args.activation_high_codes,
-                              args.activation_scales, args.activation_status,
-                              args.weight_codes, args.weight_scales};
+        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes))
+        return false;
+    const void* pointers[]    = {args.activation_low_codes, args.activation_high_codes,
+                                 args.activation_scales,    args.activation_status,
+                                 args.weight_codes,         args.weight_scales};
     const std::size_t sizes[] = {activation_plane_bytes, activation_plane_bytes,
                                  activation_scale_bytes, sizeof(std::uint32_t),
-                                 weight_code_bytes, weight_scale_bytes};
+                                 weight_code_bytes,      weight_scale_bytes};
     for (unsigned index = 0; index < 6U; ++index) {
         if (ranges_overlap(args.output, output_bytes, pointers[index], sizes[index])) return false;
         for (unsigned other = index + 1U; other < 6U; ++other) {
@@ -228,39 +227,49 @@ bool valid_a8q4_linear_args(const A8Q4G64LinearArgs& args,
     return true;
 }
 
-bool dflash_small_t_qualification_shape(std::uint32_t rows,
-                                        std::uint32_t columns) noexcept {
+bool dflash_small_t_qualification_shape(std::uint32_t rows, std::uint32_t columns) noexcept {
     return rows == 34816U && columns == 5120U;
 }
 
 bool dflash_small_t_qualification_tokens(std::uint32_t tokens) noexcept {
     switch (tokens) {
-    case 4U: case 5U: case 6U: case 8U: case 10U: case 12U:
-    case 15U: case 16U: case 18U: case 20U: case 24U: return true;
-    default: return false;
+    case 4U:
+    case 5U:
+    case 6U:
+    case 8U:
+    case 10U:
+    case 12U:
+    case 15U:
+    case 16U:
+    case 18U:
+    case 20U:
+    case 24U:
+        return true;
+    default:
+        return false;
     }
 }
 
 bool scalar_base_offsets_fit(std::uint32_t tokens, std::uint32_t rows,
                              std::uint32_t padded_columns) noexcept {
-    if (tokens == 0U || rows == 0U || padded_columns == 0U ||
-        padded_columns % kQ4Group != 0U) return false;
-    using Wide = unsigned __int128;
+    if (tokens == 0U || rows == 0U || padded_columns == 0U || padded_columns % kQ4Group != 0U)
+        return false;
+    using Wide        = unsigned __int128;
     const Wide groups = padded_columns / kQ4Group;
     if (groups == 0U) return false;
     const Wide last_token = tokens - 1U;
-    const Wide last_row = rows - 1U;
+    const Wide last_row   = rows - 1U;
     const Wide last_group = groups - 1U;
     const Wide activation_code_last =
         last_token * (padded_columns / 2U) + last_group * 32U + 28U + 3U;
     const Wide weight_code_last =
-        (((((last_row >> 4U) * groups + last_group) * 4U + 3U) * 16U +
-           (last_row & 15U)) * 8U) + 7U;
+        (((((last_row >> 4U) * groups + last_group) * 4U + 3U) * 16U + (last_row & 15U)) * 8U) + 7U;
     const Wide activation_scale_last =
         (last_token * groups + last_group) * sizeof(std::uint16_t) + 1U;
     const Wide weight_scale_last =
         (((last_row >> 4U) * groups + last_group) * 16U + (last_row & 15U)) *
-            sizeof(std::uint16_t) + 1U;
+            sizeof(std::uint16_t) +
+        1U;
     constexpr Wide maximum = std::numeric_limits<std::uint32_t>::max();
     return activation_code_last <= maximum && weight_code_last <= maximum &&
            activation_scale_last <= maximum && weight_scale_last <= maximum;
@@ -277,46 +286,41 @@ bool valid_prefill(const hip_bfloat16* input, hip_bfloat16* output, std::uint32_
     return input != nullptr && output != nullptr && tokens >= 9U && rows != 0U && columns != 0U;
 }
 
-bool valid_qualified_width(const hip_bfloat16* input, hip_bfloat16* output,
-                           std::uint32_t tokens, std::uint32_t rows,
-                           std::uint32_t columns) noexcept {
+bool valid_qualified_width(const hip_bfloat16* input, hip_bfloat16* output, std::uint32_t tokens,
+                           std::uint32_t rows, std::uint32_t columns) noexcept {
     return valid_decode(input, output, tokens, rows, columns) ||
            valid_prefill(input, output, tokens, rows, columns);
 }
 
-bool w8_layout_bytes(std::uint32_t rows, std::uint32_t columns,
-                     std::uint32_t padded_columns, std::size_t* code_bytes,
-                     std::size_t* scale_bytes) noexcept {
+bool w8_layout_bytes(std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns,
+                     std::size_t* code_bytes, std::size_t* scale_bytes) noexcept {
     const std::size_t expected_padded = align_up(columns, kKAlignment);
     if (expected_padded != padded_columns || expected_padded < columns ||
         rows > std::numeric_limits<std::size_t>::max() / expected_padded) {
         return false;
     }
     const std::size_t base_bytes = static_cast<std::size_t>(rows) * expected_padded;
-    const std::size_t groups = expected_padded / kW8Group;
-    if (groups == 0U || rows > std::numeric_limits<std::size_t>::max() /
-                                      (groups * sizeof(std::uint16_t))) {
+    const std::size_t groups     = expected_padded / kW8Group;
+    if (groups == 0U ||
+        rows > std::numeric_limits<std::size_t>::max() / (groups * sizeof(std::uint16_t))) {
         return false;
     }
-    *code_bytes = base_bytes;
+    *code_bytes  = base_bytes;
     *scale_bytes = static_cast<std::size_t>(rows) * groups * sizeof(std::uint16_t);
     return true;
 }
 
 bool valid_a8w8_workspace(const A8G32ActivationWorkspace& workspace) noexcept {
     std::size_t code_bytes = 0, scale_bytes = 0;
-    if (workspace.codes == nullptr || workspace.scales == nullptr ||
-        workspace.status == nullptr ||
-        !w8_layout_bytes(workspace.tokens, workspace.columns, workspace.padded_columns,
-                         &code_bytes, &scale_bytes) ||
+    if (workspace.codes == nullptr || workspace.scales == nullptr || workspace.status == nullptr ||
+        !w8_layout_bytes(workspace.tokens, workspace.columns, workspace.padded_columns, &code_bytes,
+                         &scale_bytes) ||
         workspace.code_bytes != code_bytes || workspace.scale_bytes != scale_bytes) {
         return false;
     }
     return !ranges_overlap(workspace.codes, code_bytes, workspace.scales, scale_bytes) &&
-           !ranges_overlap(workspace.codes, code_bytes, workspace.status,
-                           sizeof(std::uint32_t)) &&
-           !ranges_overlap(workspace.scales, scale_bytes, workspace.status,
-                           sizeof(std::uint32_t));
+           !ranges_overlap(workspace.codes, code_bytes, workspace.status, sizeof(std::uint32_t)) &&
+           !ranges_overlap(workspace.scales, scale_bytes, workspace.status, sizeof(std::uint32_t));
 }
 
 bool valid_a8w8_linear_args(const A8W8G32LinearArgs& args) noexcept {
@@ -327,10 +331,10 @@ bool valid_a8w8_linear_args(const A8W8G32LinearArgs& args) noexcept {
         args.activation_status == nullptr || args.weight_codes == nullptr ||
         args.weight_scales == nullptr || args.output == nullptr ||
         !aligned_dword(args.activation_codes) || !aligned_dword(args.weight_codes) ||
-        !w8_layout_bytes(args.tokens, args.columns, args.padded_columns,
-                         &activation_code_bytes, &activation_scale_bytes) ||
-        !w8_layout_bytes(args.rows, args.columns, args.padded_columns,
-                         &weight_code_bytes, &weight_scale_bytes) ||
+        !w8_layout_bytes(args.tokens, args.columns, args.padded_columns, &activation_code_bytes,
+                         &activation_scale_bytes) ||
+        !w8_layout_bytes(args.rows, args.columns, args.padded_columns, &weight_code_bytes,
+                         &weight_scale_bytes) ||
         args.activation_code_bytes != activation_code_bytes ||
         args.activation_scale_bytes != activation_scale_bytes ||
         args.weight_code_bytes != weight_code_bytes ||
@@ -339,13 +343,12 @@ bool valid_a8w8_linear_args(const A8W8G32LinearArgs& args) noexcept {
     }
     std::size_t output_elements = 0, output_bytes = 0;
     if (!checked_mul(args.tokens, args.rows, &output_elements) ||
-        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes)) return false;
-    const void* pointers[] = {args.activation_codes, args.activation_scales,
-                              args.activation_status, args.weight_codes,
-                              args.weight_scales};
+        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes))
+        return false;
+    const void* pointers[] = {args.activation_codes, args.activation_scales, args.activation_status,
+                              args.weight_codes, args.weight_scales};
     const std::size_t sizes[] = {activation_code_bytes, activation_scale_bytes,
-                                 sizeof(std::uint32_t), weight_code_bytes,
-                                 weight_scale_bytes};
+                                 sizeof(std::uint32_t), weight_code_bytes, weight_scale_bytes};
     for (unsigned index = 0; index < 5U; ++index) {
         if (ranges_overlap(args.output, output_bytes, pointers[index], sizes[index])) return false;
         for (unsigned other = index + 1U; other < 5U; ++other) {
@@ -361,9 +364,9 @@ __global__ void bf16_linear_kernel(const hip_bfloat16* input, const hip_bfloat16
                                    hip_bfloat16* output, std::uint32_t columns,
                                    std::uint32_t rows) {
     const std::uint32_t column = blockIdx.x;
-    const std::uint32_t token = blockIdx.y;
+    const std::uint32_t token  = blockIdx.y;
     if (column >= rows) return;
-    float partial = 0.0F;
+    float partial            = 0.0F;
     const std::size_t x_base = static_cast<std::size_t>(token) * columns;
     const std::size_t w_base = static_cast<std::size_t>(column) * columns;
     for (std::uint32_t k = threadIdx.x; k < columns; k += blockDim.x) {
@@ -383,24 +386,23 @@ __global__ void bf16_linear_kernel(const hip_bfloat16* input, const hip_bfloat16
     }
 }
 
-__global__ void w8g32_linear_kernel(const hip_bfloat16* input,
-                                    const std::int8_t* codes,
-                                    const std::uint16_t* scale_words,
-                                    hip_bfloat16* output, std::uint32_t columns,
-                                    std::uint32_t rows, std::size_t padded_columns) {
+__global__ void w8g32_linear_kernel(const hip_bfloat16* input, const std::int8_t* codes,
+                                    const std::uint16_t* scale_words, hip_bfloat16* output,
+                                    std::uint32_t columns, std::uint32_t rows,
+                                    std::size_t padded_columns) {
     const std::uint32_t column = blockIdx.x;
-    const std::uint32_t token = blockIdx.y;
+    const std::uint32_t token  = blockIdx.y;
     if (column >= rows) return;
-    float partial = 0.0F;
-    const std::size_t x_base = static_cast<std::size_t>(token) * columns;
-    const std::size_t w_base = static_cast<std::size_t>(column) * padded_columns;
+    float partial                    = 0.0F;
+    const std::size_t x_base         = static_cast<std::size_t>(token) * columns;
+    const std::size_t w_base         = static_cast<std::size_t>(column) * padded_columns;
     const std::size_t groups_per_row = padded_columns / kW8Group;
     for (std::uint32_t k = threadIdx.x; k < columns; k += blockDim.x) {
         const std::int32_t code = codes[w_base + k];
         const std::uint16_t scale_bits =
             scale_words[static_cast<std::size_t>(column) * groups_per_row + k / kW8Group];
         const float weight = static_cast<float>(code) * __half2float(__ushort_as_half(scale_bits));
-        partial = fmaf(static_cast<float>(input[x_base + k]), weight, partial);
+        partial            = fmaf(static_cast<float>(input[x_base + k]), weight, partial);
     }
     __shared__ float reductions[kThreads];
     reductions[threadIdx.x] = partial;
@@ -418,14 +420,14 @@ __global__ void w8g32_linear_kernel(const hip_bfloat16* input,
 __global__ __launch_bounds__(64) void q4g64_quantize_activation_kernel(
     const hip_bfloat16* input, std::uint8_t* codes, std::uint16_t* scale_words,
     std::uint32_t* status, std::uint32_t columns, std::uint32_t padded_columns) {
-    const std::uint32_t group = blockIdx.x;
-    const std::uint32_t token = blockIdx.y;
-    const std::uint32_t lane = threadIdx.x;
+    const std::uint32_t group  = blockIdx.x;
+    const std::uint32_t token  = blockIdx.y;
+    const std::uint32_t lane   = threadIdx.x;
     const std::uint32_t column = group * kQ4Group + lane;
-    float value = 0.0F;
-    bool finite = true;
+    float value                = 0.0F;
+    bool finite                = true;
     if (column < columns) {
-        value = static_cast<float>(input[static_cast<std::size_t>(token) * columns + column]);
+        value  = static_cast<float>(input[static_cast<std::size_t>(token) * columns + column]);
         finite = isfinite(value);
         if (!finite) {
             atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
@@ -450,22 +452,22 @@ __global__ __launch_bounds__(64) void q4g64_quantize_activation_kernel(
                 bits = 0U;
             }
         }
-        represented_scale_bits = bits;
+        represented_scale_bits                                                             = bits;
         scale_words[static_cast<std::size_t>(token) * (padded_columns / kQ4Group) + group] = bits;
     }
     __syncthreads();
     if (lane < kQ4Group / 2U) {
         const std::uint32_t column0 = group * kQ4Group + lane * 2U;
         const std::uint32_t column1 = column0 + 1U;
-        const float scale = __half2float(__ushort_as_half(represented_scale_bits));
-        auto encode = [&](std::uint32_t source_column) {
+        const float scale           = __half2float(__ushort_as_half(represented_scale_bits));
+        auto encode                 = [&](std::uint32_t source_column) {
             if (source_column >= columns || scale == 0.0F) return 0;
             const float source = static_cast<float>(
                 input[static_cast<std::size_t>(token) * columns + source_column]);
             if (!isfinite(source)) return 0;
             return max(-8, min(7, __float2int_rn(source / scale)));
         };
-        const int low = encode(column0);
+        const int low  = encode(column0);
         const int high = encode(column1);
         codes[(static_cast<std::size_t>(token) * padded_columns + column0) / 2U] =
             static_cast<std::uint8_t>((low & 0x0f) | ((high & 0x0f) << 4));
@@ -476,15 +478,14 @@ __global__ __launch_bounds__(kWaveSize) void a8g64_quantize_activation_kernel(
     const hip_bfloat16* input, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status, std::uint32_t columns,
     std::uint32_t padded_columns) {
-    const std::uint32_t group = blockIdx.x;
-    const std::uint32_t token = blockIdx.y;
-    const std::uint32_t lane = threadIdx.x;
+    const std::uint32_t group   = blockIdx.x;
+    const std::uint32_t token   = blockIdx.y;
+    const std::uint32_t lane    = threadIdx.x;
     const std::uint32_t column0 = group * kQ4Group + lane * 2U;
     const std::uint32_t column1 = column0 + 1U;
-    auto load_finite = [&](std::uint32_t column) {
+    auto load_finite            = [&](std::uint32_t column) {
         if (column >= columns) return 0.0F;
-        float value = static_cast<float>(
-            input[static_cast<std::size_t>(token) * columns + column]);
+        float value = static_cast<float>(input[static_cast<std::size_t>(token) * columns + column]);
         if (!isfinite(value)) {
             atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
             value = 0.0F;
@@ -493,7 +494,7 @@ __global__ __launch_bounds__(kWaveSize) void a8g64_quantize_activation_kernel(
     };
     const float value0 = load_finite(column0);
     const float value1 = load_finite(column1);
-    float maximum = fmaxf(fabsf(value0), fabsf(value1));
+    float maximum      = fmaxf(fabsf(value0), fabsf(value1));
 #pragma unroll
     for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U) {
         maximum = fmaxf(maximum, __shfl_down(maximum, width, kWaveSize));
@@ -513,22 +514,20 @@ __global__ __launch_bounds__(kWaveSize) void a8g64_quantize_activation_kernel(
     }
     represented_scale_bits = static_cast<std::uint16_t>(
         __shfl(static_cast<unsigned>(represented_scale_bits), 0, kWaveSize));
-    const float scale = __half2float(__ushort_as_half(represented_scale_bits));
-    const int code0 = column0 < columns && scale != 0.0F
-                          ? max(-127, min(127, __float2int_rn(value0 / scale)))
-                          : 0;
-    const int code1 = column1 < columns && scale != 0.0F
-                          ? max(-127, min(127, __float2int_rn(value1 / scale)))
-                          : 0;
-    const int low0 = code0 & 0x0f;
-    const int low1 = code1 & 0x0f;
-    const int high0 = (code0 - low0) / 16;
-    const int high1 = (code1 - low1) / 16;
-    const std::size_t packed =
-        (static_cast<std::size_t>(token) * padded_columns + column0) / 2U;
-    low_codes[packed] = static_cast<std::uint8_t>(low0 | (low1 << 4));
-    high_codes[packed] = static_cast<std::uint8_t>((high0 & 0x0f) |
-                                                   ((high1 & 0x0f) << 4));
+    const float scale        = __half2float(__ushort_as_half(represented_scale_bits));
+    const int code0          = column0 < columns && scale != 0.0F
+                                   ? max(-127, min(127, __float2int_rn(value0 / scale)))
+                                   : 0;
+    const int code1          = column1 < columns && scale != 0.0F
+                                   ? max(-127, min(127, __float2int_rn(value1 / scale)))
+                                   : 0;
+    const int low0           = code0 & 0x0f;
+    const int low1           = code1 & 0x0f;
+    const int high0          = (code0 - low0) / 16;
+    const int high1          = (code1 - low1) / 16;
+    const std::size_t packed = (static_cast<std::size_t>(token) * padded_columns + column0) / 2U;
+    low_codes[packed]        = static_cast<std::uint8_t>(low0 | (low1 << 4));
+    high_codes[packed]       = static_cast<std::uint8_t>((high0 & 0x0f) | ((high1 & 0x0f) << 4));
 }
 
 using codec::a8g64_element_overflows;
@@ -540,7 +539,7 @@ using codec::bf16_word_element;
 // final status CTA that scans every element for the nonfinite/overflow conditions and publishes
 // the status word with a plain store. No CTA accumulates into the status word, so no reset launch
 // is needed. Rows are unpadded, 16-byte aligned and a multiple of 64 columns.
-constexpr std::uint32_t kSmallQuantizeThreads = 512U;
+constexpr std::uint32_t kSmallQuantizeThreads        = 512U;
 constexpr std::uint32_t kSmallQuantizeMaximumVectors = 8192U;
 
 __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_quantize_activation_small_kernel(
@@ -548,8 +547,8 @@ __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_quantize_activati
     std::uint16_t* scale_words, std::uint32_t* status, std::uint32_t tokens,
     std::uint32_t columns) {
     const std::uint32_t row_vectors = columns / 8U;
-    const std::uint32_t total = tokens * row_vectors;
-    const uint4* vectors = reinterpret_cast<const uint4*>(input);
+    const std::uint32_t total       = tokens * row_vectors;
+    const uint4* vectors            = reinterpret_cast<const uint4*>(input);
     if (blockIdx.x == gridDim.x - 1U) {
         constexpr std::uint32_t kInFlight = 8U;
         bool nonfinite = false, overflow = false;
@@ -558,7 +557,7 @@ __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_quantize_activati
 #pragma unroll
             for (std::uint32_t item = 0; item < kInFlight; ++item) {
                 const std::uint32_t vector = base + item * kSmallQuantizeThreads + threadIdx.x;
-                loaded[item] = vector < total ? vectors[vector] : uint4{};
+                loaded[item]               = vector < total ? vectors[vector] : uint4{};
             }
 #pragma unroll
             for (std::uint32_t item = 0; item < kInFlight; ++item) {
@@ -573,25 +572,25 @@ __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_quantize_activati
             }
         }
         const bool any_nonfinite = __syncthreads_or(nonfinite);
-        const bool any_overflow = __syncthreads_or(overflow);
+        const bool any_overflow  = __syncthreads_or(overflow);
         if (threadIdx.x == 0U)
-            *status = (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
-                      (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow)
-                                    : 0U);
+            *status =
+                (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
+                (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow) : 0U);
         return;
     }
     const std::uint32_t vector = blockIdx.x * kSmallQuantizeThreads + threadIdx.x;
-    const bool valid = vector < total;  // whole G64 groups share validity
-    const uint4 packed = valid ? vectors[vector] : uint4{};
+    const bool valid           = vector < total; // whole G64 groups share validity
+    const uint4 packed         = valid ? vectors[vector] : uint4{};
     const std::uint32_t words[4]{packed.x, packed.y, packed.z, packed.w};
     float value[8];
     float maximum = 0.0F;
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
-        float x = bf16_word_element(words, element);
-        x = isfinite(x) ? x : 0.0F;
+        float x        = bf16_word_element(words, element);
+        x              = isfinite(x) ? x : 0.0F;
         value[element] = x;
-        maximum = fmaxf(maximum, fabsf(x));
+        maximum        = fmaxf(maximum, fabsf(x));
     }
     maximum = a8g64_group_maximum(maximum);
     if (!valid) return;
@@ -603,23 +602,23 @@ __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_quantize_activati
 
 // Attention output gate into the same small-T codec: vector v of the FP32 attention and BF16 gate
 // rows [T,6144] becomes BF16(BF16(attention) / (1 + exp(-gate))), the represented values the
-// separate output-gate Op publishes, then is encoded exactly as a8g64_quantize_activation_small_kernel
-// encodes them. The final status CTA recomputes every value.
+// separate output-gate Op publishes, then is encoded exactly as
+// a8g64_quantize_activation_small_kernel encodes them. The final status CTA recomputes every value.
 constexpr std::uint32_t kGatedOutputColumns = 6144U;
 
 __device__ __forceinline__ void attention_gate_vector(const hip_bfloat16* gate,
-                                                      const float* attention,
-                                                      std::uint32_t vector, float (&value)[8]) {
+                                                      const float* attention, std::uint32_t vector,
+                                                      float (&value)[8]) {
     const uint4 packed = reinterpret_cast<const uint4*>(gate)[vector];
     const std::uint32_t words[4]{packed.x, packed.y, packed.z, packed.w};
-    const float4 low = reinterpret_cast<const float4*>(attention)[2U * vector];
+    const float4 low  = reinterpret_cast<const float4*>(attention)[2U * vector];
     const float4 high = reinterpret_cast<const float4*>(attention)[2U * vector + 1U];
     const float x[8]{low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w};
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const float represented = static_cast<float>(hip_bfloat16(x[element]));
-        value[element] = static_cast<float>(hip_bfloat16(
-            represented / (1.0F + expf(-bf16_word_element(words, element)))));
+        value[element]          = static_cast<float>(
+            hip_bfloat16(represented / (1.0F + expf(-bf16_word_element(words, element)))));
     }
 }
 
@@ -628,7 +627,7 @@ __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_gated_output_prep
     std::uint8_t* high_codes, std::uint16_t* scale_words, std::uint32_t* status,
     std::uint32_t tokens) {
     constexpr std::uint32_t row_vectors = kGatedOutputColumns / 8U;
-    const std::uint32_t total = tokens * row_vectors;
+    const std::uint32_t total           = tokens * row_vectors;
     if (blockIdx.x == gridDim.x - 1U) {
         constexpr std::uint32_t kInFlight = 4U;
         bool nonfinite = false, overflow = false;
@@ -656,23 +655,23 @@ __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_gated_output_prep
             }
         }
         const bool any_nonfinite = __syncthreads_or(nonfinite);
-        const bool any_overflow = __syncthreads_or(overflow);
+        const bool any_overflow  = __syncthreads_or(overflow);
         if (threadIdx.x == 0U)
-            *status = (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
-                      (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow)
-                                    : 0U);
+            *status =
+                (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
+                (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow) : 0U);
         return;
     }
     const std::uint32_t vector = blockIdx.x * kSmallQuantizeThreads + threadIdx.x;
-    const bool valid = vector < total;  // whole G64 groups share validity
+    const bool valid           = vector < total; // whole G64 groups share validity
     float value[8]{};
     if (valid) attention_gate_vector(gate, attention, vector, value);
     float maximum = 0.0F;
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
-        const float x = isfinite(value[element]) ? value[element] : 0.0F;
+        const float x  = isfinite(value[element]) ? value[element] : 0.0F;
         value[element] = x;
-        maximum = fmaxf(maximum, fabsf(x));
+        maximum        = fmaxf(maximum, fabsf(x));
     }
     maximum = a8g64_group_maximum(maximum);
     if (!valid) return;
@@ -691,13 +690,19 @@ constexpr std::uint32_t kNormalizedPrefillColumns = 5120U;
 constexpr std::uint32_t kNormalizedPrefillVectors = kNormalizedPrefillColumns / (8U * kWaveSize);
 constexpr std::uint32_t kNormalizedPrefillTokensPerBlock = 8U;
 
-__global__ __launch_bounds__(kNormalizedPrefillTokensPerBlock * kWaveSize)
-void a8g64_normalized_prepare_prefill_kernel(
-    const hip_bfloat16* input, const hip_bfloat16* norm, float eps, bool unit_offset,
-    std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
-    std::uint16_t* scale_words, std::uint32_t* status, hip_bfloat16* normalized_rows) {
+__global__ __launch_bounds__(
+    kNormalizedPrefillTokensPerBlock*
+        kWaveSize) void a8g64_normalized_prepare_prefill_kernel(const hip_bfloat16* input,
+                                                                const hip_bfloat16* norm, float eps,
+                                                                bool unit_offset,
+                                                                std::uint32_t tokens,
+                                                                std::uint8_t* low_codes,
+                                                                std::uint8_t* high_codes,
+                                                                std::uint16_t* scale_words,
+                                                                std::uint32_t* status,
+                                                                hip_bfloat16* normalized_rows) {
     constexpr std::uint32_t columns = kNormalizedPrefillColumns;
-    const std::uint32_t lane = threadIdx.x % kWaveSize;
+    const std::uint32_t lane        = threadIdx.x % kWaveSize;
     const std::uint32_t token =
         blockIdx.x * kNormalizedPrefillTokensPerBlock + threadIdx.x / kWaveSize;
     if (token >= tokens) return;
@@ -712,59 +717,59 @@ void a8g64_normalized_prepare_prefill_kernel(
                                      packed[vector].w};
 #pragma unroll
         for (std::uint32_t word = 0; word < 4U; ++word) {
-            const float low = __uint_as_float(words[word] << 16U);
+            const float low  = __uint_as_float(words[word] << 16U);
             const float high = __uint_as_float(words[word] & 0xffff0000U);
-            sumsq = fmaf(low, low, sumsq);
-            sumsq = fmaf(high, high, sumsq);
+            sumsq            = fmaf(low, low, sumsq);
+            sumsq            = fmaf(high, high, sumsq);
         }
     }
 #pragma unroll
     for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
         sumsq += __shfl_xor(sumsq, width, kWaveSize);
     const float inverse = rsqrtf(sumsq / static_cast<float>(columns) + eps);
-    const float offset = unit_offset ? 1.0F : 0.0F;
+    const float offset  = unit_offset ? 1.0F : 0.0F;
     bool nonfinite = false, overflow = false;
     const uint4* gains = reinterpret_cast<const uint4*>(norm);
 #pragma unroll
     for (std::uint32_t vector = 0; vector < kNormalizedPrefillVectors; ++vector) {
         const std::uint32_t slot = vector * kWaveSize + lane;
-        const uint4 gain_words = gains[slot];
+        const uint4 gain_words   = gains[slot];
         const std::uint32_t words[4]{packed[vector].x, packed[vector].y, packed[vector].z,
                                      packed[vector].w};
-        const std::uint32_t gain_packed[4]{gain_words.x, gain_words.y, gain_words.z,
-                                           gain_words.w};
+        const std::uint32_t gain_packed[4]{gain_words.x, gain_words.y, gain_words.z, gain_words.w};
         float value[8];
         std::uint32_t seam[4]{};
         float maximum = 0.0F;
 #pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
-            const std::uint32_t word = words[element >> 1U];
+            const std::uint32_t word      = words[element >> 1U];
             const std::uint32_t gain_word = gain_packed[element >> 1U];
             const float x = __uint_as_float((element & 1U) ? word & 0xffff0000U : word << 16U);
-            const float gain = __uint_as_float((element & 1U) ? gain_word & 0xffff0000U
-                                                              : gain_word << 16U) + offset;
+            const float gain =
+                __uint_as_float((element & 1U) ? gain_word & 0xffff0000U : gain_word << 16U) +
+                offset;
             const hip_bfloat16 rounded(x * inverse * gain);
             seam[element >> 1U] |= static_cast<std::uint32_t>(rounded.data)
                                    << ((element & 1U) * 16U);
             float normalized = static_cast<float>(rounded);
             nonfinite |= !isfinite(normalized);
-            normalized = isfinite(normalized) ? normalized : 0.0F;
+            normalized     = isfinite(normalized) ? normalized : 0.0F;
             value[element] = normalized;
-            maximum = fmaxf(maximum, fabsf(normalized));
+            maximum        = fmaxf(maximum, fabsf(normalized));
         }
         // Group maximum over the eight lanes of this vector slot (DPP row_xmask 4,2,1).
         maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
+                                     0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
         maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
+                                     0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
         maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
+                                     0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
         std::uint16_t scale_bits = 0U;
         if (maximum != 0.0F) {
             scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
             if (scale_bits == 0U) scale_bits = 1U;
             if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
-                overflow = true;
+                overflow   = true;
                 scale_bits = 0U;
             }
         }
@@ -772,21 +777,19 @@ void a8g64_normalized_prepare_prefill_kernel(
             scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U] =
                 scale_bits;
         }
-        const float scale = __half2float(__ushort_as_half(scale_bits));
+        const float scale      = __half2float(__ushort_as_half(scale_bits));
         std::uint32_t low_word = 0U, high_word = 0U;
 #pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
-            const int code = scale != 0.0F
-                ? max(-127, min(127, __float2int_rn(value[element] / scale)))
-                : 0;
-            const int low = code & 0x0f;
+            const int code =
+                scale != 0.0F ? max(-127, min(127, __float2int_rn(value[element] / scale))) : 0;
+            const int low  = code & 0x0f;
             const int high = (code - low) / 16;
             low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
             high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
         }
-        const std::size_t packed_offset =
-            static_cast<std::size_t>(token) * (columns / 8U) + slot;
-        reinterpret_cast<std::uint32_t*>(low_codes)[packed_offset] = low_word;
+        const std::size_t packed_offset = static_cast<std::size_t>(token) * (columns / 8U) + slot;
+        reinterpret_cast<std::uint32_t*>(low_codes)[packed_offset]  = low_word;
         reinterpret_cast<std::uint32_t*>(high_codes)[packed_offset] = high_word;
         if (normalized_rows != nullptr) {
             reinterpret_cast<uint4*>(normalized_rows)[packed_offset] =
@@ -805,8 +808,8 @@ void a8g64_normalized_prepare_prefill_kernel(
 // status word with a plain store and clears clear_status, so no reset launch is needed.
 // normalized_rows, when non-null, receives the BF16 seam rows; clear_status, when non-null, is
 // another status word the status CTA clears.
-constexpr std::uint32_t kNormalizedSmallRowVectors = kNormalizedPrefillColumns / 8U;
-constexpr std::uint32_t kNormalizedSmallWaves = kNormalizedSmallRowVectors / kWaveSize;
+constexpr std::uint32_t kNormalizedSmallRowVectors    = kNormalizedPrefillColumns / 8U;
+constexpr std::uint32_t kNormalizedSmallWaves         = kNormalizedSmallRowVectors / kWaveSize;
 constexpr std::uint32_t kNormalizedSmallMaximumTokens = 12U;
 
 // This thread's wave-reduced sum of squares of its row vector (lane 0 holds the wave partial).
@@ -815,10 +818,10 @@ __device__ __forceinline__ float normalized_small_wave_sumsq(uint4 packed) {
     float sumsq = 0.0F;
 #pragma unroll
     for (std::uint32_t word = 0; word < 4U; ++word) {
-        const float low = __uint_as_float(words[word] << 16U);
+        const float low  = __uint_as_float(words[word] << 16U);
         const float high = __uint_as_float(words[word] & 0xffff0000U);
-        sumsq = fmaf(low, low, sumsq);
-        sumsq = fmaf(high, high, sumsq);
+        sumsq            = fmaf(low, low, sumsq);
+        sumsq            = fmaf(high, high, sumsq);
     }
 #pragma unroll
     for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
@@ -834,14 +837,15 @@ __device__ __forceinline__ float normalized_small_inverse(const float* wave_sums
 }
 
 // BF16 seam values of one vector: seam words and their FP32 values (nonfinite kept).
-__device__ __forceinline__ void normalized_small_vector_seam(
-    uint4 packed, uint4 gain_words, float row_inverse, float offset, std::uint32_t (&seam)[4],
-    float (&value)[8]) {
+__device__ __forceinline__ void normalized_small_vector_seam(uint4 packed, uint4 gain_words,
+                                                             float row_inverse, float offset,
+                                                             std::uint32_t (&seam)[4],
+                                                             float (&value)[8]) {
     const std::uint32_t words[4]{packed.x, packed.y, packed.z, packed.w};
     const std::uint32_t gain_packed[4]{gain_words.x, gain_words.y, gain_words.z, gain_words.w};
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
-        const float x = bf16_word_element(words, element);
+        const float x    = bf16_word_element(words, element);
         const float gain = bf16_word_element(gain_packed, element) + offset;
         const hip_bfloat16 rounded(x * row_inverse * gain);
         seam[element >> 1U] |= static_cast<std::uint32_t>(rounded.data) << ((element & 1U) * 16U);
@@ -859,19 +863,20 @@ __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_p
     __shared__ float wave_sums[Rows][kNormalizedSmallWaves];
     __shared__ float inverse[Rows];
     constexpr std::uint32_t columns = kNormalizedPrefillColumns;
-    const std::uint32_t slot = threadIdx.x;
+    const std::uint32_t slot        = threadIdx.x;
     const std::uint32_t wave = threadIdx.x / kWaveSize, lane = threadIdx.x % kWaveSize;
-    const float offset = unit_offset ? 1.0F : 0.0F;
+    const float offset     = unit_offset ? 1.0F : 0.0F;
     const uint4 gain_words = reinterpret_cast<const uint4*>(norm)[slot];
-    const uint4* rows = reinterpret_cast<const uint4*>(input);
+    const uint4* rows      = reinterpret_cast<const uint4*>(input);
     if (blockIdx.x == tokens) {
         // Rows are predicated, never broken out of, so the unrolled arrays stay in registers.
         uint4 loaded[Rows];
 #pragma unroll
         for (std::uint32_t row = 0; row < Rows; ++row)
-            loaded[row] = row < tokens
-                ? rows[static_cast<std::size_t>(row) * kNormalizedSmallRowVectors + slot]
-                : uint4{};
+            loaded[row] =
+                row < tokens
+                    ? rows[static_cast<std::size_t>(row) * kNormalizedSmallRowVectors + slot]
+                    : uint4{};
 #pragma unroll
         for (std::uint32_t row = 0; row < Rows; ++row) {
             const float sumsq = normalized_small_wave_sumsq(loaded[row]);
@@ -892,26 +897,25 @@ __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_p
 #pragma unroll
                 for (std::uint32_t element = 0; element < 8U; ++element) {
                     nonfinite |= !isfinite(value[element]);
-                    overflow |= isfinite(value[element]) &&
-                                a8g64_element_overflows(value[element]);
+                    overflow |= isfinite(value[element]) && a8g64_element_overflows(value[element]);
                 }
             }
         }
         const bool any_nonfinite = __syncthreads_or(nonfinite);
-        const bool any_overflow = __syncthreads_or(overflow);
+        const bool any_overflow  = __syncthreads_or(overflow);
         if (threadIdx.x == 0U) {
-            *status = (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
-                      (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow)
-                                    : 0U);
+            *status =
+                (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
+                (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow) : 0U);
             // A later stage's status word owned by the same Op (see a8q4g64_normalized_mlp).
             if (clear_status != nullptr) *clear_status = 0U;
         }
         return;
     }
     const std::uint32_t token = blockIdx.x;
-    const std::size_t vector = static_cast<std::size_t>(token) * kNormalizedSmallRowVectors + slot;
-    const uint4 loaded = rows[vector];
-    const float sumsq = normalized_small_wave_sumsq(loaded);
+    const std::size_t vector  = static_cast<std::size_t>(token) * kNormalizedSmallRowVectors + slot;
+    const uint4 loaded        = rows[vector];
+    const float sumsq         = normalized_small_wave_sumsq(loaded);
     if (lane == 0U) wave_sums[0][wave] = sumsq;
     __syncthreads();
     std::uint32_t seam[4]{};
@@ -922,7 +926,7 @@ __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_p
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         value[element] = isfinite(value[element]) ? value[element] : 0.0F;
-        maximum = fmaxf(maximum, fabsf(value[element]));
+        maximum        = fmaxf(maximum, fabsf(value[element]));
     }
     maximum = a8g64_group_maximum(maximum);
     a8g64_encode_vector(value, maximum, lane, vector,
@@ -946,14 +950,14 @@ constexpr std::uint32_t kGatedPrefillVectors = kGatedPrefillColumns / (8U * kWav
 // keep each wave on 32 consecutive slots of one token so the DPP rows are whole heads/groups.
 __device__ __forceinline__ uint4 a8g64_gated_load(const hip_bfloat16* rows, std::uint32_t token,
                                                   std::uint32_t slot) {
-    return reinterpret_cast<const uint4*>(
-        rows + static_cast<std::size_t>(token) * kGatedPrefillColumns)[slot];
+    return reinterpret_cast<const uint4*>(rows + static_cast<std::size_t>(token) *
+                                                     kGatedPrefillColumns)[slot];
 }
 
 // The eight BF16 gated-seam values of one vector (nonfinite values kept).
-__device__ __forceinline__ void a8g64_gated_seam_values(
-    uint4 value_words, uint4 gate_words, const hip_bfloat16* norm, float eps, std::uint32_t slot,
-    float (&value)[8]) {
+__device__ __forceinline__ void a8g64_gated_seam_values(uint4 value_words, uint4 gate_words,
+                                                        const hip_bfloat16* norm, float eps,
+                                                        std::uint32_t slot, float (&value)[8]) {
     const std::uint32_t lane = slot % kWaveSize;
     // Every head uses the same [128] weight: this lane always reads the same eight gains.
     const uint4 gain_words =
@@ -965,32 +969,33 @@ __device__ __forceinline__ void a8g64_gated_seam_values(
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const float x = bf16_word_element(x_packed, element);
-        sumsq = fmaf(x, x, sumsq);
+        sumsq         = fmaf(x, x, sumsq);
     }
     // Sum over the 16 lanes (one head) of this DPP row.
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
-        0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
-        0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
-        0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
-        0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
+    sumsq += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
+    sumsq += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
+    sumsq += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
+    sumsq += __int_as_float(
+        __builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
     const float inverse = rsqrtf(sumsq / static_cast<float>(kGatedPrefillHeadDim) + eps);
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
-        const float z = bf16_word_element(z_packed, element);
+        const float z    = bf16_word_element(z_packed, element);
         const float silu = z / (1.0F + expf(-z));
-        value[element] = static_cast<float>(hip_bfloat16(
-            bf16_word_element(x_packed, element) * inverse *
-            bf16_word_element(gain_packed, element) * silu));
+        value[element] =
+            static_cast<float>(hip_bfloat16(bf16_word_element(x_packed, element) * inverse *
+                                            bf16_word_element(gain_packed, element) * silu));
     }
 }
 
-__device__ __forceinline__ void a8g64_gated_prepare_vector(
-    uint4 value_words, uint4 gate_words, const hip_bfloat16* norm, float eps,
-    std::uint32_t token, std::uint32_t slot, std::uint8_t* low_codes, std::uint8_t* high_codes,
-    std::uint16_t* scale_words, bool& nonfinite, bool& overflow) {
+__device__ __forceinline__ void
+a8g64_gated_prepare_vector(uint4 value_words, uint4 gate_words, const hip_bfloat16* norm, float eps,
+                           std::uint32_t token, std::uint32_t slot, std::uint8_t* low_codes,
+                           std::uint8_t* high_codes, std::uint16_t* scale_words, bool& nonfinite,
+                           bool& overflow) {
     constexpr std::uint32_t columns = kGatedPrefillColumns;
     float value[8];
     a8g64_gated_seam_values(value_words, gate_words, norm, eps, slot, value);
@@ -999,22 +1004,27 @@ __device__ __forceinline__ void a8g64_gated_prepare_vector(
     for (std::uint32_t element = 0; element < 8U; ++element) {
         nonfinite |= !isfinite(value[element]);
         value[element] = isfinite(value[element]) ? value[element] : 0.0F;
-        maximum = fmaxf(maximum, fabsf(value[element]));
+        maximum        = fmaxf(maximum, fabsf(value[element]));
     }
     maximum = a8g64_group_maximum(maximum);
-    overflow |= maximum != 0.0F &&
-                !isfinite(__half2float(__float2half_rn(maximum / 127.0F)));
+    overflow |= maximum != 0.0F && !isfinite(__half2float(__float2half_rn(maximum / 127.0F)));
     a8g64_encode_vector(value, maximum, slot % kWaveSize,
                         static_cast<std::size_t>(token) * (columns / 8U) + slot,
                         static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U,
                         low_codes, high_codes, scale_words);
 }
 
-__global__ __launch_bounds__(kNormalizedPrefillTokensPerBlock * kWaveSize)
-void a8g64_gated_normalized_prepare_prefill_kernel(
-    const hip_bfloat16* input, const hip_bfloat16* norm, const hip_bfloat16* gate, float eps,
-    std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
-    std::uint16_t* scale_words, std::uint32_t* status) {
+__global__ __launch_bounds__(
+    kNormalizedPrefillTokensPerBlock*
+        kWaveSize) void a8g64_gated_normalized_prepare_prefill_kernel(const hip_bfloat16* input,
+                                                                      const hip_bfloat16* norm,
+                                                                      const hip_bfloat16* gate,
+                                                                      float eps,
+                                                                      std::uint32_t tokens,
+                                                                      std::uint8_t* low_codes,
+                                                                      std::uint8_t* high_codes,
+                                                                      std::uint16_t* scale_words,
+                                                                      std::uint32_t* status) {
     const std::uint32_t lane = threadIdx.x % kWaveSize;
     const std::uint32_t token =
         blockIdx.x * kNormalizedPrefillTokensPerBlock + threadIdx.x / kWaveSize;
@@ -1035,16 +1045,15 @@ void a8g64_gated_normalized_prepare_prefill_kernel(
 // inside one token row), the same per-vector arithmetic. The status word is reset by the
 // launcher: a status CTA recomputing every seam value would be the critical path.
 constexpr std::uint32_t kGatedSmallMaximumTokens = 8U;
-constexpr std::uint32_t kGatedSmallThreads = 256U;
+constexpr std::uint32_t kGatedSmallThreads       = 256U;
 static_assert((kGatedPrefillColumns / 8U) % kGatedSmallThreads == 0U);
 
-__global__ __launch_bounds__(kGatedSmallThreads)
-void a8g64_gated_normalized_prepare_small_kernel(
+__global__ __launch_bounds__(kGatedSmallThreads) void a8g64_gated_normalized_prepare_small_kernel(
     const hip_bfloat16* input, const hip_bfloat16* norm, const hip_bfloat16* gate, float eps,
     std::uint8_t* low_codes, std::uint8_t* high_codes, std::uint16_t* scale_words,
     std::uint32_t* status) {
     constexpr std::uint32_t row_slots = kGatedPrefillColumns / 8U;
-    const std::uint32_t index = blockIdx.x * kGatedSmallThreads + threadIdx.x;
+    const std::uint32_t index         = blockIdx.x * kGatedSmallThreads + threadIdx.x;
     const std::uint32_t token = index / row_slots, slot = index % row_slots;
     bool nonfinite = false, overflow = false;
     a8g64_gated_prepare_vector(a8g64_gated_load(input, token, slot),
@@ -1057,19 +1066,18 @@ void a8g64_gated_normalized_prepare_small_kernel(
 __global__ __launch_bounds__(kWaveSize) void fused_silu_a8g64_quantize_kernel(
     const hip_bfloat16* gate_up, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status) {
-    constexpr std::uint32_t columns = 17408U;
+    constexpr std::uint32_t columns       = 17408U;
     constexpr std::uint32_t packed_stride = 2U * columns;
-    const std::uint32_t group = blockIdx.x;
-    const std::uint32_t token = blockIdx.y;
-    const std::uint32_t lane = threadIdx.x;
-    const std::uint32_t column0 = group * kQ4Group + lane * 2U;
-    const std::uint32_t column1 = column0 + 1U;
-    const std::size_t token_base = static_cast<std::size_t>(token) * packed_stride;
-    auto rounded_activation = [&](std::uint32_t column) {
+    const std::uint32_t group             = blockIdx.x;
+    const std::uint32_t token             = blockIdx.y;
+    const std::uint32_t lane              = threadIdx.x;
+    const std::uint32_t column0           = group * kQ4Group + lane * 2U;
+    const std::uint32_t column1           = column0 + 1U;
+    const std::size_t token_base          = static_cast<std::size_t>(token) * packed_stride;
+    auto rounded_activation               = [&](std::uint32_t column) {
         const float gate = static_cast<float>(gate_up[token_base + column]);
-        const float up = static_cast<float>(gate_up[token_base + columns + column]);
-        const hip_bfloat16 represented(
-            (gate / (1.0F + expf(-gate))) * up);
+        const float up   = static_cast<float>(gate_up[token_base + columns + column]);
+        const hip_bfloat16 represented((gate / (1.0F + expf(-gate))) * up);
         float value = static_cast<float>(represented);
         if (!isfinite(value)) {
             atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
@@ -1079,7 +1087,7 @@ __global__ __launch_bounds__(kWaveSize) void fused_silu_a8g64_quantize_kernel(
     };
     const float value0 = rounded_activation(column0);
     const float value1 = rounded_activation(column1);
-    float maximum = fmaxf(fabsf(value0), fabsf(value1));
+    float maximum      = fmaxf(fabsf(value0), fabsf(value1));
 #pragma unroll
     for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U) {
         maximum = fmaxf(maximum, __shfl_down(maximum, width, kWaveSize));
@@ -1100,31 +1108,25 @@ __global__ __launch_bounds__(kWaveSize) void fused_silu_a8g64_quantize_kernel(
     represented_scale_bits = static_cast<std::uint16_t>(
         __shfl(static_cast<unsigned>(represented_scale_bits), 0, kWaveSize));
     const float scale = __half2float(__ushort_as_half(represented_scale_bits));
-    const int code0 = scale != 0.0F
-                          ? max(-127, min(127, __float2int_rn(value0 / scale)))
-                          : 0;
-    const int code1 = scale != 0.0F
-                          ? max(-127, min(127, __float2int_rn(value1 / scale)))
-                          : 0;
-    const int low0 = code0 & 0x0f;
-    const int low1 = code1 & 0x0f;
-    const int high0 = (code0 - low0) / 16;
-    const int high1 = (code1 - low1) / 16;
-    const std::size_t packed =
-        (static_cast<std::size_t>(token) * columns + column0) / 2U;
-    low_codes[packed] = static_cast<std::uint8_t>(low0 | (low1 << 4));
-    high_codes[packed] = static_cast<std::uint8_t>((high0 & 0x0f) |
-                                                   ((high1 & 0x0f) << 4));
+    const int code0   = scale != 0.0F ? max(-127, min(127, __float2int_rn(value0 / scale))) : 0;
+    const int code1   = scale != 0.0F ? max(-127, min(127, __float2int_rn(value1 / scale))) : 0;
+    const int low0    = code0 & 0x0f;
+    const int low1    = code1 & 0x0f;
+    const int high0   = (code0 - low0) / 16;
+    const int high1   = (code1 - low1) / 16;
+    const std::size_t packed = (static_cast<std::size_t>(token) * columns + column0) / 2U;
+    low_codes[packed]        = static_cast<std::uint8_t>(low0 | (low1 << 4));
+    high_codes[packed]       = static_cast<std::uint8_t>((high0 & 0x0f) | ((high1 & 0x0f) << 4));
 }
 
 __global__ __launch_bounds__(kWaveSize) void a8g32_quantize_activation_kernel(
     const hip_bfloat16* input, std::int8_t* codes, std::uint16_t* scale_words,
     std::uint32_t* status, std::uint32_t columns, std::uint32_t padded_columns) {
-    const std::uint32_t group = blockIdx.x;
-    const std::uint32_t token = blockIdx.y;
-    const std::uint32_t lane = threadIdx.x;
+    const std::uint32_t group  = blockIdx.x;
+    const std::uint32_t token  = blockIdx.y;
+    const std::uint32_t lane   = threadIdx.x;
     const std::uint32_t column = group * kW8Group + lane;
-    float value = 0.0F;
+    float value                = 0.0F;
     if (column < columns) {
         value = static_cast<float>(input[static_cast<std::size_t>(token) * columns + column]);
         if (!isfinite(value)) {
@@ -1153,9 +1155,8 @@ __global__ __launch_bounds__(kWaveSize) void a8g32_quantize_activation_kernel(
     represented_scale_bits = static_cast<std::uint16_t>(
         __shfl(static_cast<unsigned>(represented_scale_bits), 0, kWaveSize));
     const float scale = __half2float(__ushort_as_half(represented_scale_bits));
-    const int code = column < columns && scale != 0.0F
-                         ? max(-127, min(127, __float2int_rn(value / scale)))
-                         : 0;
+    const int code =
+        column < columns && scale != 0.0F ? max(-127, min(127, __float2int_rn(value / scale))) : 0;
     codes[static_cast<std::size_t>(token) * padded_columns + column] =
         static_cast<std::int8_t>(code);
 }
@@ -1165,12 +1166,12 @@ __device__ int q4_code(const std::uint8_t* codes, std::size_t index) {
     return nibble >= 8U ? static_cast<int>(nibble) - 16 : static_cast<int>(nibble);
 }
 
-__device__ int q4_n16k16_code(const std::uint8_t* codes, std::uint32_t row,
-                              std::uint32_t column, std::uint32_t groups) {
-    const std::uint32_t group = column / kQ4Group;
+__device__ int q4_n16k16_code(const std::uint8_t* codes, std::uint32_t row, std::uint32_t column,
+                              std::uint32_t groups) {
+    const std::uint32_t group  = column / kQ4Group;
     const std::uint32_t within = column & (kQ4Group - 1U);
-    const std::uint64_t pair = reinterpret_cast<const std::uint64_t*>(codes)[
-        q4_n16k16_pair_index(row, group, within / 16U, groups)];
+    const std::uint64_t pair   = reinterpret_cast<const std::uint64_t*>(
+        codes)[q4_n16k16_pair_index(row, group, within / 16U, groups)];
     const unsigned nibble = static_cast<unsigned>(pair >> ((within & 15U) * 4U)) & 15U;
     return nibble >= 8U ? static_cast<int>(nibble) - 16 : static_cast<int>(nibble);
 }
@@ -1181,13 +1182,14 @@ __device__ hip_bfloat16 conspicuous_bf16_nan() {
     return value;
 }
 
-__global__ void q4g64_linear_vector_kernel(
-    const std::uint8_t* activation_codes, const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t padded_columns) {
-    const std::uint32_t row = blockIdx.x;
+__global__ void q4g64_linear_vector_kernel(const std::uint8_t* activation_codes,
+                                           const std::uint16_t* activation_scales,
+                                           const std::uint32_t* activation_status,
+                                           const std::uint8_t* weight_codes,
+                                           const std::uint16_t* weight_scales, hip_bfloat16* output,
+                                           std::uint32_t tokens, std::uint32_t rows,
+                                           std::uint32_t padded_columns) {
+    const std::uint32_t row   = blockIdx.x;
     const std::uint32_t token = blockIdx.y;
     if (row >= rows || token >= tokens) return;
     if (*activation_status != Q4G64ActivationOk) {
@@ -1197,24 +1199,22 @@ __global__ void q4g64_linear_vector_kernel(
         return;
     }
     const std::size_t groups = padded_columns / kQ4Group;
-    float partial = 0.0F;
+    float partial            = 0.0F;
     for (std::uint32_t group = threadIdx.x; group < groups; group += blockDim.x) {
-        std::int32_t dot = 0;
-        const std::size_t base = static_cast<std::size_t>(group) * kQ4Group;
+        std::int32_t dot         = 0;
+        const std::size_t base   = static_cast<std::size_t>(group) * kQ4Group;
         const std::size_t a_base = static_cast<std::size_t>(token) * padded_columns + base;
 #pragma unroll
         for (std::uint32_t lane = 0; lane < kQ4Group; ++lane) {
             dot += q4_code(activation_codes, a_base + lane) *
-                   q4_n16k16_code(weight_codes, row,
-                                  static_cast<std::uint32_t>(base) + lane,
+                   q4_n16k16_code(weight_codes, row, static_cast<std::uint32_t>(base) + lane,
                                   static_cast<std::uint32_t>(groups));
         }
-        const float a_scale = __half2float(__ushort_as_half(
-            activation_scales[static_cast<std::size_t>(token) * groups + group]));
+        const float a_scale = __half2float(
+            __ushort_as_half(activation_scales[static_cast<std::size_t>(token) * groups + group]));
         const float w_scale = __half2float(__ushort_as_half(
-            weight_scales[q4_n16k16_scale_index(
-                row, group, static_cast<std::uint32_t>(groups))]));
-        partial = fmaf(static_cast<float>(dot), a_scale * w_scale, partial);
+            weight_scales[q4_n16k16_scale_index(row, group, static_cast<std::uint32_t>(groups))]));
+        partial             = fmaf(static_cast<float>(dot), a_scale * w_scale, partial);
     }
     __shared__ float reductions[kThreads];
     reductions[threadIdx.x] = partial;
@@ -1231,19 +1231,18 @@ __global__ void q4g64_linear_vector_kernel(
 
 template <bool W8, std::uint32_t WavesPerBlock>
 __global__ void wave8_linear_kernel(const hip_bfloat16* input, const void* weights,
-                                    const std::uint16_t* w8_scales,
-                                    hip_bfloat16* output, std::uint32_t columns,
-                                    std::uint32_t rows, std::size_t padded_columns,
-                                    std::uint32_t tokens) {
-    const std::uint32_t row = blockIdx.x;
-    const std::uint32_t wave = threadIdx.x / kWaveSize;
-    const std::uint32_t lane = threadIdx.x & (kWaveSize - 1U);
+                                    const std::uint16_t* w8_scales, hip_bfloat16* output,
+                                    std::uint32_t columns, std::uint32_t rows,
+                                    std::size_t padded_columns, std::uint32_t tokens) {
+    const std::uint32_t row   = blockIdx.x;
+    const std::uint32_t wave  = threadIdx.x / kWaveSize;
+    const std::uint32_t lane  = threadIdx.x & (kWaveSize - 1U);
     const std::uint32_t token = blockIdx.y * WavesPerBlock + wave;
     if (row >= rows) return;
     __shared__ float weight_tile[kCooperativeTile];
-    float partial = 0.0F;
-    const auto* bf16_weights = static_cast<const hip_bfloat16*>(weights);
-    const auto* codes = static_cast<const std::int8_t*>(weights);
+    float partial                    = 0.0F;
+    const auto* bf16_weights         = static_cast<const hip_bfloat16*>(weights);
+    const auto* codes                = static_cast<const std::int8_t*>(weights);
     const std::size_t groups_per_row = padded_columns / kW8Group;
     for (std::uint32_t base = 0; base < columns; base += kCooperativeTile) {
         const std::uint32_t k = base + threadIdx.x;
@@ -1267,7 +1266,8 @@ __global__ void wave8_linear_kernel(const hip_bfloat16* input, const void* weigh
             const std::size_t input_base = static_cast<std::size_t>(token) * columns + base;
             for (std::uint32_t local = lane; local < kCooperativeTile && base + local < columns;
                  local += kWaveSize) {
-                partial = fmaf(static_cast<float>(input[input_base + local]), weight_tile[local], partial);
+                partial = fmaf(static_cast<float>(input[input_base + local]), weight_tile[local],
+                               partial);
             }
         }
         __syncthreads();
@@ -1287,34 +1287,29 @@ __global__ void wave8_linear_kernel(const hip_bfloat16* input, const void* weigh
 // an observable (and uncontracted) dequantization/rounding change.
 #if defined(__HIPCC__)
 using WmmaBf16Fragment = __attribute__((__vector_size__(8 * sizeof(short)))) short;
-using WmmaF32Fragment = __attribute__((__vector_size__(8 * sizeof(float)))) float;
-using WmmaI32x2 = int __attribute__((ext_vector_type(2)));
-using WmmaI32x8 = int __attribute__((ext_vector_type(8)));
+using WmmaF32Fragment  = __attribute__((__vector_size__(8 * sizeof(float)))) float;
+using WmmaI32x2        = int __attribute__((ext_vector_type(2)));
+using WmmaI32x8        = int __attribute__((ext_vector_type(8)));
 
-__device__ short bf16_bits(hip_bfloat16 value) {
-    return static_cast<short>(value.data);
-}
+__device__ short bf16_bits(hip_bfloat16 value) { return static_cast<short>(value.data); }
 
-__global__ void bf16_linear_wmma16_kernel(const hip_bfloat16* input,
-                                           const hip_bfloat16* weights,
-                                           hip_bfloat16* output,
-                                           std::uint32_t columns,
-                                           std::uint32_t rows,
-                                           std::uint32_t tokens) {
-    const std::uint32_t lane = threadIdx.x;
-    const std::uint32_t token_base = blockIdx.y * kWmmaTile;
-    const std::uint32_t row_base = blockIdx.x * kWmmaTile;
-    const std::uint32_t lane_group = lane / 16U;
+__global__ void bf16_linear_wmma16_kernel(const hip_bfloat16* input, const hip_bfloat16* weights,
+                                          hip_bfloat16* output, std::uint32_t columns,
+                                          std::uint32_t rows, std::uint32_t tokens) {
+    const std::uint32_t lane         = threadIdx.x;
+    const std::uint32_t token_base   = blockIdx.y * kWmmaTile;
+    const std::uint32_t row_base     = blockIdx.x * kWmmaTile;
+    const std::uint32_t lane_group   = lane / 16U;
     const std::uint32_t lane_wrapped = lane & 15U;
     WmmaF32Fragment accum{};
     for (std::uint32_t base = 0; base < columns; base += kWmmaTile) {
         WmmaBf16Fragment a{};
         WmmaBf16Fragment b{};
-#pragma unroll
+#    pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
-            const std::uint32_t k = base + lane_group * 8U + element;
+            const std::uint32_t k     = base + lane_group * 8U + element;
             const std::uint32_t token = token_base + lane_wrapped;
-            const std::uint32_t row = row_base + lane_wrapped;
+            const std::uint32_t row   = row_base + lane_wrapped;
             a[element] = token < tokens && k < columns
                              ? bf16_bits(input[static_cast<std::size_t>(token) * columns + k])
                              : 0;
@@ -1324,10 +1319,10 @@ __global__ void bf16_linear_wmma16_kernel(const hip_bfloat16* input,
         }
         accum = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, b, accum);
     }
-#pragma unroll
+#    pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const std::uint32_t token = token_base + lane_group * 8U + element;
-        const std::uint32_t row = row_base + lane_wrapped;
+        const std::uint32_t row   = row_base + lane_wrapped;
         if (token < tokens && row < rows) {
             output[static_cast<std::size_t>(token) * rows + row] =
                 static_cast<hip_bfloat16>(accum[element]);
@@ -1335,57 +1330,54 @@ __global__ void bf16_linear_wmma16_kernel(const hip_bfloat16* input,
     }
 }
 
-__device__ __attribute__((unused)) int load_q4x8(const std::uint8_t* codes,
-                                                  std::size_t element) {
+__device__ __attribute__((unused)) int load_q4x8(const std::uint8_t* codes, std::size_t element) {
     return *reinterpret_cast<const int*>(codes + element / 2U);
 }
 
-__device__ __forceinline__ std::uint64_t load_q4_n16k16_pair(
-    const std::uint8_t* codes, std::uint32_t row, std::uint32_t group,
-    std::uint32_t pair, std::uint32_t groups) {
-    return reinterpret_cast<const std::uint64_t*>(codes)[
-        q4_n16k16_pair_index(row, group, pair, groups)];
+__device__ __forceinline__ std::uint64_t load_q4_n16k16_pair(const std::uint8_t* codes,
+                                                             std::uint32_t row, std::uint32_t group,
+                                                             std::uint32_t pair,
+                                                             std::uint32_t groups) {
+    return reinterpret_cast<const std::uint64_t*>(
+        codes)[q4_n16k16_pair_index(row, group, pair, groups)];
 }
 
-__device__ __forceinline__ int load_q4_n16k16_x8(
-    const std::uint8_t* codes, std::uint32_t row, std::uint32_t group,
-    std::uint32_t word, std::uint32_t groups) {
-    const std::uint64_t pair = load_q4_n16k16_pair(
-        codes, row, group, word >> 1U, groups);
+__device__ __forceinline__ int load_q4_n16k16_x8(const std::uint8_t* codes, std::uint32_t row,
+                                                 std::uint32_t group, std::uint32_t word,
+                                                 std::uint32_t groups) {
+    const std::uint64_t pair = load_q4_n16k16_pair(codes, row, group, word >> 1U, groups);
     return static_cast<int>(word & 1U ? pair >> 32U : pair);
 }
 
-__device__ __forceinline__ __attribute__((unused)) std::uint32_t load_q4_n16k16_x8_logical(
-    const std::uint8_t* codes, std::uint32_t row, std::uint32_t group,
-    std::uint32_t word, std::uint32_t groups, std::uint32_t logical_columns) {
+__device__ __forceinline__ __attribute__((unused)) std::uint32_t
+load_q4_n16k16_x8_logical(const std::uint8_t* codes, std::uint32_t row, std::uint32_t group,
+                          std::uint32_t word, std::uint32_t groups, std::uint32_t logical_columns) {
     const std::uint32_t packed_k = group * kQ4Group + word * 8U;
     if (packed_k >= logical_columns) return 0U;
-    const std::uint32_t packed = static_cast<std::uint32_t>(
-        load_q4_n16k16_x8(codes, row, group, word, groups));
+    const std::uint32_t packed =
+        static_cast<std::uint32_t>(load_q4_n16k16_x8(codes, row, group, word, groups));
     const std::uint32_t remaining = logical_columns - packed_k;
     return remaining >= 8U ? packed : packed & ((1U << (remaining * 4U)) - 1U);
 }
 
 __global__ __launch_bounds__(kWaveSize) void q4g64_linear_wmma32_kernel(
     const std::uint8_t* activation_codes, const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    const std::uint32_t lane = threadIdx.x;
-    const std::uint32_t axis = lane & 15U;
+    const std::uint32_t* activation_status, const std::uint8_t* weight_codes,
+    const std::uint16_t* weight_scales, hip_bfloat16* output, std::uint32_t tokens,
+    std::uint32_t rows, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t lane       = threadIdx.x;
+    const std::uint32_t axis       = lane & 15U;
     const std::uint32_t lane_group = lane >> 4U;
     const std::uint32_t token_base = blockIdx.y * kWmmaTile;
-    const std::uint32_t row_base = blockIdx.x * kWmmaTile;
+    const std::uint32_t row_base   = blockIdx.x * kWmmaTile;
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = token_base + lane_group * 8U + element;
-            const std::uint32_t row = row_base + axis;
+            const std::uint32_t row   = row_base + axis;
             if (token < tokens && row < rows) {
-                output[static_cast<std::size_t>(token) * rows + row] =
-                    conspicuous_bf16_nan();
+                output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
             }
         }
         return;
@@ -1394,15 +1386,16 @@ __global__ __launch_bounds__(kWaveSize) void q4g64_linear_wmma32_kernel(
     WmmaF32Fragment total{};
     for (std::uint32_t group = 0; group < groups; ++group) {
         WmmaI32x8 integer_dot{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t half = 0; half < 2U; ++half) {
             const std::uint32_t k_base = group * kQ4Group + half * 32U + lane_group * 16U;
             WmmaI32x2 a{};
             WmmaI32x2 b{};
             const std::uint32_t token = token_base + axis;
-            const std::uint32_t row = row_base + axis;
+            const std::uint32_t row   = row_base + axis;
             if (token < tokens) {
-                const std::size_t element = static_cast<std::size_t>(token) * padded_columns + k_base;
+                const std::size_t element =
+                    static_cast<std::size_t>(token) * padded_columns + k_base;
                 a[0] = load_q4x8(activation_codes, element);
                 a[1] = load_q4x8(activation_codes, element + 8U);
             }
@@ -1411,64 +1404,66 @@ __global__ __launch_bounds__(kWaveSize) void q4g64_linear_wmma32_kernel(
                 b[0] = load_q4_n16k16_x8(weight_codes, row, group, word, groups);
                 b[1] = load_q4_n16k16_x8(weight_codes, row, group, word + 1U, groups);
             }
-            integer_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a, true, b, integer_dot, false);
+            integer_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a, true, b,
+                                                                           integer_dot, false);
         }
         const std::uint32_t row = row_base + axis;
         const float w_scale = row < rows
-                                  ? __half2float(__ushort_as_half(weight_scales[
-                                        q4_n16k16_scale_index(row, group, groups)]))
+                                  ? __half2float(__ushort_as_half(
+                                        weight_scales[q4_n16k16_scale_index(row, group, groups)]))
                                   : 0.0F;
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = token_base + lane_group * 8U + element;
-            const float a_scale = token < tokens
-                                      ? __half2float(__ushort_as_half(activation_scales[
-                                            static_cast<std::size_t>(token) * groups + group]))
-                                      : 0.0F;
-            total[element] = fmaf(static_cast<float>(integer_dot[element]),
-                                  a_scale * w_scale, total[element]);
+            const float a_scale =
+                token < tokens
+                    ? __half2float(__ushort_as_half(
+                          activation_scales[static_cast<std::size_t>(token) * groups + group]))
+                    : 0.0F;
+            total[element] =
+                fmaf(static_cast<float>(integer_dot[element]), a_scale * w_scale, total[element]);
         }
     }
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const std::uint32_t token = token_base + lane_group * 8U + element;
-        const std::uint32_t row = row_base + axis;
+        const std::uint32_t row   = row_base + axis;
         if (token < tokens && row < rows) {
             output[static_cast<std::size_t>(token) * rows + row] =
                 static_cast<hip_bfloat16>(total[element]);
         }
     }
-#else
-    (void)activation_codes; (void)activation_scales; (void)activation_status;
+#    else
+    (void)activation_codes;
+    (void)activation_scales;
+    (void)activation_status;
     (void)weight_codes;
-    (void)weight_scales; (void)output; (void)tokens; (void)rows;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
     (void)padded_columns;
-#endif
+#    endif
 }
 
 __global__ __launch_bounds__(kWaveSize) void a8q4g64_linear_wmma32_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    const std::uint32_t lane = threadIdx.x;
-    const std::uint32_t axis = lane & 15U;
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t lane       = threadIdx.x;
+    const std::uint32_t axis       = lane & 15U;
     const std::uint32_t lane_group = lane >> 4U;
     const std::uint32_t token_base = blockIdx.y * kWmmaTile;
-    const std::uint32_t row_base = blockIdx.x * kWmmaTile;
+    const std::uint32_t row_base   = blockIdx.x * kWmmaTile;
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = token_base + lane_group * 8U + element;
-            const std::uint32_t row = row_base + axis;
+            const std::uint32_t row   = row_base + axis;
             if (token < tokens && row < rows) {
-                output[static_cast<std::size_t>(token) * rows + row] =
-                    conspicuous_bf16_nan();
+                output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
             }
         }
         return;
@@ -1478,19 +1473,19 @@ __global__ __launch_bounds__(kWaveSize) void a8q4g64_linear_wmma32_kernel(
     for (std::uint32_t group = 0; group < groups; ++group) {
         WmmaI32x8 low_dot{};
         WmmaI32x8 high_dot{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t half = 0; half < 2U; ++half) {
             const std::uint32_t k_base = group * kQ4Group + half * 32U + lane_group * 16U;
             WmmaI32x2 a_low{};
             WmmaI32x2 a_high{};
             WmmaI32x2 b{};
             const std::uint32_t token = token_base + axis;
-            const std::uint32_t row = row_base + axis;
+            const std::uint32_t row   = row_base + axis;
             if (token < tokens) {
                 const std::size_t element =
                     static_cast<std::size_t>(token) * padded_columns + k_base;
-                a_low[0] = load_q4x8(activation_low_codes, element);
-                a_low[1] = load_q4x8(activation_low_codes, element + 8U);
+                a_low[0]  = load_q4x8(activation_low_codes, element);
+                a_low[1]  = load_q4x8(activation_low_codes, element + 8U);
                 a_high[0] = load_q4x8(activation_high_codes, element);
                 a_high[1] = load_q4x8(activation_high_codes, element + 8U);
             }
@@ -1499,54 +1494,57 @@ __global__ __launch_bounds__(kWaveSize) void a8q4g64_linear_wmma32_kernel(
                 b[0] = load_q4_n16k16_x8(weight_codes, row, group, word, groups);
                 b[1] = load_q4_n16k16_x8(weight_codes, row, group, word + 1U, groups);
             }
-            low_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b, low_dot, false);
-            high_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b, high_dot, false);
+            low_dot  = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false, a_low, true, b,
+                                                                        low_dot, false);
+            high_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a_high, true, b,
+                                                                        high_dot, false);
         }
         const std::uint32_t row = row_base + axis;
         const float w_scale = row < rows
-                                  ? __half2float(__ushort_as_half(weight_scales[
-                                        q4_n16k16_scale_index(row, group, groups)]))
+                                  ? __half2float(__ushort_as_half(
+                                        weight_scales[q4_n16k16_scale_index(row, group, groups)]))
                                   : 0.0F;
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = token_base + lane_group * 8U + element;
-            const float a_scale = token < tokens
-                                      ? __half2float(__ushort_as_half(activation_scales[
-                                            static_cast<std::size_t>(token) * groups + group]))
-                                      : 0.0F;
+            const float a_scale =
+                token < tokens
+                    ? __half2float(__ushort_as_half(
+                          activation_scales[static_cast<std::size_t>(token) * groups + group]))
+                    : 0.0F;
             const std::int32_t combined = low_dot[element] + 16 * high_dot[element];
-            total[element] = fmaf(static_cast<float>(combined),
-                                  a_scale * w_scale, total[element]);
+            total[element] = fmaf(static_cast<float>(combined), a_scale * w_scale, total[element]);
         }
     }
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const std::uint32_t token = token_base + lane_group * 8U + element;
-        const std::uint32_t row = row_base + axis;
+        const std::uint32_t row   = row_base + axis;
         if (token < tokens && row < rows) {
             output[static_cast<std::size_t>(token) * rows + row] =
                 static_cast<hip_bfloat16>(total[element]);
         }
     }
-#else
-    (void)activation_low_codes; (void)activation_high_codes; (void)activation_scales;
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
     (void)activation_status;
-    (void)weight_codes; (void)weight_scales; (void)output; (void)tokens; (void)rows;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
     (void)padded_columns;
-#endif
+#    endif
 }
 
-__global__ __launch_bounds__(kThreads)
-void a8q4g64_linear_decode_dot8_t1_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t rows, std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+__global__ __launch_bounds__(kThreads) void a8q4g64_linear_decode_dot8_t1_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t rows, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= rows) return;
     if (*activation_status != Q4G64ActivationOk) {
@@ -1554,49 +1552,46 @@ void a8q4g64_linear_decode_dot8_t1_kernel(
         return;
     }
     const std::uint32_t groups = padded_columns / kQ4Group;
-    float total = 0.0F;
+    float total                = 0.0F;
     for (std::uint32_t group = 0; group < groups; ++group) {
-        int low_dot = 0;
+        int low_dot  = 0;
         int high_dot = 0;
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t word = 0; word < 8U; ++word) {
-            const std::size_t element =
-                static_cast<std::size_t>(group) * kQ4Group + word * 8U;
-            const int low = load_q4x8(activation_low_codes, element);
-            const int high = load_q4x8(activation_high_codes, element);
-            const int weight =
-                load_q4_n16k16_x8(weight_codes, row, group, word, groups);
-            low_dot = __builtin_amdgcn_sudot8(
-                false, low, true, weight, low_dot, false);
-            high_dot = __builtin_amdgcn_sudot8(
-                true, high, true, weight, high_dot, false);
+            const std::size_t element = static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+            const int low             = load_q4x8(activation_low_codes, element);
+            const int high            = load_q4x8(activation_high_codes, element);
+            const int weight          = load_q4_n16k16_x8(weight_codes, row, group, word, groups);
+            low_dot  = __builtin_amdgcn_sudot8(false, low, true, weight, low_dot, false);
+            high_dot = __builtin_amdgcn_sudot8(true, high, true, weight, high_dot, false);
         }
-        const std::int32_t combined = low_dot + 16 * high_dot;
-        const float activation_scale = __half2float(
-            __ushort_as_half(activation_scales[group]));
-        const float weight_scale = __half2float(__ushort_as_half(
-            weight_scales[q4_n16k16_scale_index(row, group, groups)]));
-        total = fmaf(static_cast<float>(combined),
-                     activation_scale * weight_scale, total);
+        const std::int32_t combined  = low_dot + 16 * high_dot;
+        const float activation_scale = __half2float(__ushort_as_half(activation_scales[group]));
+        const float weight_scale     = __half2float(
+            __ushort_as_half(weight_scales[q4_n16k16_scale_index(row, group, groups)]));
+        total = fmaf(static_cast<float>(combined), activation_scale * weight_scale, total);
     }
     output[row] = static_cast<hip_bfloat16>(total);
-#else
-    (void)activation_low_codes; (void)activation_high_codes;
-    (void)activation_scales; (void)activation_status; (void)weight_codes;
-    (void)weight_scales; (void)output; (void)rows; (void)padded_columns;
-#endif
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)rows;
+    (void)padded_columns;
+#    endif
 }
 
-
-__global__ __launch_bounds__(kThreads)
-void a8q4g64_projected_residual_down_stage2_kernel(
+__global__ __launch_bounds__(kThreads) void a8q4g64_projected_residual_down_stage2_kernel(
     const std::uint8_t* activation_low, const std::uint8_t* activation_high,
     const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* residual) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* residual) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     constexpr std::uint32_t groups = 17408U / kQ4Group;
-    const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint32_t row        = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= 5120U) return;
     if (*activation_status != Q4G64ActivationOk) {
         residual[row] = conspicuous_bf16_nan();
@@ -1606,129 +1601,122 @@ void a8q4g64_projected_residual_down_stage2_kernel(
     for (std::uint32_t base = 0U; base < groups; base += 2U) {
         int low[2][8], high[2][8], weight[2][8];
         std::uint16_t a_scale_bits[2], w_scale_bits[2];
-#pragma unroll
+#        pragma unroll
         for (unsigned stage = 0U; stage < 2U; ++stage) {
             const std::uint32_t group = base + stage;
-#pragma unroll
+#        pragma unroll
             for (unsigned word = 0U; word < 8U; ++word) {
-                const std::size_t element =
-                    static_cast<std::size_t>(group) * kQ4Group + word * 8U;
-                low[stage][word] = load_q4x8(activation_low, element);
-                high[stage][word] = load_q4x8(activation_high, element);
-                weight[stage][word] =
-                    load_q4_n16k16_x8(weight_codes, row, group, word, groups);
+                const std::size_t element = static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+                low[stage][word]          = load_q4x8(activation_low, element);
+                high[stage][word]         = load_q4x8(activation_high, element);
+                weight[stage][word] = load_q4_n16k16_x8(weight_codes, row, group, word, groups);
             }
             a_scale_bits[stage] = activation_scales[group];
-            w_scale_bits[stage] =
-                weight_scales[q4_n16k16_scale_index(row, group, groups)];
+            w_scale_bits[stage] = weight_scales[q4_n16k16_scale_index(row, group, groups)];
         }
         // Issue both raw groups before compute; never decode a future scale
         // before the current group's arithmetic. Each original dot/FMA chain
         // and the explicit BF16 residual seam remain unchanged.
         __builtin_amdgcn_sched_barrier(0);
-#pragma unroll
+#        pragma unroll
         for (unsigned stage = 0U; stage < 2U; ++stage) {
-            int low_dot = 0;
+            int low_dot  = 0;
             int high_dot = 0;
-#pragma unroll
+#        pragma unroll
             for (unsigned word = 0U; word < 8U; ++word) {
-                low_dot = __builtin_amdgcn_sudot8(
-                    false, low[stage][word], true, weight[stage][word], low_dot, false);
-                high_dot = __builtin_amdgcn_sudot8(
-                    true, high[stage][word], true, weight[stage][word], high_dot, false);
+                low_dot  = __builtin_amdgcn_sudot8(false, low[stage][word], true,
+                                                   weight[stage][word], low_dot, false);
+                high_dot = __builtin_amdgcn_sudot8(true, high[stage][word], true,
+                                                   weight[stage][word], high_dot, false);
             }
-            const int combined = low_dot + 16 * high_dot;
+            const int combined  = low_dot + 16 * high_dot;
             const float a_scale = __half2float(__ushort_as_half(a_scale_bits[stage]));
             const float w_scale = __half2float(__ushort_as_half(w_scale_bits[stage]));
-            total = fmaf(static_cast<float>(combined), a_scale * w_scale, total);
+            total               = fmaf(static_cast<float>(combined), a_scale * w_scale, total);
         }
     }
     const hip_bfloat16 delta = static_cast<hip_bfloat16>(total);
-    residual[row] = hip_bfloat16(static_cast<float>(residual[row]) +
-                                 static_cast<float>(delta));
-#else
-    (void)activation_low; (void)activation_high; (void)activation_scales;
-    (void)activation_status; (void)weight_codes; (void)weight_scales; (void)residual;
-#endif
+    residual[row] = hip_bfloat16(static_cast<float>(residual[row]) + static_cast<float>(delta));
+#    else
+    (void)activation_low;
+    (void)activation_high;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)residual;
+#    endif
 }
 
-__global__ __launch_bounds__(kThreads)
-void a8q4g64_gdn_pair_t1_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight0_codes, const std::uint16_t* weight0_scales,
-    hip_bfloat16* output0,
-    const std::uint8_t* weight1_codes, const std::uint16_t* weight1_scales,
-    hip_bfloat16* output1) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    constexpr std::uint32_t kRows0 = 4096U;
-    constexpr std::uint32_t kRows1 = 12288U;
+__global__ __launch_bounds__(kThreads) void a8q4g64_gdn_pair_t1_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight0_codes, const std::uint16_t* weight0_scales, hip_bfloat16* output0,
+    const std::uint8_t* weight1_codes, const std::uint16_t* weight1_scales, hip_bfloat16* output1) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    constexpr std::uint32_t kRows0   = 4096U;
+    constexpr std::uint32_t kRows1   = 12288U;
     constexpr std::uint32_t kColumns = 5120U;
-    constexpr std::uint32_t kGroups = kColumns / kQ4Group;
+    constexpr std::uint32_t kGroups  = kColumns / kQ4Group;
     const std::uint32_t combined_row = blockIdx.x * blockDim.x + threadIdx.x;
     if (combined_row >= kRows0 + kRows1) return;
-    const bool second = combined_row >= kRows0;
-    const std::uint32_t row = second ? combined_row - kRows0 : combined_row;
+    const bool second          = combined_row >= kRows0;
+    const std::uint32_t row    = second ? combined_row - kRows0 : combined_row;
     hip_bfloat16* const output = second ? output1 : output0;
     if (*activation_status != Q4G64ActivationOk) {
         output[row] = conspicuous_bf16_nan();
         return;
     }
-    const std::uint8_t* const weight_codes = second ? weight1_codes : weight0_codes;
+    const std::uint8_t* const weight_codes   = second ? weight1_codes : weight0_codes;
     const std::uint16_t* const weight_scales = second ? weight1_scales : weight0_scales;
-    float total = 0.0F;
+    float total                              = 0.0F;
     for (std::uint32_t group = 0; group < kGroups; ++group) {
-        int low_dot = 0;
+        int low_dot  = 0;
         int high_dot = 0;
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t word = 0; word < 8U; ++word) {
-            const std::size_t element =
-                static_cast<std::size_t>(group) * kQ4Group + word * 8U;
-            const int low = load_q4x8(activation_low_codes, element);
-            const int high = load_q4x8(activation_high_codes, element);
-            const int weight =
-                load_q4_n16k16_x8(weight_codes, row, group, word, kGroups);
-            low_dot = __builtin_amdgcn_sudot8(
-                false, low, true, weight, low_dot, false);
-            high_dot = __builtin_amdgcn_sudot8(
-                true, high, true, weight, high_dot, false);
+            const std::size_t element = static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+            const int low             = load_q4x8(activation_low_codes, element);
+            const int high            = load_q4x8(activation_high_codes, element);
+            const int weight          = load_q4_n16k16_x8(weight_codes, row, group, word, kGroups);
+            low_dot  = __builtin_amdgcn_sudot8(false, low, true, weight, low_dot, false);
+            high_dot = __builtin_amdgcn_sudot8(true, high, true, weight, high_dot, false);
         }
-        const std::int32_t combined = low_dot + 16 * high_dot;
-        const float activation_scale = __half2float(
-            __ushort_as_half(activation_scales[group]));
-        const float weight_scale = __half2float(__ushort_as_half(
-            weight_scales[q4_n16k16_scale_index(row, group, kGroups)]));
-        total = fmaf(static_cast<float>(combined),
-                     activation_scale * weight_scale, total);
+        const std::int32_t combined  = low_dot + 16 * high_dot;
+        const float activation_scale = __half2float(__ushort_as_half(activation_scales[group]));
+        const float weight_scale     = __half2float(
+            __ushort_as_half(weight_scales[q4_n16k16_scale_index(row, group, kGroups)]));
+        total = fmaf(static_cast<float>(combined), activation_scale * weight_scale, total);
     }
     output[row] = static_cast<hip_bfloat16>(total);
-#else
-    (void)activation_low_codes; (void)activation_high_codes;
-    (void)activation_scales; (void)activation_status; (void)weight0_codes;
-    (void)weight0_scales; (void)output0; (void)weight1_codes;
-    (void)weight1_scales; (void)output1;
-#endif
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight0_codes;
+    (void)weight0_scales;
+    (void)output0;
+    (void)weight1_codes;
+    (void)weight1_scales;
+    (void)output1;
+#    endif
 }
 
 template <std::uint32_t Tokens>
-__global__ __launch_bounds__(kThreads)
-void a8q4g64_linear_dflash_small_t_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t rows, std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    static_assert(Tokens == 4U || Tokens == 5U || Tokens == 6U || Tokens == 8U ||
-                  Tokens == 10U || Tokens == 12U || Tokens == 15U || Tokens == 16U ||
-                  Tokens == 18U || Tokens == 20U || Tokens == 24U);
+__global__ __launch_bounds__(kThreads) void a8q4g64_linear_dflash_small_t_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t rows, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    static_assert(Tokens == 4U || Tokens == 5U || Tokens == 6U || Tokens == 8U || Tokens == 10U ||
+                  Tokens == 12U || Tokens == 15U || Tokens == 16U || Tokens == 18U ||
+                  Tokens == 20U || Tokens == 24U);
     const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= rows) return;
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t token = 0; token < Tokens; ++token) {
             output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
         }
@@ -1739,66 +1727,66 @@ void a8q4g64_linear_dflash_small_t_kernel(
     for (std::uint32_t group = 0; group < groups; ++group) {
         int low_dots[Tokens]{};
         int high_dots[Tokens]{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t word = 0; word < 8U; ++word) {
-            const int weight =
-                load_q4_n16k16_x8(weight_codes, row, group, word, groups);
-#pragma unroll
+            const int weight = load_q4_n16k16_x8(weight_codes, row, group, word, groups);
+#        pragma unroll
             for (std::uint32_t token = 0; token < Tokens; ++token) {
-                const std::size_t element =
-                    static_cast<std::size_t>(token) * padded_columns +
-                    static_cast<std::size_t>(group) * kQ4Group + word * 8U;
-                const int low = load_q4x8(activation_low_codes, element);
-                const int high = load_q4x8(activation_high_codes, element);
-                low_dots[token] = __builtin_amdgcn_sudot8(
-                    false, low, true, weight, low_dots[token], false);
-                high_dots[token] = __builtin_amdgcn_sudot8(
-                    true, high, true, weight, high_dots[token], false);
+                const std::size_t element = static_cast<std::size_t>(token) * padded_columns +
+                                            static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+                const int low             = load_q4x8(activation_low_codes, element);
+                const int high            = load_q4x8(activation_high_codes, element);
+                low_dots[token] =
+                    __builtin_amdgcn_sudot8(false, low, true, weight, low_dots[token], false);
+                high_dots[token] =
+                    __builtin_amdgcn_sudot8(true, high, true, weight, high_dots[token], false);
             }
         }
-        const float weight_scale = __half2float(__ushort_as_half(
-            weight_scales[q4_n16k16_scale_index(row, group, groups)]));
-#pragma unroll
+        const float weight_scale = __half2float(
+            __ushort_as_half(weight_scales[q4_n16k16_scale_index(row, group, groups)]));
+#        pragma unroll
         for (std::uint32_t token = 0; token < Tokens; ++token) {
-            const std::int32_t combined = low_dots[token] + 16 * high_dots[token];
+            const std::int32_t combined  = low_dots[token] + 16 * high_dots[token];
             const float activation_scale = __half2float(__ushort_as_half(
                 activation_scales[static_cast<std::size_t>(token) * groups + group]));
-            totals[token] = fmaf(static_cast<float>(combined),
-                                 activation_scale * weight_scale, totals[token]);
+            totals[token] =
+                fmaf(static_cast<float>(combined), activation_scale * weight_scale, totals[token]);
         }
     }
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t token = 0; token < Tokens; ++token) {
         output[static_cast<std::size_t>(token) * rows + row] =
             static_cast<hip_bfloat16>(totals[token]);
     }
-#else
-    (void)activation_low_codes; (void)activation_high_codes;
-    (void)activation_scales; (void)activation_status; (void)weight_codes;
-    (void)weight_scales; (void)output; (void)rows; (void)padded_columns;
-#endif
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)rows;
+    (void)padded_columns;
+#    endif
 }
 
 // Exact qualification-selected DFlash MLP-down cell. Keeping N, K, and T compile-time constants
 // preserves the accepted instruction/resource shape; the public Linear boundary still owns all
 // pointer, extent, overlap, codec-status, and stream semantics.
-__global__ __launch_bounds__(kThreads)
-void a8q4g64_linear_dflash_mlp_down_t5_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    constexpr std::uint32_t tokens = 5U;
-    constexpr std::uint32_t rows = 5120U;
+__global__ __launch_bounds__(kThreads) void a8q4g64_linear_dflash_mlp_down_t5_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    constexpr std::uint32_t tokens  = 5U;
+    constexpr std::uint32_t rows    = 5120U;
     constexpr std::uint32_t columns = 17408U;
-    constexpr std::uint32_t groups = columns / kQ4Group;
-    const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
+    constexpr std::uint32_t groups  = columns / kQ4Group;
+    const std::uint32_t row         = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= rows) return;
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t token = 0; token < tokens; ++token) {
             output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
         }
@@ -1808,24 +1796,24 @@ void a8q4g64_linear_dflash_mlp_down_t5_kernel(
     for (std::uint32_t group = 0; group < groups; ++group) {
         int low_dots[tokens]{};
         int high_dots[tokens]{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t word = 0; word < 8U; ++word) {
             const int weight = load_q4_n16k16_x8(weight_codes, row, group, word, groups);
-#pragma unroll
+#        pragma unroll
             for (std::uint32_t token = 0; token < tokens; ++token) {
                 const std::size_t element = static_cast<std::size_t>(token) * columns +
-                    static_cast<std::size_t>(group) * kQ4Group + word * 8U;
-                low_dots[token] = __builtin_amdgcn_sudot8(
-                    false, load_q4x8(activation_low_codes, element), true, weight,
-                    low_dots[token], false);
-                high_dots[token] = __builtin_amdgcn_sudot8(
-                    true, load_q4x8(activation_high_codes, element), true, weight,
-                    high_dots[token], false);
+                                            static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+                low_dots[token] =
+                    __builtin_amdgcn_sudot8(false, load_q4x8(activation_low_codes, element), true,
+                                            weight, low_dots[token], false);
+                high_dots[token] =
+                    __builtin_amdgcn_sudot8(true, load_q4x8(activation_high_codes, element), true,
+                                            weight, high_dots[token], false);
             }
         }
-        const float weight_scale = __half2float(__ushort_as_half(
-            weight_scales[q4_n16k16_scale_index(row, group, groups)]));
-#pragma unroll
+        const float weight_scale = __half2float(
+            __ushort_as_half(weight_scales[q4_n16k16_scale_index(row, group, groups)]));
+#        pragma unroll
         for (std::uint32_t token = 0; token < tokens; ++token) {
             const float activation_scale = __half2float(__ushort_as_half(
                 activation_scales[static_cast<std::size_t>(token) * groups + group]));
@@ -1833,33 +1821,36 @@ void a8q4g64_linear_dflash_mlp_down_t5_kernel(
                                  activation_scale * weight_scale, totals[token]);
         }
     }
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t token = 0; token < tokens; ++token) {
         output[static_cast<std::size_t>(token) * rows + row] =
             static_cast<hip_bfloat16>(totals[token]);
     }
-#else
-    (void)activation_low_codes; (void)activation_high_codes;
-    (void)activation_scales; (void)activation_status; (void)weight_codes;
-    (void)weight_scales; (void)output;
-#endif
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+#    endif
 }
 
 // A fragment-major LDS map avoids the 4-way conflicts produced by a logical
 // [row][packed-K-word] staging image. Bit 4 separates the two WMMA lane groups
 // onto disjoint banks while preserving contiguous rows within each group. The
 // persistent N16/K16 source is mapped directly into this LDS image while loading.
-__device__ __forceinline__ __attribute__((unused)) std::uint32_t a8q4_lds_word_index(
-    std::uint32_t row, std::uint32_t word, std::uint32_t rows) {
+__device__ __forceinline__ __attribute__((unused)) std::uint32_t
+a8q4_lds_word_index(std::uint32_t row, std::uint32_t word, std::uint32_t rows) {
     return word * rows + (row ^ (((word >> 1U) & 1U) << 4U));
 }
 
-__device__ __forceinline__ __attribute__((unused)) std::uint32_t load_q4x8_logical(
-    const std::uint8_t* codes, std::size_t element, std::uint32_t logical_k,
-    std::uint32_t packed_k) {
+__device__ __forceinline__ __attribute__((unused)) std::uint32_t
+load_q4x8_logical(const std::uint8_t* codes, std::size_t element, std::uint32_t logical_k,
+                  std::uint32_t packed_k) {
     if (packed_k >= logical_k) return 0U;
-    const std::uint32_t packed = static_cast<std::uint32_t>(
-        load_q4x8(codes, element));
+    const std::uint32_t packed    = static_cast<std::uint32_t>(load_q4x8(codes, element));
     const std::uint32_t remaining = logical_k - packed_k;
     if (remaining >= 8U) return packed;
     return packed & ((1U << (remaining * 4U)) - 1U);
@@ -1877,37 +1868,34 @@ static_assert(sizeof(A4Q4PrefillN128Tile) == 6528U);
 template <bool LdsScopeOnly>
 __device__ __forceinline__ void prefill_cta_barrier();
 
-__global__ __launch_bounds__(kA8Q4PrefillThreads)
-void q4g64_linear_prefill_cta_m64n128_kernel(
+__global__ __launch_bounds__(kA8Q4PrefillThreads) void q4g64_linear_prefill_cta_m64n128_kernel(
     const std::uint8_t* activation_codes, const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t* activation_status, const std::uint8_t* weight_codes,
+    const std::uint16_t* weight_scales, hip_bfloat16* output, std::uint32_t tokens,
+    std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ A4Q4PrefillN128Tile tile;
-    const std::uint32_t thread = threadIdx.x;
-    const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = thread / kWaveSize;
-    const std::uint32_t axis = lane & 15U;
-    const std::uint32_t lane_group = lane >> 4U;
+    const std::uint32_t thread          = threadIdx.x;
+    const std::uint32_t lane            = thread & (kWaveSize - 1U);
+    const std::uint32_t wave            = thread / kWaveSize;
+    const std::uint32_t axis            = lane & 15U;
+    const std::uint32_t lane_group      = lane >> 4U;
     const std::uint32_t wave_token_tile = wave / 4U;
-    const std::uint32_t wave_row_tile = wave & 3U;
-    const std::uint32_t cta_token_base = blockIdx.y * kA8Q4PrefillTokenTile;
-    const std::uint32_t cta_row_base = blockIdx.x * (2U * kA8Q4PrefillRowTile);
-    const std::uint32_t token_base = cta_token_base + wave_token_tile * kWmmaTile;
+    const std::uint32_t wave_row_tile   = wave & 3U;
+    const std::uint32_t cta_token_base  = blockIdx.y * kA8Q4PrefillTokenTile;
+    const std::uint32_t cta_row_base    = blockIdx.x * (2U * kA8Q4PrefillRowTile);
+    const std::uint32_t token_base      = cta_token_base + wave_token_tile * kWmmaTile;
 
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
                 const std::uint32_t token = token_base + lane_group * 8U + element;
-                const std::uint32_t row = cta_row_base + row_half * kA8Q4PrefillRowTile +
-                                          wave_row_tile * kWmmaTile + axis;
+                const std::uint32_t row   = cta_row_base + row_half * kA8Q4PrefillRowTile +
+                                            wave_row_tile * kWmmaTile + axis;
                 if (token < tokens && row < rows) {
-                    output[static_cast<std::size_t>(token) * rows + row] =
-                        conspicuous_bf16_nan();
+                    output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
                 }
             }
         }
@@ -1917,55 +1905,53 @@ void q4g64_linear_prefill_cta_m64n128_kernel(
     const std::uint32_t groups = padded_columns / kQ4Group;
     WmmaF32Fragment totals[2]{};
     for (std::uint32_t group = 0; group < groups; ++group) {
-        const std::uint32_t word = thread & 7U;
+        const std::uint32_t word           = thread & 7U;
         const std::uint32_t activation_row = thread / 8U;
-        const std::uint32_t token = cta_token_base + activation_row;
-        const std::uint32_t packed_k = group * kQ4Group + word * 8U;
+        const std::uint32_t token          = cta_token_base + activation_row;
+        const std::uint32_t packed_k       = group * kQ4Group + word * 8U;
         const std::size_t activation_element =
             static_cast<std::size_t>(token) * padded_columns + packed_k;
-        tile.activations[a8q4_lds_word_index(
-            activation_row, word, kA8Q4PrefillTokenTile)] = token < tokens
-            ? load_q4x8_logical(activation_codes, activation_element, columns, packed_k)
-            : 0U;
-#pragma unroll
+        tile.activations[a8q4_lds_word_index(activation_row, word, kA8Q4PrefillTokenTile)] =
+            token < tokens
+                ? load_q4x8_logical(activation_codes, activation_element, columns, packed_k)
+                : 0U;
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
             const std::uint32_t weight_row = thread / 8U + row_half * kA8Q4PrefillRowTile;
-            const std::uint32_t row = cta_row_base + weight_row;
-            tile.weights[a8q4_lds_word_index(
-                weight_row, word, 2U * kA8Q4PrefillRowTile)] = row < rows
-                ? load_q4_n16k16_x8_logical(
-                      weight_codes, row, group, word, groups, columns)
-                : 0U;
+            const std::uint32_t row        = cta_row_base + weight_row;
+            tile.weights[a8q4_lds_word_index(weight_row, word, 2U * kA8Q4PrefillRowTile)] =
+                row < rows
+                    ? load_q4_n16k16_x8_logical(weight_codes, row, group, word, groups, columns)
+                    : 0U;
         }
         if (thread < kA8Q4PrefillTokenTile) {
             const std::uint32_t scale_token = cta_token_base + thread;
-            tile.activation_scales[thread] = scale_token < tokens
-                ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
-                : 0U;
+            tile.activation_scales[thread] =
+                scale_token < tokens
+                    ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
+                    : 0U;
         }
         if (thread < 2U * kA8Q4PrefillRowTile) {
             const std::uint32_t scale_row = cta_row_base + thread;
-            tile.weight_scales[thread] = scale_row < rows
-                ? weight_scales[q4_n16k16_scale_index(scale_row, group, groups)]
-                : 0U;
+            tile.weight_scales[thread] =
+                scale_row < rows ? weight_scales[q4_n16k16_scale_index(scale_row, group, groups)]
+                                 : 0U;
         }
         prefill_cta_barrier<true>();
 
         WmmaI32x8 dots[2]{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t half = 0; half < 2U; ++half) {
             WmmaI32x2 a{};
             WmmaI32x2 b[2]{};
-            const std::uint32_t fragment_word = half * 4U + lane_group * 2U;
-            const std::uint32_t activation_fragment_row =
-                wave_token_tile * kWmmaTile + axis;
-            const std::uint32_t a_index = a8q4_lds_word_index(
-                activation_fragment_row, fragment_word, kA8Q4PrefillTokenTile);
+            const std::uint32_t fragment_word           = half * 4U + lane_group * 2U;
+            const std::uint32_t activation_fragment_row = wave_token_tile * kWmmaTile + axis;
+            const std::uint32_t a_index =
+                a8q4_lds_word_index(activation_fragment_row, fragment_word, kA8Q4PrefillTokenTile);
             a[0] = static_cast<int>(tile.activations[a_index]);
             a[1] = static_cast<int>(tile.activations[a8q4_lds_word_index(
-                activation_fragment_row, fragment_word + 1U,
-                kA8Q4PrefillTokenTile)]);
-#pragma unroll
+                activation_fragment_row, fragment_word + 1U, kA8Q4PrefillTokenTile)]);
+#        pragma unroll
             for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
                 const std::uint32_t weight_fragment_row =
                     row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
@@ -1973,50 +1959,54 @@ void q4g64_linear_prefill_cta_m64n128_kernel(
                     weight_fragment_row, fragment_word, 2U * kA8Q4PrefillRowTile);
                 b[row_half][0] = static_cast<int>(tile.weights[b_index]);
                 b[row_half][1] = static_cast<int>(tile.weights[a8q4_lds_word_index(
-                    weight_fragment_row, fragment_word + 1U,
-                    2U * kA8Q4PrefillRowTile)]);
+                    weight_fragment_row, fragment_word + 1U, 2U * kA8Q4PrefillRowTile)]);
                 dots[row_half] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
                     true, a, true, b[row_half], dots[row_half], false);
             }
         }
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-            const std::uint32_t fragment_row = row_half * kA8Q4PrefillRowTile +
-                                               wave_row_tile * kWmmaTile + axis;
-            const float w_scale = __half2float(__ushort_as_half(
-                tile.weight_scales[fragment_row]));
-#pragma unroll
+            const std::uint32_t fragment_row =
+                row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
+            const float w_scale = __half2float(__ushort_as_half(tile.weight_scales[fragment_row]));
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
                 const std::uint32_t fragment_token =
                     wave_token_tile * kWmmaTile + lane_group * 8U + element;
-                const float a_scale = __half2float(__ushort_as_half(
-                    tile.activation_scales[fragment_token]));
-                totals[row_half][element] = fmaf(
-                    static_cast<float>(dots[row_half][element]), a_scale * w_scale,
-                    totals[row_half][element]);
+                const float a_scale =
+                    __half2float(__ushort_as_half(tile.activation_scales[fragment_token]));
+                totals[row_half][element] = fmaf(static_cast<float>(dots[row_half][element]),
+                                                 a_scale * w_scale, totals[row_half][element]);
             }
         }
         prefill_cta_barrier<true>();
     }
 
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = token_base + lane_group * 8U + element;
-            const std::uint32_t row = cta_row_base + row_half * kA8Q4PrefillRowTile +
-                                      wave_row_tile * kWmmaTile + axis;
+            const std::uint32_t row =
+                cta_row_base + row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
             if (token < tokens && row < rows) {
                 output[static_cast<std::size_t>(token) * rows + row] =
                     static_cast<hip_bfloat16>(totals[row_half][element]);
             }
         }
     }
-#else
-    (void)activation_codes; (void)activation_scales; (void)activation_status;
-    (void)weight_codes; (void)weight_scales; (void)output; (void)tokens; (void)rows;
-    (void)columns; (void)padded_columns;
-#endif
+#    else
+    (void)activation_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
+    (void)columns;
+    (void)padded_columns;
+#    endif
 }
 
 struct A8Q4PrefillTile {
@@ -2041,7 +2031,11 @@ struct A4Q4PrefillPingPongBank {
     std::uint16_t activation_scales[kA8Q4PrefillTokenTile];
     std::uint16_t weight_scales[2U * kA8Q4PrefillRowTile];
 };
-struct A4Q4PrefillPingPongTile { A4Q4PrefillPingPongBank bank[2]; };
+
+struct A4Q4PrefillPingPongTile {
+    A4Q4PrefillPingPongBank bank[2];
+};
+
 static_assert(sizeof(A4Q4PrefillPingPongTile) == 13056U);
 
 static_assert(sizeof(A8Q4PrefillN128Tile) == 8576U);
@@ -2074,34 +2068,31 @@ __device__ __forceinline__ void prefill_cta_barrier() {
 // directly from Q4N16K16; only the LDS image is fragment-major.
 template <bool LdsScopeOnly>
 __device__ __forceinline__ void a8q4g64_linear_prefill_cta_body(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns, A8Q4PrefillTile& tile) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    const std::uint32_t thread = threadIdx.x;
-    const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = thread / kWaveSize;
-    const std::uint32_t axis = lane & 15U;
-    const std::uint32_t lane_group = lane >> 4U;
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns,
+    A8Q4PrefillTile& tile) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t thread          = threadIdx.x;
+    const std::uint32_t lane            = thread & (kWaveSize - 1U);
+    const std::uint32_t wave            = thread / kWaveSize;
+    const std::uint32_t axis            = lane & 15U;
+    const std::uint32_t lane_group      = lane >> 4U;
     const std::uint32_t wave_token_tile = wave / 4U;
-    const std::uint32_t wave_row_tile = wave & 3U;
-    const std::uint32_t cta_token_base = blockIdx.y * kA8Q4PrefillTokenTile;
-    const std::uint32_t cta_row_base = blockIdx.x * kA8Q4PrefillRowTile;
-    const std::uint32_t token_base = cta_token_base + wave_token_tile * kWmmaTile;
-    const std::uint32_t row_base = cta_row_base + wave_row_tile * kWmmaTile;
+    const std::uint32_t wave_row_tile   = wave & 3U;
+    const std::uint32_t cta_token_base  = blockIdx.y * kA8Q4PrefillTokenTile;
+    const std::uint32_t cta_row_base    = blockIdx.x * kA8Q4PrefillRowTile;
+    const std::uint32_t token_base      = cta_token_base + wave_token_tile * kWmmaTile;
+    const std::uint32_t row_base        = cta_row_base + wave_row_tile * kWmmaTile;
 
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = token_base + lane_group * 8U + element;
-            const std::uint32_t row = row_base + axis;
+            const std::uint32_t row   = row_base + axis;
             if (token < tokens && row < rows) {
-                output[static_cast<std::size_t>(token) * rows + row] =
-                    conspicuous_bf16_nan();
+                output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
             }
         }
         return;
@@ -2110,169 +2101,165 @@ __device__ __forceinline__ void a8q4g64_linear_prefill_cta_body(
     const std::uint32_t groups = padded_columns / kQ4Group;
     WmmaF32Fragment total{};
     for (std::uint32_t group = 0; group < groups; ++group) {
-        const std::uint32_t activation_row = thread / 8U;
-        const std::uint32_t activation_word = thread & 7U;
-        const std::uint32_t token = cta_token_base + activation_row;
-        const std::size_t activation_element =
-            static_cast<std::size_t>(token) * padded_columns + group * kQ4Group +
-            activation_word * 8U;
-        const std::uint32_t activation_lds = a8q4_lds_word_index(
-            activation_row, activation_word, kA8Q4PrefillTokenTile);
+        const std::uint32_t activation_row   = thread / 8U;
+        const std::uint32_t activation_word  = thread & 7U;
+        const std::uint32_t token            = cta_token_base + activation_row;
+        const std::size_t activation_element = static_cast<std::size_t>(token) * padded_columns +
+                                               group * kQ4Group + activation_word * 8U;
+        const std::uint32_t activation_lds =
+            a8q4_lds_word_index(activation_row, activation_word, kA8Q4PrefillTokenTile);
         const std::uint32_t packed_k = group * kQ4Group + activation_word * 8U;
-        tile.activation_low[activation_lds] = token < tokens
-            ? load_q4x8_logical(activation_low_codes, activation_element, columns, packed_k)
-            : 0U;
-        tile.activation_high[activation_lds] = token < tokens
-            ? load_q4x8_logical(activation_high_codes, activation_element, columns, packed_k)
-            : 0U;
+        tile.activation_low[activation_lds] =
+            token < tokens
+                ? load_q4x8_logical(activation_low_codes, activation_element, columns, packed_k)
+                : 0U;
+        tile.activation_high[activation_lds] =
+            token < tokens
+                ? load_q4x8_logical(activation_high_codes, activation_element, columns, packed_k)
+                : 0U;
 
-        const std::uint32_t weight_row = thread / 8U;
+        const std::uint32_t weight_row  = thread / 8U;
         const std::uint32_t weight_word = thread & 7U;
-        const std::uint32_t row = cta_row_base + weight_row;
-        tile.weights[a8q4_lds_word_index(weight_row, weight_word,
-                                         kA8Q4PrefillRowTile)] = row < rows
-            ? load_q4_n16k16_x8_logical(
-                  weight_codes, row, group, weight_word, groups, columns)
-            : 0U;
+        const std::uint32_t row         = cta_row_base + weight_row;
+        tile.weights[a8q4_lds_word_index(weight_row, weight_word, kA8Q4PrefillRowTile)] =
+            row < rows
+                ? load_q4_n16k16_x8_logical(weight_codes, row, group, weight_word, groups, columns)
+                : 0U;
         if (thread < kA8Q4PrefillTokenTile) {
             const std::uint32_t scale_token = cta_token_base + thread;
-            tile.activation_scales[thread] = scale_token < tokens
-                ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
-                : 0U;
+            tile.activation_scales[thread] =
+                scale_token < tokens
+                    ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
+                    : 0U;
         }
         if (thread < kA8Q4PrefillRowTile) {
             const std::uint32_t scale_row = cta_row_base + thread;
-            tile.weight_scales[thread] = scale_row < rows
-                ? weight_scales[q4_n16k16_scale_index(scale_row, group, groups)]
-                : 0U;
+            tile.weight_scales[thread] =
+                scale_row < rows ? weight_scales[q4_n16k16_scale_index(scale_row, group, groups)]
+                                 : 0U;
         }
         prefill_cta_barrier<LdsScopeOnly>();
 
         WmmaI32x8 low_dot{};
         WmmaI32x8 high_dot{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t half = 0; half < 2U; ++half) {
             WmmaI32x2 a_low{};
             WmmaI32x2 a_high{};
             WmmaI32x2 b{};
-            const std::uint32_t word = half * 4U + lane_group * 2U;
-            const std::uint32_t activation_fragment_row =
-                wave_token_tile * kWmmaTile + axis;
-            const std::uint32_t weight_fragment_row = wave_row_tile * kWmmaTile + axis;
-            const std::uint32_t a_index = a8q4_lds_word_index(
-                activation_fragment_row, word, kA8Q4PrefillTokenTile);
-            const std::uint32_t b_index = a8q4_lds_word_index(
-                weight_fragment_row, word, kA8Q4PrefillRowTile);
-            a_low[0] = static_cast<int>(tile.activation_low[a_index]);
-            a_low[1] = static_cast<int>(tile.activation_low[a8q4_lds_word_index(
+            const std::uint32_t word                    = half * 4U + lane_group * 2U;
+            const std::uint32_t activation_fragment_row = wave_token_tile * kWmmaTile + axis;
+            const std::uint32_t weight_fragment_row     = wave_row_tile * kWmmaTile + axis;
+            const std::uint32_t a_index =
+                a8q4_lds_word_index(activation_fragment_row, word, kA8Q4PrefillTokenTile);
+            const std::uint32_t b_index =
+                a8q4_lds_word_index(weight_fragment_row, word, kA8Q4PrefillRowTile);
+            a_low[0]  = static_cast<int>(tile.activation_low[a_index]);
+            a_low[1]  = static_cast<int>(tile.activation_low[a8q4_lds_word_index(
                 activation_fragment_row, word + 1U, kA8Q4PrefillTokenTile)]);
             a_high[0] = static_cast<int>(tile.activation_high[a_index]);
             a_high[1] = static_cast<int>(tile.activation_high[a8q4_lds_word_index(
                 activation_fragment_row, word + 1U, kA8Q4PrefillTokenTile)]);
-            b[0] = static_cast<int>(tile.weights[b_index]);
-            b[1] = static_cast<int>(tile.weights[a8q4_lds_word_index(
-                weight_fragment_row, word + 1U, kA8Q4PrefillRowTile)]);
-            low_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b, low_dot, false);
-            high_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b, high_dot, false);
+            b[0]      = static_cast<int>(tile.weights[b_index]);
+            b[1] = static_cast<int>(tile.weights[a8q4_lds_word_index(weight_fragment_row, word + 1U,
+                                                                     kA8Q4PrefillRowTile)]);
+            low_dot  = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false, a_low, true, b,
+                                                                        low_dot, false);
+            high_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a_high, true, b,
+                                                                        high_dot, false);
         }
-        const float w_scale = __half2float(__ushort_as_half(
-            tile.weight_scales[wave_row_tile * kWmmaTile + axis]));
-#pragma unroll
+        const float w_scale =
+            __half2float(__ushort_as_half(tile.weight_scales[wave_row_tile * kWmmaTile + axis]));
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t fragment_token =
                 wave_token_tile * kWmmaTile + lane_group * 8U + element;
-            const float a_scale = __half2float(__ushort_as_half(
-                tile.activation_scales[fragment_token]));
+            const float a_scale =
+                __half2float(__ushort_as_half(tile.activation_scales[fragment_token]));
             const std::int32_t combined = low_dot[element] + 16 * high_dot[element];
-            total[element] = fmaf(static_cast<float>(combined), a_scale * w_scale,
-                                  total[element]);
+            total[element] = fmaf(static_cast<float>(combined), a_scale * w_scale, total[element]);
         }
         prefill_cta_barrier<LdsScopeOnly>();
     }
 
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const std::uint32_t token = token_base + lane_group * 8U + element;
-        const std::uint32_t row = row_base + axis;
+        const std::uint32_t row   = row_base + axis;
         if (token < tokens && row < rows) {
             output[static_cast<std::size_t>(token) * rows + row] =
                 static_cast<hip_bfloat16>(total[element]);
         }
     }
-#else
-    (void)activation_low_codes; (void)activation_high_codes; (void)activation_scales;
-    (void)activation_status; (void)weight_codes; (void)weight_scales; (void)output;
-    (void)tokens; (void)rows; (void)columns; (void)padded_columns; (void)tile;
-#endif
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
+    (void)columns;
+    (void)padded_columns;
+    (void)tile;
+#    endif
 }
 
-__global__ __launch_bounds__(kA8Q4PrefillThreads)
-void a8q4g64_linear_prefill_cta_m64n64_regression_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns) {
+__global__
+__launch_bounds__(kA8Q4PrefillThreads) void a8q4g64_linear_prefill_cta_m64n64_regression_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns) {
     __shared__ A8Q4PrefillTile tile;
     a8q4g64_linear_prefill_cta_body<true>(
-        activation_low_codes, activation_high_codes, activation_scales,
-        activation_status, weight_codes, weight_scales, output, tokens, rows,
-        columns, padded_columns, tile);
+        activation_low_codes, activation_high_codes, activation_scales, activation_status,
+        weight_codes, weight_scales, output, tokens, rows, columns, padded_columns, tile);
 }
 
-__global__ __launch_bounds__(kA8Q4PrefillThreads)
-void a8q4g64_linear_prefill_cta_global_inv_qualification_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns) {
+__global__
+__launch_bounds__(kA8Q4PrefillThreads) void a8q4g64_linear_prefill_cta_global_inv_qualification_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns) {
     __shared__ A8Q4PrefillTile tile;
     a8q4g64_linear_prefill_cta_body<false>(
-        activation_low_codes, activation_high_codes, activation_scales,
-        activation_status, weight_codes, weight_scales, output, tokens, rows,
-        columns, padded_columns, tile);
+        activation_low_codes, activation_high_codes, activation_scales, activation_status,
+        weight_codes, weight_scales, output, tokens, rows, columns, padded_columns, tile);
 }
 
-__global__ __launch_bounds__(kA8Q4PrefillThreads)
-void a8q4g64_linear_prefill_cta_m64n128_regression_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+__global__
+__launch_bounds__(kA8Q4PrefillThreads) void a8q4g64_linear_prefill_cta_m64n128_regression_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ A8Q4PrefillN128Tile tile;
-    const std::uint32_t thread = threadIdx.x;
-    const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = thread / kWaveSize;
-    const std::uint32_t axis = lane & 15U;
-    const std::uint32_t lane_group = lane >> 4U;
+    const std::uint32_t thread          = threadIdx.x;
+    const std::uint32_t lane            = thread & (kWaveSize - 1U);
+    const std::uint32_t wave            = thread / kWaveSize;
+    const std::uint32_t axis            = lane & 15U;
+    const std::uint32_t lane_group      = lane >> 4U;
     const std::uint32_t wave_token_tile = wave / 4U;
-    const std::uint32_t wave_row_tile = wave & 3U;
-    const std::uint32_t cta_token_base = blockIdx.y * kA8Q4PrefillTokenTile;
-    const std::uint32_t cta_row_base = blockIdx.x * (2U * kA8Q4PrefillRowTile);
-    const std::uint32_t token_base = cta_token_base + wave_token_tile * kWmmaTile;
+    const std::uint32_t wave_row_tile   = wave & 3U;
+    const std::uint32_t cta_token_base  = blockIdx.y * kA8Q4PrefillTokenTile;
+    const std::uint32_t cta_row_base    = blockIdx.x * (2U * kA8Q4PrefillRowTile);
+    const std::uint32_t token_base      = cta_token_base + wave_token_tile * kWmmaTile;
 
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
                 const std::uint32_t token = token_base + lane_group * 8U + element;
-                const std::uint32_t row = cta_row_base + row_half * kA8Q4PrefillRowTile +
-                                          wave_row_tile * kWmmaTile + axis;
+                const std::uint32_t row   = cta_row_base + row_half * kA8Q4PrefillRowTile +
+                                            wave_row_tile * kWmmaTile + axis;
                 if (token < tokens && row < rows) {
-                    output[static_cast<std::size_t>(token) * rows + row] =
-                        conspicuous_bf16_nan();
+                    output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
                 }
             }
         }
@@ -2283,63 +2270,64 @@ void a8q4g64_linear_prefill_cta_m64n128_regression_kernel(
     WmmaF32Fragment totals[2]{};
     for (std::uint32_t group = 0; group < groups; ++group) {
         const std::uint32_t activation_row = thread / 8U;
-        const std::uint32_t word = thread & 7U;
-        const std::uint32_t token = cta_token_base + activation_row;
+        const std::uint32_t word           = thread & 7U;
+        const std::uint32_t token          = cta_token_base + activation_row;
         const std::size_t activation_element =
             static_cast<std::size_t>(token) * padded_columns + group * kQ4Group + word * 8U;
         const std::uint32_t activation_lds =
             a8q4_lds_word_index(activation_row, word, kA8Q4PrefillTokenTile);
         const std::uint32_t packed_k = group * kQ4Group + word * 8U;
-        tile.activation_low[activation_lds] = token < tokens
-            ? load_q4x8_logical(activation_low_codes, activation_element, columns, packed_k)
-            : 0U;
-        tile.activation_high[activation_lds] = token < tokens
-            ? load_q4x8_logical(activation_high_codes, activation_element, columns, packed_k)
-            : 0U;
+        tile.activation_low[activation_lds] =
+            token < tokens
+                ? load_q4x8_logical(activation_low_codes, activation_element, columns, packed_k)
+                : 0U;
+        tile.activation_high[activation_lds] =
+            token < tokens
+                ? load_q4x8_logical(activation_high_codes, activation_element, columns, packed_k)
+                : 0U;
 
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
             const std::uint32_t weight_row = thread / 8U + row_half * kA8Q4PrefillRowTile;
-            const std::uint32_t row = cta_row_base + weight_row;
-            tile.weights[a8q4_lds_word_index(
-                weight_row, word, 2U * kA8Q4PrefillRowTile)] = row < rows
-                ? load_q4_n16k16_x8_logical(
-                      weight_codes, row, group, word, groups, columns)
-                : 0U;
+            const std::uint32_t row        = cta_row_base + weight_row;
+            tile.weights[a8q4_lds_word_index(weight_row, word, 2U * kA8Q4PrefillRowTile)] =
+                row < rows
+                    ? load_q4_n16k16_x8_logical(weight_codes, row, group, word, groups, columns)
+                    : 0U;
         }
         if (thread < kA8Q4PrefillTokenTile) {
             const std::uint32_t scale_token = cta_token_base + thread;
-            tile.activation_scales[thread] = scale_token < tokens
-                ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
-                : 0U;
+            tile.activation_scales[thread] =
+                scale_token < tokens
+                    ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
+                    : 0U;
         }
         if (thread < 2U * kA8Q4PrefillRowTile) {
             const std::uint32_t scale_row = cta_row_base + thread;
-            tile.weight_scales[thread] = scale_row < rows
-                ? weight_scales[q4_n16k16_scale_index(scale_row, group, groups)]
-                : 0U;
+            tile.weight_scales[thread] =
+                scale_row < rows ? weight_scales[q4_n16k16_scale_index(scale_row, group, groups)]
+                                 : 0U;
         }
         prefill_cta_barrier<true>();
 
         WmmaI32x8 low_dot[2]{};
         WmmaI32x8 high_dot[2]{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t half = 0; half < 2U; ++half) {
             WmmaI32x2 a_low{};
             WmmaI32x2 a_high{};
             WmmaI32x2 b[2]{};
-            const std::uint32_t fragment_word = half * 4U + lane_group * 2U;
-            const std::uint32_t activation_fragment_row =
-                wave_token_tile * kWmmaTile + axis;
-            const std::uint32_t a_index = a8q4_lds_word_index(
-                activation_fragment_row, fragment_word, kA8Q4PrefillTokenTile);
-            a_low[0] = static_cast<int>(tile.activation_low[a_index]);
-            a_low[1] = static_cast<int>(tile.activation_low[a8q4_lds_word_index(
+            const std::uint32_t fragment_word           = half * 4U + lane_group * 2U;
+            const std::uint32_t activation_fragment_row = wave_token_tile * kWmmaTile + axis;
+            const std::uint32_t a_index =
+                a8q4_lds_word_index(activation_fragment_row, fragment_word, kA8Q4PrefillTokenTile);
+            a_low[0]  = static_cast<int>(tile.activation_low[a_index]);
+            a_low[1]  = static_cast<int>(tile.activation_low[a8q4_lds_word_index(
                 activation_fragment_row, fragment_word + 1U, kA8Q4PrefillTokenTile)]);
             a_high[0] = static_cast<int>(tile.activation_high[a_index]);
             a_high[1] = static_cast<int>(tile.activation_high[a8q4_lds_word_index(
                 activation_fragment_row, fragment_word + 1U, kA8Q4PrefillTokenTile)]);
-#pragma unroll
+#        pragma unroll
             for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
                 const std::uint32_t weight_fragment_row =
                     row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
@@ -2347,79 +2335,83 @@ void a8q4g64_linear_prefill_cta_m64n128_regression_kernel(
                     weight_fragment_row, fragment_word, 2U * kA8Q4PrefillRowTile);
                 b[row_half][0] = static_cast<int>(tile.weights[b_index]);
                 b[row_half][1] = static_cast<int>(tile.weights[a8q4_lds_word_index(
-                    weight_fragment_row, fragment_word + 1U,
-                    2U * kA8Q4PrefillRowTile)]);
+                    weight_fragment_row, fragment_word + 1U, 2U * kA8Q4PrefillRowTile)]);
             }
-            low_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b[0], low_dot[0], false);
-            high_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b[0], high_dot[0], false);
-            low_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b[1], low_dot[1], false);
-            high_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b[1], high_dot[1], false);
+            low_dot[0]  = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false, a_low, true, b[0],
+                                                                           low_dot[0], false);
+            high_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a_high, true, b[0],
+                                                                           high_dot[0], false);
+            low_dot[1]  = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false, a_low, true, b[1],
+                                                                           low_dot[1], false);
+            high_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a_high, true, b[1],
+                                                                           high_dot[1], false);
         }
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-            const std::uint32_t fragment_row = row_half * kA8Q4PrefillRowTile +
-                                               wave_row_tile * kWmmaTile + axis;
-            const float w_scale = __half2float(__ushort_as_half(
-                tile.weight_scales[fragment_row]));
-#pragma unroll
+            const std::uint32_t fragment_row =
+                row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
+            const float w_scale = __half2float(__ushort_as_half(tile.weight_scales[fragment_row]));
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
                 const std::uint32_t fragment_token =
                     wave_token_tile * kWmmaTile + lane_group * 8U + element;
-                const float a_scale = __half2float(__ushort_as_half(
-                    tile.activation_scales[fragment_token]));
+                const float a_scale =
+                    __half2float(__ushort_as_half(tile.activation_scales[fragment_token]));
                 const std::int32_t combined =
                     low_dot[row_half][element] + 16 * high_dot[row_half][element];
-                totals[row_half][element] = fmaf(
-                    static_cast<float>(combined), a_scale * w_scale,
-                    totals[row_half][element]);
+                totals[row_half][element] = fmaf(static_cast<float>(combined), a_scale * w_scale,
+                                                 totals[row_half][element]);
             }
         }
         prefill_cta_barrier<true>();
     }
 
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = token_base + lane_group * 8U + element;
-            const std::uint32_t row = cta_row_base + row_half * kA8Q4PrefillRowTile +
-                                      wave_row_tile * kWmmaTile + axis;
+            const std::uint32_t row =
+                cta_row_base + row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
             if (token < tokens && row < rows) {
                 output[static_cast<std::size_t>(token) * rows + row] =
                     static_cast<hip_bfloat16>(totals[row_half][element]);
             }
         }
     }
-#else
-    (void)activation_low_codes; (void)activation_high_codes; (void)activation_scales;
-    (void)activation_status; (void)weight_codes; (void)weight_scales; (void)output;
-    (void)tokens; (void)rows; (void)columns; (void)padded_columns;
-#endif
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
+    (void)columns;
+    (void)padded_columns;
+#    endif
 }
 
 // Selected software pipeline for exact qualified M64xN128 tuples. Immutable
 // global pointers remain scalar bases while all byte cursors are host-proven
 // zero-extendable U32 offsets.
-[[maybe_unused]] __device__ __forceinline__ std::uint32_t scalar_base_load_u32(
-    const std::uint8_t* base, std::uint32_t offset) {
+[[maybe_unused]] __device__ __forceinline__ std::uint32_t
+scalar_base_load_u32(const std::uint8_t* base, std::uint32_t offset) {
     return *reinterpret_cast<const std::uint32_t*>(base + offset);
 }
 
-[[maybe_unused]] __device__ __forceinline__ std::uint64_t scalar_base_load_u64(
-    const std::uint8_t* base, std::uint32_t offset) {
+[[maybe_unused]] __device__ __forceinline__ std::uint64_t
+scalar_base_load_u64(const std::uint8_t* base, std::uint32_t offset) {
     return *reinterpret_cast<const std::uint64_t*>(base + offset);
 }
 
-[[maybe_unused]] __device__ __forceinline__ std::uint16_t scalar_base_load_u16(
-    const std::uint16_t* base, std::uint32_t offset) {
-    return *reinterpret_cast<const std::uint16_t*>(
-        reinterpret_cast<const std::uint8_t*>(base) + offset);
+[[maybe_unused]] __device__ __forceinline__ std::uint16_t
+scalar_base_load_u16(const std::uint16_t* base, std::uint32_t offset) {
+    return *reinterpret_cast<const std::uint16_t*>(reinterpret_cast<const std::uint8_t*>(base) +
+                                                   offset);
 }
-
 
 // Production A8Q4G64 prefill: an M128xN128 CTA of eight waves, each owning 2x4
 // WMMA fragments (32 tokens x 64 rows). Token tiles vary fastest in the grid so
@@ -2435,13 +2427,17 @@ struct A8Q4PrefillM128Stage {
     float activation_scales[kA8Q4M128PrefillTokenTile];
     float weight_scales[kA8Q4M128PrefillTokenTile];
 };
-struct A8Q4PrefillM128PingPong { A8Q4PrefillM128Stage stage[2]; };
+
+struct A8Q4PrefillM128PingPong {
+    A8Q4PrefillM128Stage stage[2];
+};
+
 static_assert(sizeof(A8Q4PrefillM128PingPong) == 26624U);
 
 // [pair][128 rows] u64 image; odd pairs (the upper half-wave) move by 16 rows so
 // the two half-waves read disjoint bank halves.
-[[maybe_unused]] __device__ __forceinline__ std::uint32_t a8q4_m128_lds_index(
-    std::uint32_t pair, std::uint32_t row) {
+[[maybe_unused]] __device__ __forceinline__ std::uint32_t a8q4_m128_lds_index(std::uint32_t pair,
+                                                                              std::uint32_t row) {
     return pair * 128U + (row ^ ((pair & 1U) << 4U));
 }
 
@@ -2462,17 +2458,17 @@ __device__ __forceinline__ const T& a8q4_m128_at(const void* base, std::uint32_t
     return *reinterpret_cast<const T*>(static_cast<const std::uint8_t*>(base) + offset);
 }
 
-[[maybe_unused]] __device__ __forceinline__ A8Q4PrefillM128Load a8q4_m128_load(
-    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales, const std::uint8_t* weight_codes,
-    const std::uint16_t* weight_scales, const A8Q4PrefillM128Offsets& offsets,
-    std::uint32_t group) {
+[[maybe_unused]] __device__ __forceinline__ A8Q4PrefillM128Load
+a8q4_m128_load(const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+               const std::uint16_t* activation_scales, const std::uint8_t* weight_codes,
+               const std::uint16_t* weight_scales, const A8Q4PrefillM128Offsets& offsets,
+               std::uint32_t group) {
     A8Q4PrefillM128Load loaded;
     // Issue the scale first: loads complete in order, so its conversion never waits for the
     // prefetched code planes, which are consumed only after this group's WMMA work.
     loaded.scale = offsets.activation_scale
-        ? a8q4_m128_at<std::uint16_t>(activation_scales, offsets.scale + group * 2U)
-        : a8q4_m128_at<std::uint16_t>(weight_scales, offsets.scale + group * 32U);
+                       ? a8q4_m128_at<std::uint16_t>(activation_scales, offsets.scale + group * 2U)
+                       : a8q4_m128_at<std::uint16_t>(weight_scales, offsets.scale + group * 32U);
     loaded.activation_low =
         a8q4_m128_at<uint4>(activation_low_codes, offsets.activation + group * 32U);
     loaded.activation_high =
@@ -2483,13 +2479,14 @@ __device__ __forceinline__ const T& a8q4_m128_at(const void* base, std::uint32_t
 }
 
 [[maybe_unused]] __device__ __forceinline__ std::uint64_t a8q4_m128_u64(std::uint32_t low,
-                                                                      std::uint32_t high) {
+                                                                        std::uint32_t high) {
     return (static_cast<std::uint64_t>(high) << 32U) | low;
 }
 
-[[maybe_unused]] __device__ __forceinline__ void a8q4_m128_store(
-    A8Q4PrefillM128Stage& stage, const A8Q4PrefillM128Load& loaded, std::uint32_t thread) {
-    const std::uint32_t token = thread >> 1U;
+[[maybe_unused]] __device__ __forceinline__ void a8q4_m128_store(A8Q4PrefillM128Stage& stage,
+                                                                 const A8Q4PrefillM128Load& loaded,
+                                                                 std::uint32_t thread) {
+    const std::uint32_t token           = thread >> 1U;
     const std::uint32_t activation_pair = (thread & 1U) * 2U;
     stage.activation_low[a8q4_m128_lds_index(activation_pair, token)] =
         a8q4_m128_u64(loaded.activation_low.x, loaded.activation_low.y);
@@ -2499,9 +2496,9 @@ __device__ __forceinline__ const T& a8q4_m128_at(const void* base, std::uint32_t
         a8q4_m128_u64(loaded.activation_high.x, loaded.activation_high.y);
     stage.activation_high[a8q4_m128_lds_index(activation_pair + 1U, token)] =
         a8q4_m128_u64(loaded.activation_high.z, loaded.activation_high.w);
-    const std::uint32_t within = thread & 31U;
+    const std::uint32_t within      = thread & 31U;
     const std::uint32_t weight_pair = within >> 3U;
-    const std::uint32_t row = (thread >> 5U) * 16U + (within & 7U) * 2U;
+    const std::uint32_t row         = (thread >> 5U) * 16U + (within & 7U) * 2U;
     stage.weights[a8q4_m128_lds_index(weight_pair, row)] =
         a8q4_m128_u64(loaded.weights.x, loaded.weights.y);
     stage.weights[a8q4_m128_lds_index(weight_pair, row + 1U)] =
@@ -2520,44 +2517,44 @@ __device__ __forceinline__ const T& a8q4_m128_at(const void* base, std::uint32_t
 }
 
 // One K64 group of the wave's 2x4 fragments.
-[[maybe_unused]] __device__ __forceinline__ void a8q4_m128_group(
-    const A8Q4PrefillM128Stage& stage, std::uint32_t wave_token, std::uint32_t wave_row,
-    std::uint32_t axis, std::uint32_t lane_group, const WmmaI32x8& high_origin,
-    WmmaF32Fragment (&totals)[2][4]) {
+[[maybe_unused]] __device__ __forceinline__ void
+a8q4_m128_group(const A8Q4PrefillM128Stage& stage, std::uint32_t wave_token, std::uint32_t wave_row,
+                std::uint32_t axis, std::uint32_t lane_group, const WmmaI32x8& high_origin,
+                WmmaF32Fragment (&totals)[2][4]) {
     WmmaI32x2 low[2][2], high[2][2], weights[2][4];
-#pragma unroll
+#    pragma unroll
     for (std::uint32_t half = 0; half < 2U; ++half) {
         const std::uint32_t pair = half * 2U + lane_group;
-#pragma unroll
+#    pragma unroll
         for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
             const std::uint32_t index =
                 a8q4_m128_lds_index(pair, wave_token + fragment * 16U + axis);
-            low[half][fragment] = a8q4_m128_fragment(stage.activation_low[index]);
+            low[half][fragment]  = a8q4_m128_fragment(stage.activation_low[index]);
             high[half][fragment] = a8q4_m128_fragment(stage.activation_high[index]);
         }
-#pragma unroll
+#    pragma unroll
         for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
-            weights[half][row_fragment] = a8q4_m128_fragment(stage.weights[
-                a8q4_m128_lds_index(pair, wave_row + row_fragment * 16U + axis)]);
+            weights[half][row_fragment] = a8q4_m128_fragment(
+                stage.weights[a8q4_m128_lds_index(pair, wave_row + row_fragment * 16U + axis)]);
         }
     }
     float activation_scale[2][8];
-#pragma unroll
+#    pragma unroll
     for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
-#pragma unroll
+#    pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
-            activation_scale[fragment][element] = stage.activation_scales[
-                wave_token + fragment * 16U + lane_group * 8U + element];
+            activation_scale[fragment][element] =
+                stage.activation_scales[wave_token + fragment * 16U + lane_group * 8U + element];
         }
     }
     float weight_scale[4];
-#pragma unroll
+#    pragma unroll
     for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
         weight_scale[row_fragment] = stage.weight_scales[wave_row + row_fragment * 16U + axis];
     }
-#pragma unroll
+#    pragma unroll
     for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
-#pragma unroll
+#    pragma unroll
         for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
             WmmaI32x8 dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
                 true, high[0][fragment], true, weights[0][row_fragment], high_origin, false);
@@ -2568,17 +2565,17 @@ __device__ __forceinline__ const T& a8q4_m128_at(const void* base, std::uint32_t
                 false, low[0][fragment], true, weights[0][row_fragment], dot, false);
             dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
                 false, low[1][fragment], true, weights[1][row_fragment], dot, false);
-#pragma unroll
+#    pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
-                totals[fragment][row_fragment][element] = fmaf(
-                    __int_as_float(dot[element]) - 12582912.0F,
-                    activation_scale[fragment][element] * weight_scale[row_fragment],
-                    totals[fragment][row_fragment][element]);
+                totals[fragment][row_fragment][element] =
+                    fmaf(__int_as_float(dot[element]) - 12582912.0F,
+                         activation_scale[fragment][element] * weight_scale[row_fragment],
+                         totals[fragment][row_fragment][element]);
             }
         }
     }
     // Interleave each WMMA with four independent VALU instructions of the scale epilogue.
-#pragma unroll
+#    pragma unroll
     for (std::uint32_t instruction = 0; instruction < 32U; ++instruction) {
         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
         __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
@@ -2586,38 +2583,33 @@ __device__ __forceinline__ const T& a8q4_m128_at(const void* base, std::uint32_t
 }
 
 template <bool kAccumulate>
-__global__ __launch_bounds__(kA8Q4M128ProductionThreads)
-void a8q4g64_linear_prefill_cta_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+__global__ __launch_bounds__(kA8Q4M128ProductionThreads) void a8q4g64_linear_prefill_cta_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ A8Q4PrefillM128PingPong tiles;
-    const std::uint32_t thread = threadIdx.x;
-    const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = __builtin_amdgcn_readfirstlane(thread / kWaveSize);
-    const std::uint32_t axis = lane & 15U;
+    const std::uint32_t thread     = threadIdx.x;
+    const std::uint32_t lane       = thread & (kWaveSize - 1U);
+    const std::uint32_t wave       = __builtin_amdgcn_readfirstlane(thread / kWaveSize);
+    const std::uint32_t axis       = lane & 15U;
     const std::uint32_t lane_group = lane >> 4U;
     const std::uint32_t token_base = blockIdx.x * kA8Q4M128PrefillTokenTile;
-    const std::uint32_t row_base = blockIdx.y * kA8Q4M128PrefillTokenTile;
+    const std::uint32_t row_base   = blockIdx.y * kA8Q4M128PrefillTokenTile;
     const std::uint32_t wave_token = (wave & 3U) * 32U;
-    const std::uint32_t wave_row = (wave >> 2U) * 64U;
+    const std::uint32_t wave_row   = (wave >> 2U) * 64U;
 
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
-#pragma unroll
+#        pragma unroll
             for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
-#pragma unroll
+#        pragma unroll
                 for (std::uint32_t element = 0; element < 8U; ++element) {
-                    const std::uint32_t token = token_base + wave_token + fragment * 16U +
-                                                lane_group * 8U + element;
-                    const std::uint32_t row =
-                        row_base + wave_row + row_fragment * 16U + axis;
+                    const std::uint32_t token =
+                        token_base + wave_token + fragment * 16U + lane_group * 8U + element;
+                    const std::uint32_t row = row_base + wave_row + row_fragment * 16U + axis;
                     if (token < tokens)
                         output[static_cast<std::size_t>(token) * rows + row] =
                             conspicuous_bf16_nan();
@@ -2629,26 +2621,29 @@ void a8q4g64_linear_prefill_cta_kernel(
 
     const std::uint32_t groups = padded_columns / kQ4Group;
     // Rows of a partial token tile stage the last real token: their products are never stored.
-    const auto staged_token = [&](std::uint32_t token) { return token < tokens ? token : tokens - 1U; };
+    const auto staged_token = [&](std::uint32_t token) {
+        return token < tokens ? token : tokens - 1U;
+    };
     A8Q4PrefillM128Offsets offsets;
     offsets.activation =
         staged_token(token_base + (thread >> 1U)) * (padded_columns / 2U) + (thread & 1U) * 16U;
     offsets.weight = (row_base / 16U + (thread >> 5U)) * groups * 512U + (thread & 31U) * 16U;
     offsets.activation_scale = thread < kA8Q4M128PrefillTokenTile;
-    offsets.scale = offsets.activation_scale
-        ? staged_token(token_base + thread) * groups * 2U
-        : static_cast<std::uint32_t>(
-              q4_n16k16_scale_index(row_base + thread - kA8Q4M128PrefillTokenTile, 0U, groups) *
-              sizeof(std::uint16_t));
+    offsets.scale =
+        offsets.activation_scale
+            ? staged_token(token_base + thread) * groups * 2U
+            : static_cast<std::uint32_t>(
+                  q4_n16k16_scale_index(row_base + thread - kA8Q4M128PrefillTokenTile, 0U, groups) *
+                  sizeof(std::uint16_t));
 
     WmmaF32Fragment totals[2][4]{};
     WmmaI32x8 high_origin;
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) high_origin[element] = 0x04B40000;
 
     a8q4_m128_store(tiles.stage[0],
-                    a8q4_m128_load(activation_low_codes, activation_high_codes,
-                                   activation_scales, weight_codes, weight_scales, offsets, 0U),
+                    a8q4_m128_load(activation_low_codes, activation_high_codes, activation_scales,
+                                   weight_codes, weight_scales, offsets, 0U),
                     thread);
     prefill_cta_barrier<true>();
     for (std::uint32_t group = 0; group + 1U < groups; ++group) {
@@ -2663,14 +2658,14 @@ void a8q4g64_linear_prefill_cta_kernel(
     a8q4_m128_group(tiles.stage[(groups - 1U) & 1U], wave_token, wave_row, axis, lane_group,
                     high_origin, totals);
 
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
-#pragma unroll
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
-                const std::uint32_t token = token_base + wave_token + fragment * 16U +
-                                            lane_group * 8U + element;
+                const std::uint32_t token =
+                    token_base + wave_token + fragment * 16U + lane_group * 8U + element;
                 const std::uint32_t row = row_base + wave_row + row_fragment * 16U + axis;
                 if (token >= tokens) continue;
                 hip_bfloat16& target = output[static_cast<std::size_t>(token) * rows + row];
@@ -2685,85 +2680,83 @@ void a8q4g64_linear_prefill_cta_kernel(
             }
         }
     }
-#else
-    (void)activation_low_codes; (void)activation_high_codes;
-    (void)activation_scales; (void)activation_status; (void)weight_codes;
-    (void)weight_scales; (void)output; (void)tokens; (void)rows; (void)padded_columns;
-#endif
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
+    (void)padded_columns;
+#    endif
 }
 
-__global__ __launch_bounds__(kA8Q4PrefillThreads)
-void a4q4g64_linear_prefill_pingpong_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+__global__ __launch_bounds__(kA8Q4PrefillThreads) void a4q4g64_linear_prefill_pingpong_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint16_t* activation_scales,
+    const std::uint32_t* activation_status, const std::uint8_t* weight_codes,
+    const std::uint16_t* weight_scales, hip_bfloat16* output, std::uint32_t tokens,
+    std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     (void)tokens;
     (void)columns;
     __shared__ A4Q4PrefillPingPongTile tiles;
-    const std::uint32_t thread = threadIdx.x;
-    const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = thread / kWaveSize;
-    const std::uint32_t axis = lane & 15U;
-    const std::uint32_t lane_group = lane >> 4U;
+    const std::uint32_t thread          = threadIdx.x;
+    const std::uint32_t lane            = thread & (kWaveSize - 1U);
+    const std::uint32_t wave            = thread / kWaveSize;
+    const std::uint32_t axis            = lane & 15U;
+    const std::uint32_t lane_group      = lane >> 4U;
     const std::uint32_t wave_token_tile = wave / 4U;
-    const std::uint32_t wave_row_tile = wave & 3U;
-    const std::uint32_t cta_token_base = blockIdx.y * kA8Q4PrefillTokenTile;
-    const std::uint32_t cta_row_base = blockIdx.x * (2U * kA8Q4PrefillRowTile);
-    const std::uint32_t token_base =
-        cta_token_base + wave_token_tile * kWmmaTile;
+    const std::uint32_t wave_row_tile   = wave & 3U;
+    const std::uint32_t cta_token_base  = blockIdx.y * kA8Q4PrefillTokenTile;
+    const std::uint32_t cta_row_base    = blockIdx.x * (2U * kA8Q4PrefillRowTile);
+    const std::uint32_t token_base      = cta_token_base + wave_token_tile * kWmmaTile;
 
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
                 const std::uint32_t token = token_base + lane_group * 8U + element;
-                const std::uint32_t row = cta_row_base +
-                    row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
-                output[static_cast<std::size_t>(token) * rows + row] =
-                    conspicuous_bf16_nan();
+                const std::uint32_t row   = cta_row_base + row_half * kA8Q4PrefillRowTile +
+                                            wave_row_tile * kWmmaTile + axis;
+                output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
             }
         }
         return;
     }
 
-    const std::uint32_t groups = padded_columns / kQ4Group;
+    const std::uint32_t groups         = padded_columns / kQ4Group;
     const std::uint32_t activation_row = thread / 8U;
-    const std::uint32_t word = thread & 7U;
-    const std::uint32_t token = cta_token_base + activation_row;
+    const std::uint32_t word           = thread & 7U;
+    const std::uint32_t token          = cta_token_base + activation_row;
     const std::uint32_t activation_lds =
         a8q4_lds_word_index(activation_row, word, kA8Q4PrefillTokenTile);
-    const std::uint32_t load_tile = thread >> 6U;
-    const std::uint32_t load_pair = (thread >> 4U) & 3U;
-    const std::uint32_t load_lane = thread & 15U;
+    const std::uint32_t load_tile      = thread >> 6U;
+    const std::uint32_t load_pair      = (thread >> 4U) & 3U;
+    const std::uint32_t load_lane      = thread & 15U;
     const std::uint32_t load_row_local = load_tile * 16U + load_lane;
-    const std::uint32_t load_row = cta_row_base + load_row_local;
-    const std::uint32_t load_word = load_pair * 2U;
+    const std::uint32_t load_row       = cta_row_base + load_row_local;
+    const std::uint32_t load_word      = load_pair * 2U;
 
-    std::uint32_t activation_offset =
-        token * (padded_columns / 2U) + word * sizeof(std::uint32_t);
-    std::uint32_t weight_offset = static_cast<std::uint32_t>(
-        q4_n16k16_pair_index(load_row, 0U, load_pair, groups) *
-        sizeof(std::uint64_t));
+    std::uint32_t activation_offset = token * (padded_columns / 2U) + word * sizeof(std::uint32_t);
+    std::uint32_t weight_offset     = static_cast<std::uint32_t>(
+        q4_n16k16_pair_index(load_row, 0U, load_pair, groups) * sizeof(std::uint64_t));
     std::uint32_t activation_scale_offset =
         (cta_token_base + thread) * groups * sizeof(std::uint16_t);
     std::uint32_t weight_scale_offset = static_cast<std::uint32_t>(
-        q4_n16k16_scale_index(cta_row_base + thread, 0U, groups) *
-        sizeof(std::uint16_t));
+        q4_n16k16_scale_index(cta_row_base + thread, 0U, groups) * sizeof(std::uint16_t));
 
     tiles.bank[0].activation_low[activation_lds] =
         scalar_base_load_u32(activation_low_codes, activation_offset);
-    const std::uint64_t first_weight =
-        scalar_base_load_u64(weight_codes, weight_offset);
-    tiles.bank[0].weights[a8q4_lds_word_index(
-        load_row_local, load_word, 2U * kA8Q4PrefillRowTile)] =
+    const std::uint64_t first_weight = scalar_base_load_u64(weight_codes, weight_offset);
+    tiles.bank[0]
+        .weights[a8q4_lds_word_index(load_row_local, load_word, 2U * kA8Q4PrefillRowTile)] =
         static_cast<std::uint32_t>(first_weight);
-    tiles.bank[0].weights[a8q4_lds_word_index(
-        load_row_local, load_word + 1U, 2U * kA8Q4PrefillRowTile)] =
+    tiles.bank[0]
+        .weights[a8q4_lds_word_index(load_row_local, load_word + 1U, 2U * kA8Q4PrefillRowTile)] =
         static_cast<std::uint32_t>(first_weight >> 32U);
     if (thread < kA8Q4PrefillTokenTile) {
         tiles.bank[0].activation_scales[thread] =
@@ -2777,82 +2770,75 @@ void a4q4g64_linear_prefill_pingpong_kernel(
 
     WmmaF32Fragment totals[2]{};
     for (std::uint32_t group = 0; group < groups; ++group) {
-        const bool has_next = group + 1U < groups;
+        const bool has_next               = group + 1U < groups;
         std::uint32_t next_activation_low = 0U;
-        std::uint64_t next_weight = 0U;
+        std::uint64_t next_weight         = 0U;
         if (has_next) {
             activation_offset += kQ4Group / 2U;
             weight_offset += 4U * 16U * sizeof(std::uint64_t);
-            next_activation_low =
-                scalar_base_load_u32(activation_low_codes, activation_offset);
-            next_weight = scalar_base_load_u64(weight_codes, weight_offset);
+            next_activation_low = scalar_base_load_u32(activation_low_codes, activation_offset);
+            next_weight         = scalar_base_load_u64(weight_codes, weight_offset);
         }
 
         auto& current = tiles.bank[group & 1U];
         WmmaI32x8 low_dot[2]{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t half = 0; half < 2U; ++half) {
             WmmaI32x2 a_low{};
             WmmaI32x2 b[2]{};
-            const std::uint32_t fragment_word = half * 4U + lane_group * 2U;
-            const std::uint32_t activation_fragment_row =
-                wave_token_tile * kWmmaTile + axis;
-            const std::uint32_t a_index = a8q4_lds_word_index(
-                activation_fragment_row, fragment_word, kA8Q4PrefillTokenTile);
+            const std::uint32_t fragment_word           = half * 4U + lane_group * 2U;
+            const std::uint32_t activation_fragment_row = wave_token_tile * kWmmaTile + axis;
+            const std::uint32_t a_index =
+                a8q4_lds_word_index(activation_fragment_row, fragment_word, kA8Q4PrefillTokenTile);
             a_low[0] = static_cast<int>(current.activation_low[a_index]);
             a_low[1] = static_cast<int>(current.activation_low[a8q4_lds_word_index(
-                activation_fragment_row, fragment_word + 1U,
-                kA8Q4PrefillTokenTile)]);
-#pragma unroll
+                activation_fragment_row, fragment_word + 1U, kA8Q4PrefillTokenTile)]);
+#        pragma unroll
             for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
                 const std::uint32_t weight_fragment_row =
                     row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
                 const std::uint32_t b_index = a8q4_lds_word_index(
-                    weight_fragment_row, fragment_word,
-                    2U * kA8Q4PrefillRowTile);
+                    weight_fragment_row, fragment_word, 2U * kA8Q4PrefillRowTile);
                 b[row_half][0] = static_cast<int>(current.weights[b_index]);
-                b[row_half][1] = static_cast<int>(current.weights[
-                    a8q4_lds_word_index(weight_fragment_row, fragment_word + 1U,
-                                           2U * kA8Q4PrefillRowTile)]);
+                b[row_half][1] = static_cast<int>(current.weights[a8q4_lds_word_index(
+                    weight_fragment_row, fragment_word + 1U, 2U * kA8Q4PrefillRowTile)]);
             }
-            low_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_low, true, b[0], low_dot[0], false);
-            low_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_low, true, b[1], low_dot[1], false);
+            low_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a_low, true, b[0],
+                                                                          low_dot[0], false);
+            low_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a_low, true, b[1],
+                                                                          low_dot[1], false);
         }
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-            const std::uint32_t fragment_row = row_half * kA8Q4PrefillRowTile +
-                wave_row_tile * kWmmaTile + axis;
-            const float weight_scale = __half2float(__ushort_as_half(
-                current.weight_scales[fragment_row]));
-#pragma unroll
+            const std::uint32_t fragment_row =
+                row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
+            const float weight_scale =
+                __half2float(__ushort_as_half(current.weight_scales[fragment_row]));
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
                 const std::uint32_t fragment_token =
                     wave_token_tile * kWmmaTile + lane_group * 8U + element;
-                const float activation_scale = __half2float(__ushort_as_half(
-                    current.activation_scales[fragment_token]));
-                const std::int32_t combined =
-                    low_dot[row_half][element];
-                totals[row_half][element] = fmaf(
-                    static_cast<float>(combined), activation_scale * weight_scale,
-                    totals[row_half][element]);
+                const float activation_scale =
+                    __half2float(__ushort_as_half(current.activation_scales[fragment_token]));
+                const std::int32_t combined = low_dot[row_half][element];
+                totals[row_half][element] =
+                    fmaf(static_cast<float>(combined), activation_scale * weight_scale,
+                         totals[row_half][element]);
             }
         }
 
         if (has_next) {
-            auto& next = tiles.bank[(group + 1U) & 1U];
+            auto& next                          = tiles.bank[(group + 1U) & 1U];
             next.activation_low[activation_lds] = next_activation_low;
-            next.weights[a8q4_lds_word_index(
-                load_row_local, load_word, 2U * kA8Q4PrefillRowTile)] =
+            next.weights[a8q4_lds_word_index(load_row_local, load_word, 2U * kA8Q4PrefillRowTile)] =
                 static_cast<std::uint32_t>(next_weight);
-            next.weights[a8q4_lds_word_index(
-                load_row_local, load_word + 1U, 2U * kA8Q4PrefillRowTile)] =
+            next.weights[a8q4_lds_word_index(load_row_local, load_word + 1U,
+                                             2U * kA8Q4PrefillRowTile)] =
                 static_cast<std::uint32_t>(next_weight >> 32U);
             if (thread < kA8Q4PrefillTokenTile) {
                 activation_scale_offset += sizeof(std::uint16_t);
-                next.activation_scales[thread] = scalar_base_load_u16(
-                    activation_scales, activation_scale_offset);
+                next.activation_scales[thread] =
+                    scalar_base_load_u16(activation_scales, activation_scale_offset);
             }
             if (thread < 2U * kA8Q4PrefillRowTile) {
                 weight_scale_offset += 16U * sizeof(std::uint16_t);
@@ -2863,58 +2849,60 @@ void a4q4g64_linear_prefill_pingpong_kernel(
         }
     }
 
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t output_token = token_base + lane_group * 8U + element;
-            const std::uint32_t row = cta_row_base +
-                row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
+            const std::uint32_t row =
+                cta_row_base + row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
             output[static_cast<std::size_t>(output_token) * rows + row] =
                 static_cast<hip_bfloat16>(totals[row_half][element]);
         }
     }
-#else
+#    else
     (void)activation_low_codes;
-    (void)activation_scales; (void)activation_status; (void)weight_codes;
-    (void)weight_scales; (void)output; (void)tokens; (void)rows;
-    (void)columns; (void)padded_columns;
-#endif
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
+    (void)columns;
+    (void)padded_columns;
+#    endif
 }
 
-__global__ __launch_bounds__(kA8Q4M128PrefillThreads)
-void a8q4g64_linear_prefill_cta_m128n128_qualification_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+__global__
+__launch_bounds__(kA8Q4M128PrefillThreads) void a8q4g64_linear_prefill_cta_m128n128_qualification_kernel(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales, hip_bfloat16* output,
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ A8Q4PrefillM128N128Tile tile;
-    const std::uint32_t thread = threadIdx.x;
-    const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = thread / kWaveSize;
-    const std::uint32_t axis = lane & 15U;
-    const std::uint32_t lane_group = lane >> 4U;
+    const std::uint32_t thread          = threadIdx.x;
+    const std::uint32_t lane            = thread & (kWaveSize - 1U);
+    const std::uint32_t wave            = thread / kWaveSize;
+    const std::uint32_t axis            = lane & 15U;
+    const std::uint32_t lane_group      = lane >> 4U;
     const std::uint32_t wave_token_tile = wave / 4U;
-    const std::uint32_t wave_row_tile = wave & 3U;
-    const std::uint32_t cta_token_base = blockIdx.y * kA8Q4M128PrefillTokenTile;
-    const std::uint32_t cta_row_base = blockIdx.x * (2U * kA8Q4PrefillRowTile);
-    const std::uint32_t token_base = cta_token_base + wave_token_tile * kWmmaTile;
+    const std::uint32_t wave_row_tile   = wave & 3U;
+    const std::uint32_t cta_token_base  = blockIdx.y * kA8Q4M128PrefillTokenTile;
+    const std::uint32_t cta_row_base    = blockIdx.x * (2U * kA8Q4PrefillRowTile);
+    const std::uint32_t token_base      = cta_token_base + wave_token_tile * kWmmaTile;
 
     if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
                 const std::uint32_t token = token_base + lane_group * 8U + element;
-                const std::uint32_t row = cta_row_base + row_half * kA8Q4PrefillRowTile +
-                                          wave_row_tile * kWmmaTile + axis;
+                const std::uint32_t row   = cta_row_base + row_half * kA8Q4PrefillRowTile +
+                                            wave_row_tile * kWmmaTile + axis;
                 if (token < tokens && row < rows) {
-                    output[static_cast<std::size_t>(token) * rows + row] =
-                        conspicuous_bf16_nan();
+                    output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
                 }
             }
         }
@@ -2925,61 +2913,60 @@ void a8q4g64_linear_prefill_cta_m128n128_qualification_kernel(
     WmmaF32Fragment totals[2]{};
     for (std::uint32_t group = 0; group < groups; ++group) {
         const std::uint32_t activation_row = thread / 8U;
-        const std::uint32_t word = thread & 7U;
-        const std::uint32_t token = cta_token_base + activation_row;
-        const std::uint32_t row = cta_row_base + activation_row;
-        const std::uint32_t packed_k = group * kQ4Group + word * 8U;
+        const std::uint32_t word           = thread & 7U;
+        const std::uint32_t token          = cta_token_base + activation_row;
+        const std::uint32_t row            = cta_row_base + activation_row;
+        const std::uint32_t packed_k       = group * kQ4Group + word * 8U;
         const std::size_t activation_element =
             static_cast<std::size_t>(token) * padded_columns + packed_k;
-        const std::uint32_t activation_lds = a8q4_lds_word_index(
-            activation_row, word, kA8Q4M128PrefillTokenTile);
-        const std::uint32_t weight_lds = a8q4_lds_word_index(
-            activation_row, word, 2U * kA8Q4PrefillRowTile);
-        tile.activation_low[activation_lds] = token < tokens
-            ? load_q4x8_logical(activation_low_codes, activation_element, columns, packed_k)
-            : 0U;
-        tile.activation_high[activation_lds] = token < tokens
-            ? load_q4x8_logical(activation_high_codes, activation_element, columns, packed_k)
-            : 0U;
-        tile.weights[weight_lds] = row < rows
-            ? load_q4_n16k16_x8_logical(
-                  weight_codes, row, group, word, groups, columns)
-            : 0U;
+        const std::uint32_t activation_lds =
+            a8q4_lds_word_index(activation_row, word, kA8Q4M128PrefillTokenTile);
+        const std::uint32_t weight_lds =
+            a8q4_lds_word_index(activation_row, word, 2U * kA8Q4PrefillRowTile);
+        tile.activation_low[activation_lds] =
+            token < tokens
+                ? load_q4x8_logical(activation_low_codes, activation_element, columns, packed_k)
+                : 0U;
+        tile.activation_high[activation_lds] =
+            token < tokens
+                ? load_q4x8_logical(activation_high_codes, activation_element, columns, packed_k)
+                : 0U;
+        tile.weights[weight_lds] =
+            row < rows ? load_q4_n16k16_x8_logical(weight_codes, row, group, word, groups, columns)
+                       : 0U;
         if (thread < kA8Q4M128PrefillTokenTile) {
             const std::uint32_t scale_token = cta_token_base + thread;
-            tile.activation_scales[thread] = scale_token < tokens
-                ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
-                : 0U;
+            tile.activation_scales[thread] =
+                scale_token < tokens
+                    ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
+                    : 0U;
         }
         if (thread < 2U * kA8Q4PrefillRowTile) {
             const std::uint32_t scale_row = cta_row_base + thread;
-            tile.weight_scales[thread] = scale_row < rows
-                ? weight_scales[q4_n16k16_scale_index(scale_row, group, groups)]
-                : 0U;
+            tile.weight_scales[thread] =
+                scale_row < rows ? weight_scales[q4_n16k16_scale_index(scale_row, group, groups)]
+                                 : 0U;
         }
         prefill_cta_barrier<true>();
 
         WmmaI32x8 low_dot[2]{};
         WmmaI32x8 high_dot[2]{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t half = 0; half < 2U; ++half) {
             WmmaI32x2 a_low{};
             WmmaI32x2 a_high{};
             WmmaI32x2 b[2]{};
-            const std::uint32_t fragment_word = half * 4U + lane_group * 2U;
-            const std::uint32_t activation_fragment_row =
-                wave_token_tile * kWmmaTile + axis;
-            const std::uint32_t a_index = a8q4_lds_word_index(
+            const std::uint32_t fragment_word           = half * 4U + lane_group * 2U;
+            const std::uint32_t activation_fragment_row = wave_token_tile * kWmmaTile + axis;
+            const std::uint32_t a_index                 = a8q4_lds_word_index(
                 activation_fragment_row, fragment_word, kA8Q4M128PrefillTokenTile);
-            a_low[0] = static_cast<int>(tile.activation_low[a_index]);
-            a_low[1] = static_cast<int>(tile.activation_low[a8q4_lds_word_index(
-                activation_fragment_row, fragment_word + 1U,
-                kA8Q4M128PrefillTokenTile)]);
+            a_low[0]  = static_cast<int>(tile.activation_low[a_index]);
+            a_low[1]  = static_cast<int>(tile.activation_low[a8q4_lds_word_index(
+                activation_fragment_row, fragment_word + 1U, kA8Q4M128PrefillTokenTile)]);
             a_high[0] = static_cast<int>(tile.activation_high[a_index]);
             a_high[1] = static_cast<int>(tile.activation_high[a8q4_lds_word_index(
-                activation_fragment_row, fragment_word + 1U,
-                kA8Q4M128PrefillTokenTile)]);
-#pragma unroll
+                activation_fragment_row, fragment_word + 1U, kA8Q4M128PrefillTokenTile)]);
+#        pragma unroll
             for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
                 const std::uint32_t weight_fragment_row =
                     row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
@@ -2987,70 +2974,75 @@ void a8q4g64_linear_prefill_cta_m128n128_qualification_kernel(
                     weight_fragment_row, fragment_word, 2U * kA8Q4PrefillRowTile);
                 b[row_half][0] = static_cast<int>(tile.weights[b_index]);
                 b[row_half][1] = static_cast<int>(tile.weights[a8q4_lds_word_index(
-                    weight_fragment_row, fragment_word + 1U,
-                    2U * kA8Q4PrefillRowTile)]);
+                    weight_fragment_row, fragment_word + 1U, 2U * kA8Q4PrefillRowTile)]);
             }
-            low_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b[0], low_dot[0], false);
-            high_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b[0], high_dot[0], false);
-            low_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b[1], low_dot[1], false);
-            high_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b[1], high_dot[1], false);
+            low_dot[0]  = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false, a_low, true, b[0],
+                                                                           low_dot[0], false);
+            high_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a_high, true, b[0],
+                                                                           high_dot[0], false);
+            low_dot[1]  = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false, a_low, true, b[1],
+                                                                           low_dot[1], false);
+            high_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true, a_high, true, b[1],
+                                                                           high_dot[1], false);
         }
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-            const std::uint32_t fragment_row = row_half * kA8Q4PrefillRowTile +
-                                               wave_row_tile * kWmmaTile + axis;
-            const float w_scale = __half2float(__ushort_as_half(
-                tile.weight_scales[fragment_row]));
-#pragma unroll
+            const std::uint32_t fragment_row =
+                row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
+            const float w_scale = __half2float(__ushort_as_half(tile.weight_scales[fragment_row]));
+#        pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
                 const std::uint32_t fragment_token =
                     wave_token_tile * kWmmaTile + lane_group * 8U + element;
-                const float a_scale = __half2float(__ushort_as_half(
-                    tile.activation_scales[fragment_token]));
+                const float a_scale =
+                    __half2float(__ushort_as_half(tile.activation_scales[fragment_token]));
                 const std::int32_t combined =
                     low_dot[row_half][element] + 16 * high_dot[row_half][element];
-                totals[row_half][element] = fmaf(
-                    static_cast<float>(combined), a_scale * w_scale,
-                    totals[row_half][element]);
+                totals[row_half][element] = fmaf(static_cast<float>(combined), a_scale * w_scale,
+                                                 totals[row_half][element]);
             }
         }
         prefill_cta_barrier<true>();
     }
 
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = token_base + lane_group * 8U + element;
-            const std::uint32_t row = cta_row_base + row_half * kA8Q4PrefillRowTile +
-                                      wave_row_tile * kWmmaTile + axis;
+            const std::uint32_t row =
+                cta_row_base + row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
             if (token < tokens && row < rows) {
                 output[static_cast<std::size_t>(token) * rows + row] =
                     static_cast<hip_bfloat16>(totals[row_half][element]);
             }
         }
     }
-#else
-    (void)activation_low_codes; (void)activation_high_codes; (void)activation_scales;
-    (void)activation_status; (void)weight_codes; (void)weight_scales; (void)output;
-    (void)tokens; (void)rows; (void)columns; (void)padded_columns;
-#endif
+#    else
+    (void)activation_low_codes;
+    (void)activation_high_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
+    (void)columns;
+    (void)padded_columns;
+#    endif
 }
 
-__device__ __attribute__((unused)) WmmaI32x2 load_i8x8(
-    const std::int8_t* values, std::size_t begin, bool valid) {
+__device__ __attribute__((unused)) WmmaI32x2 load_i8x8(const std::int8_t* values, std::size_t begin,
+                                                       bool valid) {
     WmmaI32x2 packed{};
     if (valid) {
         // The public launcher requires dword-aligned code planes; every G32/K16
         // fragment offset is a multiple of eight. Do not require 8-byte base
         // alignment or read beyond this exact eight-byte fragment.
         const auto* words = reinterpret_cast<const std::int32_t*>(values + begin);
-        packed[0] = words[0];
-        packed[1] = words[1];
+        packed[0]         = words[0];
+        packed[1]         = words[1];
     }
     return packed;
 }
@@ -3058,18 +3050,18 @@ __device__ __attribute__((unused)) WmmaI32x2 load_i8x8(
 __global__ __launch_bounds__(kWaveSize) void a8w8g32_linear_wmma32_kernel(
     const std::int8_t* activation_codes, const std::uint16_t* activation_scales,
     const std::uint32_t* activation_status, const std::int8_t* weight_codes,
-    const std::uint16_t* weight_scales, hip_bfloat16* output,
-    std::uint32_t tokens, std::uint32_t rows, std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    const std::uint32_t lane = threadIdx.x;
-    const std::uint32_t axis = lane & 15U;
-    const std::uint32_t lane_group = lane >> 4U;
-    const std::uint32_t token_base = blockIdx.y * kWmmaTile;
-    const std::uint32_t row_base = blockIdx.x * kWmmaTile;
+    const std::uint16_t* weight_scales, hip_bfloat16* output, std::uint32_t tokens,
+    std::uint32_t rows, std::uint32_t padded_columns) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t lane                = threadIdx.x;
+    const std::uint32_t axis                = lane & 15U;
+    const std::uint32_t lane_group          = lane >> 4U;
+    const std::uint32_t token_base          = blockIdx.y * kWmmaTile;
+    const std::uint32_t row_base            = blockIdx.x * kWmmaTile;
     const std::uint32_t fragment_token_base = token_base + lane_group * 8U;
-    const std::uint32_t row = row_base + axis;
+    const std::uint32_t row                 = row_base + axis;
     if (*activation_status != A8G32ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = fragment_token_base + element;
             if (token < tokens && row < rows) {
@@ -3082,27 +3074,23 @@ __global__ __launch_bounds__(kWaveSize) void a8w8g32_linear_wmma32_kernel(
     const std::uint32_t groups = padded_columns / kW8Group;
     for (std::uint32_t group = 0; group < groups; ++group) {
         WmmaI32x8 integer_dot{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t tile = 0; tile < 2U; ++tile) {
-            const std::uint32_t k_base =
-                group * kW8Group + tile * kWmmaTile + lane_group * 8U;
-            const std::uint32_t token = token_base + axis;
-            const WmmaI32x2 a = load_i8x8(
-                activation_codes,
-                static_cast<std::size_t>(token) * padded_columns + k_base,
-                token < tokens);
+            const std::uint32_t k_base = group * kW8Group + tile * kWmmaTile + lane_group * 8U;
+            const std::uint32_t token  = token_base + axis;
+            const WmmaI32x2 a = load_i8x8(activation_codes,
+                                          static_cast<std::size_t>(token) * padded_columns + k_base,
+                                          token < tokens);
             const WmmaI32x2 b = load_i8x8(
-                weight_codes, static_cast<std::size_t>(row) * padded_columns + k_base,
-                row < rows);
-            integer_dot = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12(
-                true, a, true, b, integer_dot, false);
+                weight_codes, static_cast<std::size_t>(row) * padded_columns + k_base, row < rows);
+            integer_dot = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12(true, a, true, b,
+                                                                           integer_dot, false);
         }
         const float weight_scale =
-            row < rows
-                ? __half2float(__ushort_as_half(
-                      weight_scales[static_cast<std::size_t>(row) * groups + group]))
-                : 0.0F;
-#pragma unroll
+            row < rows ? __half2float(__ushort_as_half(
+                             weight_scales[static_cast<std::size_t>(row) * groups + group]))
+                       : 0.0F;
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = fragment_token_base + element;
             const float activation_scale =
@@ -3114,7 +3102,7 @@ __global__ __launch_bounds__(kWaveSize) void a8w8g32_linear_wmma32_kernel(
                                   activation_scale * weight_scale, total[element]);
         }
     }
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const std::uint32_t token = fragment_token_base + element;
         if (token < tokens && row < rows) {
@@ -3122,7 +3110,7 @@ __global__ __launch_bounds__(kWaveSize) void a8w8g32_linear_wmma32_kernel(
                 static_cast<hip_bfloat16>(total[element]);
         }
     }
-#else
+#    else
     (void)activation_codes;
     (void)activation_scales;
     (void)activation_status;
@@ -3132,20 +3120,19 @@ __global__ __launch_bounds__(kWaveSize) void a8w8g32_linear_wmma32_kernel(
     (void)tokens;
     (void)rows;
     (void)padded_columns;
-#endif
+#    endif
 }
 
-__device__ __forceinline__ __attribute__((unused)) std::uint32_t a8w8_lds_word_index(
-    std::uint32_t row, std::uint32_t word, std::uint32_t rows) {
+__device__ __forceinline__ __attribute__((unused)) std::uint32_t
+a8w8_lds_word_index(std::uint32_t row, std::uint32_t word, std::uint32_t rows) {
     return word * rows + (row ^ (((word >> 1U) & 1U) << 4U));
 }
 
-__device__ __forceinline__ __attribute__((unused)) std::uint32_t load_i8x4_logical(
-    const std::int8_t* codes, std::size_t element, std::uint32_t logical_k,
-    std::uint32_t packed_k) {
+__device__ __forceinline__ __attribute__((unused)) std::uint32_t
+load_i8x4_logical(const std::int8_t* codes, std::size_t element, std::uint32_t logical_k,
+                  std::uint32_t packed_k) {
     if (packed_k >= logical_k) return 0U;
-    const std::uint32_t packed =
-        *reinterpret_cast<const std::uint32_t*>(codes + element);
+    const std::uint32_t packed    = *reinterpret_cast<const std::uint32_t*>(codes + element);
     const std::uint32_t remaining = logical_k - packed_k;
     if (remaining >= 4U) return packed;
     return packed & ((1U << (remaining * 8U)) - 1U);
@@ -3165,25 +3152,25 @@ template <bool LdsScopeOnly>
 __device__ __forceinline__ void a8w8g32_linear_prefill_cta_body(
     const std::int8_t* activation_codes, const std::uint16_t* activation_scales,
     const std::uint32_t* activation_status, const std::int8_t* weight_codes,
-    const std::uint16_t* weight_scales, hip_bfloat16* output,
-    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
-    std::uint32_t padded_columns, A8W8PrefillTile& tile) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    const std::uint32_t thread = threadIdx.x;
-    const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = thread / kWaveSize;
-    const std::uint32_t axis = lane & 15U;
-    const std::uint32_t lane_group = lane >> 4U;
-    const std::uint32_t wave_token_tile = wave / 4U;
-    const std::uint32_t wave_row_tile = wave & 3U;
-    const std::uint32_t cta_token_base = blockIdx.y * kA8W8PrefillTokenTile;
-    const std::uint32_t cta_row_base = blockIdx.x * kA8W8PrefillRowTile;
-    const std::uint32_t token_base = cta_token_base + wave_token_tile * kWmmaTile;
-    const std::uint32_t row_base = cta_row_base + wave_row_tile * kWmmaTile;
+    const std::uint16_t* weight_scales, hip_bfloat16* output, std::uint32_t tokens,
+    std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns,
+    A8W8PrefillTile& tile) {
+#    if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t thread              = threadIdx.x;
+    const std::uint32_t lane                = thread & (kWaveSize - 1U);
+    const std::uint32_t wave                = thread / kWaveSize;
+    const std::uint32_t axis                = lane & 15U;
+    const std::uint32_t lane_group          = lane >> 4U;
+    const std::uint32_t wave_token_tile     = wave / 4U;
+    const std::uint32_t wave_row_tile       = wave & 3U;
+    const std::uint32_t cta_token_base      = blockIdx.y * kA8W8PrefillTokenTile;
+    const std::uint32_t cta_row_base        = blockIdx.x * kA8W8PrefillRowTile;
+    const std::uint32_t token_base          = cta_token_base + wave_token_tile * kWmmaTile;
+    const std::uint32_t row_base            = cta_row_base + wave_row_tile * kWmmaTile;
     const std::uint32_t fragment_token_base = token_base + lane_group * 8U;
-    const std::uint32_t output_row = row_base + axis;
+    const std::uint32_t output_row          = row_base + axis;
     if (*activation_status != A8G32ActivationOk) {
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t token = fragment_token_base + element;
             if (token < tokens && output_row < rows) {
@@ -3197,76 +3184,75 @@ __device__ __forceinline__ void a8w8g32_linear_prefill_cta_body(
     const std::uint32_t groups = padded_columns / kW8Group;
     WmmaF32Fragment total{};
     for (std::uint32_t group = 0; group < groups; ++group) {
-        const std::uint32_t activation_row = thread / 8U;
-        const std::uint32_t activation_word = thread & 7U;
-        const std::uint32_t token = cta_token_base + activation_row;
-        const std::size_t activation_element =
-            static_cast<std::size_t>(token) * padded_columns + group * kW8Group +
-            activation_word * 4U;
-        const std::uint32_t packed_k = group * kW8Group + activation_word * 4U;
-        tile.activations[a8w8_lds_word_index(
-            activation_row, activation_word, kA8W8PrefillTokenTile)] = token < tokens
-            ? load_i8x4_logical(activation_codes, activation_element, columns, packed_k)
-            : 0U;
-        const std::uint32_t weight_row = thread / 8U;
+        const std::uint32_t activation_row   = thread / 8U;
+        const std::uint32_t activation_word  = thread & 7U;
+        const std::uint32_t token            = cta_token_base + activation_row;
+        const std::size_t activation_element = static_cast<std::size_t>(token) * padded_columns +
+                                               group * kW8Group + activation_word * 4U;
+        const std::uint32_t packed_k         = group * kW8Group + activation_word * 4U;
+        tile.activations[a8w8_lds_word_index(activation_row, activation_word,
+                                             kA8W8PrefillTokenTile)] =
+            token < tokens
+                ? load_i8x4_logical(activation_codes, activation_element, columns, packed_k)
+                : 0U;
+        const std::uint32_t weight_row  = thread / 8U;
         const std::uint32_t weight_word = thread & 7U;
-        const std::uint32_t row = cta_row_base + weight_row;
+        const std::uint32_t row         = cta_row_base + weight_row;
         const std::size_t weight_element =
-            static_cast<std::size_t>(row) * padded_columns + group * kW8Group +
-            weight_word * 4U;
+            static_cast<std::size_t>(row) * padded_columns + group * kW8Group + weight_word * 4U;
         const std::uint32_t weight_packed_k = group * kW8Group + weight_word * 4U;
-        tile.weights[a8w8_lds_word_index(weight_row, weight_word,
-                                         kA8W8PrefillRowTile)] = row < rows
-            ? load_i8x4_logical(weight_codes, weight_element, columns, weight_packed_k)
-            : 0U;
+        tile.weights[a8w8_lds_word_index(weight_row, weight_word, kA8W8PrefillRowTile)] =
+            row < rows ? load_i8x4_logical(weight_codes, weight_element, columns, weight_packed_k)
+                       : 0U;
         if (thread < kA8W8PrefillTokenTile) {
             const std::uint32_t scale_token = cta_token_base + thread;
-            tile.activation_scales[thread] = scale_token < tokens
-                ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
-                : 0U;
+            tile.activation_scales[thread] =
+                scale_token < tokens
+                    ? activation_scales[static_cast<std::size_t>(scale_token) * groups + group]
+                    : 0U;
         }
         if (thread < kA8W8PrefillRowTile) {
             const std::uint32_t scale_row = cta_row_base + thread;
-            tile.weight_scales[thread] = scale_row < rows
-                ? weight_scales[static_cast<std::size_t>(scale_row) * groups + group]
-                : 0U;
+            tile.weight_scales[thread] =
+                scale_row < rows
+                    ? weight_scales[static_cast<std::size_t>(scale_row) * groups + group]
+                    : 0U;
         }
         prefill_cta_barrier<LdsScopeOnly>();
 
         WmmaI32x8 integer_dot{};
-#pragma unroll
+#        pragma unroll
         for (std::uint32_t k_tile = 0; k_tile < 2U; ++k_tile) {
-            const std::uint32_t word = k_tile * 4U + lane_group * 2U;
-            const std::uint32_t activation_fragment_row =
-                wave_token_tile * kWmmaTile + axis;
-            const std::uint32_t weight_fragment_row = wave_row_tile * kWmmaTile + axis;
+            const std::uint32_t word                    = k_tile * 4U + lane_group * 2U;
+            const std::uint32_t activation_fragment_row = wave_token_tile * kWmmaTile + axis;
+            const std::uint32_t weight_fragment_row     = wave_row_tile * kWmmaTile + axis;
             WmmaI32x2 a{};
             WmmaI32x2 b{};
             a[0] = static_cast<int>(tile.activations[a8w8_lds_word_index(
                 activation_fragment_row, word, kA8W8PrefillTokenTile)]);
             a[1] = static_cast<int>(tile.activations[a8w8_lds_word_index(
                 activation_fragment_row, word + 1U, kA8W8PrefillTokenTile)]);
-            b[0] = static_cast<int>(tile.weights[a8w8_lds_word_index(
-                weight_fragment_row, word, kA8W8PrefillRowTile)]);
-            b[1] = static_cast<int>(tile.weights[a8w8_lds_word_index(
-                weight_fragment_row, word + 1U, kA8W8PrefillRowTile)]);
-            integer_dot = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12(
-                true, a, true, b, integer_dot, false);
+            b[0] = static_cast<int>(
+                tile.weights[a8w8_lds_word_index(weight_fragment_row, word, kA8W8PrefillRowTile)]);
+            b[1] = static_cast<int>(tile.weights[a8w8_lds_word_index(weight_fragment_row, word + 1U,
+                                                                     kA8W8PrefillRowTile)]);
+            integer_dot = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12(true, a, true, b,
+                                                                           integer_dot, false);
         }
-        const float weight_scale = __half2float(__ushort_as_half(
-            tile.weight_scales[wave_row_tile * kWmmaTile + axis]));
-#pragma unroll
+        const float weight_scale =
+            __half2float(__ushort_as_half(tile.weight_scales[wave_row_tile * kWmmaTile + axis]));
+#        pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             const std::uint32_t fragment_token =
                 wave_token_tile * kWmmaTile + lane_group * 8U + element;
-            const float activation_scale = __half2float(__ushort_as_half(
-                tile.activation_scales[fragment_token]));
+            const float activation_scale =
+                __half2float(__ushort_as_half(tile.activation_scales[fragment_token]));
             total[element] = fmaf(static_cast<float>(integer_dot[element]),
                                   activation_scale * weight_scale, total[element]);
         }
         prefill_cta_barrier<LdsScopeOnly>();
     }
-#pragma unroll
+#        pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
         const std::uint32_t token = fragment_token_base + element;
         if (token < tokens && output_row < rows) {
@@ -3274,51 +3260,56 @@ __device__ __forceinline__ void a8w8g32_linear_prefill_cta_body(
                 static_cast<hip_bfloat16>(total[element]);
         }
     }
-#else
-    (void)activation_codes; (void)activation_scales; (void)activation_status;
-    (void)weight_codes; (void)weight_scales; (void)output; (void)tokens; (void)rows;
-    (void)columns; (void)padded_columns; (void)tile;
-#endif
+#    else
+    (void)activation_codes;
+    (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes;
+    (void)weight_scales;
+    (void)output;
+    (void)tokens;
+    (void)rows;
+    (void)columns;
+    (void)padded_columns;
+    (void)tile;
+#    endif
 }
 
 __global__ __launch_bounds__(kA8W8PrefillThreads) void a8w8g32_linear_prefill_cta_kernel(
     const std::int8_t* activation_codes, const std::uint16_t* activation_scales,
     const std::uint32_t* activation_status, const std::int8_t* weight_codes,
-    const std::uint16_t* weight_scales, hip_bfloat16* output,
-    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
-    std::uint32_t padded_columns) {
+    const std::uint16_t* weight_scales, hip_bfloat16* output, std::uint32_t tokens,
+    std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns) {
     __shared__ A8W8PrefillTile tile;
-    a8w8g32_linear_prefill_cta_body<true>(
-        activation_codes, activation_scales, activation_status, weight_codes,
-        weight_scales, output, tokens, rows, columns, padded_columns, tile);
+    a8w8g32_linear_prefill_cta_body<true>(activation_codes, activation_scales, activation_status,
+                                          weight_codes, weight_scales, output, tokens, rows,
+                                          columns, padded_columns, tile);
 }
 
-__global__ __launch_bounds__(kA8W8PrefillThreads)
-void a8w8g32_linear_prefill_cta_global_inv_qualification_kernel(
+__global__
+__launch_bounds__(kA8W8PrefillThreads) void a8w8g32_linear_prefill_cta_global_inv_qualification_kernel(
     const std::int8_t* activation_codes, const std::uint16_t* activation_scales,
     const std::uint32_t* activation_status, const std::int8_t* weight_codes,
-    const std::uint16_t* weight_scales, hip_bfloat16* output,
-    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
-    std::uint32_t padded_columns) {
+    const std::uint16_t* weight_scales, hip_bfloat16* output, std::uint32_t tokens,
+    std::uint32_t rows, std::uint32_t columns, std::uint32_t padded_columns) {
     __shared__ A8W8PrefillTile tile;
-    a8w8g32_linear_prefill_cta_body<false>(
-        activation_codes, activation_scales, activation_status, weight_codes,
-        weight_scales, output, tokens, rows, columns, padded_columns, tile);
+    a8w8g32_linear_prefill_cta_body<false>(activation_codes, activation_scales, activation_status,
+                                           weight_codes, weight_scales, output, tokens, rows,
+                                           columns, padded_columns, tile);
 }
 
 #endif
 
 } // namespace
 
-bool a8q4g64_scalar_base_u32_offsets_fit(
-    std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t padded_columns) noexcept {
+bool a8q4g64_scalar_base_u32_offsets_fit(std::uint32_t tokens, std::uint32_t rows,
+                                         std::uint32_t padded_columns) noexcept {
     return scalar_base_offsets_fit(tokens, rows, padded_columns);
 }
 
 std::size_t q4g64_activation_workspace_capacity_bytes(std::uint32_t tokens,
-                                                       std::uint32_t columns) noexcept {
-    std::uint32_t padded = 0;
+                                                      std::uint32_t columns) noexcept {
+    std::uint32_t padded   = 0;
     std::size_t code_bytes = 0, scale_bytes = 0;
     if (!q4_padded_columns(columns, &padded) ||
         !q4_layout_bytes(tokens, columns, padded, &code_bytes, &scale_bytes) ||
@@ -3326,17 +3317,18 @@ std::size_t q4g64_activation_workspace_capacity_bytes(std::uint32_t tokens,
         return 0U;
     }
     const std::size_t scale_offset = align_up(code_bytes, kQ4PlaneAlignment);
-    if (scale_offset > std::numeric_limits<std::size_t>::max() - scale_bytes -
-                           kQ4PlaneAlignment - sizeof(std::uint32_t)) return 0U;
+    if (scale_offset > std::numeric_limits<std::size_t>::max() - scale_bytes - kQ4PlaneAlignment -
+                           sizeof(std::uint32_t))
+        return 0U;
     const std::size_t status_offset = align_up(scale_offset + scale_bytes, kQ4PlaneAlignment);
     return status_offset + sizeof(std::uint32_t);
 }
 
-hipError_t q4g64_bind_activation_workspace(
-    void* storage, std::size_t storage_bytes, std::uint32_t tokens,
-    std::uint32_t columns, Q4G64ActivationWorkspace* out) noexcept {
+hipError_t q4g64_bind_activation_workspace(void* storage, std::size_t storage_bytes,
+                                           std::uint32_t tokens, std::uint32_t columns,
+                                           Q4G64ActivationWorkspace* out) noexcept {
     const std::size_t required = q4g64_activation_workspace_capacity_bytes(tokens, columns);
-    std::uint32_t padded = 0;
+    std::uint32_t padded       = 0;
     std::size_t code_bytes = 0, scale_bytes = 0;
     if (storage == nullptr || out == nullptr || required == 0U || storage_bytes != required ||
         reinterpret_cast<std::uintptr_t>(storage) % alignof(std::uint32_t) != 0U ||
@@ -3344,14 +3336,17 @@ hipError_t q4g64_bind_activation_workspace(
         !q4_layout_bytes(tokens, columns, padded, &code_bytes, &scale_bytes)) {
         return hipErrorInvalidValue;
     }
-    auto* bytes = static_cast<std::uint8_t*>(storage);
-    const std::size_t scale_offset = align_up(code_bytes, kQ4PlaneAlignment);
+    auto* bytes                     = static_cast<std::uint8_t*>(storage);
+    const std::size_t scale_offset  = align_up(code_bytes, kQ4PlaneAlignment);
     const std::size_t status_offset = align_up(scale_offset + scale_bytes, kQ4PlaneAlignment);
-    *out = Q4G64ActivationWorkspace{bytes, code_bytes,
+    *out = Q4G64ActivationWorkspace{bytes,
+                                    code_bytes,
                                     reinterpret_cast<std::uint16_t*>(bytes + scale_offset),
                                     scale_bytes,
                                     reinterpret_cast<std::uint32_t*>(bytes + status_offset),
-                                    tokens, columns, padded};
+                                    tokens,
+                                    columns,
+                                    padded};
     return hipSuccess;
 }
 
@@ -3362,7 +3357,8 @@ hipError_t q4g64_quantize_activation(const Q4G64ActivationQuantizeArgs& args,
     if (!checked_mul(args.workspace.tokens, args.workspace.columns, &input_elements) ||
         !checked_mul(input_elements, sizeof(hip_bfloat16), &input_bytes) ||
         ranges_overlap(args.input, input_bytes, args.workspace.codes, args.workspace.code_bytes) ||
-        ranges_overlap(args.input, input_bytes, args.workspace.scales, args.workspace.scale_bytes) ||
+        ranges_overlap(args.input, input_bytes, args.workspace.scales,
+                       args.workspace.scale_bytes) ||
         ranges_overlap(args.input, input_bytes, args.workspace.status, sizeof(std::uint32_t))) {
         return hipErrorInvalidValue;
     }
@@ -3376,57 +3372,14 @@ hipError_t q4g64_quantize_activation(const Q4G64ActivationQuantizeArgs& args,
     return hipGetLastError();
 }
 
-hipError_t q4g64_linear_wmma32(const Q4G64LinearArgs& args,
-                               hipStream_t stream) noexcept {
+hipError_t q4g64_linear_wmma32(const Q4G64LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_q4_linear_args(args)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kWmmaTile - 1U) / kWmmaTile,
                     (args.tokens + kWmmaTile - 1U) / kWmmaTile);
     hipLaunchKernelGGL(q4g64_linear_wmma32_kernel, grid, dim3(kWaveSize), 0, stream,
-                       args.activation_codes, args.activation_scales,
-                       args.activation_status, args.weight_codes, args.weight_scales,
-                       args.output, args.tokens, args.rows, args.padded_columns);
-    return hipGetLastError();
-#else
-    (void)stream;
-    return hipErrorNotSupported;
-#endif
-}
-
-hipError_t q4g64_linear_vector(const Q4G64LinearArgs& args,
-                               hipStream_t stream) noexcept {
-    if (!valid_q4_linear_args(args)) return hipErrorInvalidValue;
-    hipLaunchKernelGGL(q4g64_linear_vector_kernel, dim3(args.rows, args.tokens),
-                       dim3(kThreads), 0, stream, args.activation_codes,
-                       args.activation_scales, args.activation_status, args.weight_codes,
-                       args.weight_scales,
-                       args.output, args.tokens, args.rows, args.padded_columns);
-    return hipGetLastError();
-}
-
-hipError_t q4g64_linear_prefill_cta_m64n128(
-    const Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_q4_linear_args(args) || args.tokens <= 128U) return hipErrorInvalidValue;
-#if defined(__HIPCC__)
-    if (args.rows == 34816U && args.columns == 5120U &&
-        args.padded_columns == args.columns && args.tokens % kA8Q4PrefillTokenTile == 0U &&
-        scalar_base_offsets_fit(args.tokens, args.rows, args.padded_columns)) {
-        hipLaunchKernelGGL(a4q4g64_linear_prefill_pingpong_kernel,
-            dim3(args.rows / 128U, args.tokens / 64U), dim3(kA8Q4PrefillThreads), 0, stream,
-            args.activation_codes, args.activation_scales, args.activation_status,
-            args.weight_codes, args.weight_scales, args.output, args.tokens, args.rows,
-            args.columns, args.padded_columns);
-        return hipGetLastError();
-    }
-    const dim3 grid((args.rows + 2U * kA8Q4PrefillRowTile - 1U) /
-                        (2U * kA8Q4PrefillRowTile),
-                    (args.tokens + kA8Q4PrefillTokenTile - 1U) /
-                        kA8Q4PrefillTokenTile);
-    hipLaunchKernelGGL(q4g64_linear_prefill_cta_m64n128_kernel,
-                       grid, dim3(kA8Q4PrefillThreads), 0, stream,
-                       args.activation_codes, args.activation_scales,
-                       args.activation_status, args.weight_codes, args.weight_scales,
-                       args.output, args.tokens, args.rows, args.columns,
+                       args.activation_codes, args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output, args.tokens, args.rows,
                        args.padded_columns);
     return hipGetLastError();
 #else
@@ -3435,14 +3388,51 @@ hipError_t q4g64_linear_prefill_cta_m64n128(
 #endif
 }
 
-hipError_t q4g64_prefill_qualification_resources(
-    Q4G64PrefillQualificationResources* resources, bool pingpong) noexcept {
+hipError_t q4g64_linear_vector(const Q4G64LinearArgs& args, hipStream_t stream) noexcept {
+    if (!valid_q4_linear_args(args)) return hipErrorInvalidValue;
+    hipLaunchKernelGGL(q4g64_linear_vector_kernel, dim3(args.rows, args.tokens), dim3(kThreads), 0,
+                       stream, args.activation_codes, args.activation_scales,
+                       args.activation_status, args.weight_codes, args.weight_scales, args.output,
+                       args.tokens, args.rows, args.padded_columns);
+    return hipGetLastError();
+}
+
+hipError_t q4g64_linear_prefill_cta_m64n128(const Q4G64LinearArgs& args,
+                                            hipStream_t stream) noexcept {
+    if (!valid_q4_linear_args(args) || args.tokens <= 128U) return hipErrorInvalidValue;
+#if defined(__HIPCC__)
+    if (args.rows == 34816U && args.columns == 5120U && args.padded_columns == args.columns &&
+        args.tokens % kA8Q4PrefillTokenTile == 0U &&
+        scalar_base_offsets_fit(args.tokens, args.rows, args.padded_columns)) {
+        hipLaunchKernelGGL(a4q4g64_linear_prefill_pingpong_kernel,
+                           dim3(args.rows / 128U, args.tokens / 64U), dim3(kA8Q4PrefillThreads), 0,
+                           stream, args.activation_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.tokens, args.rows, args.columns, args.padded_columns);
+        return hipGetLastError();
+    }
+    const dim3 grid((args.rows + 2U * kA8Q4PrefillRowTile - 1U) / (2U * kA8Q4PrefillRowTile),
+                    (args.tokens + kA8Q4PrefillTokenTile - 1U) / kA8Q4PrefillTokenTile);
+    hipLaunchKernelGGL(q4g64_linear_prefill_cta_m64n128_kernel, grid, dim3(kA8Q4PrefillThreads), 0,
+                       stream, args.activation_codes, args.activation_scales,
+                       args.activation_status, args.weight_codes, args.weight_scales, args.output,
+                       args.tokens, args.rows, args.columns, args.padded_columns);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t q4g64_prefill_qualification_resources(Q4G64PrefillQualificationResources* resources,
+                                                 bool pingpong) noexcept {
     if (resources == nullptr) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     hipFuncAttributes attributes{};
     const hipError_t result = hipFuncGetAttributes(
-        &attributes, pingpong ? reinterpret_cast<const void*>(a4q4g64_linear_prefill_pingpong_kernel)
-            : reinterpret_cast<const void*>(q4g64_linear_prefill_cta_m64n128_kernel));
+        &attributes, pingpong
+                         ? reinterpret_cast<const void*>(a4q4g64_linear_prefill_pingpong_kernel)
+                         : reinterpret_cast<const void*>(q4g64_linear_prefill_cta_m64n128_kernel));
     if (result != hipSuccess) return result;
     *resources = Q4G64PrefillQualificationResources{
         attributes.numRegs, static_cast<int>(attributes.sharedSizeBytes),
@@ -3454,21 +3444,19 @@ hipError_t q4g64_prefill_qualification_resources(
 #endif
 }
 
-hipError_t q4g64_linear_candidate(const Q4G64CandidateArgs& args,
-                                  hipStream_t stream) noexcept {
+hipError_t q4g64_linear_candidate(const Q4G64CandidateArgs& args, hipStream_t stream) noexcept {
     std::size_t input_elements = 0, input_bytes = 0, output_elements = 0, output_bytes = 0;
-    if (args.input == nullptr ||
-        !checked_mul(args.tokens, args.columns, &input_elements) ||
+    if (args.input == nullptr || !checked_mul(args.tokens, args.columns, &input_elements) ||
         !checked_mul(input_elements, sizeof(hip_bfloat16), &input_bytes) ||
         !checked_mul(args.tokens, args.rows, &output_elements) ||
         !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes) ||
         ranges_overlap(args.input, input_bytes, args.output, output_bytes) ||
         ranges_overlap(args.input, input_bytes, args.weight_codes, args.weight_code_bytes) ||
         ranges_overlap(args.input, input_bytes, args.weight_scales, args.weight_scale_bytes) ||
-        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
-                       args.input, input_bytes) ||
-        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
-                       args.output, output_bytes) ||
+        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes, args.input,
+                       input_bytes) ||
+        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes, args.output,
+                       output_bytes) ||
         ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
                        args.weight_codes, args.weight_code_bytes) ||
         ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
@@ -3476,16 +3464,24 @@ hipError_t q4g64_linear_candidate(const Q4G64CandidateArgs& args,
         return hipErrorInvalidValue;
     }
     Q4G64ActivationWorkspace workspace{};
-    if (q4g64_bind_activation_workspace(args.activation_workspace,
-                                        args.activation_workspace_bytes, args.tokens,
-                                        args.columns, &workspace) != hipSuccess ||
-        workspace.padded_columns != args.padded_columns) return hipErrorInvalidValue;
-    const Q4G64LinearArgs linear_args{
-        workspace.codes, workspace.code_bytes, workspace.scales, workspace.scale_bytes,
-        workspace.status,
-        args.weight_codes, args.weight_code_bytes, args.weight_scales,
-        args.weight_scale_bytes, args.output, args.tokens, args.rows, args.columns,
-        args.padded_columns};
+    if (q4g64_bind_activation_workspace(args.activation_workspace, args.activation_workspace_bytes,
+                                        args.tokens, args.columns, &workspace) != hipSuccess ||
+        workspace.padded_columns != args.padded_columns)
+        return hipErrorInvalidValue;
+    const Q4G64LinearArgs linear_args{workspace.codes,
+                                      workspace.code_bytes,
+                                      workspace.scales,
+                                      workspace.scale_bytes,
+                                      workspace.status,
+                                      args.weight_codes,
+                                      args.weight_code_bytes,
+                                      args.weight_scales,
+                                      args.weight_scale_bytes,
+                                      args.output,
+                                      args.tokens,
+                                      args.rows,
+                                      args.columns,
+                                      args.padded_columns};
     if (!valid_q4_linear_args(linear_args)) return hipErrorInvalidValue;
     const hipError_t quantized = q4g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
@@ -3497,26 +3493,22 @@ hipError_t q4g64_linear_candidate(const Q4G64CandidateArgs& args,
 }
 
 std::size_t a8q4g64_activation_workspace_capacity_bytes(std::uint32_t tokens,
-                                                         std::uint32_t columns) noexcept {
-    std::uint32_t padded = 0;
+                                                        std::uint32_t columns) noexcept {
+    std::uint32_t padded    = 0;
     std::size_t plane_bytes = 0, scale_bytes = 0;
     if (!q4_padded_columns(columns, &padded) ||
         !q4_layout_bytes(tokens, columns, padded, &plane_bytes, &scale_bytes) ||
-        plane_bytes > std::numeric_limits<std::size_t>::max() -
-                          (kQ4PlaneAlignment - 1U)) {
+        plane_bytes > std::numeric_limits<std::size_t>::max() - (kQ4PlaneAlignment - 1U)) {
         return 0U;
     }
     const std::size_t high_offset = align_up(plane_bytes, kQ4PlaneAlignment);
     if (high_offset > std::numeric_limits<std::size_t>::max() - plane_bytes) return 0U;
     const std::size_t high_end = high_offset + plane_bytes;
-    if (high_end > std::numeric_limits<std::size_t>::max() -
-                       (kQ4PlaneAlignment - 1U)) return 0U;
-    const std::size_t scale_offset =
-        align_up(high_end, kQ4PlaneAlignment);
+    if (high_end > std::numeric_limits<std::size_t>::max() - (kQ4PlaneAlignment - 1U)) return 0U;
+    const std::size_t scale_offset = align_up(high_end, kQ4PlaneAlignment);
     if (scale_offset > std::numeric_limits<std::size_t>::max() - scale_bytes) return 0U;
     const std::size_t scale_end = scale_offset + scale_bytes;
-    if (scale_end > std::numeric_limits<std::size_t>::max() -
-                        (kQ4PlaneAlignment - 1U)) return 0U;
+    if (scale_end > std::numeric_limits<std::size_t>::max() - (kQ4PlaneAlignment - 1U)) return 0U;
     const std::size_t status_offset = align_up(scale_end, kQ4PlaneAlignment);
     if (status_offset > std::numeric_limits<std::size_t>::max() - sizeof(std::uint32_t)) {
         return 0U;
@@ -3524,12 +3516,11 @@ std::size_t a8q4g64_activation_workspace_capacity_bytes(std::uint32_t tokens,
     return status_offset + sizeof(std::uint32_t);
 }
 
-hipError_t a8q4g64_bind_activation_workspace(
-    void* storage, std::size_t storage_bytes, std::uint32_t tokens,
-    std::uint32_t columns, A8G64ActivationWorkspace* out) noexcept {
-    const std::size_t required =
-        a8q4g64_activation_workspace_capacity_bytes(tokens, columns);
-    std::uint32_t padded = 0;
+hipError_t a8q4g64_bind_activation_workspace(void* storage, std::size_t storage_bytes,
+                                             std::uint32_t tokens, std::uint32_t columns,
+                                             A8G64ActivationWorkspace* out) noexcept {
+    const std::size_t required = a8q4g64_activation_workspace_capacity_bytes(tokens, columns);
+    std::uint32_t padded       = 0;
     std::size_t plane_bytes = 0, scale_bytes = 0;
     if (storage == nullptr || out == nullptr || required == 0U || storage_bytes != required ||
         reinterpret_cast<std::uintptr_t>(storage) % alignof(std::uint32_t) != 0U ||
@@ -3537,15 +3528,20 @@ hipError_t a8q4g64_bind_activation_workspace(
         !q4_layout_bytes(tokens, columns, padded, &plane_bytes, &scale_bytes)) {
         return hipErrorInvalidValue;
     }
-    auto* bytes = static_cast<std::uint8_t*>(storage);
-    const std::size_t high_offset = align_up(plane_bytes, kQ4PlaneAlignment);
-    const std::size_t scale_offset =
-        align_up(high_offset + plane_bytes, kQ4PlaneAlignment);
+    auto* bytes                     = static_cast<std::uint8_t*>(storage);
+    const std::size_t high_offset   = align_up(plane_bytes, kQ4PlaneAlignment);
+    const std::size_t scale_offset  = align_up(high_offset + plane_bytes, kQ4PlaneAlignment);
     const std::size_t status_offset = align_up(scale_offset + scale_bytes, kQ4PlaneAlignment);
-    *out = A8G64ActivationWorkspace{
-        bytes, plane_bytes, bytes + high_offset, plane_bytes,
-        reinterpret_cast<std::uint16_t*>(bytes + scale_offset), scale_bytes,
-        reinterpret_cast<std::uint32_t*>(bytes + status_offset), tokens, columns, padded};
+    *out = A8G64ActivationWorkspace{bytes,
+                                    plane_bytes,
+                                    bytes + high_offset,
+                                    plane_bytes,
+                                    reinterpret_cast<std::uint16_t*>(bytes + scale_offset),
+                                    scale_bytes,
+                                    reinterpret_cast<std::uint32_t*>(bytes + status_offset),
+                                    tokens,
+                                    columns,
+                                    padded};
     return hipSuccess;
 }
 
@@ -3563,8 +3559,7 @@ hipError_t a8g64_quantize_activation(const A8G64ActivationQuantizeArgs& args,
                        args.workspace.high_code_bytes) ||
         ranges_overlap(args.input, input_bytes, args.workspace.scales,
                        args.workspace.scale_bytes) ||
-        ranges_overlap(args.input, input_bytes, args.workspace.status,
-                       sizeof(std::uint32_t))) {
+        ranges_overlap(args.input, input_bytes, args.workspace.status, sizeof(std::uint32_t))) {
         return hipErrorInvalidValue;
     }
     const std::uint32_t columns = args.workspace.columns;
@@ -3573,12 +3568,12 @@ hipError_t a8g64_quantize_activation(const A8G64ActivationQuantizeArgs& args,
         static_cast<std::size_t>(args.workspace.tokens) * (columns / 8U) <=
             kSmallQuantizeMaximumVectors) {
         const std::uint32_t vectors = args.workspace.tokens * (columns / 8U);
-        hipLaunchKernelGGL(a8g64_quantize_activation_small_kernel,
-                           dim3((vectors + kSmallQuantizeThreads - 1U) / kSmallQuantizeThreads + 1U),
-                           dim3(kSmallQuantizeThreads), 0, stream, args.input,
-                           args.workspace.low_codes, args.workspace.high_codes,
-                           args.workspace.scales, args.workspace.status, args.workspace.tokens,
-                           columns);
+        hipLaunchKernelGGL(
+            a8g64_quantize_activation_small_kernel,
+            dim3((vectors + kSmallQuantizeThreads - 1U) / kSmallQuantizeThreads + 1U),
+            dim3(kSmallQuantizeThreads), 0, stream, args.input, args.workspace.low_codes,
+            args.workspace.high_codes, args.workspace.scales, args.workspace.status,
+            args.workspace.tokens, columns);
         return hipGetLastError();
     }
     hipError_t result = hipMemsetAsync(args.workspace.status, 0, sizeof(std::uint32_t), stream);
@@ -3591,8 +3586,7 @@ hipError_t a8g64_quantize_activation(const A8G64ActivationQuantizeArgs& args,
     return hipGetLastError();
 }
 
-hipError_t a8q4g64_linear_wmma32(const A8Q4G64LinearArgs& args,
-                                  hipStream_t stream) noexcept {
+hipError_t a8q4g64_linear_wmma32(const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_a8q4_linear_args(args)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kWmmaTile - 1U) / kWmmaTile,
@@ -3609,21 +3603,18 @@ hipError_t a8q4g64_linear_wmma32(const A8Q4G64LinearArgs& args,
 #endif
 }
 
-hipError_t a8q4g64_linear_decode_dot8_t1(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
+hipError_t a8q4g64_linear_decode_dot8_t1(const A8Q4G64LinearArgs& args,
+                                         hipStream_t stream) noexcept {
     if (!valid_a8q4_linear_args(args) ||
-        !use_a8q4_decode_dot8_t1(
-            args.tokens, args.rows, args.columns, args.padded_columns)) {
+        !use_a8q4_decode_dot8_t1(args.tokens, args.rows, args.columns, args.padded_columns)) {
         return hipErrorInvalidValue;
     }
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kThreads - 1U) / kThreads);
-    hipLaunchKernelGGL(a8q4g64_linear_decode_dot8_t1_kernel,
-                       grid, dim3(kThreads), 0, stream,
+    hipLaunchKernelGGL(a8q4g64_linear_decode_dot8_t1_kernel, grid, dim3(kThreads), 0, stream,
                        args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output,
-                       args.rows, args.padded_columns);
+                       args.activation_scales, args.activation_status, args.weight_codes,
+                       args.weight_scales, args.output, args.rows, args.padded_columns);
     return hipGetLastError();
 #else
     (void)stream;
@@ -3631,79 +3622,94 @@ hipError_t a8q4g64_linear_decode_dot8_t1(
 #endif
 }
 
-hipError_t a8q4g64_gdn_pair_t1(
-    const A8Q4G64GdnPairArgs& args, hipStream_t stream) noexcept {
-    constexpr std::uint32_t kRows0 = 4096U;
-    constexpr std::uint32_t kRows1 = 12288U;
-    constexpr std::uint32_t kColumns = 5120U;
+hipError_t a8q4g64_gdn_pair_t1(const A8Q4G64GdnPairArgs& args, hipStream_t stream) noexcept {
+    constexpr std::uint32_t kRows0         = 4096U;
+    constexpr std::uint32_t kRows1         = 12288U;
+    constexpr std::uint32_t kColumns       = 5120U;
     constexpr std::uint32_t kPaddedColumns = 5120U;
     const std::size_t required_workspace =
         a8q4g64_activation_workspace_capacity_bytes(1U, kColumns);
     // A null input means the workspace already holds the exact A8G64 planes (and status) of the
     // represented row, prepared by another Op; the quantization is skipped.
     std::size_t input_bytes = 0U;
-    if (args.tokens != 1U || args.columns != kColumns ||
-        args.activation_workspace == nullptr ||
+    if (args.tokens != 1U || args.columns != kColumns || args.activation_workspace == nullptr ||
         args.activation_workspace_bytes != required_workspace ||
         !checked_mul(kColumns, sizeof(hip_bfloat16), &input_bytes)) {
         return hipErrorInvalidValue;
     }
     A8G64ActivationWorkspace workspace{};
-    if (a8q4g64_bind_activation_workspace(
-            args.activation_workspace, args.activation_workspace_bytes, 1U,
-            kColumns, &workspace) != hipSuccess ||
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace,
+                                          args.activation_workspace_bytes, 1U, kColumns,
+                                          &workspace) != hipSuccess ||
         workspace.padded_columns != kPaddedColumns) {
         return hipErrorInvalidValue;
     }
-    const A8Q4G64LinearArgs linear0{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes,
-        workspace.status, args.weight0_codes, args.weight0_code_bytes,
-        args.weight0_scales, args.weight0_scale_bytes, args.output0, 1U, kRows0,
-        kColumns, kPaddedColumns};
-    const A8Q4G64LinearArgs linear1{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes,
-        workspace.status, args.weight1_codes, args.weight1_code_bytes,
-        args.weight1_scales, args.weight1_scale_bytes, args.output1, 1U, kRows1,
-        kColumns, kPaddedColumns};
-    if (!valid_a8q4_linear_args(linear0) ||
-        !valid_a8q4_linear_args(linear1)) {
+    const A8Q4G64LinearArgs linear0{workspace.low_codes,
+                                    workspace.low_code_bytes,
+                                    workspace.high_codes,
+                                    workspace.high_code_bytes,
+                                    workspace.scales,
+                                    workspace.scale_bytes,
+                                    workspace.status,
+                                    args.weight0_codes,
+                                    args.weight0_code_bytes,
+                                    args.weight0_scales,
+                                    args.weight0_scale_bytes,
+                                    args.output0,
+                                    1U,
+                                    kRows0,
+                                    kColumns,
+                                    kPaddedColumns};
+    const A8Q4G64LinearArgs linear1{workspace.low_codes,
+                                    workspace.low_code_bytes,
+                                    workspace.high_codes,
+                                    workspace.high_code_bytes,
+                                    workspace.scales,
+                                    workspace.scale_bytes,
+                                    workspace.status,
+                                    args.weight1_codes,
+                                    args.weight1_code_bytes,
+                                    args.weight1_scales,
+                                    args.weight1_scale_bytes,
+                                    args.output1,
+                                    1U,
+                                    kRows1,
+                                    kColumns,
+                                    kPaddedColumns};
+    if (!valid_a8q4_linear_args(linear0) || !valid_a8q4_linear_args(linear1)) {
         return hipErrorInvalidValue;
     }
-    constexpr std::size_t kOutput0Bytes =
-        static_cast<std::size_t>(kRows0) * sizeof(hip_bfloat16);
-    constexpr std::size_t kOutput1Bytes =
-        static_cast<std::size_t>(kRows1) * sizeof(hip_bfloat16);
-    const void* pointers[] = {
-        args.input, args.activation_workspace,
-        args.weight0_codes, args.weight0_scales, args.output0,
-        args.weight1_codes, args.weight1_scales, args.output1};
-    const std::size_t sizes[] = {
-        input_bytes, args.activation_workspace_bytes,
-        args.weight0_code_bytes, args.weight0_scale_bytes, kOutput0Bytes,
-        args.weight1_code_bytes, args.weight1_scale_bytes, kOutput1Bytes};
+    constexpr std::size_t kOutput0Bytes = static_cast<std::size_t>(kRows0) * sizeof(hip_bfloat16);
+    constexpr std::size_t kOutput1Bytes = static_cast<std::size_t>(kRows1) * sizeof(hip_bfloat16);
+    const void* pointers[]              = {
+        args.input,   args.activation_workspace, args.weight0_codes,  args.weight0_scales,
+        args.output0, args.weight1_codes,        args.weight1_scales, args.output1};
+    const std::size_t sizes[] = {input_bytes,
+                                 args.activation_workspace_bytes,
+                                 args.weight0_code_bytes,
+                                 args.weight0_scale_bytes,
+                                 kOutput0Bytes,
+                                 args.weight1_code_bytes,
+                                 args.weight1_scale_bytes,
+                                 kOutput1Bytes};
     for (unsigned index = args.input == nullptr ? 1U : 0U; index < 8U; ++index) {
         for (unsigned other = index + 1U; other < 8U; ++other) {
-            if (ranges_overlap(pointers[index], sizes[index],
-                               pointers[other], sizes[other])) {
+            if (ranges_overlap(pointers[index], sizes[index], pointers[other], sizes[other])) {
                 return hipErrorInvalidValue;
             }
         }
     }
     if (args.input != nullptr) {
-        const hipError_t quantized =
-            a8g64_quantize_activation({args.input, workspace}, stream);
+        const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
         if (quantized != hipSuccess) return quantized;
     }
 #if defined(__HIPCC__)
     constexpr std::uint32_t kRows = kRows0 + kRows1;
     const dim3 grid((kRows + kThreads - 1U) / kThreads);
-    hipLaunchKernelGGL(
-        a8q4g64_gdn_pair_t1_kernel, grid, dim3(kThreads), 0, stream,
-        workspace.low_codes, workspace.high_codes, workspace.scales,
-        workspace.status, args.weight0_codes, args.weight0_scales, args.output0,
-        args.weight1_codes, args.weight1_scales, args.output1);
+    hipLaunchKernelGGL(a8q4g64_gdn_pair_t1_kernel, grid, dim3(kThreads), 0, stream,
+                       workspace.low_codes, workspace.high_codes, workspace.scales,
+                       workspace.status, args.weight0_codes, args.weight0_scales, args.output0,
+                       args.weight1_codes, args.weight1_scales, args.output1);
     return hipGetLastError();
 #else
     (void)stream;
@@ -3711,14 +3717,12 @@ hipError_t a8q4g64_gdn_pair_t1(
 #endif
 }
 
-hipError_t a8q4g64_gdn_pair_t1_resources(
-    A8Q4G64GdnPairResources* resources) noexcept {
+hipError_t a8q4g64_gdn_pair_t1_resources(A8Q4G64GdnPairResources* resources) noexcept {
     if (resources == nullptr) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     hipFuncAttributes attributes{};
     const hipError_t result = hipFuncGetAttributes(
-        &attributes,
-        reinterpret_cast<const void*>(a8q4g64_gdn_pair_t1_kernel));
+        &attributes, reinterpret_cast<const void*>(a8q4g64_gdn_pair_t1_kernel));
     if (result != hipSuccess) return result;
     *resources = A8Q4G64GdnPairResources{
         attributes.numRegs, static_cast<int>(attributes.sharedSizeBytes),
@@ -3729,23 +3733,20 @@ hipError_t a8q4g64_gdn_pair_t1_resources(
 #endif
 }
 
-hipError_t a8q4g64_linear_decode_dot8_block_t1_qualification(
-    const A8Q4G64LinearArgs& args, std::uint32_t threads,
-    hipStream_t stream) noexcept {
+hipError_t a8q4g64_linear_decode_dot8_block_t1_qualification(const A8Q4G64LinearArgs& args,
+                                                             std::uint32_t threads,
+                                                             hipStream_t stream) noexcept {
     if (!valid_a8q4_linear_args(args) ||
-        !use_a8q4_decode_dot8_t1(
-            args.tokens, args.rows, args.columns, args.padded_columns) ||
+        !use_a8q4_decode_dot8_t1(args.tokens, args.rows, args.columns, args.padded_columns) ||
         (threads != 32U && threads != 64U && threads != 128U && threads != 256U)) {
         return hipErrorInvalidValue;
     }
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + threads - 1U) / threads);
-    hipLaunchKernelGGL(a8q4g64_linear_decode_dot8_t1_kernel,
-                       grid, dim3(threads), 0, stream,
+    hipLaunchKernelGGL(a8q4g64_linear_decode_dot8_t1_kernel, grid, dim3(threads), 0, stream,
                        args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output,
-                       args.rows, args.padded_columns);
+                       args.activation_scales, args.activation_status, args.weight_codes,
+                       args.weight_scales, args.output, args.rows, args.padded_columns);
     return hipGetLastError();
 #else
     (void)stream;
@@ -3753,10 +3754,9 @@ hipError_t a8q4g64_linear_decode_dot8_block_t1_qualification(
 #endif
 }
 
-hipError_t a8q4g64_linear_dflash_small_t_qualification(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args) ||
-        !dflash_small_t_qualification_tokens(args.tokens) ||
+hipError_t a8q4g64_linear_dflash_small_t_qualification(const A8Q4G64LinearArgs& args,
+                                                       hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) || !dflash_small_t_qualification_tokens(args.tokens) ||
         !dflash_small_t_qualification_shape(args.rows, args.columns)) {
         return hipErrorInvalidValue;
     }
@@ -3764,83 +3764,73 @@ hipError_t a8q4g64_linear_dflash_small_t_qualification(
     const dim3 grid((args.rows + kThreads - 1U) / kThreads);
     switch (args.tokens) {
     case 4U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<4U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<4U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 5U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<5U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<5U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 6U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<6U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<6U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 8U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<8U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<8U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 10U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<10U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<10U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 12U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<12U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<12U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 15U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<15U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<15U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 16U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<16U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<16U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 18U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<18U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<18U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 20U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<20U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<20U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
     case 24U:
-        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<24U>), grid,
-                           dim3(kThreads), 0, stream, args.activation_low_codes,
-                           args.activation_high_codes, args.activation_scales,
-                           args.activation_status, args.weight_codes, args.weight_scales,
-                           args.output, args.rows, args.padded_columns);
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<24U>), grid, dim3(kThreads), 0,
+                           stream, args.activation_low_codes, args.activation_high_codes,
+                           args.activation_scales, args.activation_status, args.weight_codes,
+                           args.weight_scales, args.output, args.rows, args.padded_columns);
         break;
-    default: return hipErrorInvalidValue;
+    default:
+        return hipErrorInvalidValue;
     }
     return hipGetLastError();
 #else
@@ -3849,20 +3839,19 @@ hipError_t a8q4g64_linear_dflash_small_t_qualification(
 #endif
 }
 
-hipError_t a8q4g64_linear_dflash_mlp_down_t5_qualification(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
+hipError_t a8q4g64_linear_dflash_mlp_down_t5_qualification(const A8Q4G64LinearArgs& args,
+                                                           hipStream_t stream) noexcept {
     if (!valid_a8q4_linear_args(args) ||
-        !is_a8q4_dflash_mlp_down_t5_eligible(
-            args.tokens, args.rows, args.columns, args.padded_columns)) {
+        !is_a8q4_dflash_mlp_down_t5_eligible(args.tokens, args.rows, args.columns,
+                                             args.padded_columns)) {
         return hipErrorInvalidValue;
     }
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kThreads - 1U) / kThreads);
-    hipLaunchKernelGGL(a8q4g64_linear_dflash_mlp_down_t5_kernel,
-                       grid, dim3(kThreads), 0, stream,
+    hipLaunchKernelGGL(a8q4g64_linear_dflash_mlp_down_t5_kernel, grid, dim3(kThreads), 0, stream,
                        args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output);
+                       args.activation_scales, args.activation_status, args.weight_codes,
+                       args.weight_scales, args.output);
     return hipGetLastError();
 #else
     (void)stream;
@@ -3870,21 +3859,16 @@ hipError_t a8q4g64_linear_dflash_mlp_down_t5_qualification(
 #endif
 }
 
-hipError_t a8q4g64_linear_prefill_cta_m64n128_regression(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
-        return hipErrorInvalidValue;
-    }
+hipError_t a8q4g64_linear_prefill_cta_m64n128_regression(const A8Q4G64LinearArgs& args,
+                                                         hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) { return hipErrorInvalidValue; }
 #if defined(__HIPCC__)
-    const dim3 grid((args.rows + 2U * kA8Q4PrefillRowTile - 1U) /
-                        (2U * kA8Q4PrefillRowTile),
-                    (args.tokens + kA8Q4PrefillTokenTile - 1U) /
-                        kA8Q4PrefillTokenTile);
+    const dim3 grid((args.rows + 2U * kA8Q4PrefillRowTile - 1U) / (2U * kA8Q4PrefillRowTile),
+                    (args.tokens + kA8Q4PrefillTokenTile - 1U) / kA8Q4PrefillTokenTile);
     hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_m64n128_regression_kernel, grid,
-                       dim3(kA8Q4PrefillThreads), 0, stream,
-                       args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status, args.weight_codes,
-                       args.weight_scales, args.output, args.tokens, args.rows,
+                       dim3(kA8Q4PrefillThreads), 0, stream, args.activation_low_codes,
+                       args.activation_high_codes, args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output, args.tokens, args.rows,
                        args.columns, args.padded_columns);
     return hipGetLastError();
 #else
@@ -3893,21 +3877,17 @@ hipError_t a8q4g64_linear_prefill_cta_m64n128_regression(
 #endif
 }
 
-hipError_t a8q4g64_linear_prefill_cta_global_inv_qualification(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
-        return hipErrorInvalidValue;
-    }
+hipError_t a8q4g64_linear_prefill_cta_global_inv_qualification(const A8Q4G64LinearArgs& args,
+                                                               hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) { return hipErrorInvalidValue; }
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kA8Q4PrefillRowTile - 1U) / kA8Q4PrefillRowTile,
-                    (args.tokens + kA8Q4PrefillTokenTile - 1U) /
-                        kA8Q4PrefillTokenTile);
-    hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_global_inv_qualification_kernel,
-                       grid, dim3(kA8Q4PrefillThreads), 0, stream,
-                       args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output, args.tokens,
-                       args.rows, args.columns, args.padded_columns);
+                    (args.tokens + kA8Q4PrefillTokenTile - 1U) / kA8Q4PrefillTokenTile);
+    hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_global_inv_qualification_kernel, grid,
+                       dim3(kA8Q4PrefillThreads), 0, stream, args.activation_low_codes,
+                       args.activation_high_codes, args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output, args.tokens, args.rows,
+                       args.columns, args.padded_columns);
     return hipGetLastError();
 #else
     (void)stream;
@@ -3915,21 +3895,17 @@ hipError_t a8q4g64_linear_prefill_cta_global_inv_qualification(
 #endif
 }
 
-hipError_t a8q4g64_linear_prefill_cta_m64n64_regression(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
-        return hipErrorInvalidValue;
-    }
+hipError_t a8q4g64_linear_prefill_cta_m64n64_regression(const A8Q4G64LinearArgs& args,
+                                                        hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) { return hipErrorInvalidValue; }
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kA8Q4PrefillRowTile - 1U) / kA8Q4PrefillRowTile,
-                    (args.tokens + kA8Q4PrefillTokenTile - 1U) /
-                        kA8Q4PrefillTokenTile);
-    hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_m64n64_regression_kernel,
-                       grid, dim3(kA8Q4PrefillThreads), 0, stream,
-                       args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output, args.tokens,
-                       args.rows, args.columns, args.padded_columns);
+                    (args.tokens + kA8Q4PrefillTokenTile - 1U) / kA8Q4PrefillTokenTile);
+    hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_m64n64_regression_kernel, grid,
+                       dim3(kA8Q4PrefillThreads), 0, stream, args.activation_low_codes,
+                       args.activation_high_codes, args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output, args.tokens, args.rows,
+                       args.columns, args.padded_columns);
     return hipGetLastError();
 #else
     (void)stream;
@@ -3937,22 +3913,17 @@ hipError_t a8q4g64_linear_prefill_cta_m64n64_regression(
 #endif
 }
 
-hipError_t a8q4g64_linear_prefill_cta_m128n128_qualification(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
-        return hipErrorInvalidValue;
-    }
+hipError_t a8q4g64_linear_prefill_cta_m128n128_qualification(const A8Q4G64LinearArgs& args,
+                                                             hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) { return hipErrorInvalidValue; }
 #if defined(__HIPCC__)
-    const dim3 grid((args.rows + 2U * kA8Q4PrefillRowTile - 1U) /
-                        (2U * kA8Q4PrefillRowTile),
-                    (args.tokens + kA8Q4M128PrefillTokenTile - 1U) /
-                        kA8Q4M128PrefillTokenTile);
-    hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_m128n128_qualification_kernel,
-                       grid, dim3(kA8Q4M128PrefillThreads), 0, stream,
-                       args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output, args.tokens,
-                       args.rows, args.columns, args.padded_columns);
+    const dim3 grid((args.rows + 2U * kA8Q4PrefillRowTile - 1U) / (2U * kA8Q4PrefillRowTile),
+                    (args.tokens + kA8Q4M128PrefillTokenTile - 1U) / kA8Q4M128PrefillTokenTile);
+    hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_m128n128_qualification_kernel, grid,
+                       dim3(kA8Q4M128PrefillThreads), 0, stream, args.activation_low_codes,
+                       args.activation_high_codes, args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output, args.tokens, args.rows,
+                       args.columns, args.padded_columns);
     return hipGetLastError();
 #else
     (void)stream;
@@ -3960,17 +3931,13 @@ hipError_t a8q4g64_linear_prefill_cta_m128n128_qualification(
 #endif
 }
 
-hipError_t a8q4g64_linear_prefill_cta(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args, true) || args.tokens <= 32U) {
-        return hipErrorInvalidValue;
-    }
+hipError_t a8q4g64_linear_prefill_cta(const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args, true) || args.tokens <= 32U) { return hipErrorInvalidValue; }
     // The M128xN128 kernel predicates partial token tiles and uses U32 byte offsets. The
     // size_t-addressed single-bank kernel remains the complete direct-call fallback for every
     // tuple outside the qualified inventory.
     if (!use_a8q4_prefill_cta(args.tokens, args.rows, args.columns) ||
-        args.columns != args.padded_columns ||
-        args.rows % kA8Q4M128PrefillTokenTile != 0U ||
+        args.columns != args.padded_columns || args.rows % kA8Q4M128PrefillTokenTile != 0U ||
         !scalar_base_offsets_fit(args.tokens, args.rows, args.padded_columns)) {
         if (args.accumulate_output) return hipErrorInvalidValue;
         return a8q4g64_linear_prefill_cta_m64n128_regression(args, stream);
@@ -3980,11 +3947,10 @@ hipError_t a8q4g64_linear_prefill_cta(
                     args.rows / kA8Q4M128PrefillTokenTile);
     hipLaunchKernelGGL(args.accumulate_output ? a8q4g64_linear_prefill_cta_kernel<true>
                                               : a8q4g64_linear_prefill_cta_kernel<false>,
-                       grid, dim3(kA8Q4M128ProductionThreads), 0, stream,
-                       args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output, args.tokens,
-                       args.rows, args.padded_columns);
+                       grid, dim3(kA8Q4M128ProductionThreads), 0, stream, args.activation_low_codes,
+                       args.activation_high_codes, args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output, args.tokens, args.rows,
+                       args.padded_columns);
     return hipGetLastError();
 #else
     (void)stream;
@@ -3992,13 +3958,12 @@ hipError_t a8q4g64_linear_prefill_cta(
 #endif
 }
 
-hipError_t run_a8q4_projection(const A8Q4G64LinearArgs& linear_args,
-                               hipStream_t stream) noexcept;
+hipError_t run_a8q4_projection(const A8Q4G64LinearArgs& linear_args, hipStream_t stream) noexcept;
 
 // K5120 normalized preparation: the per-row small route (its status CTA publishes the status) up to
 // kNormalizedSmallMaximumTokens rows, otherwise the reset launch and one wave per row.
-hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat16* norm,
-                                     float eps, bool unit_offset, std::uint32_t tokens,
+hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat16* norm, float eps,
+                                     bool unit_offset, std::uint32_t tokens,
                                      const A8G64ActivationWorkspace& workspace,
                                      hip_bfloat16* normalized, hipStream_t stream,
                                      std::uint32_t* clear_status = nullptr) noexcept {
@@ -4006,29 +3971,36 @@ hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat
     if (tokens <= kNormalizedSmallMaximumTokens) {
         const auto launch = [&](auto kernel) {
             hipLaunchKernelGGL(kernel, dim3(tokens + 1U), dim3(kNormalizedSmallRowVectors), 0,
-                               stream, input, norm, eps, unit_offset, tokens,
-                               workspace.low_codes, workspace.high_codes, workspace.scales,
-                               workspace.status, normalized, clear_status);
+                               stream, input, norm, eps, unit_offset, tokens, workspace.low_codes,
+                               workspace.high_codes, workspace.scales, workspace.status, normalized,
+                               clear_status);
             return hipGetLastError();
         };
         // Verification widths (T <= 6) keep the status CTA's row arrays at six.
-        return tokens <= 6U ? launch(a8g64_normalized_prepare_small_kernel<6U>)
-                            : launch(a8g64_normalized_prepare_small_kernel<
-                                     kNormalizedSmallMaximumTokens>);
+        return tokens <= 6U
+                   ? launch(a8g64_normalized_prepare_small_kernel<6U>)
+                   : launch(a8g64_normalized_prepare_small_kernel<kNormalizedSmallMaximumTokens>);
     }
     if (clear_status != nullptr) return hipErrorInvalidValue;
     const hipError_t reset = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
     if (reset != hipSuccess) return reset;
-    hipLaunchKernelGGL(a8g64_normalized_prepare_prefill_kernel,
-                       dim3((tokens + kNormalizedPrefillTokensPerBlock - 1U) /
-                            kNormalizedPrefillTokensPerBlock),
-                       dim3(kNormalizedPrefillTokensPerBlock * kWaveSize), 0, stream, input,
-                       norm, eps, unit_offset, tokens, workspace.low_codes, workspace.high_codes,
-                       workspace.scales, workspace.status, normalized);
+    hipLaunchKernelGGL(
+        a8g64_normalized_prepare_prefill_kernel,
+        dim3((tokens + kNormalizedPrefillTokensPerBlock - 1U) / kNormalizedPrefillTokensPerBlock),
+        dim3(kNormalizedPrefillTokensPerBlock * kWaveSize), 0, stream, input, norm, eps,
+        unit_offset, tokens, workspace.low_codes, workspace.high_codes, workspace.scales,
+        workspace.status, normalized);
     return hipGetLastError();
 #else
-    (void)input; (void)norm; (void)eps; (void)unit_offset; (void)tokens; (void)workspace;
-    (void)normalized; (void)stream; (void)clear_status;
+    (void)input;
+    (void)norm;
+    (void)eps;
+    (void)unit_offset;
+    (void)tokens;
+    (void)workspace;
+    (void)normalized;
+    (void)stream;
+    (void)clear_status;
     return hipErrorNotSupported;
 #endif
 }
@@ -4044,10 +4016,11 @@ hipError_t normalized_linear_batched(const A8Q4G64CandidateArgs& args, const hip
     const std::uint32_t tokens = args.tokens;
     if (!a8q4g64_normalized_linear_batched_supported(tokens) || args.rows != 34816U ||
         args.columns != 5120U || args.padded_columns != 5120U || !(eps > 0.0F) ||
-        eps > std::numeric_limits<float>::max()) return hipErrorInvalidValue;
+        eps > std::numeric_limits<float>::max())
+        return hipErrorInvalidValue;
     const std::size_t input_bytes = static_cast<std::size_t>(tokens) * 5120U * sizeof(hip_bfloat16);
-    constexpr std::size_t norm_bytes = 5120U * sizeof(hip_bfloat16);
-    constexpr std::size_t code_bytes = 34816U * 5120U / 2U;
+    constexpr std::size_t norm_bytes  = 5120U * sizeof(hip_bfloat16);
+    constexpr std::size_t code_bytes  = 34816U * 5120U / 2U;
     constexpr std::size_t scale_bytes = 34816U * 80U * sizeof(std::uint16_t);
     const std::size_t output_bytes =
         static_cast<std::size_t>(tokens) * 34816U * sizeof(hip_bfloat16);
@@ -4055,10 +4028,10 @@ hipError_t normalized_linear_batched(const A8Q4G64CandidateArgs& args, const hip
     if (args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
         args.activation_workspace_bytes != workspace_bytes)
         return hipErrorInvalidValue;
-    const void* pointers[]{args.input, norm, args.weight_codes, args.weight_scales,
-                           args.output, args.activation_workspace};
-    const std::size_t sizes[]{input_bytes, norm_bytes, code_bytes, scale_bytes,
-                              output_bytes, workspace_bytes};
+    const void* pointers[]{args.input,         norm,        args.weight_codes,
+                           args.weight_scales, args.output, args.activation_workspace};
+    const std::size_t sizes[]{input_bytes, norm_bytes,   code_bytes,
+                              scale_bytes, output_bytes, workspace_bytes};
     // The normalized rows and gains are read as 16-byte vectors.
     const std::size_t alignments[]{16U, 16U, 8U, 2U, 2U, 4U};
     for (std::size_t index = 0U; index < 6U; ++index) {
@@ -4071,14 +4044,25 @@ hipError_t normalized_linear_batched(const A8Q4G64CandidateArgs& args, const hip
                 return hipErrorInvalidValue;
     }
     A8G64ActivationWorkspace workspace{};
-    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes, tokens,
-                                          5120U, &workspace) != hipSuccess)
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes, tokens, 5120U,
+                                          &workspace) != hipSuccess)
         return hipErrorInvalidValue;
-    const A8Q4G64LinearArgs linear_args{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
-        args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.output,
-        tokens, 34816U, 5120U, 5120U};
+    const A8Q4G64LinearArgs linear_args{workspace.low_codes,
+                                        workspace.low_code_bytes,
+                                        workspace.high_codes,
+                                        workspace.high_code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        code_bytes,
+                                        args.weight_scales,
+                                        scale_bytes,
+                                        args.output,
+                                        tokens,
+                                        34816U,
+                                        5120U,
+                                        5120U};
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     const hipError_t prepared = launch_normalized_prepare(
@@ -4086,15 +4070,16 @@ hipError_t normalized_linear_batched(const A8Q4G64CandidateArgs& args, const hip
     if (prepared != hipSuccess) return prepared;
     return run_a8q4_projection(linear_args, stream);
 #else
-    (void)unit_offset; (void)clear_status;
+    (void)unit_offset;
+    (void)clear_status;
     return hipErrorNotSupported;
 #endif
 }
-}
+} // namespace
 
-hipError_t a8q4g64_normalized_linear_batched(
-    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
-    bool unit_offset, hipStream_t stream) noexcept {
+hipError_t a8q4g64_normalized_linear_batched(const A8Q4G64CandidateArgs& args,
+                                             const hip_bfloat16* norm, float eps, bool unit_offset,
+                                             hipStream_t stream) noexcept {
     return normalized_linear_batched(args, norm, eps, unit_offset, nullptr, stream);
 }
 
@@ -4109,10 +4094,10 @@ namespace {
 // Binds the shared planes and validates every projection of a shared-activation call against the
 // input rows and one another. `rows_bytes` is the byte extent of each input-sized row plane that
 // must stay disjoint from every output (the input, and the normalized rows when published).
-bool bind_shared_projections(const A8Q4G64SharedActivationArgs& args,
-                             std::initializer_list<const void*> row_planes,
-                             A8G64ActivationWorkspace* workspace,
-                             A8Q4G64LinearArgs (&linear)[kA8Q4G64MaximumSharedProjections]) noexcept {
+bool bind_shared_projections(
+    const A8Q4G64SharedActivationArgs& args, std::initializer_list<const void*> row_planes,
+    A8G64ActivationWorkspace* workspace,
+    A8Q4G64LinearArgs (&linear)[kA8Q4G64MaximumSharedProjections]) noexcept {
     const std::uint32_t tokens = args.tokens, columns = args.columns;
     if ((args.input == nullptr) == (row_planes.size() != 0U) || args.projection_count < 2U ||
         args.projection_count > kA8Q4G64MaximumSharedProjections ||
@@ -4129,21 +4114,32 @@ bool bind_shared_projections(const A8Q4G64SharedActivationArgs& args,
             return false;
     for (std::uint32_t index = 0; index < args.projection_count; ++index) {
         const auto& projection = args.projections[index];
-        if (!a8q4g64_shared_activation_supported(tokens, columns, projection.rows))
-            return false;
+        if (!a8q4g64_shared_activation_supported(tokens, columns, projection.rows)) return false;
         if ((projection.split == 0U) != (projection.trailing == nullptr) ||
             projection.split >= projection.rows)
             return false;
-        const std::size_t output_bytes = static_cast<std::size_t>(tokens) *
+        const std::size_t output_bytes =
+            static_cast<std::size_t>(tokens) *
             (projection.split != 0U ? projection.split : projection.rows) * sizeof(hip_bfloat16);
         const std::size_t trailing_bytes = static_cast<std::size_t>(tokens) *
-            (projection.rows - projection.split) * sizeof(hip_bfloat16);
-        linear[index] = A8Q4G64LinearArgs{
-            workspace->low_codes, workspace->low_code_bytes, workspace->high_codes,
-            workspace->high_code_bytes, workspace->scales, workspace->scale_bytes,
-            workspace->status, projection.weight_codes, projection.weight_code_bytes,
-            projection.weight_scales, projection.weight_scale_bytes, projection.output, tokens,
-            projection.rows, columns, columns};
+                                           (projection.rows - projection.split) *
+                                           sizeof(hip_bfloat16);
+        linear[index]                    = A8Q4G64LinearArgs{workspace->low_codes,
+                                                             workspace->low_code_bytes,
+                                                             workspace->high_codes,
+                                                             workspace->high_code_bytes,
+                                                             workspace->scales,
+                                                             workspace->scale_bytes,
+                                                             workspace->status,
+                                                             projection.weight_codes,
+                                                             projection.weight_code_bytes,
+                                                             projection.weight_scales,
+                                                             projection.weight_scale_bytes,
+                                                             projection.output,
+                                                             tokens,
+                                                             projection.rows,
+                                                             columns,
+                                                             columns};
         if (!valid_a8q4_linear_args(linear[index])) return false;
         // Every published output region of this projection.
         const std::pair<const void*, std::size_t> regions[2]{
@@ -4151,8 +4147,7 @@ bool bind_shared_projections(const A8Q4G64SharedActivationArgs& args,
             {projection.trailing, projection.split != 0U ? trailing_bytes : 0U}};
         const auto disjoint = [&](const void* other, std::size_t other_bytes) {
             for (const auto& [region, bytes] : regions)
-                if (bytes != 0U && ranges_overlap(region, bytes, other, other_bytes))
-                    return false;
+                if (bytes != 0U && ranges_overlap(region, bytes, other, other_bytes)) return false;
             return true;
         };
         if (projection.split != 0U &&
@@ -4161,9 +4156,10 @@ bool bind_shared_projections(const A8Q4G64SharedActivationArgs& args,
         for (const void* plane : row_planes)
             if (!disjoint(plane, row_bytes)) return false;
         for (std::uint32_t other = 0; other < index; ++other) {
-            const auto& previous = args.projections[other];
+            const auto& previous      = args.projections[other];
             const std::size_t leading = static_cast<std::size_t>(tokens) *
-                (previous.split != 0U ? previous.split : previous.rows) * sizeof(hip_bfloat16);
+                                        (previous.split != 0U ? previous.split : previous.rows) *
+                                        sizeof(hip_bfloat16);
             if (!disjoint(previous.output, leading) ||
                 (previous.split != 0U &&
                  !disjoint(previous.trailing, static_cast<std::size_t>(tokens) *
@@ -4175,19 +4171,18 @@ bool bind_shared_projections(const A8Q4G64SharedActivationArgs& args,
     return true;
 }
 
-hipError_t run_shared_projections(
-    const A8Q4G64SharedActivationArgs& args,
-    const A8Q4G64LinearArgs (&linear)[kA8Q4G64MaximumSharedProjections],
-    hipStream_t stream) noexcept {
+hipError_t
+run_shared_projections(const A8Q4G64SharedActivationArgs& args,
+                       const A8Q4G64LinearArgs (&linear)[kA8Q4G64MaximumSharedProjections],
+                       hipStream_t stream) noexcept {
     bool split = false;
     for (std::uint32_t index = 0; index < args.projection_count; ++index)
         split |= args.projections[index].split != 0U;
     if (split) {
-        const auto& first = args.projections[0];
+        const auto& first  = args.projections[0];
         const auto& second = args.projections[1];
         if (args.projection_count != 2U || first.split != second.split ||
-            !detail::use_a8q4_small_batch_projection_pair_split(linear[0], linear[1],
-                                                                 first.split))
+            !detail::use_a8q4_small_batch_projection_pair_split(linear[0], linear[1], first.split))
             return hipErrorInvalidValue;
         return detail::launch_a8q4_small_batch_projection_pair_split(
             linear[0], linear[1],
@@ -4195,10 +4190,10 @@ hipError_t run_shared_projections(
     }
     if (args.projection_count == 2U &&
         detail::use_a8q4_small_batch_projection_pair(linear[0], linear[1]) &&
-        detail::use_a8q4_small_batch_projection(linear[0].tokens, linear[0].rows,
-                                                linear[0].columns, linear[0].padded_columns) &&
-        detail::use_a8q4_small_batch_projection(linear[1].tokens, linear[1].rows,
-                                                linear[1].columns, linear[1].padded_columns))
+        detail::use_a8q4_small_batch_projection(linear[0].tokens, linear[0].rows, linear[0].columns,
+                                                linear[0].padded_columns) &&
+        detail::use_a8q4_small_batch_projection(linear[1].tokens, linear[1].rows, linear[1].columns,
+                                                linear[1].padded_columns))
         return detail::launch_a8q4_small_batch_projection_pair(linear[0], linear[1], stream);
     for (std::uint32_t index = 0; index < args.projection_count; ++index) {
         const hipError_t result = run_a8q4_projection(linear[index], stream);
@@ -4209,8 +4204,8 @@ hipError_t run_shared_projections(
 
 } // namespace
 
-hipError_t a8q4g64_shared_activation_linear(
-    const A8Q4G64SharedActivationArgs& args, hipStream_t stream) noexcept {
+hipError_t a8q4g64_shared_activation_linear(const A8Q4G64SharedActivationArgs& args,
+                                            hipStream_t stream) noexcept {
     A8G64ActivationWorkspace workspace{};
     A8Q4G64LinearArgs linear[kA8Q4G64MaximumSharedProjections];
     if (!bind_shared_projections(args, {args.input}, &workspace, linear))
@@ -4220,25 +4215,26 @@ hipError_t a8q4g64_shared_activation_linear(
     return run_shared_projections(args, linear, stream);
 }
 
-hipError_t a8q4g64_prepared_shared_activation_linear(
-    const A8Q4G64SharedActivationArgs& args, hipStream_t stream) noexcept {
+hipError_t a8q4g64_prepared_shared_activation_linear(const A8Q4G64SharedActivationArgs& args,
+                                                     hipStream_t stream) noexcept {
     A8G64ActivationWorkspace workspace{};
     A8Q4G64LinearArgs linear[kA8Q4G64MaximumSharedProjections];
     if (!bind_shared_projections(args, {}, &workspace, linear)) return hipErrorInvalidValue;
     return run_shared_projections(args, linear, stream);
 }
 
-hipError_t a8q4g64_normalized_shared_activation_linear(
-    const A8Q4G64SharedActivationArgs& args, const hip_bfloat16* norm, float eps,
-    bool unit_offset, hip_bfloat16* normalized, hipStream_t stream,
-    const A8Q4G64SideProjection* side) noexcept {
+hipError_t a8q4g64_normalized_shared_activation_linear(const A8Q4G64SharedActivationArgs& args,
+                                                       const hip_bfloat16* norm, float eps,
+                                                       bool unit_offset, hip_bfloat16* normalized,
+                                                       hipStream_t stream,
+                                                       const A8Q4G64SideProjection* side) noexcept {
     const std::uint32_t tokens = args.tokens;
     A8G64ActivationWorkspace workspace{};
     A8Q4G64LinearArgs linear[kA8Q4G64MaximumSharedProjections];
     const std::size_t row_bytes =
         static_cast<std::size_t>(tokens) * kNormalizedPrefillColumns * sizeof(hip_bfloat16);
-    if (args.columns != kNormalizedPrefillColumns || norm == nullptr ||
-        !(eps > 0.0F) || eps > std::numeric_limits<float>::max() ||
+    if (args.columns != kNormalizedPrefillColumns || norm == nullptr || !(eps > 0.0F) ||
+        eps > std::numeric_limits<float>::max() ||
         reinterpret_cast<std::uintptr_t>(args.input) % 16U != 0U ||
         reinterpret_cast<std::uintptr_t>(norm) % 16U != 0U ||
         reinterpret_cast<std::uintptr_t>(normalized) % 16U != 0U ||
@@ -4275,7 +4271,7 @@ bool gated_normalized_small(std::uint32_t tokens) noexcept {
     return tokens >= 1U && tokens <= kGatedSmallMaximumTokens &&
            detail::use_a8q4_small_batch_projection(tokens, 5120U, 6144U, 6144U);
 }
-}
+} // namespace
 
 bool a8q4g64_gated_normalized_linear_supported(std::uint32_t tokens) noexcept {
     return gated_normalized_small(tokens) ||
@@ -4284,16 +4280,18 @@ bool a8q4g64_gated_normalized_linear_supported(std::uint32_t tokens) noexcept {
             scalar_base_offsets_fit(tokens, 5120U, 6144U));
 }
 
-hipError_t a8q4g64_gated_normalized_linear(
-    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, const hip_bfloat16* gate,
-    float eps, hipStream_t stream, bool status_cleared) noexcept {
+hipError_t a8q4g64_gated_normalized_linear(const A8Q4G64CandidateArgs& args,
+                                           const hip_bfloat16* norm, const hip_bfloat16* gate,
+                                           float eps, hipStream_t stream,
+                                           bool status_cleared) noexcept {
     const std::uint32_t tokens = args.tokens;
     if (!a8q4g64_gated_normalized_linear_supported(tokens) || args.rows != 5120U ||
         args.columns != 6144U || args.padded_columns != 6144U || !(eps > 0.0F) ||
-        eps > std::numeric_limits<float>::max()) return hipErrorInvalidValue;
+        eps > std::numeric_limits<float>::max())
+        return hipErrorInvalidValue;
     const std::size_t input_bytes = static_cast<std::size_t>(tokens) * 6144U * sizeof(hip_bfloat16);
-    constexpr std::size_t norm_bytes = 128U * sizeof(hip_bfloat16);
-    constexpr std::size_t code_bytes = 5120U * 6144U / 2U;
+    constexpr std::size_t norm_bytes  = 128U * sizeof(hip_bfloat16);
+    constexpr std::size_t code_bytes  = 5120U * 6144U / 2U;
     constexpr std::size_t scale_bytes = 5120U * 96U * sizeof(std::uint16_t);
     const std::size_t output_bytes =
         static_cast<std::size_t>(tokens) * 5120U * sizeof(hip_bfloat16);
@@ -4301,10 +4299,15 @@ hipError_t a8q4g64_gated_normalized_linear(
     if (args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
         args.activation_workspace_bytes != workspace_bytes)
         return hipErrorInvalidValue;
-    const void* pointers[]{args.input, norm, gate, args.weight_codes, args.weight_scales,
-                           args.output, args.activation_workspace};
-    const std::size_t sizes[]{input_bytes, norm_bytes, input_bytes, code_bytes, scale_bytes,
-                              output_bytes, workspace_bytes};
+    const void* pointers[]{args.input,
+                           norm,
+                           gate,
+                           args.weight_codes,
+                           args.weight_scales,
+                           args.output,
+                           args.activation_workspace};
+    const std::size_t sizes[]{input_bytes, norm_bytes,   input_bytes,    code_bytes,
+                              scale_bytes, output_bytes, workspace_bytes};
     // Rows, gates and gains are read as 16-byte vectors.
     const std::size_t alignments[]{16U, 16U, 16U, 8U, 2U, 2U, 4U};
     for (std::size_t index = 0U; index < 7U; ++index) {
@@ -4317,14 +4320,26 @@ hipError_t a8q4g64_gated_normalized_linear(
                 return hipErrorInvalidValue;
     }
     A8G64ActivationWorkspace workspace{};
-    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes, tokens,
-                                          6144U, &workspace) != hipSuccess)
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes, tokens, 6144U,
+                                          &workspace) != hipSuccess)
         return hipErrorInvalidValue;
-    const A8Q4G64LinearArgs linear_args{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
-        args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.output,
-        tokens, 5120U, 6144U, 6144U, true};
+    const A8Q4G64LinearArgs linear_args{workspace.low_codes,
+                                        workspace.low_code_bytes,
+                                        workspace.high_codes,
+                                        workspace.high_code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        code_bytes,
+                                        args.weight_scales,
+                                        scale_bytes,
+                                        args.output,
+                                        tokens,
+                                        5120U,
+                                        6144U,
+                                        6144U,
+                                        true};
     if (!valid_a8q4_linear_args(linear_args, true)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     if (gated_normalized_small(tokens)) {
@@ -4346,12 +4361,11 @@ hipError_t a8q4g64_gated_normalized_linear(
     hipError_t result = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
     if (result != hipSuccess) return result;
 #if defined(__HIPCC__)
-    hipLaunchKernelGGL(a8g64_gated_normalized_prepare_prefill_kernel,
-                       dim3((tokens + kNormalizedPrefillTokensPerBlock - 1U) /
-                            kNormalizedPrefillTokensPerBlock),
-                       dim3(kNormalizedPrefillTokensPerBlock * kWaveSize), 0, stream,
-                       args.input, norm, gate, eps, tokens, workspace.low_codes,
-                       workspace.high_codes, workspace.scales, workspace.status);
+    hipLaunchKernelGGL(
+        a8g64_gated_normalized_prepare_prefill_kernel,
+        dim3((tokens + kNormalizedPrefillTokensPerBlock - 1U) / kNormalizedPrefillTokensPerBlock),
+        dim3(kNormalizedPrefillTokensPerBlock * kWaveSize), 0, stream, args.input, norm, gate, eps,
+        tokens, workspace.low_codes, workspace.high_codes, workspace.scales, workspace.status);
     result = hipGetLastError();
     if (result != hipSuccess) return result;
     return a8q4g64_linear_prefill_cta(linear_args, stream);
@@ -4365,14 +4379,13 @@ bool a8q4g64_gated_output_supported(std::uint32_t tokens) noexcept {
                                                    kGatedOutputColumns);
 }
 
-hipError_t a8q4g64_gated_output(const A8Q4G64GatedOutputArgs& args,
-                                hipStream_t stream) noexcept {
+hipError_t a8q4g64_gated_output(const A8Q4G64GatedOutputArgs& args, hipStream_t stream) noexcept {
     const std::uint32_t tokens = args.tokens;
     if (!a8q4g64_gated_output_supported(tokens)) return hipErrorInvalidValue;
-    const std::size_t elements = static_cast<std::size_t>(tokens) * kGatedOutputColumns;
+    const std::size_t elements       = static_cast<std::size_t>(tokens) * kGatedOutputColumns;
     constexpr std::size_t code_bytes = 5120U * kGatedOutputColumns / 2U;
-    constexpr std::size_t scale_bytes = 5120U * (kGatedOutputColumns / kQ4Group) *
-                                        sizeof(std::uint16_t);
+    constexpr std::size_t scale_bytes =
+        5120U * (kGatedOutputColumns / kQ4Group) * sizeof(std::uint16_t);
     const std::size_t output_bytes =
         static_cast<std::size_t>(tokens) * 5120U * sizeof(hip_bfloat16);
     const std::size_t workspace_bytes =
@@ -4380,10 +4393,14 @@ hipError_t a8q4g64_gated_output(const A8Q4G64GatedOutputArgs& args,
     if (args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
         args.activation_workspace_bytes != workspace_bytes)
         return hipErrorInvalidValue;
-    const void* pointers[]{args.gate, args.attention, args.weight_codes, args.weight_scales,
-                           args.residual, args.activation_workspace};
-    const std::size_t sizes[]{elements * sizeof(hip_bfloat16), elements * sizeof(float),
-                              code_bytes, scale_bytes, output_bytes, workspace_bytes};
+    const void* pointers[]{args.gate,          args.attention, args.weight_codes,
+                           args.weight_scales, args.residual,  args.activation_workspace};
+    const std::size_t sizes[]{elements * sizeof(hip_bfloat16),
+                              elements * sizeof(float),
+                              code_bytes,
+                              scale_bytes,
+                              output_bytes,
+                              workspace_bytes};
     const std::size_t alignments[]{16U, 16U, 8U, 2U, 2U, 4U};
     for (std::size_t index = 0U; index < 6U; ++index) {
         const auto first = reinterpret_cast<std::uintptr_t>(pointers[index]);
@@ -4398,11 +4415,23 @@ hipError_t a8q4g64_gated_output(const A8Q4G64GatedOutputArgs& args,
     if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes, tokens,
                                           kGatedOutputColumns, &workspace) != hipSuccess)
         return hipErrorInvalidValue;
-    const A8Q4G64LinearArgs linear_args{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
-        args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.residual,
-        tokens, 5120U, kGatedOutputColumns, kGatedOutputColumns, true};
+    const A8Q4G64LinearArgs linear_args{workspace.low_codes,
+                                        workspace.low_code_bytes,
+                                        workspace.high_codes,
+                                        workspace.high_code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        code_bytes,
+                                        args.weight_scales,
+                                        scale_bytes,
+                                        args.residual,
+                                        tokens,
+                                        5120U,
+                                        kGatedOutputColumns,
+                                        kGatedOutputColumns,
+                                        true};
     if (!valid_a8q4_linear_args(linear_args, true)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     const std::uint32_t vectors = tokens * (kGatedOutputColumns / 8U);
@@ -4420,24 +4449,23 @@ hipError_t a8q4g64_gated_output(const A8Q4G64GatedOutputArgs& args,
 #endif
 }
 
-hipError_t a8q4g64_normalized_linear_t1(
-    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
-    bool unit_offset, hipStream_t stream) noexcept {
+hipError_t a8q4g64_normalized_linear_t1(const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm,
+                                        float eps, bool unit_offset, hipStream_t stream) noexcept {
     if (args.tokens != 1U || args.rows != 34816U || args.columns != 5120U ||
-        args.padded_columns != 5120U || !(eps > 0.0F) ||
-        eps > std::numeric_limits<float>::max()) return hipErrorInvalidValue;
-    constexpr std::size_t input_bytes = 5120U * sizeof(hip_bfloat16);
-    constexpr std::size_t code_bytes = 34816U * 5120U / 2U;
-    constexpr std::size_t scale_bytes = 34816U * 80U * sizeof(std::uint16_t);
+        args.padded_columns != 5120U || !(eps > 0.0F) || eps > std::numeric_limits<float>::max())
+        return hipErrorInvalidValue;
+    constexpr std::size_t input_bytes  = 5120U * sizeof(hip_bfloat16);
+    constexpr std::size_t code_bytes   = 34816U * 5120U / 2U;
+    constexpr std::size_t scale_bytes  = 34816U * 80U * sizeof(std::uint16_t);
     constexpr std::size_t output_bytes = 34816U * sizeof(hip_bfloat16);
-    const std::size_t workspace_bytes = a8q4g64_activation_workspace_capacity_bytes(1U, 5120U);
+    const std::size_t workspace_bytes  = a8q4g64_activation_workspace_capacity_bytes(1U, 5120U);
     if (args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
         args.activation_workspace_bytes != workspace_bytes)
         return hipErrorInvalidValue;
-    const void* pointers[]{args.input, norm, args.weight_codes, args.weight_scales,
-                           args.output, args.activation_workspace};
-    const std::size_t sizes[]{input_bytes, input_bytes, code_bytes, scale_bytes,
-                              output_bytes, workspace_bytes};
+    const void* pointers[]{args.input,         norm,        args.weight_codes,
+                           args.weight_scales, args.output, args.activation_workspace};
+    const std::size_t sizes[]{input_bytes, input_bytes,  code_bytes,
+                              scale_bytes, output_bytes, workspace_bytes};
     const std::size_t alignments[]{2U, 2U, 8U, 2U, 2U, 4U};
     for (std::size_t index = 0U; index < 6U; ++index) {
         const auto first = reinterpret_cast<std::uintptr_t>(pointers[index]);
@@ -4449,14 +4477,25 @@ hipError_t a8q4g64_normalized_linear_t1(
                 return hipErrorInvalidValue;
     }
     A8G64ActivationWorkspace workspace{};
-    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes,
-                                         1U, 5120U, &workspace) != hipSuccess)
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes, 1U, 5120U,
+                                          &workspace) != hipSuccess)
         return hipErrorInvalidValue;
-    const A8Q4G64LinearArgs linear_args{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
-        args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.output,
-        1U, 34816U, 5120U, 5120U};
+    const A8Q4G64LinearArgs linear_args{workspace.low_codes,
+                                        workspace.low_code_bytes,
+                                        workspace.high_codes,
+                                        workspace.high_code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        code_bytes,
+                                        args.weight_scales,
+                                        scale_bytes,
+                                        args.output,
+                                        1U,
+                                        34816U,
+                                        5120U,
+                                        5120U};
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     const hipError_t prepared = launch_normalized_prepare(args.input, norm, eps, unit_offset, 1U,
@@ -4470,28 +4509,27 @@ hipError_t a8q4g64_normalized_linear_t1(
 #endif
 }
 
-hipError_t a8q4g64_projected_residual_t1(
-    const A8Q4G64ProjectedResidualT1Args& args, hipStream_t stream) noexcept {
+hipError_t a8q4g64_projected_residual_t1(const A8Q4G64ProjectedResidualT1Args& args,
+                                         hipStream_t stream) noexcept {
     if (args.tokens != 1U || args.rows != 5120U ||
-        (args.columns != 6144U && args.columns != 17408U) ||
-        args.padded_columns != args.columns) return hipErrorInvalidValue;
+        (args.columns != 6144U && args.columns != 17408U) || args.padded_columns != args.columns)
+        return hipErrorInvalidValue;
     const std::size_t input_bytes = args.columns * sizeof(hip_bfloat16);
-    const std::size_t code_bytes = static_cast<std::size_t>(args.rows) * args.columns / 2U;
+    const std::size_t code_bytes  = static_cast<std::size_t>(args.rows) * args.columns / 2U;
     const std::size_t scale_bytes =
         static_cast<std::size_t>(args.rows) * (args.columns / kQ4Group) * sizeof(std::uint16_t);
     const std::size_t residual_bytes = args.rows * sizeof(hip_bfloat16);
     const std::size_t workspace_bytes =
         a8q4g64_activation_workspace_capacity_bytes(1U, args.columns);
-    if (args.input == nullptr || args.weight_codes == nullptr ||
-        args.weight_scales == nullptr || args.activation_workspace == nullptr ||
-        args.residual == nullptr || args.weight_code_bytes != code_bytes ||
-        args.weight_scale_bytes != scale_bytes ||
-        args.activation_workspace_bytes != workspace_bytes ||
-        !aligned_qword(args.weight_codes)) return hipErrorInvalidValue;
-    const void* pointers[]{args.input, args.weight_codes, args.weight_scales,
-                           args.residual, args.activation_workspace};
-    const std::size_t sizes[]{input_bytes, code_bytes, scale_bytes,
-                              residual_bytes, workspace_bytes};
+    if (args.input == nullptr || args.weight_codes == nullptr || args.weight_scales == nullptr ||
+        args.activation_workspace == nullptr || args.residual == nullptr ||
+        args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
+        args.activation_workspace_bytes != workspace_bytes || !aligned_qword(args.weight_codes))
+        return hipErrorInvalidValue;
+    const void* pointers[]{args.input, args.weight_codes, args.weight_scales, args.residual,
+                           args.activation_workspace};
+    const std::size_t sizes[]{input_bytes, code_bytes, scale_bytes, residual_bytes,
+                              workspace_bytes};
     for (std::size_t index = 0U; index < 5U; ++index) {
         for (std::size_t other = index + 1U; other < 5U; ++other) {
             if (ranges_overlap(pointers[index], sizes[index], pointers[other], sizes[other]))
@@ -4499,25 +4537,25 @@ hipError_t a8q4g64_projected_residual_t1(
         }
     }
     A8G64ActivationWorkspace workspace{};
-    if (a8q4g64_bind_activation_workspace(
-            args.activation_workspace, args.activation_workspace_bytes, 1U,
-            args.columns, &workspace) != hipSuccess) return hipErrorInvalidValue;
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace,
+                                          args.activation_workspace_bytes, 1U, args.columns,
+                                          &workspace) != hipSuccess)
+        return hipErrorInvalidValue;
     const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
 #if defined(__HIPCC__)
     if (args.columns == 17408U) {
-        hipLaunchKernelGGL(a8q4g64_projected_residual_down_stage2_kernel,
-                           dim3(5120U / kThreads), dim3(kThreads), 0, stream,
-                           workspace.low_codes, workspace.high_codes, workspace.scales,
-                           workspace.status, args.weight_codes, args.weight_scales,
-                           args.residual);
+        hipLaunchKernelGGL(a8q4g64_projected_residual_down_stage2_kernel, dim3(5120U / kThreads),
+                           dim3(kThreads), 0, stream, workspace.low_codes, workspace.high_codes,
+                           workspace.scales, workspace.status, args.weight_codes,
+                           args.weight_scales, args.residual);
         return hipGetLastError();
     }
     return detail::launch_a8q4_small_batch_projection(
         {workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
          workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
-         args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.residual, 1U,
-         5120U, 6144U, 6144U, true},
+         args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.residual, 1U, 5120U,
+         6144U, 6144U, true},
         stream);
 #else
     (void)stream;
@@ -4527,28 +4565,23 @@ hipError_t a8q4g64_projected_residual_t1(
 
 // The selected A8Q4 matrix route for already prepared activation planes: the qualified small-batch,
 // T1 dot8 and DFlash small-T routes, then the prefill CTA or WMMA32 route.
-hipError_t run_a8q4_projection(const A8Q4G64LinearArgs& linear_args,
-                               hipStream_t stream) noexcept {
+hipError_t run_a8q4_projection(const A8Q4G64LinearArgs& linear_args, hipStream_t stream) noexcept {
     const A8Q4G64LinearArgs& args = linear_args;
-    if (detail::use_a8q4_small_batch_projection(
-            args.tokens, args.rows, args.columns, args.padded_columns)) {
+    if (detail::use_a8q4_small_batch_projection(args.tokens, args.rows, args.columns,
+                                                args.padded_columns)) {
         return detail::launch_a8q4_small_batch_projection(linear_args, stream);
     }
     // Only the small-batch and M128 prefill routes own the in-place residual epilogue.
-    if (args.accumulate_output &&
-        select_a8q4_prefill_route(args.tokens, args.rows, args.columns) !=
-            A8Q4PrefillRoute::M64N128PingPongProduction)
+    if (args.accumulate_output && select_a8q4_prefill_route(args.tokens, args.rows, args.columns) !=
+                                      A8Q4PrefillRoute::M64N128PingPongProduction)
         return hipErrorInvalidValue;
-    if (use_a8q4_decode_dot8_t1(
-            args.tokens, args.rows, args.columns, args.padded_columns)) {
+    if (use_a8q4_decode_dot8_t1(args.tokens, args.rows, args.columns, args.padded_columns)) {
         return a8q4g64_linear_decode_dot8_t1(linear_args, stream);
     }
-    if (use_a8q4_dflash_small_t(
-            args.tokens, args.rows, args.columns, args.padded_columns)) {
+    if (use_a8q4_dflash_small_t(args.tokens, args.rows, args.columns, args.padded_columns)) {
         return a8q4g64_linear_dflash_small_t_qualification(linear_args, stream);
     }
-    if (use_a8q4_dflash_mlp_down_t5(
-            args.tokens, args.rows, args.columns, args.padded_columns)) {
+    if (use_a8q4_dflash_mlp_down_t5(args.tokens, args.rows, args.columns, args.padded_columns)) {
         return a8q4g64_linear_dflash_mlp_down_t5_qualification(linear_args, stream);
     }
     switch (select_a8q4_prefill_route(args.tokens, args.rows, args.columns)) {
@@ -4560,21 +4593,19 @@ hipError_t run_a8q4_projection(const A8Q4G64LinearArgs& linear_args,
     return hipErrorInvalidValue;
 }
 
-hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
-                                    hipStream_t stream) noexcept {
+hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args, hipStream_t stream) noexcept {
     std::size_t input_elements = 0, input_bytes = 0, output_elements = 0, output_bytes = 0;
-    if (args.input == nullptr ||
-        !checked_mul(args.tokens, args.columns, &input_elements) ||
+    if (args.input == nullptr || !checked_mul(args.tokens, args.columns, &input_elements) ||
         !checked_mul(input_elements, sizeof(hip_bfloat16), &input_bytes) ||
         !checked_mul(args.tokens, args.rows, &output_elements) ||
         !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes) ||
         ranges_overlap(args.input, input_bytes, args.output, output_bytes) ||
         ranges_overlap(args.input, input_bytes, args.weight_codes, args.weight_code_bytes) ||
         ranges_overlap(args.input, input_bytes, args.weight_scales, args.weight_scale_bytes) ||
-        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
-                       args.input, input_bytes) ||
-        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
-                       args.output, output_bytes) ||
+        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes, args.input,
+                       input_bytes) ||
+        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes, args.output,
+                       output_bytes) ||
         ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
                        args.weight_codes, args.weight_code_bytes) ||
         ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
@@ -4585,14 +4616,24 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
     if (a8q4g64_bind_activation_workspace(args.activation_workspace,
                                           args.activation_workspace_bytes, args.tokens,
                                           args.columns, &workspace) != hipSuccess ||
-        workspace.padded_columns != args.padded_columns) return hipErrorInvalidValue;
-    const A8Q4G64LinearArgs linear_args{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes,
-        workspace.status,
-        args.weight_codes, args.weight_code_bytes, args.weight_scales,
-        args.weight_scale_bytes, args.output, args.tokens, args.rows, args.columns,
-        args.padded_columns};
+        workspace.padded_columns != args.padded_columns)
+        return hipErrorInvalidValue;
+    const A8Q4G64LinearArgs linear_args{workspace.low_codes,
+                                        workspace.low_code_bytes,
+                                        workspace.high_codes,
+                                        workspace.high_code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        args.weight_code_bytes,
+                                        args.weight_scales,
+                                        args.weight_scale_bytes,
+                                        args.output,
+                                        args.tokens,
+                                        args.rows,
+                                        args.columns,
+                                        args.padded_columns};
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
     const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
@@ -4601,12 +4642,12 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
 
 bool a8q4g64_projected_residual_supported(std::uint32_t tokens, std::uint32_t rows,
                                           std::uint32_t columns) noexcept {
-    const bool small_batch = rows == 5U * 1024U &&
-        detail::use_a8q4_small_batch_projection(tokens, rows, columns, columns);
+    const bool small_batch = rows == 5U * 1024U && detail::use_a8q4_small_batch_projection(
+                                                       tokens, rows, columns, columns);
     const bool prefill = tokens != 0U && tokens % kA8Q4M128PrefillTokenTile == 0U &&
-        rows % kA8Q4M128PrefillTokenTile == 0U && columns % kQ4KAlignment == 0U &&
-        use_a8q4_prefill_cta(tokens, rows, columns) &&
-        scalar_base_offsets_fit(tokens, rows, columns);
+                         rows % kA8Q4M128PrefillTokenTile == 0U && columns % kQ4KAlignment == 0U &&
+                         use_a8q4_prefill_cta(tokens, rows, columns) &&
+                         scalar_base_offsets_fit(tokens, rows, columns);
     return small_batch || prefill;
 }
 
@@ -4615,8 +4656,8 @@ hipError_t a8q4g64_projected_residual(const A8Q4G64CandidateArgs& args,
     std::size_t input_bytes = 0, residual_bytes = 0;
     if (args.input == nullptr || args.padded_columns != args.columns ||
         !a8q4g64_projected_residual_supported(args.tokens, args.rows, args.columns) ||
-        !checked_mul(static_cast<std::size_t>(args.tokens) * args.columns,
-                     sizeof(hip_bfloat16), &input_bytes) ||
+        !checked_mul(static_cast<std::size_t>(args.tokens) * args.columns, sizeof(hip_bfloat16),
+                     &input_bytes) ||
         !checked_mul(static_cast<std::size_t>(args.tokens) * args.rows, sizeof(hip_bfloat16),
                      &residual_bytes) ||
         ranges_overlap(args.input, input_bytes, args.output, residual_bytes) ||
@@ -4633,11 +4674,23 @@ hipError_t a8q4g64_projected_residual(const A8Q4G64CandidateArgs& args,
                                           args.activation_workspace_bytes, args.tokens,
                                           args.columns, &workspace) != hipSuccess)
         return hipErrorInvalidValue;
-    const A8Q4G64LinearArgs linear_args{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
-        args.weight_codes, args.weight_code_bytes, args.weight_scales, args.weight_scale_bytes,
-        args.output, args.tokens, args.rows, args.columns, args.columns, true};
+    const A8Q4G64LinearArgs linear_args{workspace.low_codes,
+                                        workspace.low_code_bytes,
+                                        workspace.high_codes,
+                                        workspace.high_code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        args.weight_code_bytes,
+                                        args.weight_scales,
+                                        args.weight_scale_bytes,
+                                        args.output,
+                                        args.tokens,
+                                        args.rows,
+                                        args.columns,
+                                        args.columns,
+                                        true};
     if (!valid_a8q4_linear_args(linear_args, true)) return hipErrorInvalidValue;
     const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
@@ -4651,27 +4704,24 @@ hipError_t launch_fused_silu_quantize(const hip_bfloat16* gate_up,
 
 hipError_t fused_silu_down(const FusedSiluA8Q4G64DownArgs& args, bool status_cleared,
                            hipStream_t stream) noexcept {
-    const std::uint32_t tokens = args.tokens;
-    constexpr std::uint32_t rows = 5120U;
+    const std::uint32_t tokens      = args.tokens;
+    constexpr std::uint32_t rows    = 5120U;
     constexpr std::uint32_t columns = 17408U;
     std::size_t gate_up_elements = 0, gate_up_bytes = 0;
     std::size_t output_elements = 0, output_bytes = 0;
     if (!a8q4g64_projected_residual_supported(tokens, rows, columns) || args.rows != rows ||
-        args.columns != columns ||
-        args.padded_columns != columns || args.gate_up == nullptr || args.residual == nullptr ||
-        !checked_mul(tokens, 2U * columns, &gate_up_elements) ||
+        args.columns != columns || args.padded_columns != columns || args.gate_up == nullptr ||
+        args.residual == nullptr || !checked_mul(tokens, 2U * columns, &gate_up_elements) ||
         !checked_mul(gate_up_elements, sizeof(hip_bfloat16), &gate_up_bytes) ||
         !checked_mul(tokens, rows, &output_elements) ||
         !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes) ||
         ranges_overlap(args.gate_up, gate_up_bytes, args.residual, output_bytes) ||
-        ranges_overlap(args.gate_up, gate_up_bytes, args.weight_codes,
-                       args.weight_code_bytes) ||
-        ranges_overlap(args.gate_up, gate_up_bytes, args.weight_scales,
-                       args.weight_scale_bytes) ||
-        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
-                       args.gate_up, gate_up_bytes) ||
-        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
-                       args.residual, output_bytes) ||
+        ranges_overlap(args.gate_up, gate_up_bytes, args.weight_codes, args.weight_code_bytes) ||
+        ranges_overlap(args.gate_up, gate_up_bytes, args.weight_scales, args.weight_scale_bytes) ||
+        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes, args.gate_up,
+                       gate_up_bytes) ||
+        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes, args.residual,
+                       output_bytes) ||
         ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
                        args.weight_codes, args.weight_code_bytes) ||
         ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
@@ -4679,27 +4729,39 @@ hipError_t fused_silu_down(const FusedSiluA8Q4G64DownArgs& args, bool status_cle
         return hipErrorInvalidValue;
     }
     A8G64ActivationWorkspace workspace{};
-    if (a8q4g64_bind_activation_workspace(
-            args.activation_workspace, args.activation_workspace_bytes, tokens, columns,
-            &workspace) != hipSuccess) {
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace,
+                                          args.activation_workspace_bytes, tokens, columns,
+                                          &workspace) != hipSuccess) {
         return hipErrorInvalidValue;
     }
-    const A8Q4G64LinearArgs linear_args{
-        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
-        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes,
-        workspace.status, args.weight_codes, args.weight_code_bytes, args.weight_scales,
-        args.weight_scale_bytes, args.residual, tokens, rows, columns, columns, true};
+    const A8Q4G64LinearArgs linear_args{workspace.low_codes,
+                                        workspace.low_code_bytes,
+                                        workspace.high_codes,
+                                        workspace.high_code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        args.weight_code_bytes,
+                                        args.weight_scales,
+                                        args.weight_scale_bytes,
+                                        args.residual,
+                                        tokens,
+                                        rows,
+                                        columns,
+                                        columns,
+                                        true};
     if (!valid_a8q4_linear_args(linear_args, true)) return hipErrorInvalidValue;
     hipError_t result = status_cleared
-        ? launch_fused_silu_quantize(args.gate_up, workspace, false, stream)
-        : fused_silu_a8g64_prepare(args.gate_up, workspace, stream);
+                            ? launch_fused_silu_quantize(args.gate_up, workspace, false, stream)
+                            : fused_silu_a8g64_prepare(args.gate_up, workspace, stream);
     if (result != hipSuccess) return result;
     return run_a8q4_projection(linear_args, stream);
 }
-}
+} // namespace
 
-hipError_t fused_silu_a8q4g64_down(
-    const FusedSiluA8Q4G64DownArgs& args, hipStream_t stream) noexcept {
+hipError_t fused_silu_a8q4g64_down(const FusedSiluA8Q4G64DownArgs& args,
+                                   hipStream_t stream) noexcept {
     return fused_silu_down(args, false, stream);
 }
 
@@ -4709,14 +4771,12 @@ bool a8q4g64_normalized_mlp_supported(std::uint32_t tokens) noexcept {
            a8q4g64_projected_residual_supported(tokens, 5120U, 17408U);
 }
 
-hipError_t a8q4g64_normalized_mlp(const A8Q4G64CandidateArgs& gate_up,
-                                  const hip_bfloat16* norm, float eps, bool unit_offset,
-                                  const FusedSiluA8Q4G64DownArgs& down,
+hipError_t a8q4g64_normalized_mlp(const A8Q4G64CandidateArgs& gate_up, const hip_bfloat16* norm,
+                                  float eps, bool unit_offset, const FusedSiluA8Q4G64DownArgs& down,
                                   hipStream_t stream) noexcept {
     const std::uint32_t tokens = gate_up.tokens;
     if (!a8q4g64_normalized_mlp_supported(tokens) || down.tokens != tokens ||
-        down.gate_up != gate_up.output ||
-        gate_up.activation_workspace != down.activation_workspace)
+        down.gate_up != gate_up.output || gate_up.activation_workspace != down.activation_workspace)
         return hipErrorInvalidValue;
     A8G64ActivationWorkspace down_workspace{};
     if (a8q4g64_bind_activation_workspace(down.activation_workspace,
@@ -4724,9 +4784,8 @@ hipError_t a8q4g64_normalized_mlp(const A8Q4G64CandidateArgs& gate_up,
                                           &down_workspace) != hipSuccess)
         return hipErrorInvalidValue;
     // The prepare clears the down status only if the gate/up stage never touches that word.
-    const auto* gate_up_end =
-        static_cast<const std::uint8_t*>(gate_up.activation_workspace) +
-        gate_up.activation_workspace_bytes;
+    const auto* gate_up_end = static_cast<const std::uint8_t*>(gate_up.activation_workspace) +
+                              gate_up.activation_workspace_bytes;
     if (reinterpret_cast<const std::uint8_t*>(down_workspace.status) < gate_up_end)
         return hipErrorInvalidValue;
     const hipError_t projected =
@@ -4735,27 +4794,22 @@ hipError_t a8q4g64_normalized_mlp(const A8Q4G64CandidateArgs& gate_up,
     return fused_silu_down(down, true, stream);
 }
 
-hipError_t fused_silu_a8g64_prepare(
-    const hip_bfloat16* gate_up, const A8G64ActivationWorkspace& workspace,
-    hipStream_t stream) noexcept {
-    const std::uint32_t tokens = workspace.tokens;
+hipError_t fused_silu_a8g64_prepare(const hip_bfloat16* gate_up,
+                                    const A8G64ActivationWorkspace& workspace,
+                                    hipStream_t stream) noexcept {
+    const std::uint32_t tokens      = workspace.tokens;
     constexpr std::uint32_t columns = 17408U;
     if (gate_up == nullptr || !valid_a8_workspace(workspace) || tokens == 0U ||
-        workspace.columns != columns ||
-        workspace.padded_columns != columns) {
+        workspace.columns != columns || workspace.padded_columns != columns) {
         return hipErrorInvalidValue;
     }
     std::size_t gate_up_elements = 0, gate_up_bytes = 0;
     if (!checked_mul(tokens, 2U * columns, &gate_up_elements) ||
         !checked_mul(gate_up_elements, sizeof(hip_bfloat16), &gate_up_bytes) ||
-        ranges_overlap(gate_up, gate_up_bytes, workspace.low_codes,
-                       workspace.low_code_bytes) ||
-        ranges_overlap(gate_up, gate_up_bytes, workspace.high_codes,
-                       workspace.high_code_bytes) ||
-        ranges_overlap(gate_up, gate_up_bytes, workspace.scales,
-                       workspace.scale_bytes) ||
-        ranges_overlap(gate_up, gate_up_bytes, workspace.status,
-                       sizeof(std::uint32_t))) {
+        ranges_overlap(gate_up, gate_up_bytes, workspace.low_codes, workspace.low_code_bytes) ||
+        ranges_overlap(gate_up, gate_up_bytes, workspace.high_codes, workspace.high_code_bytes) ||
+        ranges_overlap(gate_up, gate_up_bytes, workspace.scales, workspace.scale_bytes) ||
+        ranges_overlap(gate_up, gate_up_bytes, workspace.status, sizeof(std::uint32_t))) {
         return hipErrorInvalidValue;
     }
     return launch_fused_silu_quantize(gate_up, workspace, true, stream);
@@ -4770,21 +4824,20 @@ hipError_t launch_fused_silu_quantize(const hip_bfloat16* gate_up,
             hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
         if (result != hipSuccess) return result;
     }
-    hipLaunchKernelGGL(fused_silu_a8g64_quantize_kernel,
-                       dim3(17408U / kQ4Group, workspace.tokens), dim3(kWaveSize), 0, stream,
-                       gate_up, workspace.low_codes, workspace.high_codes,
-                       workspace.scales, workspace.status);
+    hipLaunchKernelGGL(fused_silu_a8g64_quantize_kernel, dim3(17408U / kQ4Group, workspace.tokens),
+                       dim3(kWaveSize), 0, stream, gate_up, workspace.low_codes,
+                       workspace.high_codes, workspace.scales, workspace.status);
     return hipGetLastError();
 }
-}
+} // namespace
 
 std::size_t a8w8g32_activation_workspace_capacity_bytes(std::uint32_t tokens,
-                                                         std::uint32_t columns) noexcept {
+                                                        std::uint32_t columns) noexcept {
     const std::size_t padded_size = align_up(static_cast<std::size_t>(columns), kKAlignment);
     if (tokens == 0U || columns == 0U || padded_size > std::numeric_limits<std::uint32_t>::max()) {
         return 0U;
     }
-    const auto padded = static_cast<std::uint32_t>(padded_size);
+    const auto padded      = static_cast<std::uint32_t>(padded_size);
     std::size_t code_bytes = 0, scale_bytes = 0;
     if (!w8_layout_bytes(tokens, columns, padded, &code_bytes, &scale_bytes) ||
         code_bytes > std::numeric_limits<std::size_t>::max() - (kQ4PlaneAlignment - 1U)) {
@@ -4793,8 +4846,7 @@ std::size_t a8w8g32_activation_workspace_capacity_bytes(std::uint32_t tokens,
     const std::size_t scale_offset = align_up(code_bytes, kQ4PlaneAlignment);
     if (scale_offset > std::numeric_limits<std::size_t>::max() - scale_bytes) return 0U;
     const std::size_t scale_end = scale_offset + scale_bytes;
-    if (scale_end > std::numeric_limits<std::size_t>::max() -
-                        (kQ4PlaneAlignment - 1U)) return 0U;
+    if (scale_end > std::numeric_limits<std::size_t>::max() - (kQ4PlaneAlignment - 1U)) return 0U;
     const std::size_t status_offset = align_up(scale_end, kQ4PlaneAlignment);
     if (status_offset > std::numeric_limits<std::size_t>::max() - sizeof(std::uint32_t)) {
         return 0U;
@@ -4802,28 +4854,32 @@ std::size_t a8w8g32_activation_workspace_capacity_bytes(std::uint32_t tokens,
     return status_offset + sizeof(std::uint32_t);
 }
 
-hipError_t a8w8g32_bind_activation_workspace(
-    void* storage, std::size_t storage_bytes, std::uint32_t tokens,
-    std::uint32_t columns, A8G32ActivationWorkspace* out) noexcept {
-    const std::size_t required = a8w8g32_activation_workspace_capacity_bytes(tokens, columns);
+hipError_t a8w8g32_bind_activation_workspace(void* storage, std::size_t storage_bytes,
+                                             std::uint32_t tokens, std::uint32_t columns,
+                                             A8G32ActivationWorkspace* out) noexcept {
+    const std::size_t required    = a8w8g32_activation_workspace_capacity_bytes(tokens, columns);
     const std::size_t padded_size = align_up(static_cast<std::size_t>(columns), kKAlignment);
     if (storage == nullptr || out == nullptr || required == 0U || storage_bytes != required ||
         padded_size > std::numeric_limits<std::uint32_t>::max() ||
         reinterpret_cast<std::uintptr_t>(storage) % alignof(std::uint32_t) != 0U) {
         return hipErrorInvalidValue;
     }
-    const auto padded = static_cast<std::uint32_t>(padded_size);
+    const auto padded      = static_cast<std::uint32_t>(padded_size);
     std::size_t code_bytes = 0, scale_bytes = 0;
     if (!w8_layout_bytes(tokens, columns, padded, &code_bytes, &scale_bytes)) {
         return hipErrorInvalidValue;
     }
-    auto* bytes = static_cast<std::uint8_t*>(storage);
-    const std::size_t scale_offset = align_up(code_bytes, kQ4PlaneAlignment);
+    auto* bytes                     = static_cast<std::uint8_t*>(storage);
+    const std::size_t scale_offset  = align_up(code_bytes, kQ4PlaneAlignment);
     const std::size_t status_offset = align_up(scale_offset + scale_bytes, kQ4PlaneAlignment);
-    *out = A8G32ActivationWorkspace{
-        reinterpret_cast<std::int8_t*>(bytes), code_bytes,
-        reinterpret_cast<std::uint16_t*>(bytes + scale_offset), scale_bytes,
-        reinterpret_cast<std::uint32_t*>(bytes + status_offset), tokens, columns, padded};
+    *out = A8G32ActivationWorkspace{reinterpret_cast<std::int8_t*>(bytes),
+                                    code_bytes,
+                                    reinterpret_cast<std::uint16_t*>(bytes + scale_offset),
+                                    scale_bytes,
+                                    reinterpret_cast<std::uint32_t*>(bytes + status_offset),
+                                    tokens,
+                                    columns,
+                                    padded};
     return hipSuccess;
 }
 
@@ -4835,12 +4891,10 @@ hipError_t a8g32_quantize_activation(const A8G32ActivationQuantizeArgs& args,
     std::size_t input_elements = 0, input_bytes = 0;
     if (!checked_mul(args.workspace.tokens, args.workspace.columns, &input_elements) ||
         !checked_mul(input_elements, sizeof(hip_bfloat16), &input_bytes) ||
-        ranges_overlap(args.input, input_bytes, args.workspace.codes,
-                       args.workspace.code_bytes) ||
+        ranges_overlap(args.input, input_bytes, args.workspace.codes, args.workspace.code_bytes) ||
         ranges_overlap(args.input, input_bytes, args.workspace.scales,
                        args.workspace.scale_bytes) ||
-        ranges_overlap(args.input, input_bytes, args.workspace.status,
-                       sizeof(std::uint32_t))) {
+        ranges_overlap(args.input, input_bytes, args.workspace.status, sizeof(std::uint32_t))) {
         return hipErrorInvalidValue;
     }
     hipError_t result = hipMemsetAsync(args.workspace.status, 0, sizeof(std::uint32_t), stream);
@@ -4853,58 +4907,14 @@ hipError_t a8g32_quantize_activation(const A8G32ActivationQuantizeArgs& args,
     return hipGetLastError();
 }
 
-hipError_t a8w8g32_linear_wmma32(const A8W8G32LinearArgs& args,
-                                 hipStream_t stream) noexcept {
+hipError_t a8w8g32_linear_wmma32(const A8W8G32LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_a8w8_linear_args(args)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kWmmaTile - 1U) / kWmmaTile,
                     (args.tokens + kWmmaTile - 1U) / kWmmaTile);
     hipLaunchKernelGGL(a8w8g32_linear_wmma32_kernel, grid, dim3(kWaveSize), 0, stream,
-                       args.activation_codes, args.activation_scales,
-                       args.activation_status, args.weight_codes, args.weight_scales,
-                       args.output, args.tokens, args.rows, args.padded_columns);
-    return hipGetLastError();
-#else
-    (void)stream;
-    return hipErrorNotSupported;
-#endif
-}
-
-hipError_t a8w8g32_linear_prefill_cta(const A8W8G32LinearArgs& args,
-                                      hipStream_t stream) noexcept {
-    if (!valid_a8w8_linear_args(args) || args.tokens <= 128U) {
-        return hipErrorInvalidValue;
-    }
-#if defined(__HIPCC__)
-    const dim3 grid((args.rows + kA8W8PrefillRowTile - 1U) / kA8W8PrefillRowTile,
-                    (args.tokens + kA8W8PrefillTokenTile - 1U) /
-                        kA8W8PrefillTokenTile);
-    hipLaunchKernelGGL(a8w8g32_linear_prefill_cta_kernel, grid,
-                       dim3(kA8W8PrefillThreads), 0, stream, args.activation_codes,
-                       args.activation_scales, args.activation_status, args.weight_codes,
-                       args.weight_scales, args.output, args.tokens, args.rows,
-                       args.columns, args.padded_columns);
-    return hipGetLastError();
-#else
-    (void)stream;
-    return hipErrorNotSupported;
-#endif
-}
-
-hipError_t a8w8g32_linear_prefill_cta_global_inv_qualification(
-    const A8W8G32LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8w8_linear_args(args) || args.tokens <= 128U) {
-        return hipErrorInvalidValue;
-    }
-#if defined(__HIPCC__)
-    const dim3 grid((args.rows + kA8W8PrefillRowTile - 1U) / kA8W8PrefillRowTile,
-                    (args.tokens + kA8W8PrefillTokenTile - 1U) /
-                        kA8W8PrefillTokenTile);
-    hipLaunchKernelGGL(a8w8g32_linear_prefill_cta_global_inv_qualification_kernel,
-                       grid, dim3(kA8W8PrefillThreads), 0, stream,
-                       args.activation_codes, args.activation_scales,
-                       args.activation_status, args.weight_codes, args.weight_scales,
-                       args.output, args.tokens, args.rows, args.columns,
+                       args.activation_codes, args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output, args.tokens, args.rows,
                        args.padded_columns);
     return hipGetLastError();
 #else
@@ -4913,21 +4923,53 @@ hipError_t a8w8g32_linear_prefill_cta_global_inv_qualification(
 #endif
 }
 
-hipError_t a8w8g32_linear_candidate(const A8W8G32CandidateArgs& args,
-                                    hipStream_t stream) noexcept {
+hipError_t a8w8g32_linear_prefill_cta(const A8W8G32LinearArgs& args, hipStream_t stream) noexcept {
+    if (!valid_a8w8_linear_args(args) || args.tokens <= 128U) { return hipErrorInvalidValue; }
+#if defined(__HIPCC__)
+    const dim3 grid((args.rows + kA8W8PrefillRowTile - 1U) / kA8W8PrefillRowTile,
+                    (args.tokens + kA8W8PrefillTokenTile - 1U) / kA8W8PrefillTokenTile);
+    hipLaunchKernelGGL(a8w8g32_linear_prefill_cta_kernel, grid, dim3(kA8W8PrefillThreads), 0,
+                       stream, args.activation_codes, args.activation_scales,
+                       args.activation_status, args.weight_codes, args.weight_scales, args.output,
+                       args.tokens, args.rows, args.columns, args.padded_columns);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t a8w8g32_linear_prefill_cta_global_inv_qualification(const A8W8G32LinearArgs& args,
+                                                               hipStream_t stream) noexcept {
+    if (!valid_a8w8_linear_args(args) || args.tokens <= 128U) { return hipErrorInvalidValue; }
+#if defined(__HIPCC__)
+    const dim3 grid((args.rows + kA8W8PrefillRowTile - 1U) / kA8W8PrefillRowTile,
+                    (args.tokens + kA8W8PrefillTokenTile - 1U) / kA8W8PrefillTokenTile);
+    hipLaunchKernelGGL(a8w8g32_linear_prefill_cta_global_inv_qualification_kernel, grid,
+                       dim3(kA8W8PrefillThreads), 0, stream, args.activation_codes,
+                       args.activation_scales, args.activation_status, args.weight_codes,
+                       args.weight_scales, args.output, args.tokens, args.rows, args.columns,
+                       args.padded_columns);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t a8w8g32_linear_candidate(const A8W8G32CandidateArgs& args, hipStream_t stream) noexcept {
     std::size_t input_elements = 0, input_bytes = 0, output_elements = 0, output_bytes = 0;
-    if (args.input == nullptr ||
-        !checked_mul(args.tokens, args.columns, &input_elements) ||
+    if (args.input == nullptr || !checked_mul(args.tokens, args.columns, &input_elements) ||
         !checked_mul(input_elements, sizeof(hip_bfloat16), &input_bytes) ||
         !checked_mul(args.tokens, args.rows, &output_elements) ||
         !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes) ||
         ranges_overlap(args.input, input_bytes, args.output, output_bytes) ||
         ranges_overlap(args.input, input_bytes, args.weight_codes, args.weight_code_bytes) ||
         ranges_overlap(args.input, input_bytes, args.weight_scales, args.weight_scale_bytes) ||
-        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
-                       args.input, input_bytes) ||
-        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
-                       args.output, output_bytes) ||
+        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes, args.input,
+                       input_bytes) ||
+        ranges_overlap(args.activation_workspace, args.activation_workspace_bytes, args.output,
+                       output_bytes) ||
         ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
                        args.weight_codes, args.weight_code_bytes) ||
         ranges_overlap(args.activation_workspace, args.activation_workspace_bytes,
@@ -4941,11 +4983,20 @@ hipError_t a8w8g32_linear_candidate(const A8W8G32CandidateArgs& args,
         workspace.padded_columns != args.padded_columns) {
         return hipErrorInvalidValue;
     }
-    const A8W8G32LinearArgs linear_args{
-        workspace.codes, workspace.code_bytes, workspace.scales, workspace.scale_bytes,
-        workspace.status, args.weight_codes, args.weight_code_bytes, args.weight_scales,
-        args.weight_scale_bytes, args.output, args.tokens, args.rows, args.columns,
-        args.padded_columns};
+    const A8W8G32LinearArgs linear_args{workspace.codes,
+                                        workspace.code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        args.weight_code_bytes,
+                                        args.weight_scales,
+                                        args.weight_scale_bytes,
+                                        args.output,
+                                        args.tokens,
+                                        args.rows,
+                                        args.columns,
+                                        args.padded_columns};
     if (!valid_a8w8_linear_args(linear_args)) return hipErrorInvalidValue;
     const hipError_t quantized = a8g32_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
@@ -4963,21 +5014,25 @@ hipError_t a8w8g32_kernel_resources(A8W8G32KernelResources* resources) noexcept 
     hipError_t result = hipFuncGetAttributes(
         &quantize, reinterpret_cast<const void*>(a8g32_quantize_activation_kernel));
     if (result != hipSuccess) return result;
-    result = hipFuncGetAttributes(
-        &wmma, reinterpret_cast<const void*>(a8w8g32_linear_wmma32_kernel));
+    result =
+        hipFuncGetAttributes(&wmma, reinterpret_cast<const void*>(a8w8g32_linear_wmma32_kernel));
+    if (result != hipSuccess) return result;
+    result = hipFuncGetAttributes(&prefill_cta,
+                                  reinterpret_cast<const void*>(a8w8g32_linear_prefill_cta_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
-        &prefill_cta, reinterpret_cast<const void*>(a8w8g32_linear_prefill_cta_kernel));
-    if (result != hipSuccess) return result;
-    result = hipFuncGetAttributes(
-        &prefill_cta_global_inv_qualification, reinterpret_cast<const void*>(
-            a8w8g32_linear_prefill_cta_global_inv_qualification_kernel));
+        &prefill_cta_global_inv_qualification,
+        reinterpret_cast<const void*>(a8w8g32_linear_prefill_cta_global_inv_qualification_kernel));
     if (result != hipSuccess) return result;
     *resources = A8W8G32KernelResources{
-        quantize.numRegs, static_cast<int>(quantize.sharedSizeBytes),
-        static_cast<int>(quantize.localSizeBytes), wmma.numRegs,
-        static_cast<int>(wmma.sharedSizeBytes), static_cast<int>(wmma.localSizeBytes),
-        prefill_cta.numRegs, static_cast<int>(prefill_cta.sharedSizeBytes),
+        quantize.numRegs,
+        static_cast<int>(quantize.sharedSizeBytes),
+        static_cast<int>(quantize.localSizeBytes),
+        wmma.numRegs,
+        static_cast<int>(wmma.sharedSizeBytes),
+        static_cast<int>(wmma.localSizeBytes),
+        prefill_cta.numRegs,
+        static_cast<int>(prefill_cta.sharedSizeBytes),
         static_cast<int>(prefill_cta.localSizeBytes),
         prefill_cta_global_inv_qualification.numRegs,
         static_cast<int>(prefill_cta_global_inv_qualification.sharedSizeBytes),
@@ -4998,42 +5053,44 @@ hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept 
     hipError_t result = hipFuncGetAttributes(
         &quantize, reinterpret_cast<const void*>(a8g64_quantize_activation_kernel));
     if (result != hipSuccess) return result;
-    result = hipFuncGetAttributes(
-        &wmma, reinterpret_cast<const void*>(a8q4g64_linear_wmma32_kernel));
+    result =
+        hipFuncGetAttributes(&wmma, reinterpret_cast<const void*>(a8q4g64_linear_wmma32_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
-        &decode_dot8_t1, reinterpret_cast<const void*>(
-            a8q4g64_linear_decode_dot8_t1_kernel));
+        &decode_dot8_t1, reinterpret_cast<const void*>(a8q4g64_linear_decode_dot8_t1_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
-        &prefill_cta,
-        reinterpret_cast<const void*>(a8q4g64_linear_prefill_cta_kernel<false>));
+        &prefill_cta, reinterpret_cast<const void*>(a8q4g64_linear_prefill_cta_kernel<false>));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
-        &prefill_cta_global_inv_qualification, reinterpret_cast<const void*>(
-            a8q4g64_linear_prefill_cta_global_inv_qualification_kernel));
+        &prefill_cta_global_inv_qualification,
+        reinterpret_cast<const void*>(a8q4g64_linear_prefill_cta_global_inv_qualification_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
-        &prefill_cta_m64n64_regression, reinterpret_cast<const void*>(
-            a8q4g64_linear_prefill_cta_m64n64_regression_kernel));
+        &prefill_cta_m64n64_regression,
+        reinterpret_cast<const void*>(a8q4g64_linear_prefill_cta_m64n64_regression_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
-        &prefill_cta_m128n128_qualification, reinterpret_cast<const void*>(
-            a8q4g64_linear_prefill_cta_m128n128_qualification_kernel));
+        &prefill_cta_m128n128_qualification,
+        reinterpret_cast<const void*>(a8q4g64_linear_prefill_cta_m128n128_qualification_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
-        &prefill_cta_m64n128_regression, reinterpret_cast<const void*>(
-            a8q4g64_linear_prefill_cta_m64n128_regression_kernel));
+        &prefill_cta_m64n128_regression,
+        reinterpret_cast<const void*>(a8q4g64_linear_prefill_cta_m64n128_regression_kernel));
     if (result != hipSuccess) return result;
     *resources = A8Q4G64KernelResources{
-        quantize.numRegs, static_cast<int>(quantize.sharedSizeBytes),
-        static_cast<int>(quantize.localSizeBytes), wmma.numRegs,
-        static_cast<int>(wmma.sharedSizeBytes), static_cast<int>(wmma.localSizeBytes),
+        quantize.numRegs,
+        static_cast<int>(quantize.sharedSizeBytes),
+        static_cast<int>(quantize.localSizeBytes),
+        wmma.numRegs,
+        static_cast<int>(wmma.sharedSizeBytes),
+        static_cast<int>(wmma.localSizeBytes),
         decode_dot8_t1.numRegs,
         static_cast<int>(decode_dot8_t1.sharedSizeBytes),
         static_cast<int>(decode_dot8_t1.localSizeBytes),
         decode_dot8_t1.maxThreadsPerBlock,
-        prefill_cta.numRegs, static_cast<int>(prefill_cta.sharedSizeBytes),
+        prefill_cta.numRegs,
+        static_cast<int>(prefill_cta.sharedSizeBytes),
         static_cast<int>(prefill_cta.localSizeBytes),
         prefill_cta_global_inv_qualification.numRegs,
         static_cast<int>(prefill_cta_global_inv_qualification.sharedSizeBytes),
@@ -5054,14 +5111,15 @@ hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept 
 
 hipError_t bf16_linear_baseline(const Bf16LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_qualified_width(args.input, args.output, args.tokens, args.rows, args.columns) ||
-        args.weights == nullptr) return hipErrorInvalidValue;
+        args.weights == nullptr)
+        return hipErrorInvalidValue;
     hipLaunchKernelGGL(bf16_linear_kernel, dim3(args.rows, args.tokens), dim3(kThreads), 0, stream,
                        args.input, args.weights, args.output, args.columns, args.rows);
     return hipGetLastError();
 }
 
 hipError_t w8g32_linear_baseline(const W8G32LinearArgs& args, hipStream_t stream) noexcept {
-    std::size_t expected_codes = 0;
+    std::size_t expected_codes  = 0;
     std::size_t expected_scales = 0;
     if (!valid_qualified_width(args.input, args.output, args.tokens, args.rows, args.columns) ||
         args.codes == nullptr || args.scales == nullptr ||
@@ -5078,16 +5136,17 @@ hipError_t w8g32_linear_baseline(const W8G32LinearArgs& args, hipStream_t stream
 
 hipError_t bf16_linear_wave8(const Bf16LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_decode(args.input, args.output, args.tokens, args.rows, args.columns) ||
-        args.weights == nullptr) return hipErrorInvalidValue;
+        args.weights == nullptr)
+        return hipErrorInvalidValue;
     const dim3 grid(args.rows, (args.tokens + kWavesPerDecodeBlock - 1U) / kWavesPerDecodeBlock);
-    hipLaunchKernelGGL((wave8_linear_kernel<false, kWavesPerDecodeBlock>), grid, dim3(kThreads), 0, stream, args.input,
-                       args.weights, nullptr, args.output, args.columns, args.rows, 0U,
-                       args.tokens);
+    hipLaunchKernelGGL((wave8_linear_kernel<false, kWavesPerDecodeBlock>), grid, dim3(kThreads), 0,
+                       stream, args.input, args.weights, nullptr, args.output, args.columns,
+                       args.rows, 0U, args.tokens);
     return hipGetLastError();
 }
 
 hipError_t w8g32_linear_wave8(const W8G32LinearArgs& args, hipStream_t stream) noexcept {
-    std::size_t expected_codes = 0;
+    std::size_t expected_codes  = 0;
     std::size_t expected_scales = 0;
     if (!valid_decode(args.input, args.output, args.tokens, args.rows, args.columns) ||
         args.codes == nullptr || args.scales == nullptr ||
@@ -5097,17 +5156,17 @@ hipError_t w8g32_linear_wave8(const W8G32LinearArgs& args, hipStream_t stream) n
         return hipErrorInvalidValue;
     }
     const dim3 grid(args.rows, (args.tokens + kWavesPerDecodeBlock - 1U) / kWavesPerDecodeBlock);
-    hipLaunchKernelGGL((wave8_linear_kernel<true, kWavesPerDecodeBlock>), grid, dim3(kThreads), 0, stream, args.input,
-                       args.codes, args.scales, args.output, args.columns, args.rows,
-                       args.padded_columns, args.tokens);
+    hipLaunchKernelGGL((wave8_linear_kernel<true, kWavesPerDecodeBlock>), grid, dim3(kThreads), 0,
+                       stream, args.input, args.codes, args.scales, args.output, args.columns,
+                       args.rows, args.padded_columns, args.tokens);
     return hipGetLastError();
 }
 
 hipError_t bf16_linear_wave16(const Bf16LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_prefill(args.input, args.output, args.tokens, args.rows, args.columns) ||
-        args.weights == nullptr) return hipErrorInvalidValue;
-    const dim3 grid(args.rows,
-                    (args.tokens + kWavesPerPrefillBlock - 1U) / kWavesPerPrefillBlock);
+        args.weights == nullptr)
+        return hipErrorInvalidValue;
+    const dim3 grid(args.rows, (args.tokens + kWavesPerPrefillBlock - 1U) / kWavesPerPrefillBlock);
     hipLaunchKernelGGL((wave8_linear_kernel<false, kWavesPerPrefillBlock>), grid,
                        dim3(kPrefillThreads), 0, stream, args.input, args.weights, nullptr,
                        args.output, args.columns, args.rows, 0U, args.tokens);
@@ -5115,7 +5174,7 @@ hipError_t bf16_linear_wave16(const Bf16LinearArgs& args, hipStream_t stream) no
 }
 
 hipError_t w8g32_linear_wave16(const W8G32LinearArgs& args, hipStream_t stream) noexcept {
-    std::size_t expected_codes = 0;
+    std::size_t expected_codes  = 0;
     std::size_t expected_scales = 0;
     if (!valid_prefill(args.input, args.output, args.tokens, args.rows, args.columns) ||
         args.codes == nullptr || args.scales == nullptr ||
@@ -5124,8 +5183,7 @@ hipError_t w8g32_linear_wave16(const W8G32LinearArgs& args, hipStream_t stream) 
         args.code_bytes != expected_codes || args.scale_bytes != expected_scales) {
         return hipErrorInvalidValue;
     }
-    const dim3 grid(args.rows,
-                    (args.tokens + kWavesPerPrefillBlock - 1U) / kWavesPerPrefillBlock);
+    const dim3 grid(args.rows, (args.tokens + kWavesPerPrefillBlock - 1U) / kWavesPerPrefillBlock);
     hipLaunchKernelGGL((wave8_linear_kernel<true, kWavesPerPrefillBlock>), grid,
                        dim3(kPrefillThreads), 0, stream, args.input, args.codes, args.scales,
                        args.output, args.columns, args.rows, args.padded_columns, args.tokens);
@@ -5134,7 +5192,8 @@ hipError_t w8g32_linear_wave16(const W8G32LinearArgs& args, hipStream_t stream) 
 
 hipError_t bf16_linear_wmma16(const Bf16LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_prefill(args.input, args.output, args.tokens, args.rows, args.columns) ||
-        args.weights == nullptr || args.columns % kWmmaTile != 0U) return hipErrorInvalidValue;
+        args.weights == nullptr || args.columns % kWmmaTile != 0U)
+        return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kWmmaTile - 1U) / kWmmaTile,
                     (args.tokens + kWmmaTile - 1U) / kWmmaTile);
@@ -5159,15 +5218,14 @@ hipError_t bf16_linear(const Bf16LinearArgs& args, hipStream_t stream) noexcept 
     if (args.tokens >= 9U) { return bf16_linear_prefill(args, stream); }
     // Fixed R9700 decode dispatch selected by the standalone real-shape sweep:
     // baseline wins T=1..3; coalesced wave8 reuse wins T=4..8.
-    return args.tokens <= 3U ? bf16_linear_baseline(args, stream)
-                              : bf16_linear_wave8(args, stream);
+    return args.tokens <= 3U ? bf16_linear_baseline(args, stream) : bf16_linear_wave8(args, stream);
 }
 
 hipError_t w8g32_linear(const W8G32LinearArgs& args, hipStream_t stream) noexcept {
     if (args.tokens >= 9U) { return w8g32_linear_prefill(args, stream); }
     // W8's lighter base load shifts the crossover by one decode row.
     return args.tokens <= 4U ? w8g32_linear_baseline(args, stream)
-                              : w8g32_linear_wave8(args, stream);
+                             : w8g32_linear_wave8(args, stream);
 }
 
 hipError_t bf16_linear_prefill(const Bf16LinearArgs& args, hipStream_t stream) noexcept {

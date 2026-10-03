@@ -10,7 +10,8 @@ from tools.r9700.check_gdn_grouped_heads_static import SYMBOL, check
 class GroupedHeadsStaticTest(unittest.TestCase):
     def fixture(self, root: Path) -> Path:
         path = root / "candidate.s"
-        path.write_text(f"""; -- Begin function {SYMBOL}
+        path.write_text(
+            f"""; -- Begin function {SYMBOL}
 {SYMBOL}:
  s_barrier_signal -1
  s_barrier_wait -1
@@ -26,7 +27,9 @@ class GroupedHeadsStaticTest(unittest.TestCase):
 ; ScratchSize: 0
 ; Occupancy: 12
  .max_flat_workgroup_size: 256
-""", encoding="utf-8")
+""",
+            encoding="utf-8",
+        )
         return path
 
     def test_accepts_exact_profile(self) -> None:
@@ -34,9 +37,14 @@ class GroupedHeadsStaticTest(unittest.TestCase):
             self.assertEqual(check(self.fixture(Path(directory)))["vgpr"], 116)
 
     def test_rejects_spill_resource_and_barrier_drift(self) -> None:
-        mutations = (("ScratchSize: 0", "ScratchSize: 4"),
-                     ("Occupancy: 12", "Occupancy: 4"),
-                     (" s_barrier_wait -1\n", "",))
+        mutations = (
+            ("ScratchSize: 0", "ScratchSize: 4"),
+            ("Occupancy: 12", "Occupancy: 4"),
+            (
+                " s_barrier_wait -1\n",
+                "",
+            ),
+        )
         for old, new in mutations:
             with self.subTest(old=old), tempfile.TemporaryDirectory() as directory:
                 path = self.fixture(Path(directory))

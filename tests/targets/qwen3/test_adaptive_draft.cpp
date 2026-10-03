@@ -28,17 +28,17 @@ void expect_near(float got, float want, float tol, std::string_view message) {
     expect(err <= tol, message);
 }
 
-void plant_r(q36::AdaptiveDraftState& state, std::uint32_t live_k,
-             std::initializer_list<float> rs, std::uint32_t n = 256) {
+void plant_r(q36::AdaptiveDraftState& state, std::uint32_t live_k, std::initializer_list<float> rs,
+             std::uint32_t n = 256) {
     q36::seed_adaptive_draft_state(state, live_k);
     state.observed    = n;
     state.rounds_at_k = 32;
     std::uint32_t i   = 0;
     for (float r : rs) {
         if (i >= q36::kAdaptiveMaximumHops) { break; }
-        const float nn   = static_cast<float>(n);
-        state.alpha[i]   = r * nn + 1.0f;
-        state.beta[i]    = (1.0f - r) * nn + 1.0f;
+        const float nn = static_cast<float>(n);
+        state.alpha[i] = r * nn + 1.0f;
+        state.beta[i]  = (1.0f - r) * nn + 1.0f;
         state.r_seen |= static_cast<std::uint8_t>(1U << i);
         ++i;
     }
@@ -75,7 +75,8 @@ void test_capture_set() {
                        std::string_view msg) { expect(got == want, msg); };
     eq(q36::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, false), {5}, "frozen MTP {N}");
     eq(q36::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, true), {3, 4, 5}, "MTP adaptive {3,4,5}");
-    eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 5, true), {3, 4, 5}, "DFlash N=5 {3,4,5}");
+    eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 5, true), {3, 4, 5},
+       "DFlash N=5 {3,4,5}");
     eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 7, true), {3, 4, 5, 6, 7},
        "DFlash N=7 {3..7}");
     eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 4, true), {4}, "DFlash N=4 frozen {4}");
@@ -88,7 +89,8 @@ void test_seed_is_captured_min() {
     const auto mt = q36::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, true);
     expect(q36::adaptive_seed_k(df, SpeculativeBackend::DFlash) == 3,
            "seed fallback is captured.front()");
-    expect(q36::adaptive_seed_k(mt, SpeculativeBackend::Mtp) == 3, "MTP seed is also the smallest k");
+    expect(q36::adaptive_seed_k(mt, SpeculativeBackend::Mtp) == 3,
+           "MTP seed is also the smallest k");
     const std::uint32_t frozen[] = {7};
     expect(q36::adaptive_seed_k(frozen, SpeculativeBackend::DFlash) == 7, "frozen |K|=1 seeds N");
 }
@@ -276,9 +278,7 @@ void test_stationary_late_hop_does_not_force_k5() {
     const std::uint32_t ks[] = {3, 4, 5};
     auto cfg                 = cfg_of(ks, t);
     cfg.switch_seconds       = 0.0f;
-    for (int i = 0; i < 80; ++i) {
-        (void)q36::adaptive_draft_next(cfg, state, 3, 4, 5, 4);
-    }
+    for (int i = 0; i < 80; ++i) { (void)q36::adaptive_draft_next(cfg, state, 3, 4, 5, 4); }
     expect(state.live_k == 4, "stationary hop-3 failures do not inject k=5");
     expect((state.r_seen & 0x10U) == 0, "k=4 rounds never observe r4");
 }
@@ -295,12 +295,12 @@ void test_batch_sum_e_over_t() {
     plant_r(cold, 3, {0.40f, 0.35f, 0.36f});
     const q36::AdaptiveDraftState* mid[] = {&hot, &cold};
     const std::uint32_t rows[]           = {5, 5};
-    const std::uint32_t picked =
-        q36::adaptive_select_batch_k(mid, rows, captured, &t, 512, 0);
+    const std::uint32_t picked = q36::adaptive_select_batch_k(mid, rows, captured, &t, 512, 0);
     float best_s               = -1.0f;
     std::uint32_t want         = 3;
     for (std::uint32_t k : {3U, 4U, 5U}) {
-        const float e  = q36::detail::expected_tokens(hot, k) + q36::detail::expected_tokens(cold, k);
+        const float e =
+            q36::detail::expected_tokens(hot, k) + q36::detail::expected_tokens(cold, k);
         const float tk = q36::adaptive_t_hat(t, k, 512);
         const float sc = e / tk;
         if (sc > best_s) {
@@ -321,13 +321,12 @@ void test_batch_row_budget_clips_expected_tokens() {
     plant_r(hot, 5, {0.90f, 0.94f, 0.88f, 0.88f, 0.76f});
     const q36::AdaptiveDraftState* mid[] = {&hot, &hot};
     const std::uint32_t rows[]           = {5, 3};
-    const std::uint32_t picked =
-        q36::adaptive_select_batch_k(mid, rows, captured, &t, 512, 0);
+    const std::uint32_t picked = q36::adaptive_select_batch_k(mid, rows, captured, &t, 512, 0);
     float best_s               = -1.0f;
     std::uint32_t want         = 3;
     for (std::uint32_t k : {3U, 4U, 5U}) {
-        const float e = q36::detail::expected_tokens(hot, std::min(k, 5U)) +
-                        q36::detail::expected_tokens(hot, std::min(k, 3U));
+        const float e  = q36::detail::expected_tokens(hot, std::min(k, 5U)) +
+                         q36::detail::expected_tokens(hot, std::min(k, 3U));
         const float sc = e / q36::adaptive_t_hat(t, k, 512);
         if (sc > best_s) {
             best_s = sc;
@@ -350,8 +349,7 @@ void test_batch_next_writes_executed_k() {
     const q36::AdaptiveDraftState* mid[] = {&a, &b};
     const std::uint32_t rows[]           = {5, 5};
     q36::AdaptiveBatchKState batch;
-    const std::uint32_t k =
-        q36::adaptive_batch_next(batch, mid, rows, captured, &t, 512);
+    const std::uint32_t k = q36::adaptive_batch_next(batch, mid, rows, captured, &t, 512);
     expect(k == 4 && batch.live_k == 4, "batch live_k is the executed argmax, not a per-row pick");
     q36::AdaptiveDraftState* mut[] = {&a, &b};
     q36::adaptive_assign_live_k(mut, k);
@@ -376,8 +374,8 @@ void test_dflash_physical_tail_route() {
     plant_r(a, 5, {0.9f, 0.8f, 0.7f, 0.6f, 0.5f});
     plant_r(b, 5, {0.9f, 0.8f, 0.7f, 0.6f, 0.5f});
     const q36::AdaptiveDraftState* states[] = {&a, &b};
-    const std::uint32_t ks[] = {3, 4, 5};
-    const std::uint32_t extents[] = {3, 0};
+    const std::uint32_t ks[]                = {3, 4, 5};
+    const std::uint32_t extents[]           = {3, 0};
     q36::AdaptiveRoundTimeState t;
     plant_t(t, 3, 0.080f);
     plant_t(t, 4, 0.040f);
@@ -412,7 +410,7 @@ void test_dflash_physical_tail_route() {
     expect(q36::adaptive_dflash_physical_k(cfg, states, zeros, 5, 4) == 3,
            "target-only batch selects measured cost with guaranteed clipped yield");
     const std::uint32_t fixed[] = {4};
-    cfg.captured_ks = fixed;
+    cfg.captured_ks             = fixed;
     expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 5, 4) == 4,
            "K4-only capture inventory cannot acquire other physical widths");
 }
@@ -431,9 +429,8 @@ void test_dflash_extrapolates_deepest_observed_r() {
     plant_r(state, 3, {0.80f, 0.625f, 0.60f});
     const float y3 = q36::detail::expected_tokens(state, 3);
     const float q2 = 0.80f * 0.625f * 0.60f;
-    expect_near(q36::detail::expected_tokens_extrapolated(state, 5),
-                y3 + q2 * 0.60f + q2 * 0.36f, 0.02f,
-                "unseen r3,r4 continue the deepest observed r2");
+    expect_near(q36::detail::expected_tokens_extrapolated(state, 5), y3 + q2 * 0.60f + q2 * 0.36f,
+                0.02f, "unseen r3,r4 continue the deepest observed r2");
     expect_near(q36::detail::expected_tokens_extrapolated(state, 3), y3, 1e-6f,
                 "identified hops are unchanged");
     q36::AdaptiveDraftState cold;
@@ -447,8 +444,8 @@ void test_dflash_shallow_start_reaches_deep_k_when_t_is_flat() {
     q36::AdaptiveDraftState state;
     plant_r(state, 4, {0.85f, 0.80f, 0.78f, 0.75f});
     const q36::AdaptiveDraftState* states[] = {&state};
-    const std::uint32_t ks[] = {3, 4, 5, 6, 7};
-    const std::uint32_t extents[] = {7};
+    const std::uint32_t ks[]                = {3, 4, 5, 6, 7};
+    const std::uint32_t extents[]           = {7};
     q36::AdaptiveRoundTimeState flat;
     for (std::uint32_t k = 3; k <= 7; ++k) plant_t(flat, k, 0.0310f + 0.0001f * k);
     auto cfg = cfg_of(ks, flat, 512, 0.001f);
@@ -461,7 +458,7 @@ void test_dflash_shallow_start_reaches_deep_k_when_t_is_flat() {
     expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 8, 3) == 3,
            "a T cliff above K3 keeps K3");
     const std::uint32_t k5[] = {3, 4, 5};
-    auto mtp_like = cfg_of(k5, flat, 512, 0.001f);
+    auto mtp_like            = cfg_of(k5, flat, 512, 0.001f);
     expect(pick(mtp_like, state, 5, 4) == 4,
            "without continuation (MTP) the unseen hop earns no credit");
 }
@@ -470,8 +467,8 @@ void test_dflash_rejecting_hop_gives_little_deep_credit() {
     q36::AdaptiveDraftState state;
     plant_r(state, 4, {0.90f, 0.85f, 0.80f, 0.05f});
     const q36::AdaptiveDraftState* states[] = {&state};
-    const std::uint32_t ks[] = {3, 4, 5, 6, 7};
-    const std::uint32_t extents[] = {7};
+    const std::uint32_t ks[]                = {3, 4, 5, 6, 7};
+    const std::uint32_t extents[]           = {7};
     q36::AdaptiveRoundTimeState t;
     for (std::uint32_t k = 3; k <= 7; ++k) plant_t(t, k, 0.030f + 0.0005f * k);
     auto cfg = cfg_of(ks, t, 512, 0.001f);
@@ -483,16 +480,16 @@ void test_dflash_rejecting_hop_gives_little_deep_credit() {
 // policy picks the physical K, and the round is recorded as the engine does.
 std::uint32_t dflash_closed_loop_deep_rounds(float p, const q36::AdaptiveRoundTimeState& t,
                                              std::uint32_t deep_k, std::uint64_t seed) {
-    const std::uint32_t ks[] = {3, 4, 5, 6, 7};
+    const std::uint32_t ks[]      = {3, 4, 5, 6, 7};
     const std::uint32_t extents[] = {7};
-    auto cfg = cfg_of(ks, t, 512, 0.001f);
+    auto cfg                      = cfg_of(ks, t, 512, 0.001f);
     q36::AdaptiveDraftState state;
     q36::seed_adaptive_draft_state(state, 0);
     const q36::AdaptiveDraftState* states[] = {&state};
     std::uint32_t live = 0, deep = 0;
     for (int round = 0; round < 300; ++round) {
-        live = q36::adaptive_dflash_physical_k(cfg, states, extents, 8, live);
-        state.live_k = live;
+        live                   = q36::adaptive_dflash_physical_k(cfg, states, extents, 8, live);
+        state.live_k           = live;
         std::uint32_t accepted = 0;
         while (accepted < live) {
             seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;

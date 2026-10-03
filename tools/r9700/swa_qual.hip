@@ -17,10 +17,10 @@
 
 namespace {
 
-constexpr int kD = 128;
-constexpr int kQHeads = 32;
+constexpr int kD       = 128;
+constexpr int kQHeads  = 32;
 constexpr int kKvHeads = 8;
-constexpr int kGroup = 4;
+constexpr int kGroup   = 4;
 constexpr float kScale = 0.08838834764831844055F;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
@@ -33,45 +33,51 @@ ninfer::DeviceBuffer upload(const std::vector<T>& host) {
 }
 
 std::size_t q_index(int d, int head, int token, int batch, int tokens) {
-    return static_cast<std::size_t>(d) + static_cast<std::size_t>(kD) *
-        (static_cast<std::size_t>(head) + static_cast<std::size_t>(kQHeads) *
-         (static_cast<std::size_t>(token) + static_cast<std::size_t>(tokens) * batch));
+    return static_cast<std::size_t>(d) +
+           static_cast<std::size_t>(kD) *
+               (static_cast<std::size_t>(head) +
+                static_cast<std::size_t>(kQHeads) *
+                    (static_cast<std::size_t>(token) + static_cast<std::size_t>(tokens) * batch));
 }
 
 std::size_t query_kv_index(int d, int head, int token, int batch, int tokens) {
-    return static_cast<std::size_t>(d) + static_cast<std::size_t>(kD) *
-        (static_cast<std::size_t>(head) + static_cast<std::size_t>(kKvHeads) *
-         (static_cast<std::size_t>(token) + static_cast<std::size_t>(tokens) * batch));
+    return static_cast<std::size_t>(d) +
+           static_cast<std::size_t>(kD) *
+               (static_cast<std::size_t>(head) +
+                static_cast<std::size_t>(kKvHeads) *
+                    (static_cast<std::size_t>(token) + static_cast<std::size_t>(tokens) * batch));
 }
 
 std::size_t context_index(int d, int slot, int head, int lane, int padded) {
-    return static_cast<std::size_t>(d) + static_cast<std::size_t>(kD) *
-        (static_cast<std::size_t>(slot) + static_cast<std::size_t>(padded) *
-         (static_cast<std::size_t>(head) + static_cast<std::size_t>(kKvHeads) * lane));
+    return static_cast<std::size_t>(d) +
+           static_cast<std::size_t>(kD) *
+               (static_cast<std::size_t>(slot) +
+                static_cast<std::size_t>(padded) *
+                    (static_cast<std::size_t>(head) + static_cast<std::size_t>(kKvHeads) * lane));
 }
 
 hip_bfloat16 pattern(std::size_t index, float phase, float amplitude) {
-    return hip_bfloat16(amplitude * std::sin(static_cast<float>(index % 131071U) * 0.0137F + phase));
+    return hip_bfloat16(amplitude *
+                        std::sin(static_cast<float>(index % 131071U) * 0.0137F + phase));
 }
 
 struct Result {
-    double max_abs = 0.0;
+    double max_abs     = 0.0;
     double relative_l2 = 0.0;
     float milliseconds = 0.0F;
 };
 
 Result run_case(ninfer::DeviceContext& device, int window, int tokens,
-                const std::vector<std::int32_t>& lengths,
-                const std::vector<std::int32_t>& valid,
+                const std::vector<std::int32_t>& lengths, const std::vector<std::int32_t>& valid,
                 const std::vector<std::int32_t>& lanes,
                 ninfer::ops::SwaContextExecutionEnvelope envelope) {
     const int batch = static_cast<int>(lengths.size());
     if (batch != static_cast<int>(valid.size()) || batch != static_cast<int>(lanes.size())) {
         fail("SWA qualifier batch vectors disagree");
     }
-    const int lane_capacity = *std::max_element(lanes.begin(), lanes.end()) + 1;
-    const int padded = window;
-    const std::size_t q_elements = static_cast<std::size_t>(kD) * kQHeads * tokens * batch;
+    const int lane_capacity          = *std::max_element(lanes.begin(), lanes.end()) + 1;
+    const int padded                 = window;
+    const std::size_t q_elements     = static_cast<std::size_t>(kD) * kQHeads * tokens * batch;
     const std::size_t query_elements = static_cast<std::size_t>(kD) * kKvHeads * tokens * batch;
     const std::size_t context_elements =
         static_cast<std::size_t>(kD) * padded * kKvHeads * lane_capacity;
@@ -101,23 +107,23 @@ Result run_case(ninfer::DeviceContext& device, int window, int tokens,
     std::vector<double> scores(static_cast<std::size_t>(window - 1 + tokens));
     for (int b = 0; b < batch; ++b) {
         for (int token = 0; token < valid[b]; ++token) {
-            const int query_position = positions[static_cast<std::size_t>(token) +
-                                                 static_cast<std::size_t>(tokens) * b];
+            const int query_position =
+                positions[static_cast<std::size_t>(token) + static_cast<std::size_t>(tokens) * b];
             const int context_begin = std::max(0, query_position - (window - 1));
             const int context_count = lengths[b] - context_begin;
-            const int key_count = context_count + valid[b];
+            const int key_count     = context_count + valid[b];
             for (int q_head = 0; q_head < kQHeads; ++q_head) {
                 const int kv_head = q_head / kGroup;
-                double maximum = -std::numeric_limits<double>::infinity();
+                double maximum    = -std::numeric_limits<double>::infinity();
                 for (int key = 0; key < key_count; ++key) {
                     double dot = 0.0;
                     for (int d = 0; d < kD; ++d) {
-                        const double q_value = static_cast<float>(q[q_index(
-                            d, q_head, token, b, tokens)]);
+                        const double q_value =
+                            static_cast<float>(q[q_index(d, q_head, token, b, tokens)]);
                         double k_value;
                         if (key < context_count) {
                             const int position = context_begin + key;
-                            k_value = static_cast<float>(context_k[context_index(
+                            k_value            = static_cast<float>(context_k[context_index(
                                 d, position & (window - 1), kv_head, lanes[b], padded)]);
                         } else {
                             k_value = static_cast<float>(query_k[query_kv_index(
@@ -140,14 +146,14 @@ Result run_case(ninfer::DeviceContext& device, int window, int tokens,
                         double value;
                         if (key < context_count) {
                             const int position = context_begin + key;
-                            value = static_cast<float>(context_v[context_index(
+                            value              = static_cast<float>(context_v[context_index(
                                 d, position & (window - 1), kv_head, lanes[b], padded)]);
                         } else {
                             value = static_cast<float>(query_v[query_kv_index(
                                 d, kv_head, key - context_count, b, tokens)]);
                         }
-                        numerator = std::fma(scores[static_cast<std::size_t>(key)], value,
-                                             numerator);
+                        numerator =
+                            std::fma(scores[static_cast<std::size_t>(key)], value, numerator);
                     }
                     expected[q_index(d, q_head, token, b, tokens)] = numerator / denominator;
                 }
@@ -155,18 +161,17 @@ Result run_case(ninfer::DeviceContext& device, int window, int tokens,
         }
     }
 
-    auto d_q = upload(q);
-    auto d_query_k = upload(query_k);
-    auto d_query_v = upload(query_v);
+    auto d_q         = upload(q);
+    auto d_query_k   = upload(query_k);
+    auto d_query_v   = upload(query_v);
     auto d_context_k = upload(context_k);
     auto d_context_v = upload(context_v);
     auto d_positions = upload(positions);
-    auto d_valid = upload(valid);
-    auto d_lanes = upload(lanes);
+    auto d_valid     = upload(valid);
+    auto d_lanes     = upload(lanes);
     ninfer::DeviceBuffer d_output(q_elements * sizeof(hip_bfloat16));
     d_output.fill(0x7f);
-    ninfer::Tensor q_tensor(d_q.data(), ninfer::DType::BF16,
-                            {kD, kQHeads, tokens, batch});
+    ninfer::Tensor q_tensor(d_q.data(), ninfer::DType::BF16, {kD, kQHeads, tokens, batch});
     ninfer::Tensor query_k_tensor(d_query_k.data(), ninfer::DType::BF16,
                                   {kD, kKvHeads, tokens, batch});
     ninfer::Tensor query_v_tensor(d_query_v.data(), ninfer::DType::BF16,
@@ -177,15 +182,15 @@ Result run_case(ninfer::DeviceContext& device, int window, int tokens,
     ninfer::Tensor output_tensor(d_output.data(), ninfer::DType::BF16,
                                  {kD, kQHeads, tokens, batch});
     const ninfer::CyclicKVCacheLayerView context{
-        .k = ninfer::Tensor(d_context_k.data(), ninfer::DType::BF16,
-                            {kD, padded, kKvHeads, lane_capacity}),
-        .v = ninfer::Tensor(d_context_v.data(), ninfer::DType::BF16,
-                            {kD, padded, kKvHeads, lane_capacity}),
-        .capacity = static_cast<std::uint32_t>(window),
+        .k               = ninfer::Tensor(d_context_k.data(), ninfer::DType::BF16,
+                                          {kD, padded, kKvHeads, lane_capacity}),
+        .v               = ninfer::Tensor(d_context_v.data(), ninfer::DType::BF16,
+                                          {kD, padded, kKvHeads, lane_capacity}),
+        .capacity        = static_cast<std::uint32_t>(window),
         .padded_capacity = static_cast<std::uint32_t>(padded),
-        .num_kv_heads = kKvHeads,
-        .head_dim = kD,
-        .lane_capacity = lane_capacity,
+        .num_kv_heads    = kKvHeads,
+        .head_dim        = kD,
+        .lane_capacity   = lane_capacity,
     };
     const std::size_t workspace_bytes =
         ninfer::ops::swa_workspace_capacity_bytes(envelope, tokens, tokens, batch);
@@ -199,13 +204,13 @@ Result run_case(ninfer::DeviceContext& device, int window, int tokens,
     }
     std::vector<hip_bfloat16> actual(q_elements);
     d_output.copy_to_host(actual.data(), d_output.size());
-    double squared_error = 0.0;
+    double squared_error     = 0.0;
     double squared_reference = 0.0;
     Result result;
     for (std::size_t index = 0; index < actual.size(); ++index) {
-        const double got = static_cast<float>(actual[index]);
+        const double got   = static_cast<float>(actual[index]);
         const double error = got - expected[index];
-        result.max_abs = std::max(result.max_abs, std::abs(error));
+        result.max_abs     = std::max(result.max_abs, std::abs(error));
         squared_error += error * error;
         squared_reference += expected[index] * expected[index];
         if (std::abs(error) > 0.0045 + 0.004 * std::abs(expected[index])) {
@@ -244,29 +249,30 @@ int main() {
                 fail("SWA interval workspace capacity missed an admitted width");
             }
         }
-        const Result w4096 = run_case(device, 4096, 3, {4098, 65}, {3, 2}, {1, 0}, {0, 8194});
-        const Result w2048 = run_case(device, 2048, 1, {2048}, {1}, {0}, {0, 2048});
+        const Result w4096    = run_case(device, 4096, 3, {4098, 65}, {3, 2}, {1, 0}, {0, 8194});
+        const Result w2048    = run_case(device, 2048, 1, {2048}, {1}, {0}, {0, 2048});
         const Result w2048_b2 = run_case(device, 2048, 3, {2048, 65}, {3, 2}, {1, 0}, {0, 2048});
-        const Result direct = run_case(device, 2048, 2, {65}, {2}, {0}, {0, 96});
-        const Result saturated = run_case(device, 2048, 16, {65, 64, 63, 62},
-                                          {16, 12, 8, 4}, {3, 1, 2, 0}, {0, 2048});
+        const Result direct   = run_case(device, 2048, 2, {65}, {2}, {0}, {0, 96});
+        const Result saturated =
+            run_case(device, 2048, 16, {65, 64, 63, 62}, {16, 12, 8, 4}, {3, 1, 2, 0}, {0, 2048});
         // Production C1 K5 drafter block: six columns over a full 4096-token window.
         const Result production = run_case(device, 4096, 6, {8190}, {6}, {0}, {0, 8194});
         // Production C8 K7/K6 drafter blocks: eight lanes of eight (seven) columns over full
         // 4096-token windows, lanes permuted.
-        const Result c8_k7 = run_case(device, 4096, 8, {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000},
-                                      {8, 8, 8, 8, 8, 8, 8, 8}, {7, 0, 6, 1, 5, 2, 4, 3}, {0, 9000});
-        const Result c8_k6 = run_case(device, 4096, 7, {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000},
-                                      {7, 7, 7, 7, 7, 7, 7, 7}, {7, 0, 6, 1, 5, 2, 4, 3}, {0, 9000});
+        const Result c8_k7 =
+            run_case(device, 4096, 8, {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000},
+                     {8, 8, 8, 8, 8, 8, 8, 8}, {7, 0, 6, 1, 5, 2, 4, 3}, {0, 9000});
+        const Result c8_k6 =
+            run_case(device, 4096, 7, {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000},
+                     {7, 7, 7, 7, 7, 7, 7, 7}, {7, 0, 6, 1, 5, 2, 4, 3}, {0, 9000});
         std::cout << "swa: PASS gfx1201 wave32 D128/Hq32/Hkv8 W4096 T3/B2 mixed-tail "
                      "W2048 T1 max_abs="
                   << std::max({w4096.max_abs, w2048.max_abs, w2048_b2.max_abs, direct.max_abs,
-                               saturated.max_abs, production.max_abs, c8_k7.max_abs,
-                               c8_k6.max_abs})
-                  << " rel_l2=" << std::max({w4096.relative_l2, w2048.relative_l2,
-                                              w2048_b2.relative_l2, direct.relative_l2,
-                                              saturated.relative_l2, production.relative_l2,
-                                              c8_k7.relative_l2, c8_k6.relative_l2})
+                               saturated.max_abs, production.max_abs, c8_k7.max_abs, c8_k6.max_abs})
+                  << " rel_l2="
+                  << std::max({w4096.relative_l2, w2048.relative_l2, w2048_b2.relative_l2,
+                               direct.relative_l2, saturated.relative_l2, production.relative_l2,
+                               c8_k7.relative_l2, c8_k6.relative_l2})
                   << " ms4096=" << w4096.milliseconds << " ms2048=" << w2048.milliseconds
                   << " ms2048_t3b2=" << w2048_b2.milliseconds
                   << " ms2048_t16b4=" << saturated.milliseconds

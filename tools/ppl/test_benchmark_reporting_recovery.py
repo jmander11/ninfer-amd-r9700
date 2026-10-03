@@ -1,4 +1,5 @@
 """CPU integration checks for retained capacity and fresh reporting identities."""
+
 import copy
 import importlib.util
 import json
@@ -21,42 +22,68 @@ class ReportingBridgeTest(unittest.TestCase):
         self.frozen = {"files": {}}
         self.resource = {"hybrid_builds": []}
         self.bridge = {
-            "artifact_type": "ninfer_r9700_benchmark_reporting_recovery", "schema_version": 1,
+            "artifact_type": "ninfer_r9700_benchmark_reporting_recovery",
+            "schema_version": 1,
             "scope": reporting.SCOPE,
             "preserves": ["numerical_quality", "selected_prefill_chunk", "capacity"],
-            "reuses_concurrent_prefill_metrics": False, "profiles": [],
+            "reuses_concurrent_prefill_metrics": False,
+            "profiles": [],
         }
         for group in (16, 32):
             for attention in ("dense", "b128-s16-tau900"):
                 row = {"kv_value_group": group, "xattention_profile": attention}
                 for label in ("old_nonhybrid", "old_hybrid", "new"):
                     build = self.root / f"{label}-{group}-{attention}"
-                    row[label + "_benchmark"] = self.write(build / "bench/ninfer_bench", label, executable=True)
-                    row[label + "_planner"] = self.write(build / "src/ninfer_r9700_runtime_planner_qual",
-                                                          label + "planner", executable=True)
+                    row[label + "_benchmark"] = self.write(
+                        build / "bench/ninfer_bench", label, executable=True
+                    )
+                    row[label + "_planner"] = self.write(
+                        build / "src/ninfer_r9700_runtime_planner_qual",
+                        label + "planner",
+                        executable=True,
+                    )
                     field = "build_cache" if label == "new" else label + "_build_cache"
-                    row[field] = self.write(build / "CMakeCache.txt",
+                    row[field] = self.write(
+                        build / "CMakeCache.txt",
                         f"NINFER_R9700_KV_VALUE_GROUP:STRING={group}\n"
-                        f"NINFER_R9700_XATTENTION_PROFILE:STRING={attention}\n")
+                        f"NINFER_R9700_XATTENTION_PROFILE:STRING={attention}\n",
+                    )
                     if label == "old_nonhybrid":
-                        for item in (row[label + "_benchmark"], row[label + "_planner"], row[field]):
-                            self.frozen["files"][str(Path(item["path"]).relative_to(reporting.REPO))] = item["sha256"]
-                row["host_planner_check"] = self.write(self.root / f"check-{group}-{attention}.json", {
-                    "command": [row["new_planner"]["path"], "--host-split512-routing"], "exit_code": 0,
-                    "stdout": self.write(self.root / f"stdout-{group}-{attention}", "PASS\n"),
-                    "stderr": self.write(self.root / f"stderr-{group}-{attention}", ""),
-                })
+                        for item in (
+                            row[label + "_benchmark"],
+                            row[label + "_planner"],
+                            row[field],
+                        ):
+                            self.frozen["files"][
+                                str(Path(item["path"]).relative_to(reporting.REPO))
+                            ] = item["sha256"]
+                row["host_planner_check"] = self.write(
+                    self.root / f"check-{group}-{attention}.json",
+                    {
+                        "command": [row["new_planner"]["path"], "--host-split512-routing"],
+                        "exit_code": 0,
+                        "stdout": self.write(self.root / f"stdout-{group}-{attention}", "PASS\n"),
+                        "stderr": self.write(self.root / f"stderr-{group}-{attention}", ""),
+                    },
+                )
                 self.bridge["profiles"].append(row)
-                hybrid = {"weights_id": fp8.HYBRID, "kv_value_group": group,
-                          "xattention_profile": attention,
-                          "new_benchmark": row["old_hybrid_benchmark"],
-                          "new_planner": row["old_hybrid_planner"],
-                          "build_cache": row["old_hybrid_build_cache"]}
+                hybrid = {
+                    "weights_id": fp8.HYBRID,
+                    "kv_value_group": group,
+                    "xattention_profile": attention,
+                    "new_benchmark": row["old_hybrid_benchmark"],
+                    "new_planner": row["old_hybrid_planner"],
+                    "build_cache": row["old_hybrid_build_cache"],
+                }
                 for recipe in ("allq4", "mixed", fp8.HYBRID):
                     old = row["old_nonhybrid_benchmark"]
-                    source = {"weights_id": recipe, "kv_value_group": group,
-                              "xattention_profile": attention,
-                              "artifact": {"weights_id": recipe}, "benchmark_executable": old}
+                    source = {
+                        "weights_id": recipe,
+                        "kv_value_group": group,
+                        "xattention_profile": attention,
+                        "artifact": {"weights_id": recipe},
+                        "benchmark_executable": old,
+                    }
                     self.sources.append(source)
                     if recipe == fp8.HYBRID:
                         hybrid["old_benchmark"] = old
@@ -64,12 +91,20 @@ class ReportingBridgeTest(unittest.TestCase):
         self.chunk = {"selected_prefill_chunk": 2048, "sources": self.sources}
         self.resource["chunk_selection"] = self.write(self.root / "chunk.json", self.chunk)
         self.resource["frozen_panel_inputs"] = self.write(self.root / "frozen.json", self.frozen)
-        self.resource["source_review"] = self.write(self.root / "model-review.json", {"status": "unchanged_arithmetic"})
-        self.bridge["fp8_context_resource_recovery"] = self.write(self.root / "resource.json", self.resource)
+        self.resource["source_review"] = self.write(
+            self.root / "model-review.json", {"status": "unchanged_arithmetic"}
+        )
+        self.bridge["fp8_context_resource_recovery"] = self.write(
+            self.root / "resource.json", self.resource
+        )
         self.review = {
-            "artifact_type": "ninfer_r9700_benchmark_reporting_source_review", "schema_version": 1,
-            "status": "reporting_only", "scope": reporting.SCOPE,
-            "model_runtime_changed": False, "arithmetic_changed": False, "kernel_or_recipe_changed": False,
+            "artifact_type": "ninfer_r9700_benchmark_reporting_source_review",
+            "schema_version": 1,
+            "status": "reporting_only",
+            "scope": reporting.SCOPE,
+            "model_runtime_changed": False,
+            "arithmetic_changed": False,
+            "kernel_or_recipe_changed": False,
             "base_source_review": self.resource["source_review"],
             "sources": [fp8.identity(reporting.REPO / path) for path in reporting.SOURCE_FILES],
         }
@@ -88,19 +123,33 @@ class ReportingBridgeTest(unittest.TestCase):
     def provenance(self):
         result = []
         for index, original in enumerate(self.sources):
-            row = reporting.mapping(self.bridge, original["kv_value_group"], original["xattention_profile"])
-            source = {"artifact": original["artifact"], "cache_value_group": original["kv_value_group"],
-                      "benchmark_executable": row["new_benchmark"],
-                      "quality": {"representation": {"xattention_profile": original["xattention_profile"]}},
-                      "matrices": {}}
+            row = reporting.mapping(
+                self.bridge, original["kv_value_group"], original["xattention_profile"]
+            )
+            source = {
+                "artifact": original["artifact"],
+                "cache_value_group": original["kv_value_group"],
+                "benchmark_executable": row["new_benchmark"],
+                "quality": {
+                    "representation": {"xattention_profile": original["xattention_profile"]}
+                },
+                "matrices": {},
+            }
             for preset in ("pareto-capacity", "pareto-whole"):
-                manifest = {"artifact": source["artifact"],
-                            "bench": reporting.expected_benchmark(source, preset, self.bridge)}
+                manifest = {
+                    "artifact": source["artifact"],
+                    "bench": reporting.expected_benchmark(source, preset, self.bridge),
+                }
                 if original["weights_id"] == fp8.HYBRID:
-                    manifest["hybrid_shared_workspace_authority"] = {"tool": row[
-                        "new_planner" if preset == "pareto-whole" else "old_hybrid_planner"]}
-                source["matrices"][preset] = {**self.write(self.root / f"matrix-{index}-{preset}.json", manifest),
-                                               "reports": []}
+                    manifest["hybrid_shared_workspace_authority"] = {
+                        "tool": row[
+                            "new_planner" if preset == "pareto-whole" else "old_hybrid_planner"
+                        ]
+                    }
+                source["matrices"][preset] = {
+                    **self.write(self.root / f"matrix-{index}-{preset}.json", manifest),
+                    "reports": [],
+                }
             result.append(source)
         return result
 
@@ -124,51 +173,95 @@ class ReportingBridgeTest(unittest.TestCase):
 
     def test_selected_resolver_and_dflash_use_fresh_whole_planner(self):
         from tools.bench import assemble_dflash_selection as dflash
+
         source = self.provenance()[2]  # G16/dense hybrid.
         row = self.bridge["profiles"][0]
         artifact = self.write(self.root / "model.ninfer", "artifact", executable=True)
         artifact["weights_id"] = fp8.HYBRID
-        source.update({"candidate": "winner", "artifact": artifact,
-                       "fp8_context_resource_recovery": self.bridge["fp8_context_resource_recovery"],
-                       "benchmark_reporting_recovery": self.write(self.root / "bridge.json", self.bridge)})
+        source.update(
+            {
+                "candidate": "winner",
+                "artifact": artifact,
+                "fp8_context_resource_recovery": self.bridge["fp8_context_resource_recovery"],
+                "benchmark_reporting_recovery": self.write(self.root / "bridge.json", self.bridge),
+            }
+        )
         cache = {"value_group": 16}
         execution = {"xattention_profile": "dense"}
         for preset, binding in source["matrices"].items():
             path = Path(binding["path"])
             manifest = json.loads(path.read_text())
-            manifest.update({"artifact_type": "ninfer_bench_matrix_run", "schema_version": 14,
-                             "preset": preset, "artifact": artifact, "concurrency": [1, 2, 3, 4],
-                             "selected_prefill_chunk": 2048, "expected_kv_value_group": 16,
-                             "expected_xattention_profile": "dense",
-                             "required_candidate_identity": "fp8-hybrid-selection-authority"})
+            manifest.update(
+                {
+                    "artifact_type": "ninfer_bench_matrix_run",
+                    "schema_version": 14,
+                    "preset": preset,
+                    "artifact": artifact,
+                    "concurrency": [1, 2, 3, 4],
+                    "selected_prefill_chunk": 2048,
+                    "expected_kv_value_group": 16,
+                    "expected_xattention_profile": "dense",
+                    "required_candidate_identity": "fp8-hybrid-selection-authority",
+                }
+            )
             source["matrices"][preset] = self.write(path, manifest)
-        terminal = {"winner": "winner", "winner_artifact": artifact,
-                    "winner_cache_profile": cache, "winner_execution_profile": execution}
-        candidate = {"name": "winner", "weight_recipe": artifact,
-                     "cache_profile": cache, "execution_profile": execution}
-        base = {"terminal_production_selection": terminal, "source_provenance": [source],
-                "candidates": [candidate], "selected_prefill_chunk": 2048}
+        terminal = {
+            "winner": "winner",
+            "winner_artifact": artifact,
+            "winner_cache_profile": cache,
+            "winner_execution_profile": execution,
+        }
+        candidate = {
+            "name": "winner",
+            "weight_recipe": artifact,
+            "cache_profile": cache,
+            "execution_profile": execution,
+        }
+        base = {
+            "terminal_production_selection": terminal,
+            "source_provenance": [source],
+            "candidates": [candidate],
+            "selected_prefill_chunk": 2048,
+        }
         path = Path(self.write(self.root / "selection.json", base)["path"])
         build = Path(row["new_benchmark"]["path"]).parent.parent
         self.write(build / "CTestTestfile.cmake", "# fixture\n")
-        spec = importlib.util.spec_from_file_location("reporting_route_test", reporting.REPO /
-            "profiles/bench/post-terminal-focused-verification-20260905/resolve.py")
+        spec = importlib.util.spec_from_file_location(
+            "reporting_route_test",
+            reporting.REPO
+            / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py",
+        )
         resolver = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(resolver)
-        with patch.object(resolver, "load_payload", return_value=base), \
-                patch.object(resolver, "validate_terminal_production_authority", return_value=(terminal, candidate)), \
-                patch.object(resolver, "inspect_artifact", return_value=artifact), \
-                patch.object(resolver, "bind_n16_migration_receipt", return_value=artifact), \
-                patch.object(resolver, "require_fp8_hybrid_artifact", return_value=artifact), \
-                patch.object(resolver, "inspect_executable", side_effect=fp8.executable_identity), \
-                patch.object(resolver, "validate_build_profile"), \
-                patch.object(resolver, "validate_hybrid_shared_workspace_authority", side_effect=lambda value, _: value), \
-                patch.object(dflash, "validate_hybrid_shared_workspace_authority", side_effect=lambda value, _: value):
+        with (
+            patch.object(resolver, "load_payload", return_value=base),
+            patch.object(
+                resolver,
+                "validate_terminal_production_authority",
+                return_value=(terminal, candidate),
+            ),
+            patch.object(resolver, "inspect_artifact", return_value=artifact),
+            patch.object(resolver, "bind_n16_migration_receipt", return_value=artifact),
+            patch.object(resolver, "require_fp8_hybrid_artifact", return_value=artifact),
+            patch.object(resolver, "inspect_executable", side_effect=fp8.executable_identity),
+            patch.object(resolver, "validate_build_profile"),
+            patch.object(
+                resolver,
+                "validate_hybrid_shared_workspace_authority",
+                side_effect=lambda value, _: value,
+            ),
+            patch.object(
+                dflash,
+                "validate_hybrid_shared_workspace_authority",
+                side_effect=lambda value, _: value,
+            ),
+        ):
             route = resolver.resolve(path)
             self.assertEqual(route["benchmark"], row["new_benchmark"])
             self.assertEqual(route["hybrid_width_tool"], row["new_planner"])
-            self.assertEqual(dflash._selected_hybrid_authority(base, artifact, 2048)["tool"],
-                             row["new_planner"])
+            self.assertEqual(
+                dflash._selected_hybrid_authority(base, artifact, 2048)["tool"], row["new_planner"]
+            )
             source.pop("benchmark_reporting_recovery")
             with self.assertRaisesRegex(ValueError, "different planners"):
                 dflash._selected_hybrid_authority(base, artifact, 2048)

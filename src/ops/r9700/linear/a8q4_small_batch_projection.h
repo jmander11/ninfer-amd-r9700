@@ -15,8 +15,9 @@ namespace ninfer::ops::r9700::linear {
 // Concurrent-DFlash widths T17..64 of the drafter shapes and the N131072/K5120 draft head take
 // the measured wide route below (N1280/K5120: its TiledM widths and T49..64).
 // No allocation or persistent-weight transformation.
-[[nodiscard]] hipError_t a8q4_small_batch_projection(
-    const A8Q4G64CandidateArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t a8q4_small_batch_projection(const A8Q4G64CandidateArgs& args,
+                                                     hipStream_t stream) noexcept;
+
 namespace detail {
 // Wide cells T17..64. TokenTile* (a8q4_token_tile_cta.h): one CTA per ceil(T/16)x16 token tile
 // and 64-row (N64, N64SplitK) or 128-row (N128) row tile, every staged G64 activation fragment
@@ -40,10 +41,16 @@ namespace detail {
 //                 -> 704..714.
 // The in-place residual epilogue is admitted on the N5120 routes.
 enum class A8Q4WideRoute : std::uint8_t {
-    None, TiledM, TokenTileN64, TokenTileN64SplitK, TokenTileN128
+    None,
+    TiledM,
+    TokenTileN64,
+    TokenTileN64SplitK,
+    TokenTileN128
 };
-[[nodiscard]] constexpr A8Q4WideRoute select_a8q4_small_batch_wide_route(
-    unsigned tokens, unsigned rows, unsigned columns, unsigned padded_columns) noexcept {
+
+[[nodiscard]] constexpr A8Q4WideRoute
+select_a8q4_small_batch_wide_route(unsigned tokens, unsigned rows, unsigned columns,
+                                   unsigned padded_columns) noexcept {
     using R = A8Q4WideRoute;
     if (columns != padded_columns || tokens < 17 || tokens > 64) return R::None;
     if (rows == 34816 && columns == 5120)
@@ -56,68 +63,79 @@ enum class A8Q4WideRoute : std::uint8_t {
     if (rows == 1280 && columns == 5120) {
         if (tokens >= 49) return R::TokenTileN64SplitK;
         return tokens == 25 || tokens == 30 || tokens == 35 || tokens == 36 || tokens == 40 ||
-               tokens == 42 || tokens == 48 ? R::TiledM : R::None;
+                       tokens == 42 || tokens == 48
+                   ? R::TiledM
+                   : R::None;
     }
     return R::None;
 }
-[[nodiscard]] constexpr bool use_a8q4_small_batch_wide(
-    unsigned tokens, unsigned rows, unsigned columns, unsigned padded_columns) noexcept {
+
+[[nodiscard]] constexpr bool use_a8q4_small_batch_wide(unsigned tokens, unsigned rows,
+                                                       unsigned columns,
+                                                       unsigned padded_columns) noexcept {
     return select_a8q4_small_batch_wide_route(tokens, rows, columns, padded_columns) !=
            A8Q4WideRoute::None;
 }
-[[nodiscard]] constexpr bool use_a8q4_small_batch_projection(
-    unsigned tokens, unsigned rows, unsigned columns, unsigned padded_columns) noexcept {
+
+[[nodiscard]] constexpr bool use_a8q4_small_batch_projection(unsigned tokens, unsigned rows,
+                                                             unsigned columns,
+                                                             unsigned padded_columns) noexcept {
     const bool t1_4 = tokens >= 1 && tokens <= 4, t4_8 = tokens >= 4 && tokens <= 8;
-    const bool t10_16 = tokens == 10 || tokens == 12 || tokens == 14 || tokens == 15 ||
-                        tokens == 16;
+    const bool t10_16 =
+        tokens == 10 || tokens == 12 || tokens == 14 || tokens == 15 || tokens == 16;
     const bool t18_32 = tokens == 18 || tokens == 20 || tokens == 21 || tokens == 24 ||
                         tokens == 28 || tokens == 32;
-    const bool k5120_projection = (rows == 12288 || rows == 4096 || rows == 7168 ||
-                                   rows == 6144 || rows == 1280) && columns == 5120;
+    const bool k5120_projection =
+        (rows == 12288 || rows == 4096 || rows == 7168 || rows == 6144 || rows == 1280) &&
+        columns == 5120;
     const bool mlp = (rows == 34816 && columns == 5120) || (rows == 5120 && columns == 17408);
     return use_a8q4_small_batch_wide(tokens, rows, columns, padded_columns) ||
-        (columns == padded_columns &&
-         ((t4_8 && ((rows == 5120 && (columns == 4096 || columns == 6144 || columns == 17408 ||
-                                      columns == 25600)) ||
-                    (rows == 34816 && columns == 5120) || k5120_projection)) ||
-          (t1_4 && rows == 5120 && columns == 6144) ||
-          (t10_16 && ((rows == 5120 && (columns == 4096 || columns == 6144 || columns == 25600)) ||
-                      k5120_projection)) ||
-          // T>16 table cells of shapes without a wide route at these widths.
-          (t18_32 && ((rows == 5120 && columns == 6144) ||
-                      ((rows == 12288 || rows == 4096 || rows == 7168 || rows == 1280) &&
-                       columns == 5120))) ||
-          ((t1_4 || t10_16) && mlp)));
+           (columns == padded_columns &&
+            ((t4_8 && ((rows == 5120 && (columns == 4096 || columns == 6144 || columns == 17408 ||
+                                         columns == 25600)) ||
+                       (rows == 34816 && columns == 5120) || k5120_projection)) ||
+             (t1_4 && rows == 5120 && columns == 6144) ||
+             (t10_16 &&
+              ((rows == 5120 && (columns == 4096 || columns == 6144 || columns == 25600)) ||
+               k5120_projection)) ||
+             // T>16 table cells of shapes without a wide route at these widths.
+             (t18_32 && ((rows == 5120 && columns == 6144) ||
+                         ((rows == 12288 || rows == 4096 || rows == 7168 || rows == 1280) &&
+                          columns == 5120))) ||
+             ((t1_4 || t10_16) && mlp)));
 }
+
 // Internal prepared launch only: the generic owner has validated all planes,
 // selected the exact predicate above and freshly quantized its A8 workspace.
 // No second quantization, stream query, workspace binding or allocation.
-[[nodiscard]] hipError_t launch_a8q4_small_batch_projection(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t launch_a8q4_small_batch_projection(const A8Q4G64LinearArgs& args,
+                                                            hipStream_t stream) noexcept;
 // Two non-accumulating small-batch projections of the same prepared K5120 activation in one
 // launch (the GDN query-key/value-z and the attention query-key/gate-value pairs), with the
 // per-output arithmetic of the split small-batch route. The predicate requires identical
 // activation planes and widths; the launcher requires it.
-[[nodiscard]] bool use_a8q4_small_batch_projection_pair(
-    const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second) noexcept;
-[[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair(
-    const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second,
-    hipStream_t stream) noexcept;
+[[nodiscard]] bool use_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& first,
+                                                        const A8Q4G64LinearArgs& second) noexcept;
+[[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& first,
+                                                                 const A8Q4G64LinearArgs& second,
+                                                                 hipStream_t stream) noexcept;
+
 // The attention pair (two N7168/K5120 matrices) at T5/T6 with each matrix's rows split at
 // `split`: rows [0,split) publish to its leading [T,split] and the rest to its trailing
 // [T,7168-split] output, the values the unsplit pair would store.
 struct A8Q4PairSplitOutputs {
-    hip_bfloat16* first_leading = nullptr;
-    hip_bfloat16* first_trailing = nullptr;
-    hip_bfloat16* second_leading = nullptr;
+    hip_bfloat16* first_leading   = nullptr;
+    hip_bfloat16* first_trailing  = nullptr;
+    hip_bfloat16* second_leading  = nullptr;
     hip_bfloat16* second_trailing = nullptr;
-    std::uint32_t split = 0;
+    std::uint32_t split           = 0;
 };
-[[nodiscard]] bool use_a8q4_small_batch_projection_pair_split(
-    const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second,
-    std::uint32_t split) noexcept;
+
+[[nodiscard]] bool use_a8q4_small_batch_projection_pair_split(const A8Q4G64LinearArgs& first,
+                                                              const A8Q4G64LinearArgs& second,
+                                                              std::uint32_t split) noexcept;
 [[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair_split(
     const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second,
     const A8Q4PairSplitOutputs& outputs, hipStream_t stream) noexcept;
-}
-}
+} // namespace detail
+} // namespace ninfer::ops::r9700::linear

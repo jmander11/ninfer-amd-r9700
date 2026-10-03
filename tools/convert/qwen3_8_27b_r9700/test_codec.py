@@ -44,27 +44,18 @@ class W8G32ReferenceCodecTest(unittest.TestCase):
         source = [10.0] + [1.0] * 31
         baseline = codec.encode_w8g32_reference(source, 1, 32)
         refined = codec.encode_w8g32_mse_reference(source, 1, 32)
-        baseline_codes, baseline_scales = codec.decode_w8g32_reference(
-            baseline, 1, 32
-        )
-        refined_codes, refined_scales = codec.decode_w8g32_reference(
-            refined, 1, 32
-        )
+        baseline_codes, baseline_scales = codec.decode_w8g32_reference(baseline, 1, 32)
+        refined_codes, refined_scales = codec.decode_w8g32_reference(refined, 1, 32)
 
         def decoded_sse(codes: list[int], scale_bits: int) -> float:
             scale = struct.unpack("<e", struct.pack("<H", scale_bits))[0]
-            return sum(
-                (item - code * scale) ** 2
-                for item, code in zip(source, codes, strict=True)
-            )
+            return sum((item - code * scale) ** 2 for item, code in zip(source, codes, strict=True))
 
         self.assertLess(
             decoded_sse(refined_codes[:32], refined_scales[0]),
             decoded_sse(baseline_codes[:32], baseline_scales[0]),
         )
-        self.assertEqual(
-            codec.encode_w8g32_mse_reference(source, 1, 32), refined
-        )
+        self.assertEqual(codec.encode_w8g32_mse_reference(source, 1, 32), refined)
 
     def test_mse_refinement_retains_padding_and_rejects_nonfinite(self) -> None:
         payload = codec.encode_w8g32_mse_reference([1.0] * 33, 1, 33)
@@ -104,19 +95,12 @@ class Q4G64ReferenceCodecTest(unittest.TestCase):
         source = row * 16
         baseline = codec.encode_q4g64_reference(source, 16, 64)
         refined = codec.encode_q4g64_mse_reference(source, 16, 64)
-        baseline_codes, baseline_scales = codec.decode_q4g64_reference(
-            baseline, 16, 64
-        )
-        refined_codes, refined_scales = codec.decode_q4g64_reference(
-            refined, 16, 64
-        )
+        baseline_codes, baseline_scales = codec.decode_q4g64_reference(baseline, 16, 64)
+        refined_codes, refined_scales = codec.decode_q4g64_reference(refined, 16, 64)
 
         def decoded_sse(codes: list[int], scale_bits: int) -> float:
             scale = struct.unpack("<e", struct.pack("<H", scale_bits))[0]
-            return sum(
-                (item - code * scale) ** 2
-                for item, code in zip(row, codes, strict=True)
-            )
+            return sum((item - code * scale) ** 2 for item, code in zip(row, codes, strict=True))
 
         self.assertEqual(refined_codes[0], codec.Q4_QMIN)
         self.assertLess(
@@ -136,8 +120,7 @@ class Q4G64ReferenceCodecTest(unittest.TestCase):
             rows = rng.choice((16, 32))
             columns = rng.randint(1, 193)
             source = [
-                rng.uniform(-8.0, 8.0) * (2.0 ** rng.randint(-12, 8))
-                for _ in range(rows * columns)
+                rng.uniform(-8.0, 8.0) * (2.0 ** rng.randint(-12, 8)) for _ in range(rows * columns)
             ]
             baseline_codes, baseline_scales = codec.decode_q4g64_reference(
                 codec.encode_q4g64_reference(source, rows, columns), rows, columns

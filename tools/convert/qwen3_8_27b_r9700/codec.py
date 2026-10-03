@@ -119,17 +119,13 @@ def _group_codes(values: Sequence[float], scale_bits: int) -> list[int]:
     if scale_bits == 0:
         return [0] * len(values)
     reciprocal = _f32(1.0 / _fp16_value(scale_bits))
-    return [
-        max(QMIN, min(QMAX, _round_even(_f32(float(item) * reciprocal))))
-        for item in values
-    ]
+    return [max(QMIN, min(QMAX, _round_even(_f32(float(item) * reciprocal)))) for item in values]
 
 
 def _group_sse(values: Sequence[float], codes: Sequence[int], scale_bits: int) -> float:
     scale = _fp16_value(scale_bits)
     return math.fsum(
-        (float(item) - float(code) * scale) ** 2
-        for item, code in zip(values, codes, strict=True)
+        (float(item) - float(code) * scale) ** 2 for item, code in zip(values, codes, strict=True)
     )
 
 
@@ -143,8 +139,7 @@ def _mse_scale_bits(values: Sequence[float]) -> int:
     for _ in range(MSE_REFINEMENT_STEPS):
         current_codes = _group_codes(values, current_bits)
         numerator = math.fsum(
-            float(item) * float(code)
-            for item, code in zip(values, current_codes, strict=True)
+            float(item) * float(code) for item, code in zip(values, current_codes, strict=True)
         )
         denominator = sum(code * code for code in current_codes)
         raw_scale = numerator / float(denominator) if denominator else 0.0
@@ -233,26 +228,20 @@ def _q4_group_codes(values: Sequence[float], scale_bits: int) -> list[int]:
         return [0] * len(values)
     reciprocal = _f32(1.0 / _fp16_value(scale_bits))
     return [
-        max(Q4_QMIN, min(Q4_QMAX, _round_even(_f32(float(item) * reciprocal))))
-        for item in values
+        max(Q4_QMIN, min(Q4_QMAX, _round_even(_f32(float(item) * reciprocal)))) for item in values
     ]
 
 
-def _q4_group_sse(
-    values: Sequence[float], codes: Sequence[int], scale_bits: int
-) -> float:
+def _q4_group_sse(values: Sequence[float], codes: Sequence[int], scale_bits: int) -> float:
     scale = _fp16_value(scale_bits)
     return math.fsum(
-        (float(item) - float(code) * scale) ** 2
-        for item, code in zip(values, codes, strict=True)
+        (float(item) - float(code) * scale) ** 2 for item, code in zip(values, codes, strict=True)
     )
 
 
 def _q4_mse_scale_bits(values: Sequence[float]) -> int:
     maximum = max(abs(float(item)) for item in values)
-    best_bits = _q4_scale_bits_from_raw(
-        maximum / float(Q4_QMAX), maximum != 0.0
-    )
+    best_bits = _q4_scale_bits_from_raw(maximum / float(Q4_QMAX), maximum != 0.0)
     current_bits = best_bits
     best_codes = _q4_group_codes(values, best_bits)
     best_sse = _q4_group_sse(values, best_codes, best_bits)
@@ -260,8 +249,7 @@ def _q4_mse_scale_bits(values: Sequence[float]) -> int:
     for _ in range(MSE_REFINEMENT_STEPS):
         current_codes = _q4_group_codes(values, current_bits)
         numerator = math.fsum(
-            float(item) * float(code)
-            for item, code in zip(values, current_codes, strict=True)
+            float(item) * float(code) for item, code in zip(values, current_codes, strict=True)
         )
         denominator = sum(code * code for code in current_codes)
         raw_scale = numerator / float(denominator) if denominator else 0.0
@@ -274,9 +262,7 @@ def _q4_mse_scale_bits(values: Sequence[float]) -> int:
     return best_bits
 
 
-def _encode_q4g64(
-    values: Sequence[float], rows: int, columns: int, *, refined: bool
-) -> bytes:
+def _encode_q4g64(values: Sequence[float], rows: int, columns: int, *, refined: bool) -> bytes:
     _validate_q4_shape(rows, columns, values)
     padded_columns = _align_up(columns, K_ALIGNMENT)
     groups_per_row = padded_columns // Q4_GROUP_SIZE
@@ -296,15 +282,11 @@ def _encode_q4g64(
                 scale_bits = _q4_mse_scale_bits(logical)
             else:
                 maximum = max(abs(item) for item in logical)
-                scale_bits = _q4_scale_bits_from_raw(
-                    maximum / float(Q4_QMAX), maximum != 0.0
-                )
+                scale_bits = _q4_scale_bits_from_raw(maximum / float(Q4_QMAX), maximum != 0.0)
             codes = _q4_group_codes(logical, scale_bits)
             for offset in range(0, Q4_GROUP_SIZE, 2):
                 base = row * (padded_columns // 2) + group * 32 + offset // 2
-                payload[base] = (
-                    (codes[offset] & 0x0F) | ((codes[offset + 1] & 0x0F) << 4)
-                )
+                payload[base] = (codes[offset] & 0x0F) | ((codes[offset + 1] & 0x0F) << 4)
             scale_index = (row * groups_per_row + group) * 2
             struct.pack_into("<H", payload, scale_offset + scale_index, scale_bits)
     return bytes(payload)
@@ -316,9 +298,7 @@ def encode_q4g64_reference(values: Sequence[float], rows: int, columns: int) -> 
     return _encode_q4g64(values, rows, columns, refined=False)
 
 
-def encode_q4g64_mse_reference(
-    values: Sequence[float], rows: int, columns: int
-) -> bytes:
+def encode_q4g64_mse_reference(values: Sequence[float], rows: int, columns: int) -> bytes:
     """Encode represented values with the source-only Q4G64 MSE trajectory."""
 
     return _encode_q4g64(values, rows, columns, refined=True)
@@ -342,17 +322,15 @@ def encode_q4g64_n16k16_reference(
                 for lane in range(16):
                     source = (tile * 16 + lane) * (padded_columns // 2) + group * 32 + pair * 8
                     target = (((tile * groups + group) * 4 + pair) * 16 + lane) * 8
-                    result[target:target + 8] = logical[source:source + 8]
+                    result[target : target + 8] = logical[source : source + 8]
             for lane in range(16):
                 source = scale_offset + ((tile * 16 + lane) * groups + group) * 2
                 target = scale_offset + ((tile * groups + group) * 16 + lane) * 2
-                result[target:target + 2] = logical[source:source + 2]
+                result[target : target + 2] = logical[source : source + 2]
     return bytes(result)
 
 
-def decode_q4g64_reference(
-    payload: bytes, rows: int, columns: int
-) -> tuple[list[int], list[int]]:
+def decode_q4g64_reference(payload: bytes, rows: int, columns: int) -> tuple[list[int], list[int]]:
     """Return canonical signed Q4 codes and FP16 scale words for inspection."""
 
     _validate_q4_shape(rows, columns, [0.0] * (rows * columns))
@@ -368,10 +346,9 @@ def decode_q4g64_reference(
     for row in range(rows):
         for group in range(groups_per_row):
             base = row * (padded_columns // 2) + group * 32
-            for byte in payload[base:base + 32]:
+            for byte in payload[base : base + 32]:
                 low, high = byte & 0x0F, byte >> 4
-                codes.extend((low - 16 if low >= 8 else low,
-                              high - 16 if high >= 8 else high))
+                codes.extend((low - 16 if low >= 8 else low, high - 16 if high >= 8 else high))
             scale_index = (row * groups_per_row + group) * 2
             scales.append(struct.unpack_from("<H", payload, scale_offset + scale_index)[0])
     return codes, scales
@@ -424,9 +401,7 @@ def decode_e4m3fn_reference(word: int) -> float:
     return -magnitude if word & 0x80 else magnitude
 
 
-def _validate_e4m3_rowwise_shape(
-    rows: int, columns: int, value_count: int | None = None
-) -> None:
+def _validate_e4m3_rowwise_shape(rows: int, columns: int, value_count: int | None = None) -> None:
     if type(rows) is not int or type(columns) is not int or rows <= 0 or columns <= 0:
         raise ValueError("E4M3 rowwise shape requires positive integer rows and columns")
     if value_count is not None and value_count != rows * columns:
@@ -441,9 +416,7 @@ def e4m3_rowwise_payload_size(rows: int, columns: int) -> int:
     return _align_up(code_bytes, PLANE_ALIGNMENT) + rows * 4
 
 
-def encode_e4m3_rowwise_reference(
-    values: Sequence[float], rows: int, columns: int
-) -> bytes:
+def encode_e4m3_rowwise_reference(values: Sequence[float], rows: int, columns: int) -> bytes:
     """Scalar oracle for BF16-source rowwise E4M3FN weight encoding.
 
     The represented values are scaled per output row by an exactly stored
@@ -487,9 +460,7 @@ def decode_e4m3_rowwise_reference(
     scale_offset = _align_up(code_bytes, PLANE_ALIGNMENT)
     expected = scale_offset + rows * 4
     if len(payload) != expected:
-        raise ValueError(
-            f"E4M3 rowwise payload has {len(payload)} bytes, expected {expected}"
-        )
+        raise ValueError(f"E4M3 rowwise payload has {len(payload)} bytes, expected {expected}")
     codes = list(payload[:code_bytes])
     if any(word & 0x7F == 0x7F for word in codes):
         raise ValueError("E4M3 rowwise payload contains an E4M3FN NaN word")

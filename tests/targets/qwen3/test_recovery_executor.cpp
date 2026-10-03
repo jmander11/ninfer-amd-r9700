@@ -47,7 +47,7 @@ using ninfer::targets::qwen3::PreparedPrompt;
 
 // Toy tokenizer ids for "<|im_start|>user\nx<|im_end|>\n<|im_start|>assistant\n<think>\n".
 // The suffix is the recovery thinking prologue the splice requires.
-constexpr TokenId kResidentPrefix[] = {248045, 30, 0, 248046, 32, 248045, 31, 248068, 32};
+constexpr TokenId kResidentPrefix[]     = {248045, 30, 0, 248046, 32, 248045, 31, 248068, 32};
 constexpr std::uint32_t kResidentTokens = sizeof(kResidentPrefix) / sizeof(kResidentPrefix[0]);
 constexpr std::uint32_t kOutputBudget   = 8;
 constexpr std::uint64_t kRamEntryId     = 7;
@@ -70,8 +70,8 @@ nlohmann::json added(int id, std::string content, bool special = false) {
 }
 
 std::string read_template() {
-    const std::string path =
-        std::string(NINFER_SOURCE_DIR) + "/tests/fixtures/frontend/thinking_toggle_chat_template.jinja";
+    const std::string path = std::string(NINFER_SOURCE_DIR) +
+                             "/tests/fixtures/frontend/thinking_toggle_chat_template.jinja";
     std::ifstream stream(path, std::ios::binary);
     if (!stream) { throw std::runtime_error("failed to open " + path); }
     std::string source{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
@@ -104,8 +104,8 @@ std::string recovery_notice(std::uint32_t attempt = 1) {
     input.options.add_generation_prompt = true;
     ninfer::ChatMessage user;
     user.role = ninfer::ChatRole::User;
-    user.parts.push_back(ninfer::MessagePart{
-        .kind = ninfer::MessagePartKind::Text, .text = "x", .media = {}});
+    user.parts.push_back(
+        ninfer::MessagePart{.kind = ninfer::MessagePartKind::Text, .text = "x", .media = {}});
     input.messages.push_back(std::move(user));
     const auto recovery = ninfer::targets::qwen3::GenerationRecoveryContext::analyze(input);
     if (!recovery) { throw std::runtime_error("probe input is not eligible for recovery"); }
@@ -120,18 +120,36 @@ std::string recovery_notice(std::uint32_t attempt = 1) {
 FrontendResources resources() {
     FrontendResources result;
     result.chat_template_jinja = read_template();
-    nlohmann::json tokens      = nlohmann::json::array(
-        {added(1, "helloST"), added(2, "OPtail"), added(3, "thought</thi"),
-         added(4, "nk>\n\nanswer"), added(6, "<eos>", true), added(7, "<0.0 seconds>"),
-         added(14, "   \n"), added(15, "answer"), added(16, "<tool_"), added(17, "call>"),
-         added(18, "<function=f>"), added(19, "</function>"), added(20, "</tool_call>"),
-         added(21, "<tool_call>"), added(22, "preface"), added(23, "call"), added(24, "a <"),
-         added(30, "user\n"), added(31, "assistant\n"), added(32, "\n"), added(33, "system\n"),
-         added(248045, "<|im_start|>", true), added(248046, "<|im_end|>", true),
-         added(248053, "<|vision_start|>", true), added(248054, "<|vision_end|>", true),
-         added(248056, "<|image_pad|>", true), added(248057, "<|video_pad|>", true),
-         added(248068, "<think>"), added(248069, "</think>")});
-    nlohmann::json vocab = {{"x", 0}, {"ä", 10}, {"¸", 11}, {"Ń", 12}};
+    nlohmann::json tokens      = nlohmann::json::array({added(1, "helloST"),
+                                                        added(2, "OPtail"),
+                                                        added(3, "thought</thi"),
+                                                        added(4, "nk>\n\nanswer"),
+                                                        added(6, "<eos>", true),
+                                                        added(7, "<0.0 seconds>"),
+                                                        added(14, "   \n"),
+                                                        added(15, "answer"),
+                                                        added(16, "<tool_"),
+                                                        added(17, "call>"),
+                                                        added(18, "<function=f>"),
+                                                        added(19, "</function>"),
+                                                        added(20, "</tool_call>"),
+                                                        added(21, "<tool_call>"),
+                                                        added(22, "preface"),
+                                                        added(23, "call"),
+                                                        added(24, "a <"),
+                                                        added(30, "user\n"),
+                                                        added(31, "assistant\n"),
+                                                        added(32, "\n"),
+                                                        added(33, "system\n"),
+                                                        added(248045, "<|im_start|>", true),
+                                                        added(248046, "<|im_end|>", true),
+                                                        added(248053, "<|vision_start|>", true),
+                                                        added(248054, "<|vision_end|>", true),
+                                                        added(248056, "<|image_pad|>", true),
+                                                        added(248057, "<|video_pad|>", true),
+                                                        added(248068, "<think>"),
+                                                        added(248069, "</think>")});
+    nlohmann::json vocab       = {{"x", 0}, {"ä", 10}, {"¸", 11}, {"Ń", 12}};
     for (int byte = 0; byte <= 255; ++byte) {
         const std::string symbol = byte_level_symbol(static_cast<std::uint8_t>(byte));
         if (!vocab.contains(symbol)) { vocab[symbol] = 1000 + byte; }
@@ -139,8 +157,8 @@ FrontendResources resources() {
     result.tokenizer_json = nlohmann::json{
         {"model",
          {{"type", "BPE"}, {"vocab", std::move(vocab)}, {"merges", nlohmann::json::array()}}},
-        {"added_tokens", tokens}}
-                                .dump();
+        {"added_tokens",
+         tokens}}.dump();
     nlohmann::json decoder = nlohmann::json::object();
     for (const nlohmann::json& token : tokens) {
         nlohmann::json value = token;
@@ -153,8 +171,8 @@ FrontendResources resources() {
         {"add_prefix_space", false},
         {"pad_token", "<|endoftext|>"},
         {"chat_template", result.chat_template_jinja},
-        {"added_tokens_decoder", std::move(decoder)}}
-                                       .dump();
+        {"added_tokens_decoder",
+         std::move(decoder)}}.dump();
     result.generation_config_json = R"({"eos_token_id":[6]})";
     result.preprocessor_config_json =
         R"({"patch_size":16,"temporal_patch_size":2,"merge_size":2,"image_mean":[0.5,0.5,0.5],"image_std":[0.5,0.5,0.5],"size":{"shortest_edge":4096,"longest_edge":16777216}})";
@@ -182,15 +200,24 @@ enum class CacheCase {
 
 const char* cache_case_name(CacheCase script) {
     switch (script) {
-    case CacheCase::RecoveryRamRestoreFails: return "recovery RAM restore failure";
-    case CacheCase::RecoveryResidentHit: return "recovery resident hit";
-    case CacheCase::RecoveryRamHit: return "recovery RAM hit";
-    case CacheCase::RecoveryDiskHit: return "recovery disk hit";
-    case CacheCase::RecoveryDiskClaimMiss: return "recovery disk claim miss";
-    case CacheCase::RecoveryDiskRestoreFails: return "recovery disk restore failure";
-    case CacheCase::AdmitRamHit: return "admission RAM hit";
-    case CacheCase::AdmitDiskLongerThanRam: return "admission longer disk hit";
-    case CacheCase::AdmitRamRestoreThenCold: return "admission restore then cold";
+    case CacheCase::RecoveryRamRestoreFails:
+        return "recovery RAM restore failure";
+    case CacheCase::RecoveryResidentHit:
+        return "recovery resident hit";
+    case CacheCase::RecoveryRamHit:
+        return "recovery RAM hit";
+    case CacheCase::RecoveryDiskHit:
+        return "recovery disk hit";
+    case CacheCase::RecoveryDiskClaimMiss:
+        return "recovery disk claim miss";
+    case CacheCase::RecoveryDiskRestoreFails:
+        return "recovery disk restore failure";
+    case CacheCase::AdmitRamHit:
+        return "admission RAM hit";
+    case CacheCase::AdmitDiskLongerThanRam:
+        return "admission longer disk hit";
+    case CacheCase::AdmitRamRestoreThenCold:
+        return "admission restore then cold";
     }
     return "unknown cache case";
 }
@@ -236,8 +263,8 @@ struct DiskSnapshot {
     std::uint64_t evictions    = 0;
     std::uint64_t drops        = 0;
     std::array<std::uint64_t, ninfer::kKvDiskDropReasonCount> drop_reasons{};
-    double save_seconds        = 0;
-    double load_seconds        = 0;
+    double save_seconds = 0;
+    double load_seconds = 0;
 };
 
 struct GpuPoolSnapshot {
@@ -271,40 +298,40 @@ public:
 
     CacheCase script = CacheCase::RecoveryRamRestoreFails;
     std::vector<std::string> trace;
-    std::uint32_t copied_tokens      = 0;
-    std::uint32_t abort_count        = 0;
-    std::uint32_t aborts_at_prefill  = 0;
-    std::uint32_t prefill_count      = 0;
-    std::uint32_t prefill_lane       = 99;
-    std::uint32_t prefill_tokens     = 0;
-    std::uint32_t prefill_reusable   = 99;
-    PrefixReuseSource prefill_source = PrefixReuseSource::HostRam;
-    std::uint64_t prefill_ram_entry  = 1;
-    std::uint64_t prefill_disk_entry = 1;
-    std::uint32_t offered_ram        = 0;
-    std::uint32_t offered_disk       = 0;
-    std::uint32_t restore_ram_count  = 0;
-    std::uint32_t restore_disk_count = 0;
-    std::uint32_t claim_ram_count    = 0;
-    std::uint32_t claim_disk_count   = 0;
-    std::uint32_t consume_ram_count  = 0;
-    std::uint32_t consume_disk_count = 0;
-    std::uint32_t discard_ram_count  = 0;
-    std::uint32_t invalidate_disk_count = 0;
-    std::uint64_t claimed_ram_entry  = 0;
-    std::uint64_t claimed_disk_entry = 0;
-    bool prefill_terminal            = false;
-    bool saw_force_cold              = false;
-    bool cancel_on_restore           = false;
+    std::uint32_t copied_tokens             = 0;
+    std::uint32_t abort_count               = 0;
+    std::uint32_t aborts_at_prefill         = 0;
+    std::uint32_t prefill_count             = 0;
+    std::uint32_t prefill_lane              = 99;
+    std::uint32_t prefill_tokens            = 0;
+    std::uint32_t prefill_reusable          = 99;
+    PrefixReuseSource prefill_source        = PrefixReuseSource::HostRam;
+    std::uint64_t prefill_ram_entry         = 1;
+    std::uint64_t prefill_disk_entry        = 1;
+    std::uint32_t offered_ram               = 0;
+    std::uint32_t offered_disk              = 0;
+    std::uint32_t restore_ram_count         = 0;
+    std::uint32_t restore_disk_count        = 0;
+    std::uint32_t claim_ram_count           = 0;
+    std::uint32_t claim_disk_count          = 0;
+    std::uint32_t consume_ram_count         = 0;
+    std::uint32_t consume_disk_count        = 0;
+    std::uint32_t discard_ram_count         = 0;
+    std::uint32_t invalidate_disk_count     = 0;
+    std::uint64_t claimed_ram_entry         = 0;
+    std::uint64_t claimed_disk_entry        = 0;
+    bool prefill_terminal                   = false;
+    bool saw_force_cold                     = false;
+    bool cancel_on_restore                  = false;
     std::atomic<bool>* request_cancellation = nullptr;
-    bool lifecycle_retries           = false;
+    bool lifecycle_retries                  = false;
     // Lane 1 decodes beside the retry; its one round must not wait for the host restore.
-    bool peer_decoding               = false;
+    bool peer_decoding = false;
     // With peer_decoding: the retry is cancelled during its host restore. The hold must stay
     // parked while the peer decodes, and drain only once its copies settle.
-    bool cancel_held                 = false;
+    bool cancel_held                   = false;
     std::uint32_t decodes_since_cancel = 0;
-    bool cancel_begun                = false;
+    bool cancel_begun                  = false;
     std::vector<std::vector<TokenId>> prefilled_prompts;
 
     void note(const char* event) {
@@ -372,18 +399,19 @@ public:
         return true;
     }
 
-    [[nodiscard]] ProbePlan plan_request_base(const PreparedPrompt& prompt,
-                                              const ninfer::runtime::ResolvedExecutionOptions& options) {
+    [[nodiscard]] ProbePlan
+    plan_request_base(const PreparedPrompt& prompt,
+                      const ninfer::runtime::ResolvedExecutionOptions& options) {
         note("plan_base");
-        ProbePlan plan     = fitted_plan();
+        ProbePlan plan = fitted_plan();
         if (lifecycle_retries) {
-            plan.fields.prompt_tokens = prompt.summary().prompt_tokens;
+            plan.fields.prompt_tokens           = prompt.summary().prompt_tokens;
             plan.fields.effective_output_tokens = options.requested_output_tokens;
-            plan.fields.service_work_quanta = options.requested_output_tokens + 8;
+            plan.fields.service_work_quanta     = options.requested_output_tokens + 8;
         }
-        plan.force_cold    = options.force_cold_prefill;
-        plan.allow_reuse   = options.allow_prefix_reuse;
-        saw_force_cold     = saw_force_cold || options.force_cold_prefill;
+        plan.force_cold  = options.force_cold_prefill;
+        plan.allow_reuse = options.allow_prefix_reuse;
+        saw_force_cold   = saw_force_cold || options.force_cold_prefill;
         return plan;
     }
 
@@ -394,9 +422,10 @@ public:
         plan.force_cold  = base.force_cold;
         plan.allow_reuse = base.allow_reuse;
         if (script == CacheCase::RecoveryResidentHit && !base.force_cold && base.allow_reuse) {
-            plan.fields.reusable_prompt_tokens = lifecycle_retries
-                ? (prefilled_prompts.empty() ? 0 : prefilled_prompts.back().size())
-                : kResidentTokens;
+            plan.fields.reusable_prompt_tokens =
+                lifecycle_retries
+                    ? (prefilled_prompts.empty() ? 0 : prefilled_prompts.back().size())
+                    : kResidentTokens;
             if (plan.fields.reusable_prompt_tokens != 0) {
                 plan.fields.reuse_source = PrefixReuseSource::VramResident;
             }
@@ -406,7 +435,7 @@ public:
 
     [[nodiscard]] ProbePlan plan_ram_reuse(const PreparedPrompt&, const ProbePlan& base) {
         note("plan_ram");
-        ProbePlan plan = fitted_plan();
+        ProbePlan plan   = fitted_plan();
         plan.force_cold  = base.force_cold;
         plan.allow_reuse = base.allow_reuse;
         if (base.force_cold || !base.allow_reuse) { return plan; }
@@ -421,7 +450,7 @@ public:
 
     [[nodiscard]] ProbePlan plan_disk_reuse(const PreparedPrompt&, const ProbePlan& base) {
         note("plan_disk");
-        ProbePlan plan = fitted_plan();
+        ProbePlan plan   = fitted_plan();
         plan.force_cold  = base.force_cold;
         plan.allow_reuse = base.allow_reuse;
         if (base.force_cold || !base.allow_reuse) { return plan; }
@@ -437,29 +466,40 @@ public:
     [[nodiscard]] bool can_admit_lane(std::uint32_t, const ProbePlan&) const noexcept {
         return true;
     }
+
     [[nodiscard]] bool can_admit_lane_after_retained_eviction(std::uint32_t,
-                                                             const ProbePlan&) const noexcept {
+                                                              const ProbePlan&) const noexcept {
         return false;
     }
-    [[nodiscard]] bool can_admit_lane_after_releasing(std::uint32_t, const ProbePlan&,
-                                                      std::span<const std::uint32_t>) const noexcept {
+
+    [[nodiscard]] bool
+    can_admit_lane_after_releasing(std::uint32_t, const ProbePlan&,
+                                   std::span<const std::uint32_t>) const noexcept {
         return false;
     }
 
     [[nodiscard]] ninfer::GenerationTimings generation_timings_lane(std::uint32_t) const noexcept {
         return {};
     }
+
     [[nodiscard]] ninfer::SpeculativeStats speculative_stats_lane(std::uint32_t) const noexcept {
         return {};
     }
-    [[nodiscard]] std::uint32_t captured_context_checkpoint_tokens_lane(std::uint32_t) const noexcept {
-        return 0;
-    }
-    [[nodiscard]] std::uint32_t restored_context_checkpoint_tokens_lane(std::uint32_t) const noexcept {
+
+    [[nodiscard]] std::uint32_t
+    captured_context_checkpoint_tokens_lane(std::uint32_t) const noexcept {
         return 0;
     }
 
-    void abort_lane(std::uint32_t) noexcept { note("abort"); ++abort_count; }
+    [[nodiscard]] std::uint32_t
+    restored_context_checkpoint_tokens_lane(std::uint32_t) const noexcept {
+        return 0;
+    }
+
+    void abort_lane(std::uint32_t) noexcept {
+        note("abort");
+        ++abort_count;
+    }
 
     void claim_ram_entry(std::uint64_t entry_id) {
         note("claim_ram");
@@ -481,16 +521,21 @@ public:
     }
 
     void release_ram_entry(std::uint64_t) { note("release_ram"); }
+
     void discard_ram_capture(std::uint64_t) {
         note("discard_ram");
         ++discard_ram_count;
     }
+
     void cancel_disk_restore() { note("cancel_disk"); }
+
     void begin_copy_hold_cancel() {
         note("begin_cancel");
         cancel_begun = true;
     }
+
     [[nodiscard]] bool copy_hold_cancel_settled() const { return decodes_since_cancel != 0; }
+
     void synchronize_all() { note("sync"); }
 
     [[nodiscard]] PrefillStepResult start_prefill_lane(std::uint32_t lane, PreparedPrompt prompt,
@@ -498,12 +543,12 @@ public:
                                                        const OutputSession*, bool) {
         note("start_prefill");
         ++prefill_count;
-        aborts_at_prefill = abort_count;
-        prefill_lane      = lane;
-        prefill_tokens    = prompt.summary().prompt_tokens;
-        prefill_reusable  = plan.summary().reusable_prompt_tokens;
-        prefill_source    = plan.summary().reuse_source;
-        prefill_ram_entry = plan.summary().ram_entry_id;
+        aborts_at_prefill  = abort_count;
+        prefill_lane       = lane;
+        prefill_tokens     = prompt.summary().prompt_tokens;
+        prefill_reusable   = plan.summary().reusable_prompt_tokens;
+        prefill_source     = plan.summary().reuse_source;
+        prefill_ram_entry  = plan.summary().ram_entry_id;
         prefill_disk_entry = plan.summary().disk_entry_id;
         if (lifecycle_retries) {
             auto data = ninfer::targets::qwen3::PreparedPromptAccess::take(std::move(prompt));
@@ -512,15 +557,15 @@ public:
             licensed_ = prefill_count < 3 ? 0 : 15;
         }
         PrefillStepResult step;
-        step.complete                = true;
-        step.processed_prompt_tokens = 1;
-        step.round.tokens            = std::span<const TokenId>(&licensed_, 1);
-        step.summary.prompt_tokens   = prefill_tokens;
+        step.complete                     = true;
+        step.processed_prompt_tokens      = 1;
+        step.round.tokens                 = std::span<const TokenId>(&licensed_, 1);
+        step.summary.prompt_tokens        = prefill_tokens;
         step.summary.reused_prompt_tokens = prefill_reusable;
-        step.summary.prefix_reuse_source = prefill_source;
-        step.summary.prefix_reuse_path =
-            prefill_reusable == 0 ? ninfer::PrefixReusePath::FullReset
-                                  : ninfer::PrefixReusePath::AppendAtFrontier;
+        step.summary.prefix_reuse_source  = prefill_source;
+        step.summary.prefix_reuse_path    = prefill_reusable == 0
+                                                ? ninfer::PrefixReusePath::FullReset
+                                                : ninfer::PrefixReusePath::AppendAtFrontier;
         return step;
     }
 
@@ -530,36 +575,55 @@ public:
     }
 
     [[nodiscard]] bool kv_copies_ready() const { return false; }
+
     void request_idle_spill() {}
+
     void shutdown_kv_tiers(ninfer::LoadProgress = {}) {}
+
     [[nodiscard]] RamSnapshot kv_ram_snapshot() const noexcept { return {}; }
+
     [[nodiscard]] std::optional<DiskSnapshot> try_kv_disk_snapshot() const noexcept {
         return DiskSnapshot{};
     }
+
     [[nodiscard]] GpuSnapshot kv_gpu_snapshot() const noexcept { return {}; }
+
     [[nodiscard]] RamCopySeconds harvest_kv_ram_copy_seconds() {
         if (!std::exchange(ram_timings_pending_, false)) { return {}; }
         return {.save = 0.125, .load = 0.25};
     }
+
     [[nodiscard]] DiskCopySeconds harvest_kv_disk_copy_seconds() {
         if (!std::exchange(disk_timings_pending_, false)) { return {}; }
         return {.save = 0.5, .load = 1.0, .h2d = 2.0};
     }
+
     [[nodiscard]] bool kv_ram_copies_ready() const { return true; }
+
     [[nodiscard]] bool kv_disk_restore_failed() const { return false; }
+
     // A request starts at index version zero. Zero here would skip the host lookup.
     [[nodiscard]] std::uint64_t kv_ram_index_version() const noexcept { return 1; }
+
     [[nodiscard]] std::uint64_t kv_disk_index_version() const noexcept { return 1; }
+
     [[nodiscard]] std::uint64_t pending_disk_restore_ticket() const noexcept { return 0; }
+
     [[nodiscard]] bool has_retained_lane(std::uint32_t) const noexcept { return false; }
+
     [[nodiscard]] std::uint64_t retained_use_tick(std::uint32_t) const noexcept { return 0; }
+
     void mark_turn_closed(std::uint32_t) noexcept {}
+
     [[nodiscard]] bool capture_retained_lane(std::uint32_t, std::uint64_t* = nullptr, bool = true,
                                              bool* = nullptr, std::span<const std::uint64_t> = {}) {
         return false;
     }
+
     [[nodiscard]] bool disk_restore_ready(std::uint64_t) const { return true; }
+
     [[nodiscard]] bool kv_ram_reclaim_pending() const { return false; }
+
     [[nodiscard]] bool claim_disk_entry(std::uint64_t entry_id, std::uint32_t, std::uint64_t,
                                         std::uint64_t, std::uint32_t, ninfer::PrefixReusePath,
                                         std::uint64_t) {
@@ -568,16 +632,23 @@ public:
         claimed_disk_entry = entry_id;
         return script != CacheCase::RecoveryDiskClaimMiss;
     }
+
     [[nodiscard]] bool revert_cancelled_prefill_lane(std::uint32_t) { return true; }
+
     [[nodiscard]] PrefillStepResult advance_prefill_lane(std::uint32_t, bool) {
         throw std::logic_error("cold prefill did not complete in one step");
     }
+
     [[nodiscard]] bool prefill_mixable(std::uint32_t) const noexcept { return false; }
+
     [[nodiscard]] std::uint32_t mixed_forward() const noexcept { return 0; }
-    [[nodiscard]] MixedGeneratedRound decode_batch_with_prefill(
-        std::span<const std::uint32_t>, std::span<const RoundBudget>, std::uint32_t) {
+
+    [[nodiscard]] MixedGeneratedRound decode_batch_with_prefill(std::span<const std::uint32_t>,
+                                                                std::span<const RoundBudget>,
+                                                                std::uint32_t) {
         throw std::logic_error("recovery probe never mixes prefill into decode");
     }
+
     [[nodiscard]] BatchedGeneratedRound decode_batch(std::span<const std::uint32_t>,
                                                      std::span<const RoundBudget>) {
         if (peer_decoding) {
@@ -590,7 +661,7 @@ public:
                     .row_stride = 1};
         }
         if (lifecycle_retries && prefill_count < 3) {
-            return {.tokens = repeated_tokens_,
+            return {.tokens     = repeated_tokens_,
                     .row_counts = std::span<const std::int32_t>(&repeated_count_, 1),
                     .row_stride = 64};
         }
@@ -598,20 +669,26 @@ public:
     }
 
     void release_disk_entry(std::uint64_t) { note("release_disk"); }
+
     void invalidate_disk_entry(std::uint64_t) {
         note("invalidate_disk");
         ++invalidate_disk_count;
     }
+
     void consume_ram_entry(std::uint64_t) {
         note("consume_ram");
         ++consume_ram_count;
     }
+
     void consume_disk_entry(std::uint64_t) {
         note("consume_disk");
         ++consume_disk_count;
     }
+
     void prefetch_disk_plan(std::uint64_t, const ProbePlan&) { note("prefetch_disk"); }
+
     void pump_disk_restore() {}
+
     void restore_disk_entry(std::uint32_t, std::uint64_t, const ProbePlan&) {
         note("restore_disk");
         ++restore_disk_count;
@@ -620,32 +697,41 @@ public:
         }
         disk_timings_pending_ = true;
     }
+
     void wait_kv_ram_copies() {}
+
     void wait_kv_disk_copies() {}
+
     void wait_kv_ram_copies_on_compute() {
         if (cancel_on_restore && request_cancellation != nullptr) {
             request_cancellation->store(true, std::memory_order_release);
         }
     }
+
     void evict_retained_lane(std::uint32_t) noexcept {}
+
     void retain_lane(std::uint32_t) {}
+
     void set_suppressed_tokens_lane(std::uint32_t, std::span<const TokenId>) {}
+
     void clear_suppressed_tokens_lane(std::uint32_t) {}
+
     void set_typical_cycle_reasoning_lane(std::uint32_t, bool) {}
+
     void resolve_pending_batch(std::span<const std::uint32_t>, std::span<const std::uint32_t>,
                                std::span<const std::uint8_t>, std::span<const std::uint8_t>,
                                std::span<const std::uint8_t>) {}
 
 private:
-    static constexpr TokenId kPeerStop         = kCallerStop;
-    static constexpr TokenId kPeerContinue     = 1000 + 'a';
-    std::uint32_t peer_rounds_                 = 0;
-    static constexpr std::int32_t kPeerCount   = 1;
-    bool ram_timings_pending_ = false;
-    bool disk_timings_pending_ = false;
+    static constexpr TokenId kPeerStop       = kCallerStop;
+    static constexpr TokenId kPeerContinue   = 1000 + 'a';
+    std::uint32_t peer_rounds_               = 0;
+    static constexpr std::int32_t kPeerCount = 1;
+    bool ram_timings_pending_                = false;
+    bool disk_timings_pending_               = false;
     std::array<TokenId, 64> repeated_tokens_{};
     std::int32_t repeated_count_ = 64;
-    TokenId licensed_ = kCallerStop;
+    TokenId licensed_            = kCallerStop;
     std::mutex trace_mu_;
 };
 
@@ -665,7 +751,9 @@ struct ProbeMemory {
             throw std::invalid_argument("recovery probe transient must stay empty");
         }
     }
+
     void deactivate() noexcept {}
+
     [[nodiscard]] TransientRegion region() const noexcept { return {}; }
 };
 
@@ -675,22 +763,22 @@ struct ProbeDevice {
 };
 
 struct RecoveryProbe {
-    using Package = ProbePackage;
+    using Package         = ProbePackage;
     ProbeProgram* program = nullptr;
     ProbeLoaded* loaded   = nullptr;
     ProbeMemory request_memory;
 };
 
 const char* kExpectedTrace[] = {
-    "retain",        "copy",       "plan_base",   "plan_ram",      "plan_disk",
-    "abort",         "claim_ram",  "restore_ram", "cancel_disk",   "sync",
-    "release_ram",   "discard_ram", "abort",      "plan_cold",     "start_prefill",
-    "resolve_prefill",
+    "retain",      "copy",      "plan_base",     "plan_ram",
+    "plan_disk",   "abort",     "claim_ram",     "restore_ram",
+    "cancel_disk", "sync",      "release_ram",   "discard_ram",
+    "abort",       "plan_cold", "start_prefill", "resolve_prefill",
 };
 
 struct RecoveryOutcome {
     ninfer::GenerationResult result;
-    bool finished                  = false;
+    bool finished = false;
     std::string error;
     std::uint32_t attempts         = 0;
     std::uint32_t budget_remaining = 0;
@@ -734,27 +822,29 @@ int fail_case(const ProbeProgram& program, bool ok, const char* message) {
 int check_scripted_recovery(const ProbeProgram& program, const RecoveryOutcome& outcome) {
     int failures = 0;
     if (program.cancel_held) {
-        failures += fail_case(program, outcome.finished && outcome.error.empty() &&
-                                           outcome.finish == FinishReason::Cancelled &&
-                                           outcome.peer_finish == FinishReason::StopToken &&
-                                           program.prefill_count == 0 &&
-                                           event_count(program.trace, "release_ram") == 1 &&
-                                           in_order(program.trace, {"restore_ram", "begin_cancel",
-                                                                    "decode", "cancel_disk"}) &&
-                                           outcome.slot_empty && !outcome.executor_failed,
-                              "a cancelled host restore drained while the peer was decoding");
+        failures += fail_case(
+            program,
+            outcome.finished && outcome.error.empty() &&
+                outcome.finish == FinishReason::Cancelled &&
+                outcome.peer_finish == FinishReason::StopToken && program.prefill_count == 0 &&
+                event_count(program.trace, "release_ram") == 1 &&
+                in_order(program.trace, {"restore_ram", "begin_cancel", "decode", "cancel_disk"}) &&
+                outcome.slot_empty && !outcome.executor_failed,
+            "a cancelled host restore drained while the peer was decoding");
         if (failures != 0) { dump_trace(program); }
         return failures;
     }
-    failures += fail_case(program, outcome.finished && outcome.error.empty(),
-                          outcome.error.empty() ? "the retry did not finish" : outcome.error.c_str());
+    failures +=
+        fail_case(program, outcome.finished && outcome.error.empty(),
+                  outcome.error.empty() ? "the retry did not finish" : outcome.error.c_str());
     const bool cancelled = program.cancel_on_restore;
-    failures += fail_case(program, outcome.attempts == 1 && outcome.has_budget &&
-                                       outcome.budget_remaining == kOutputBudget - (cancelled ? 0 : 1) &&
-                                       outcome.finish == (cancelled ? FinishReason::Cancelled
-                                                                    : FinishReason::StopToken),
+    failures += fail_case(program,
+                          outcome.attempts == 1 && outcome.has_budget &&
+                              outcome.budget_remaining == kOutputBudget - (cancelled ? 0 : 1) &&
+                              outcome.finish ==
+                                  (cancelled ? FinishReason::Cancelled : FinishReason::StopToken),
                           "the retry did not keep its output budget and finish");
-    const bool ram_hit = program.script == CacheCase::RecoveryRamHit;
+    const bool ram_hit  = program.script == CacheCase::RecoveryRamHit;
     const bool disk_hit = program.script == CacheCase::RecoveryDiskHit;
     failures += fail_case(program,
                           outcome.result.kv_ram_save_seconds == (ram_hit ? 0.125 : 0.0) &&
@@ -763,8 +853,9 @@ int check_scripted_recovery(const ProbeProgram& program, const RecoveryOutcome& 
                               outcome.result.kv_disk_load_seconds == (disk_hit ? 1.0 : 0.0) &&
                               outcome.result.kv_disk_h2d_seconds == (disk_hit ? 2.0 : 0.0),
                           "first-step completion lost restored-cache timings");
-    failures += fail_case(program, outcome.pending_empty && outcome.recovery_empty &&
-                                       outcome.slot_empty && !outcome.executor_failed,
+    failures += fail_case(program,
+                          outcome.pending_empty && outcome.recovery_empty && outcome.slot_empty &&
+                              !outcome.executor_failed,
                           "the retry left a queue, lane, or failed executor behind");
     failures += fail_case(program, program.copied_tokens == kResidentTokens,
                           "the retry copied a length other than the resident ledger");
@@ -774,50 +865,49 @@ int check_scripted_recovery(const ProbeProgram& program, const RecoveryOutcome& 
                               program.prefill_terminal;
     switch (program.script) {
     case CacheCase::RecoveryRamRestoreFails: {
-        const bool trace_ok = program.trace.size() == std::size(kExpectedTrace) &&
-                              std::equal(program.trace.begin(), program.trace.end(),
-                                         std::begin(kExpectedTrace));
+        const bool trace_ok =
+            program.trace.size() == std::size(kExpectedTrace) &&
+            std::equal(program.trace.begin(), program.trace.end(), std::begin(kExpectedTrace));
         failures += fail_case(program, trace_ok,
                               "host restore failure did not abort, release, and cold-prefill");
-        failures += fail_case(program, program.claimed_ram_entry == kRamEntryId &&
-                                           program.aborts_at_prefill == 2 && program.abort_count == 2 &&
-                                           cold_compute && program.prefill_tokens > kResidentTokens,
+        failures += fail_case(program,
+                              program.claimed_ram_entry == kRamEntryId &&
+                                  program.aborts_at_prefill == 2 && program.abort_count == 2 &&
+                                  cold_compute && program.prefill_tokens > kResidentTokens,
                               "cold prefill did not follow the two idempotent lane aborts");
         failures += fail_case(program, !outcome.cache_fallback && !outcome.force_cold,
                               "the failed recovery restore stuck a cold fallback");
         break;
     }
     case CacheCase::RecoveryResidentHit:
-        failures += fail_case(program,
-                              program.abort_count == 0 && event_count(program.trace, "plan_ram") == 0 &&
-                                  event_count(program.trace, "plan_disk") == 0 &&
-                                  program.claim_ram_count == 0 && program.prefill_count == 1 &&
-                                  program.prefill_source == PrefixReuseSource::VramResident &&
-                                  program.prefill_reusable == kResidentTokens &&
-                                  program.prefill_tokens > kResidentTokens &&
-                                  program.prefill_ram_entry == 0 && !outcome.cache_fallback &&
-                                  !outcome.force_cold,
-                              "a resident prefix was dropped instead of being prefilled in place");
+        failures += fail_case(
+            program,
+            program.abort_count == 0 && event_count(program.trace, "plan_ram") == 0 &&
+                event_count(program.trace, "plan_disk") == 0 && program.claim_ram_count == 0 &&
+                program.prefill_count == 1 &&
+                program.prefill_source == PrefixReuseSource::VramResident &&
+                program.prefill_reusable == kResidentTokens &&
+                program.prefill_tokens > kResidentTokens && program.prefill_ram_entry == 0 &&
+                !outcome.cache_fallback && !outcome.force_cold,
+            "a resident prefix was dropped instead of being prefilled in place");
         break;
     case CacheCase::RecoveryRamHit:
-        failures += fail_case(program,
-                              program.abort_count == 1 && program.consume_ram_count == 1 &&
-                                  program.discard_ram_count == 0 && program.prefill_count == 1 &&
-                                  program.prefill_source == PrefixReuseSource::HostRam &&
-                                  program.prefill_reusable == kRamReuse &&
-                                  program.prefill_ram_entry == kRamEntryId &&
-                                  event_count(program.trace, "plan_cold") == 0 &&
-                                  in_order(program.trace, {"abort", "restore_ram", "start_prefill",
-                                                           "consume_ram"}) &&
-                                  !outcome.cache_fallback && !outcome.force_cold &&
-                                  !program.saw_force_cold,
-                              "a RAM checkpoint was not restored onto the retry");
+        failures += fail_case(
+            program,
+            program.abort_count == 1 && program.consume_ram_count == 1 &&
+                program.discard_ram_count == 0 && program.prefill_count == 1 &&
+                program.prefill_source == PrefixReuseSource::HostRam &&
+                program.prefill_reusable == kRamReuse && program.prefill_ram_entry == kRamEntryId &&
+                event_count(program.trace, "plan_cold") == 0 &&
+                in_order(program.trace, {"abort", "restore_ram", "start_prefill", "consume_ram"}) &&
+                !outcome.cache_fallback && !outcome.force_cold && !program.saw_force_cold,
+            "a RAM checkpoint was not restored onto the retry");
         break;
     case CacheCase::RecoveryDiskHit:
         failures += fail_case(program,
                               program.abort_count == 1 && program.consume_disk_count == 1 &&
-                                  program.invalidate_disk_count == 0 && program.restore_ram_count == 0 &&
-                                  program.prefill_count == 1 &&
+                                  program.invalidate_disk_count == 0 &&
+                                  program.restore_ram_count == 0 && program.prefill_count == 1 &&
                                   program.prefill_source == PrefixReuseSource::HostDisk &&
                                   program.prefill_reusable == kDiskReuse &&
                                   program.prefill_disk_entry == kDiskEntryId &&
@@ -828,23 +918,25 @@ int check_scripted_recovery(const ProbeProgram& program, const RecoveryOutcome& 
                               "the longer disk checkpoint did not win the retry");
         break;
     case CacheCase::RecoveryDiskClaimMiss:
-        failures += fail_case(program,
-                              program.abort_count == 2 && program.restore_disk_count == 0 &&
-                                  program.invalidate_disk_count == 0 &&
-                                  event_count(program.trace, "cancel_disk") == 0 && cold_compute &&
-                                  program.claimed_disk_entry == kDiskEntryId &&
-                                  in_order(program.trace, {"claim_disk", "plan_cold", "start_prefill"}) &&
-                                  !outcome.cache_fallback && !outcome.force_cold,
-                              "a disk claim miss did not cold-prefill without invalidating an entry");
+        failures +=
+            fail_case(program,
+                      program.abort_count == 2 && program.restore_disk_count == 0 &&
+                          program.invalidate_disk_count == 0 &&
+                          event_count(program.trace, "cancel_disk") == 0 && cold_compute &&
+                          program.claimed_disk_entry == kDiskEntryId &&
+                          in_order(program.trace, {"claim_disk", "plan_cold", "start_prefill"}) &&
+                          !outcome.cache_fallback && !outcome.force_cold,
+                      "a disk claim miss did not cold-prefill without invalidating an entry");
         break;
     case CacheCase::RecoveryDiskRestoreFails:
-        failures += fail_case(program,
-                              program.abort_count == 2 && program.invalidate_disk_count == 1 &&
-                                  program.consume_disk_count == 0 && cold_compute &&
-                                  in_order(program.trace, {"restore_disk", "invalidate_disk", "plan_cold",
-                                                           "start_prefill"}) &&
-                                  !outcome.cache_fallback && !outcome.force_cold,
-                              "a failed disk restore did not invalidate that entry and cold-prefill");
+        failures +=
+            fail_case(program,
+                      program.abort_count == 2 && program.invalidate_disk_count == 1 &&
+                          program.consume_disk_count == 0 && cold_compute &&
+                          in_order(program.trace, {"restore_disk", "invalidate_disk", "plan_cold",
+                                                   "start_prefill"}) &&
+                          !outcome.cache_fallback && !outcome.force_cold,
+                      "a failed disk restore did not invalidate that entry and cold-prefill");
         break;
     case CacheCase::AdmitRamHit:
     case CacheCase::AdmitDiskLongerThanRam:
@@ -870,8 +962,8 @@ ninfer::PromptInput thinking_input() {
     input.options.add_generation_prompt = true;
     ninfer::ChatMessage user;
     user.role = ninfer::ChatRole::User;
-    user.parts.push_back(ninfer::MessagePart{
-        .kind = ninfer::MessagePartKind::Text, .text = "x", .media = {}});
+    user.parts.push_back(
+        ninfer::MessagePart{.kind = ninfer::MessagePartKind::Text, .text = "x", .media = {}});
     input.messages.push_back(std::move(user));
     return input;
 }
@@ -892,50 +984,50 @@ namespace ninfer::runtime {
 
 template <class ProbeInstance>
 int drive_scripted_recovery(ConcurrentExecutor<ProbeInstance>& executor) {
-    using Request = typename ConcurrentExecutor<ProbeInstance>::Request;
+    using Request      = typename ConcurrentExecutor<ProbeInstance>::Request;
     Frontend& frontend = executor.instance_.loaded->frontend;
-    auto input = thinking_input();
+    auto input         = thinking_input();
 
-    auto prepared = frontend.prepare(input);
+    auto prepared                       = frontend.prepare(input);
     const ninfer::PromptSummary summary = prepared.summary();
     ninfer::StopPolicy stop;
     stop.token_ids = {kCallerStop};
-    auto session = frontend.make_output_session(prepared, stop, {});
+    auto session   = frontend.make_output_session(prepared, stop, {});
 
     ResolvedRequestOptions options;
-    options.execution.sampling.p_less          = true;
-    options.execution.allow_prefix_reuse       = true;
-    options.execution.force_cold_prefill       = false;
-    options.execution.requested_output_tokens  = kOutputBudget;
-    options.stop                               = stop;
-    const auto now = ConcurrentExecutor<ProbeInstance>::Clock::now();
-    auto request = std::shared_ptr<Request>(new Request(
-        1, std::move(prepared), std::move(session), summary, 0.0, std::move(options),
-        ninfer::OutputDelivery::TerminalOnly, now + std::chrono::hours(1), now, ninfer::HostInputLease{},
-        true));
+    options.execution.sampling.p_less         = true;
+    options.execution.allow_prefix_reuse      = true;
+    options.execution.force_cold_prefill      = false;
+    options.execution.requested_output_tokens = kOutputBudget;
+    options.stop                              = stop;
+    const auto now                            = ConcurrentExecutor<ProbeInstance>::Clock::now();
+    auto request                              = std::shared_ptr<Request>(
+        new Request(1, std::move(prepared), std::move(session), summary, 0.0, std::move(options),
+                    ninfer::OutputDelivery::TerminalOnly, now + std::chrono::hours(1), now,
+                    ninfer::HostInputLease{}, true));
     int failures = check(request->recovery_context != nullptr, "the retry had no recovery context");
     request->budget.emplace(kOutputBudget, FinishReason::OutputLimit);
-    request->lane                    = 0;
-    request->recovery_pending        = true;
-    request->resident_prompt_tokens  = kResidentTokens;
-    request->admission_resources     = AdmissionResources{1, 1, 0};
-    request->remaining_service_work  = 4;
-    request->recovery_cause          = "repeated_reasoning";
+    request->lane                                    = 0;
+    request->recovery_pending                        = true;
+    request->resident_prompt_tokens                  = kResidentTokens;
+    request->admission_resources                     = AdmissionResources{1, 1, 0};
+    request->remaining_service_work                  = 4;
+    request->recovery_cause                          = "repeated_reasoning";
     executor.instance_.program->request_cancellation = &request->cancelled;
 
     std::shared_ptr<Request> peer;
     if (executor.instance_.program->peer_decoding) {
-        auto peer_prepared = frontend.prepare(input);
+        auto peer_prepared                       = frontend.prepare(input);
         const ninfer::PromptSummary peer_summary = peer_prepared.summary();
         auto peer_session = frontend.make_output_session(peer_prepared, stop, {});
         ResolvedRequestOptions peer_options;
         peer_options.execution.sampling.p_less         = true;
         peer_options.execution.requested_output_tokens = kOutputBudget;
         peer_options.stop                              = stop;
-        peer = std::shared_ptr<Request>(new Request(
-            2, std::move(peer_prepared), std::move(peer_session), peer_summary, 0.0,
-            std::move(peer_options), ninfer::OutputDelivery::TerminalOnly,
-            now + std::chrono::hours(1), now, ninfer::HostInputLease{}, false));
+        peer                                           = std::shared_ptr<Request>(
+            new Request(2, std::move(peer_prepared), std::move(peer_session), peer_summary, 0.0,
+                        std::move(peer_options), ninfer::OutputDelivery::TerminalOnly,
+                        now + std::chrono::hours(1), now, ninfer::HostInputLease{}, false));
         peer->budget.emplace(kOutputBudget, FinishReason::OutputLimit);
         peer->lane                   = 1;
         peer->decode_ready           = true;
@@ -973,9 +1065,7 @@ int drive_scripted_recovery(ConcurrentExecutor<ProbeInstance>& executor) {
     if (request->error != nullptr) {
         try {
             std::rethrow_exception(request->error);
-        } catch (const std::exception& error) {
-            outcome.error = error.what();
-        } catch (...) {
+        } catch (const std::exception& error) { outcome.error = error.what(); } catch (...) {
             outcome.error = "the retry completed with an unknown error";
         }
     }
@@ -988,10 +1078,10 @@ int drive_scripted_recovery(ConcurrentExecutor<ProbeInstance>& executor) {
     outcome.result           = request->result;
     {
         std::scoped_lock locks(executor.execution_mutex_, executor.queue_mutex_);
-        outcome.pending_empty   = executor.pending_.empty();
-        outcome.recovery_empty  = executor.recovery_queue_.empty();
-        outcome.slot_empty      = executor.slots_[0] == nullptr;
-        outcome.executor_failed = executor.failed_;
+        outcome.pending_empty                            = executor.pending_.empty();
+        outcome.recovery_empty                           = executor.recovery_queue_.empty();
+        outcome.slot_empty                               = executor.slots_[0] == nullptr;
+        outcome.executor_failed                          = executor.failed_;
         executor.instance_.program->request_cancellation = nullptr;
     }
     return failures + check_scripted_recovery(*executor.instance_.program, outcome);
@@ -1002,7 +1092,7 @@ int drive_scripted_recovery(ConcurrentExecutor<ProbeInstance>& executor) {
 int run_recovery(Frontend& frontend, CacheCase script, bool cancel_on_restore = false,
                  bool peer_decoding = false, bool cancel_held = false) {
     ProbeProgram program;
-    program.script = script;
+    program.script            = script;
     program.cancel_on_restore = cancel_on_restore;
     program.peer_decoding     = peer_decoding;
     program.cancel_held       = cancel_held;
@@ -1010,7 +1100,7 @@ int run_recovery(Frontend& frontend, CacheCase script, bool cancel_on_restore = 
     RecoveryProbe instance;
     instance.program = &program;
     instance.loaded  = &loaded;
-    auto engine = engine_options();
+    auto engine      = engine_options();
     if (peer_decoding) { engine.max_concurrency = 2; }
     ninfer::runtime::ConcurrentExecutor<RecoveryProbe> executor(instance, ProbeDevice{}, engine);
     return ninfer::runtime::drive_scripted_recovery(executor);
@@ -1026,21 +1116,20 @@ int run_admission(Frontend& frontend, CacheCase script) {
     ninfer::runtime::ConcurrentExecutor<RecoveryProbe> executor(instance, ProbeDevice{},
                                                                 engine_options());
 
-    auto prepared = frontend.prepare(thinking_input());
+    auto prepared      = frontend.prepare(thinking_input());
     const auto summary = prepared.summary();
     ninfer::runtime::ResolvedRequestOptions options;
     options.execution.sampling.p_less    = true;
     options.execution.allow_prefix_reuse = true;
     options.stop.token_ids               = {kCallerStop};
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    ninfer::CancellationView cancel([deadline] {
-        return std::chrono::steady_clock::now() >= deadline;
-    });
+    ninfer::CancellationView cancel(
+        [deadline] { return std::chrono::steady_clock::now() >= deadline; });
     try {
         auto submission = executor.submit(std::move(prepared), summary, 0.0, std::move(options),
                                           ninfer::OutputDelivery::TerminalOnly);
         const ninfer::GenerationResult result = submission.wait(nullptr, cancel);
-        int failures = 0;
+        int failures                          = 0;
         const bool cold = program.prefill_count == 1 && program.prefill_reusable == 0 &&
                           program.prefill_source == PrefixReuseSource::None &&
                           result.reused_prompt_tokens == 0 &&
@@ -1053,31 +1142,33 @@ int run_admission(Frontend& frontend, CacheCase script) {
                                       result.prefix_reuse_source == PrefixReuseSource::HostRam &&
                                       program.prefill_ram_entry == kRamEntryId &&
                                       program.consume_ram_count == 1 && program.abort_count == 0 &&
-                                      program.discard_ram_count == 0 && program.restore_ram_count == 1 &&
-                                      !program.saw_force_cold,
+                                      program.discard_ram_count == 0 &&
+                                      program.restore_ram_count == 1 && !program.saw_force_cold,
                                   "admission did not restore the RAM checkpoint into the result");
             break;
         case CacheCase::AdmitDiskLongerThanRam:
-            failures += fail_case(program,
-                                  result.finish_reason == FinishReason::StopToken &&
-                                      result.reused_prompt_tokens == kDiskReuse &&
-                                      result.prefix_reuse_source == PrefixReuseSource::HostDisk &&
-                                      program.offered_disk > program.offered_ram &&
-                                      program.prefill_reusable == program.offered_disk &&
-                                      program.prefill_disk_entry == kDiskEntryId &&
-                                      program.consume_disk_count == 1 && program.restore_ram_count == 0 &&
-                                      program.consume_ram_count == 0 && program.abort_count == 0,
-                                  "admission did not prefer the longer disk checkpoint");
+            failures +=
+                fail_case(program,
+                          result.finish_reason == FinishReason::StopToken &&
+                              result.reused_prompt_tokens == kDiskReuse &&
+                              result.prefix_reuse_source == PrefixReuseSource::HostDisk &&
+                              program.offered_disk > program.offered_ram &&
+                              program.prefill_reusable == program.offered_disk &&
+                              program.prefill_disk_entry == kDiskEntryId &&
+                              program.consume_disk_count == 1 && program.restore_ram_count == 0 &&
+                              program.consume_ram_count == 0 && program.abort_count == 0,
+                          "admission did not prefer the longer disk checkpoint");
             break;
         case CacheCase::AdmitRamRestoreThenCold:
-            failures += fail_case(program,
-                                  result.finish_reason == FinishReason::StopToken && cold &&
-                                      program.saw_force_cold && program.discard_ram_count == 1 &&
-                                      program.consume_ram_count == 0 && program.claim_ram_count == 1 &&
-                                      program.restore_ram_count == 1 && program.offered_ram == kRamReuse &&
-                                      in_order(program.trace, {"claim_ram", "restore_ram", "discard_ram",
-                                                               "start_prefill"}),
-                                  "a failed admission restore was reused instead of computed cold");
+            failures +=
+                fail_case(program,
+                          result.finish_reason == FinishReason::StopToken && cold &&
+                              program.saw_force_cold && program.discard_ram_count == 1 &&
+                              program.consume_ram_count == 0 && program.claim_ram_count == 1 &&
+                              program.restore_ram_count == 1 && program.offered_ram == kRamReuse &&
+                              in_order(program.trace, {"claim_ram", "restore_ram", "discard_ram",
+                                                       "start_prefill"}),
+                          "a failed admission restore was reused instead of computed cold");
             break;
         case CacheCase::RecoveryRamRestoreFails:
         case CacheCase::RecoveryResidentHit:
@@ -1099,32 +1190,31 @@ int run_admission(Frontend& frontend, CacheCase script) {
 
 int run_retry_lifecycle(Frontend& frontend) {
     ProbeProgram program;
-    program.script = CacheCase::RecoveryResidentHit;
+    program.script            = CacheCase::RecoveryResidentHit;
     program.lifecycle_retries = true;
     ProbeLoaded loaded{frontend};
     RecoveryProbe instance;
-    instance.program = &program;
-    instance.loaded = &loaded;
-    auto engine = engine_options();
+    instance.program   = &program;
+    instance.loaded    = &loaded;
+    auto engine        = engine_options();
     engine.max_context = 32768;
     ninfer::runtime::ConcurrentExecutor<RecoveryProbe> executor(instance, ProbeDevice{}, engine);
 
-    auto prepared = frontend.prepare(thinking_input());
+    auto prepared               = frontend.prepare(thinking_input());
     const auto original_summary = prepared.summary();
     ninfer::runtime::ResolvedRequestOptions options;
-    options.execution.sampling.p_less = true;
-    options.execution.sampling.temperature = 1.0F;
-    options.execution.allow_prefix_reuse = true;
+    options.execution.sampling.p_less         = true;
+    options.execution.sampling.temperature    = 1.0F;
+    options.execution.allow_prefix_reuse      = true;
     options.execution.requested_output_tokens = 20000;
-    options.stop.token_ids = {15};
+    options.stop.token_ids                    = {15};
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    ninfer::CancellationView cancel([deadline] {
-        return std::chrono::steady_clock::now() >= deadline;
-    });
-    auto submission = executor.submit(std::move(prepared), original_summary, 0.0, std::move(options),
-                                      ninfer::OutputDelivery::TerminalOnly);
+    ninfer::CancellationView cancel(
+        [deadline] { return std::chrono::steady_clock::now() >= deadline; });
+    auto submission   = executor.submit(std::move(prepared), original_summary, 0.0,
+                                        std::move(options), ninfer::OutputDelivery::TerminalOnly);
     const auto result = submission.wait(nullptr, cancel);
-    int failures = 0;
+    int failures      = 0;
     failures += check(result.finish_reason == FinishReason::StopToken &&
                           result.recovery.attempts == 2 && result.recovery.prefill_samples == 2 &&
                           result.recovery.discarded_reasoning_tokens >= 8192,
@@ -1139,8 +1229,8 @@ int run_retry_lifecycle(Frontend& frontend) {
                       "retry lifecycle did not preserve the resident lane twice");
     if (program.prefilled_prompts.size() == 3) {
         const auto& original = program.prefilled_prompts[0];
-        const auto& first = program.prefilled_prompts[1];
-        const auto& second = program.prefilled_prompts[2];
+        const auto& first    = program.prefilled_prompts[1];
+        const auto& second   = program.prefilled_prompts[2];
         // Each notice is markup around literal text; count its exact token run.
         const auto owned = resources();
         const ninfer::targets::qwen3::frontend_internal::Tokenizer tokenizer(
@@ -1148,7 +1238,7 @@ int run_retry_lifecycle(Frontend& frontend) {
              .tokenizer_config_json  = owned.tokenizer_config_json,
              .generation_config_json = owned.generation_config_json});
         const auto notice_ids = [&](std::uint32_t attempt) {
-            const std::string notice   = recovery_notice(attempt);
+            const std::string notice = recovery_notice(attempt);
             const std::string fragment =
                 std::string(kFragmentOpen) + notice + std::string(kFragmentClose);
             const std::array<ninfer::targets::qwen3::frontend_internal::ByteSpan, 1> literal{
@@ -1159,9 +1249,8 @@ int run_retry_lifecycle(Frontend& frontend) {
         const auto occurrences = [](const std::vector<ninfer::TokenId>& haystack,
                                     const std::vector<ninfer::TokenId>& needle) {
             std::size_t count = 0;
-            for (auto it = haystack.begin();
-                 (it = std::search(it, haystack.end(), needle.begin(), needle.end())) !=
-                 haystack.end();
+            for (auto it = haystack.begin(); (it = std::search(it, haystack.end(), needle.begin(),
+                                                               needle.end())) != haystack.end();
                  ++it) {
                 ++count;
             }
@@ -1169,15 +1258,14 @@ int run_retry_lifecycle(Frontend& frontend) {
         };
         const auto first_notice  = notice_ids(1);
         const auto second_notice = notice_ids(2);
-        failures += check(first.size() > original.size() && second.size() > first.size() &&
-                              std::equal(original.begin(), original.end(), first.begin()) &&
-                              std::equal(first.begin(), first.end(), second.begin()) &&
-                              occurrences(first, first_notice) == 1 &&
-                              occurrences(second, first_notice) == 1 &&
-                              occurrences(second, second_notice) == 1 &&
-                              second.size() < original.size() + first_notice.size() +
-                                                  second_notice.size() + 128,
-                          "second retry lost the first notice or included failed generation");
+        failures += check(
+            first.size() > original.size() && second.size() > first.size() &&
+                std::equal(original.begin(), original.end(), first.begin()) &&
+                std::equal(first.begin(), first.end(), second.begin()) &&
+                occurrences(first, first_notice) == 1 && occurrences(second, first_notice) == 1 &&
+                occurrences(second, second_notice) == 1 &&
+                second.size() < original.size() + first_notice.size() + second_notice.size() + 128,
+            "second retry lost the first notice or included failed generation");
     }
     return failures;
 }
@@ -1193,8 +1281,8 @@ public:
         std::uint32_t lane = 0;
         bool may_block     = true;
         std::vector<std::uint64_t> keep;
-        std::uint64_t id   = 0;
-        bool deferred      = false;
+        std::uint64_t id = 0;
+        bool deferred    = false;
     };
 
     std::atomic<bool> reclaim_pending{false};
@@ -1207,10 +1295,12 @@ public:
         std::lock_guard lock(mu_);
         return captures_;
     }
+
     std::vector<std::uint64_t> discards() const {
         std::lock_guard lock(mu_);
         return discards_;
     }
+
     std::vector<std::uint32_t> closed() const {
         std::lock_guard lock(mu_);
         return closed_;
@@ -1219,35 +1309,46 @@ public:
     [[nodiscard]] AdmissionResources admission_capacity() const noexcept {
         return AdmissionResources{3, 3, 0};
     }
+
     [[nodiscard]] bool can_admit_lane(std::uint32_t lane, const ProbePlan&) const noexcept {
         return !has_retained_lane(lane);
     }
+
     [[nodiscard]] bool can_admit_lane_after_retained_eviction(std::uint32_t,
-                                                             const ProbePlan&) const noexcept {
+                                                              const ProbePlan&) const noexcept {
         return true;
     }
-    [[nodiscard]] bool can_admit_lane_after_releasing(
-        std::uint32_t, const ProbePlan&, std::span<const std::uint32_t> victims) const noexcept {
+
+    [[nodiscard]] bool
+    can_admit_lane_after_releasing(std::uint32_t, const ProbePlan&,
+                                   std::span<const std::uint32_t> victims) const noexcept {
         return !victims.empty();
     }
+
     [[nodiscard]] bool has_retained_lane(std::uint32_t lane) const noexcept {
         return lane < retained_.size() && retained_[lane].load();
     }
+
     [[nodiscard]] std::uint64_t retained_use_tick(std::uint32_t lane) const noexcept {
         return has_retained_lane(lane) ? 5 + 4 * static_cast<std::uint64_t>(lane) : 0;
     }
+
     void evict_retained_lane(std::uint32_t lane) noexcept {
         if (lane < retained_.size()) { retained_[lane].store(false); }
     }
+
     [[nodiscard]] bool kv_ram_reclaim_pending() const { return reclaim_pending.load(); }
+
     // The admission's captures complete at once, so its copy hold ends at the next boundary.
     [[nodiscard]] bool kv_copies_ready() const { return true; }
+
     [[nodiscard]] bool capture_retained_lane(std::uint32_t lane, std::uint64_t* ram_entry_id,
                                              bool may_block, bool* deferred,
                                              std::span<const std::uint64_t> keep) {
         std::lock_guard lock(mu_);
-        Capture capture{.lane = lane, .may_block = may_block,
-                        .keep = std::vector<std::uint64_t>(keep.begin(), keep.end())};
+        Capture capture{.lane      = lane,
+                        .may_block = may_block,
+                        .keep      = std::vector<std::uint64_t>(keep.begin(), keep.end())};
         if (ram_entry_id != nullptr) { *ram_entry_id = 0; }
         if (deferred != nullptr) { *deferred = false; }
         if (lane == 1 && defer_lane_capture.exchange(false)) {
@@ -1263,14 +1364,17 @@ public:
         captures_.push_back(std::move(capture));
         return true;
     }
+
     void discard_ram_capture(std::uint64_t entry_id) {
         std::lock_guard lock(mu_);
         discards_.push_back(entry_id);
     }
+
     void mark_turn_closed(std::uint32_t lane) noexcept {
         std::lock_guard lock(mu_);
         closed_.push_back(lane);
     }
+
     [[nodiscard]] PrefillStepResult start_prefill_lane(std::uint32_t lane, PreparedPrompt prompt,
                                                        ProbePlan, TransientRegion,
                                                        const OutputSession*, bool) {
@@ -1278,13 +1382,14 @@ public:
         if (lane < retained_.size()) { retained_[lane].store(false); }
         prefill_token_ = lane == 0 ? kDecodeToken : kCallerStop;
         PrefillStepResult step;
-        step.complete                = true;
-        step.processed_prompt_tokens = 1;
-        step.round.tokens            = std::span<const TokenId>(&prefill_token_, 1);
-        step.summary.prompt_tokens   = prompt.summary().prompt_tokens;
+        step.complete                  = true;
+        step.processed_prompt_tokens   = 1;
+        step.round.tokens              = std::span<const TokenId>(&prefill_token_, 1);
+        step.summary.prompt_tokens     = prompt.summary().prompt_tokens;
         step.summary.prefix_reuse_path = ninfer::PrefixReusePath::FullReset;
         return step;
     }
+
     [[nodiscard]] BatchedGeneratedRound decode_batch(std::span<const std::uint32_t> lanes,
                                                      std::span<const RoundBudget>) {
         decode_calls.fetch_add(1);
@@ -1318,7 +1423,7 @@ struct DeferPackage {
 };
 
 struct DeferProbe {
-    using Package = DeferPackage;
+    using Package         = DeferPackage;
     DeferProgram* program = nullptr;
     ProbeLoaded* loaded   = nullptr;
     ProbeMemory request_memory;
@@ -1331,22 +1436,22 @@ int run_admission_defers_for_reclaim(Frontend& frontend) {
     program.script            = CacheCase::AdmitRamHit;
     ProbeLoaded loaded{frontend};
     DeferProbe instance;
-    instance.program = &program;
-    instance.loaded  = &loaded;
-    auto engine = engine_options();
+    instance.program           = &program;
+    instance.loaded            = &loaded;
+    auto engine                = engine_options();
     engine.max_concurrency     = 3;
     engine.max_context         = 32768;
     engine.generation_recovery = false;
     ninfer::runtime::ConcurrentExecutor<DeferProbe> executor(instance, ProbeDevice{}, engine);
 
     auto submit = [&](std::uint32_t outputs) {
-        auto prepared = frontend.prepare(thinking_input());
+        auto prepared      = frontend.prepare(thinking_input());
         const auto summary = prepared.summary();
         ninfer::runtime::ResolvedRequestOptions options;
-        options.execution.sampling.p_less           = true;
-        options.execution.allow_prefix_reuse        = false;
-        options.execution.requested_output_tokens   = outputs;
-        options.stop.token_ids                      = {kCallerStop};
+        options.execution.sampling.p_less         = true;
+        options.execution.allow_prefix_reuse      = false;
+        options.execution.requested_output_tokens = outputs;
+        options.stop.token_ids                    = {kCallerStop};
         return executor.submit(std::move(prepared), summary, 0.0, std::move(options),
                                ninfer::OutputDelivery::TerminalOnly);
     };
@@ -1359,9 +1464,8 @@ int run_admission_defers_for_reclaim(Frontend& frontend) {
         return true;
     };
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    ninfer::CancellationView cancel([deadline] {
-        return std::chrono::steady_clock::now() >= deadline;
-    });
+    ninfer::CancellationView cancel(
+        [deadline] { return std::chrono::steady_clock::now() >= deadline; });
 
     int failures = 0;
     auto decoder = submit(30000);
@@ -1370,7 +1474,7 @@ int run_admission_defers_for_reclaim(Frontend& frontend) {
     }
     program.reclaim_pending.store(true);
     program.defer_lane_capture.store(true);
-    auto admitted = submit(8);
+    auto admitted                     = submit(8);
     const std::uint32_t decode_before = program.decode_calls.load();
     failures += check(wait_until([&] { return program.decode_calls.load() >= decode_before + 20; }),
                       "defer: decode stalled behind a pending reclaim");
@@ -1379,13 +1483,15 @@ int run_admission_defers_for_reclaim(Frontend& frontend) {
 
     program.reclaim_pending.store(false);
     if (!wait_until([&] { return program.captures().size() >= 2; })) {
-        return failures + check(false, "defer: admission did not capture after the reclaim cleared");
+        return failures +
+               check(false, "defer: admission did not capture after the reclaim cleared");
     }
     {
         const auto captures = program.captures();
-        failures += check(captures[0].lane == 2 && captures[0].id != 0 && !captures[0].may_block &&
-                              captures[0].keep.empty(),
-                          "defer: the victim capture was not first, non-blocking, with no keep list");
+        failures +=
+            check(captures[0].lane == 2 && captures[0].id != 0 && !captures[0].may_block &&
+                      captures[0].keep.empty(),
+                  "defer: the victim capture was not first, non-blocking, with no keep list");
         failures += check(captures[1].lane == 1 && captures[1].deferred && !captures[1].may_block &&
                               captures[1].keep == std::vector<std::uint64_t>{captures[0].id},
                           "defer: the lane capture did not defer with the victim capture kept");
@@ -1394,8 +1500,9 @@ int run_admission_defers_for_reclaim(Frontend& frontend) {
                           "defer: the deferred admission did not roll back the victim capture");
     }
     const std::uint32_t deferred_decode = program.decode_calls.load();
-    failures += check(wait_until([&] { return program.decode_calls.load() >= deferred_decode + 20; }),
-                      "defer: decode stalled behind a deferred admission");
+    failures +=
+        check(wait_until([&] { return program.decode_calls.load() >= deferred_decode + 20; }),
+              "defer: decode stalled behind a deferred admission");
     failures += check(program.captures().size() == 2 && program.prefills.load() == 1,
                       "defer: admission retried before the spill landed");
 
@@ -1426,7 +1533,7 @@ int run_admission_defers_for_reclaim(Frontend& frontend) {
 
 int main() {
     try {
-        Frontend frontend = FrontendTestAccess::create_component(resources(), false);
+        Frontend frontend                = FrontendTestAccess::create_component(resources(), false);
         const CacheCase recovery_cases[] = {
             CacheCase::RecoveryRamRestoreFails, CacheCase::RecoveryResidentHit,
             CacheCase::RecoveryRamHit,          CacheCase::RecoveryDiskHit,
@@ -1438,13 +1545,17 @@ int main() {
             CacheCase::AdmitRamRestoreThenCold,
         };
         int failures = 0;
-        for (const CacheCase script : recovery_cases) { failures += run_recovery(frontend, script); }
+        for (const CacheCase script : recovery_cases) {
+            failures += run_recovery(frontend, script);
+        }
         failures += run_recovery(frontend, CacheCase::RecoveryRamHit, true);
         failures += run_recovery(frontend, CacheCase::RecoveryDiskHit, true);
         failures += run_recovery(frontend, CacheCase::RecoveryRamHit, false, true);
         failures += run_recovery(frontend, CacheCase::RecoveryDiskHit, false, true);
         failures += run_recovery(frontend, CacheCase::RecoveryRamHit, false, true, true);
-        for (const CacheCase script : admission_cases) { failures += run_admission(frontend, script); }
+        for (const CacheCase script : admission_cases) {
+            failures += run_admission(frontend, script);
+        }
         failures += run_retry_lifecycle(frontend);
         failures += run_admission_defers_for_reclaim(frontend);
         std::cout << "recovery executor failures=" << failures << '\n';

@@ -27,15 +27,19 @@ class RunSelectiveA8Q4SourceGateTest(unittest.TestCase):
             output, arms, comparison = self._paths(Path(temporary))
             output.mkdir()
             arms["a8g64-q4g64-control"].write_text("partial")
-            with patch.object(runner, "OUTPUT", output), patch.object(
-                runner, "ARMS", arms), patch.object(runner, "COMPARISON", comparison
+            with (
+                patch.object(runner, "OUTPUT", output),
+                patch.object(runner, "ARMS", arms),
+                patch.object(runner, "COMPARISON", comparison),
             ):
                 with self.assertRaisesRegex(ValueError, "partial"):
                     runner.run()
             arms["a8g64-q4g64-control"].unlink()
             (output / "foreign").write_text("x")
-            with patch.object(runner, "OUTPUT", output), patch.object(
-                runner, "ARMS", arms), patch.object(runner, "COMPARISON", comparison
+            with (
+                patch.object(runner, "OUTPUT", output),
+                patch.object(runner, "ARMS", arms),
+                patch.object(runner, "COMPARISON", comparison),
             ):
                 with self.assertRaisesRegex(ValueError, "unexpected"):
                     runner.run()
@@ -55,11 +59,14 @@ class RunSelectiveA8Q4SourceGateTest(unittest.TestCase):
                     comparison.write_text("{}")
                 return subprocess.CompletedProcess(command, 0)
 
-            with patch.object(runner, "OUTPUT", output), patch.object(
-                runner, "ARMS", arms), patch.object(runner, "COMPARISON", comparison
-            ), patch.object(runner, "_load_score"), patch.object(
-                runner, "validate_comparison", return_value={"pass": True}
-            ), patch.object(runner.subprocess, "run", side_effect=execute):
+            with (
+                patch.object(runner, "OUTPUT", output),
+                patch.object(runner, "ARMS", arms),
+                patch.object(runner, "COMPARISON", comparison),
+                patch.object(runner, "_load_score"),
+                patch.object(runner, "validate_comparison", return_value={"pass": True}),
+                patch.object(runner.subprocess, "run", side_effect=execute),
+            ):
                 self.assertEqual(runner.run(), 0)
             self.assertEqual(len(commands), 2)
             self.assertIn("a8g128-q4g128-mse", commands[0])

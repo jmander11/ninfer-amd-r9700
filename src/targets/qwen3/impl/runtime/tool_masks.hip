@@ -24,12 +24,12 @@ struct ToolMaskExchange::Mailbox {
 };
 
 namespace {
-constexpr std::size_t kWords = (kTokenDomain + 31) / 32;
+constexpr std::size_t kWords            = (kTokenDomain + 31) / 32;
 constexpr std::uint32_t kPublishThreads = 256;
-constexpr std::uint32_t kAcquireBlocks = 16;
+constexpr std::uint32_t kAcquireBlocks  = 16;
 constexpr std::uint32_t kAcquireThreads = 256;
-constexpr auto kReplyTimeout = std::chrono::seconds(2);
-constexpr auto kMatcherPoll = std::chrono::microseconds(20);
+constexpr auto kReplyTimeout            = std::chrono::seconds(2);
+constexpr auto kMatcherPoll             = std::chrono::microseconds(20);
 
 std::size_t align_up(std::size_t value) { return (value + 255U) & ~std::size_t{255U}; }
 
@@ -51,7 +51,7 @@ __global__ __launch_bounds__(kPublishThreads) void tool_mask_publish_kernel(
     __threadfence_system();
     __syncthreads();
     if (threadIdx.x == 0U) {
-        mailbox->tree = parents != nullptr ? 1U : 0U;
+        mailbox->tree  = parents != nullptr ? 1U : 0U;
         mailbox->batch = batch;
         const std::uint32_t request =
             __hip_atomic_load(&mailbox->request, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
@@ -74,7 +74,7 @@ __global__ __launch_bounds__(kAcquireThreads) void tool_mask_acquire_kernel(
         const std::uint32_t request =
             __hip_atomic_load(&mailbox->request, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
         const std::uint64_t start = wall_clock64();
-        std::uint32_t ok = 1U;
+        std::uint32_t ok          = 1U;
         while (__hip_atomic_load(&mailbox->reply, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) !=
                request) {
             if (wall_clock64() - start > timeout_ticks) {
@@ -103,7 +103,7 @@ __global__ __launch_bounds__(kAcquireThreads) void tool_mask_acquire_kernel(
                                __HIP_MEMORY_SCOPE_SYSTEM);
         return;
     }
-    const std::size_t thread = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::size_t thread  = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     const std::size_t threads = static_cast<std::size_t>(gridDim.x) * blockDim.x;
     for (std::uint32_t row = 0; row < batch; ++row) {
         const std::size_t words = mask_words[row];
@@ -135,19 +135,19 @@ bool all_permitted(const std::uint32_t* words, std::size_t nodes) {
 ToolMaskExchange::ToolMaskExchange(Tensor masks, Tensor sampling)
     : masks_(masks), sampling_(sampling), width_(masks.ne[1]), capacity_(masks.ne[2]),
       root_masks_(capacity_ * kWords * sizeof(std::uint32_t)) {
-    if (masks.dtype != DType::I32 || masks.ne[0] != kWords ||
-        !masks.is_contiguous() || width_ == 0 || capacity_ == 0 ||
+    if (masks.dtype != DType::I32 || masks.ne[0] != kWords || !masks.is_contiguous() ||
+        width_ == 0 || capacity_ == 0 ||
         sampling.bytes() < capacity_ * sizeof(ops::SamplingConfig)) {
         throw std::invalid_argument("invalid tool mask exchange storage");
     }
     outputs_.resize(capacity_, nullptr);
     configs_.resize(capacity_);
 
-    const std::size_t nodes = width_ * capacity_;
-    const std::size_t ids_offset = align_up(sizeof(Mailbox));
+    const std::size_t nodes          = width_ * capacity_;
+    const std::size_t ids_offset     = align_up(sizeof(Mailbox));
     const std::size_t parents_offset = ids_offset + align_up(nodes * sizeof(std::int32_t));
-    const std::size_t counts_offset = parents_offset + align_up(nodes * sizeof(std::int32_t));
-    const std::size_t words_offset = counts_offset + align_up(capacity_ * sizeof(std::int32_t));
+    const std::size_t counts_offset  = parents_offset + align_up(nodes * sizeof(std::int32_t));
+    const std::size_t words_offset   = counts_offset + align_up(capacity_ * sizeof(std::int32_t));
     const std::size_t configs_offset = words_offset + align_up(capacity_ * sizeof(std::uint32_t));
     const std::size_t fallback_offset =
         configs_offset + align_up(capacity_ * sizeof(ops::SamplingConfig));
@@ -156,21 +156,22 @@ ToolMaskExchange::ToolMaskExchange(Tensor masks, Tensor sampling)
     const std::size_t bytes = masks_offset + nodes * kWords * sizeof(std::uint32_t);
     HIP_CHECK(hipHostMalloc(&mailbox_allocation_, bytes, hipHostMallocCoherent));
     std::memset(mailbox_allocation_, 0, bytes);
-    auto* base = static_cast<std::byte*>(mailbox_allocation_);
-    mailbox_ = reinterpret_cast<Mailbox*>(base);
-    mail_ids_ = reinterpret_cast<std::int32_t*>(base + ids_offset);
-    mail_parents_ = reinterpret_cast<std::int32_t*>(base + parents_offset);
-    mail_counts_ = reinterpret_cast<std::int32_t*>(base + counts_offset);
+    auto* base       = static_cast<std::byte*>(mailbox_allocation_);
+    mailbox_         = reinterpret_cast<Mailbox*>(base);
+    mail_ids_        = reinterpret_cast<std::int32_t*>(base + ids_offset);
+    mail_parents_    = reinterpret_cast<std::int32_t*>(base + parents_offset);
+    mail_counts_     = reinterpret_cast<std::int32_t*>(base + counts_offset);
     mail_mask_words_ = reinterpret_cast<std::uint32_t*>(base + words_offset);
-    mail_configs_ = reinterpret_cast<ops::SamplingConfig*>(base + configs_offset);
-    mail_fallback_ = reinterpret_cast<ops::SamplingConfig*>(base + fallback_offset);
-    mail_masks_ = reinterpret_cast<std::uint32_t*>(base + masks_offset);
+    mail_configs_    = reinterpret_cast<ops::SamplingConfig*>(base + configs_offset);
+    mail_fallback_   = reinterpret_cast<ops::SamplingConfig*>(base + fallback_offset);
+    mail_masks_      = reinterpret_cast<std::uint32_t*>(base + masks_offset);
 
-    int device = 0;
+    int device         = 0;
     int wall_clock_khz = 0;
     HIP_CHECK(hipGetDevice(&device));
     HIP_CHECK(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, device));
-    reply_timeout_ticks_ = static_cast<std::uint64_t>(wall_clock_khz) *
+    reply_timeout_ticks_ =
+        static_cast<std::uint64_t>(wall_clock_khz) *
         std::chrono::duration_cast<std::chrono::milliseconds>(kReplyTimeout).count();
     matcher_ = std::thread([this] { serve(); });
 }
@@ -213,29 +214,29 @@ ops::SamplingConfig ToolMaskExchange::root(std::size_t row, hipStream_t stream) 
 }
 
 ops::SamplingConfig ToolMaskExchange::prefill_root(const OutputSession* output,
-                                                   ops::SamplingConfig config,
-                                                   hipStream_t stream) {
+                                                   ops::SamplingConfig config, hipStream_t stream) {
     return root_into(output, config, capacity_ - 1U, stream);
 }
 
 ops::SamplingConfig ToolMaskExchange::root_into(const OutputSession* output,
                                                 ops::SamplingConfig config, std::size_t row,
                                                 hipStream_t stream) {
-    config.allowed_token_words = nullptr;
+    config.allowed_token_words         = nullptr;
     config.allowed_token_column_stride = 0;
     if (output && output->has_tool_grammar()) {
         const std::array<TokenId, 1> token{0};
         const std::array<std::int32_t, 1> parent{-1};
         output->fill_tool_masks(token, parent, {root_mask(row), kWords});
         HIP_CHECK(hipMemcpyAsync(const_cast<std::uint32_t*>(device_mask(row)), root_mask(row),
-                                   kWords * sizeof(std::uint32_t), hipMemcpyHostToDevice, stream));
+                                 kWords * sizeof(std::uint32_t), hipMemcpyHostToDevice, stream));
         config.allowed_token_words = device_mask(row);
     }
     return config;
 }
 
-const ops::SamplingConfig* ToolMaskExchange::publish(
-    const Tensor& ids, const Tensor* parents, const Tensor& valid_columns, hipStream_t stream) {
+const ops::SamplingConfig* ToolMaskExchange::publish(const Tensor& ids, const Tensor* parents,
+                                                     const Tensor& valid_columns,
+                                                     hipStream_t stream) {
     const auto batch = static_cast<std::size_t>(ids.ne[1]);
     const auto width = static_cast<std::size_t>(ids.ne[0]);
     if (width > width_ || batch > capacity_ || ids.dtype != DType::I32 ||
@@ -270,7 +271,7 @@ void ToolMaskExchange::arm() {
         std::lock_guard lock(mutex_);
         for (std::size_t row = 0; row < capacity_; ++row) {
             mail_fallback_[row] = row < configs_.size() ? configs_[row] : ops::SamplingConfig{};
-            mail_fallback_[row].allowed_token_words = nullptr;
+            mail_fallback_[row].allowed_token_words         = nullptr;
             mail_fallback_[row].allowed_token_column_stride = 0;
         }
         std::atomic_ref(mailbox_->timed_out).store(0U, std::memory_order_relaxed);
@@ -315,8 +316,7 @@ void ToolMaskExchange::serve() noexcept {
 }
 
 void ToolMaskExchange::answer(std::uint32_t request) noexcept {
-    roctx::ScopedRange range(roctx::Name::ToolMaskMatch, roctx::Category::Control,
-                             configs_.size());
+    roctx::ScopedRange range(roctx::Name::ToolMaskMatch, roctx::Category::Control, configs_.size());
     try {
         fill(std::atomic_ref(mailbox_->tree).load(std::memory_order_relaxed) != 0U);
     } catch (...) {
@@ -324,7 +324,7 @@ void ToolMaskExchange::answer(std::uint32_t request) noexcept {
         // Finish the round safely with nonempty domains, then fail before any candidate can
         // be published.
         for (std::size_t row = 0; row < capacity_; ++row) {
-            mail_configs_[row] = mail_fallback_[row];
+            mail_configs_[row]    = mail_fallback_[row];
             mail_mask_words_[row] = 0U;
         }
     }
@@ -336,11 +336,11 @@ void ToolMaskExchange::fill(bool tree) {
     const std::size_t batch = std::min<std::size_t>(
         std::atomic_ref(mailbox_->batch).load(std::memory_order_relaxed), capacity_);
     for (std::size_t row = 0; row < batch; ++row) {
-        auto& config = mail_configs_[row];
-        config = row < configs_.size() ? configs_[row] : ops::SamplingConfig{};
+        auto& config               = mail_configs_[row];
+        config                     = row < configs_.size() ? configs_[row] : ops::SamplingConfig{};
         config.allowed_token_words = nullptr;
         config.allowed_token_column_stride = 0;
-        mail_mask_words_[row] = 0U;
+        mail_mask_words_[row]              = 0U;
         if (row >= outputs_.size() || !outputs_[row] || !outputs_[row]->has_tool_grammar()) {
             continue;
         }
@@ -348,7 +348,7 @@ void ToolMaskExchange::fill(bool tree) {
         if (count_value < 1 || static_cast<std::size_t>(count_value) > width_) {
             throw std::logic_error("invalid tool grammar verification node count");
         }
-        const auto count = static_cast<std::size_t>(count_value);
+        const auto count      = static_cast<std::size_t>(count_value);
         std::int32_t* parents = mail_parents_ + row * width_;
         if (!tree) {
             for (std::size_t node = 0; node < count; ++node) {
@@ -365,7 +365,7 @@ void ToolMaskExchange::fill(bool tree) {
         for (std::size_t node = 1; node < count && shared; ++node) {
             shared = std::equal(words, words + kWords, words + node * kWords);
         }
-        config.allowed_token_words = device_mask(row);
+        config.allowed_token_words         = device_mask(row);
         config.allowed_token_column_stride = shared ? 0 : static_cast<std::int32_t>(kWords);
         mail_mask_words_[row] = static_cast<std::uint32_t>((shared ? 1U : count) * kWords);
     }

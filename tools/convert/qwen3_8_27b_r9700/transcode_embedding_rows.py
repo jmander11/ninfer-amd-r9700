@@ -7,14 +7,21 @@ words are permuted, never re-encoded; every other object is copied byte-exact. W
 has a `.conversion.json` receipt, the output receives the same receipt with the embedding's
 origin and digest updated, so `convert_fp8lut4 --validate` holds for it.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
 
-from tools.artifact.container import (Artifact, ArtifactWriter, ResourceSpec, TensorObject,
-                                      TensorSpec, plan_objects)
+from tools.artifact.container import (
+    Artifact,
+    ArtifactWriter,
+    ResourceSpec,
+    TensorObject,
+    TensorSpec,
+    plan_objects,
+)
 from tools.artifact.layouts import transcode_q4_n16k16
 from .convert_fp8lut4 import EMBEDDING, ROW_SPLIT, copied, recorded, row_split
 
@@ -47,14 +54,14 @@ def verify(source: Path, output: Path) -> None:
                 if obj.name == EMBEDDING:
                     offset = 0
                     for block in transcode_q4_n16k16(encoded, obj.shape):
-                        if original[offset:offset + len(block)] != block:
+                        if original[offset : offset + len(block)] != block:
                             raise ValueError("embedding codes/scales were not preserved exactly")
                         offset += len(block)
                     if offset != len(original):
                         raise ValueError("embedding transform extent mismatch")
                 else:
                     for begin in range(0, len(original), CHUNK):
-                        if original[begin:begin + CHUNK] != encoded[begin:begin + CHUNK]:
+                        if original[begin : begin + CHUNK] != encoded[begin : begin + CHUNK]:
                             raise ValueError(f"unchanged payload differs: {obj.name}")
 
 
@@ -84,9 +91,14 @@ def transcode(source: Path, output: Path) -> dict:
         with output_receipt.open("x") as handle:
             json.dump(receipt, handle, indent=1)
             handle.write("\n")
-    return {"artifact": str(output), "bytes": output.stat().st_size,
-            "embedding_layout": ROW_SPLIT, "embedding_sha256": embedding_record["sha256"],
-            "unchanged_payloads_byte_exact": True, "embedding_inverse_exact": True}
+    return {
+        "artifact": str(output),
+        "bytes": output.stat().st_size,
+        "embedding_layout": ROW_SPLIT,
+        "embedding_sha256": embedding_record["sha256"],
+        "unchanged_payloads_byte_exact": True,
+        "embedding_inverse_exact": True,
+    }
 
 
 def main() -> None:

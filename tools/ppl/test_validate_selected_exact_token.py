@@ -38,10 +38,20 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
             root = Path(directory)
             output = root / "admission.json"
             output.symlink_to(root / "missing")
-            argv = ["validate_selected_exact_token.py", "--plan", str(root / "plan.json"),
-                    "--campaign", str(root / "campaign.json"), "--out", str(output)]
-            with patch.object(sys, "argv", argv), patch.object(
-                    validator_module, "validate") as checker, self.assertRaises(SystemExit):
+            argv = [
+                "validate_selected_exact_token.py",
+                "--plan",
+                str(root / "plan.json"),
+                "--campaign",
+                str(root / "campaign.json"),
+                "--out",
+                str(output),
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(validator_module, "validate") as checker,
+                self.assertRaises(SystemExit),
+            ):
                 validator_module.main()
             checker.assert_not_called()
             self.assertTrue(output.is_symlink())
@@ -56,11 +66,20 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
             plan.write_text("{}\n", encoding="utf-8")
             campaign_real.write_text("{}\n", encoding="utf-8")
             campaign_link.symlink_to(campaign_real)
-            argv = ["validate_selected_exact_token.py", "--plan", str(plan),
-                    "--campaign", str(campaign_link), "--out", str(output)]
-            with patch.object(sys, "argv", argv), patch.object(
-                    validator_module, "validate") as checker, self.assertRaisesRegex(
-                        SystemExit, "campaign authority must not be symlinked"):
+            argv = [
+                "validate_selected_exact_token.py",
+                "--plan",
+                str(plan),
+                "--campaign",
+                str(campaign_link),
+                "--out",
+                str(output),
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(validator_module, "validate") as checker,
+                self.assertRaisesRegex(SystemExit, "campaign authority must not be symlinked"),
+            ):
                 validator_module.main()
             checker.assert_not_called()
             self.assertFalse(os.path.lexists(output))
@@ -82,11 +101,20 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
                 output.write_text('{"foreign": true}\n', encoding="utf-8")
                 raise ValueError("late revalidation failure")
 
-            argv = ["validate_selected_exact_token.py", "--plan", str(plan),
-                    "--campaign", str(campaign), "--out", str(output)]
-            with patch.object(sys, "argv", argv), patch.object(
-                    validator_module, "validate", side_effect=validate_then_replace
-            ), self.assertRaisesRegex(SystemExit, "late revalidation failure"):
+            argv = [
+                "validate_selected_exact_token.py",
+                "--plan",
+                str(plan),
+                "--campaign",
+                str(campaign),
+                "--out",
+                str(output),
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(validator_module, "validate", side_effect=validate_then_replace),
+                self.assertRaisesRegex(SystemExit, "late revalidation failure"),
+            ):
                 validator_module.main()
             self.assertEqual(json.loads(output.read_text(encoding="utf-8")), {"foreign": True})
 
@@ -106,12 +134,21 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
                 Path(destination).unlink()
                 Path(destination).write_text('{"foreign": true}\n', encoding="utf-8")
 
-            argv = ["validate_selected_exact_token.py", "--plan", str(plan),
-                    "--campaign", str(campaign), "--out", str(output)]
-            with patch.object(sys, "argv", argv), patch.object(
-                    validator_module, "validate", return_value=value
-            ), patch.object(validator_module.os, "link", side_effect=link_then_replace), \
-                    self.assertRaisesRegex(SystemExit, "hard-link inode differs"):
+            argv = [
+                "validate_selected_exact_token.py",
+                "--plan",
+                str(plan),
+                "--campaign",
+                str(campaign),
+                "--out",
+                str(output),
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(validator_module, "validate", return_value=value),
+                patch.object(validator_module.os, "link", side_effect=link_then_replace),
+                self.assertRaisesRegex(SystemExit, "hard-link inode differs"),
+            ):
                 validator_module.main()
             self.assertEqual(json.loads(output.read_text(encoding="utf-8")), {"foreign": True})
 
@@ -122,13 +159,19 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
             path.write_text("{}", encoding="utf-8")
             bindings[name] = {"path": str(path), "sha256": file_sha256(path)}
         source = root / "source.json"
-        source.write_text(json.dumps({"metadata": {
-            "config": {"sha256": "c" * 64}, "index": {"sha256": "d" * 64}}}))
+        source.write_text(
+            json.dumps(
+                {"metadata": {"config": {"sha256": "c" * 64}, "index": {"sha256": "d" * 64}}}
+            )
+        )
         bindings["source"] = {"path": str(source), "sha256": file_sha256(source)}
         route = {
             "winner": "selected-g16-dense",
-            "artifact": {"path": str(root / "selected.ninfer"),
-                         "weights_id": "r9700-q4g64-n16k16-eval", "sha256": "a" * 64},
+            "artifact": {
+                "path": str(root / "selected.ninfer"),
+                "weights_id": "r9700-q4g64-n16k16-eval",
+                "sha256": "a" * 64,
+            },
             "cache_profile": {"value_group": 16},
             "execution_profile": {"xattention_profile": "dense"},
             "selected_prefill_chunk": 2048,
@@ -155,41 +198,89 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
         profile = "r9700-g16"
         quality_gate = 0.05
         plan = {
-            "artifact_type": "ninfer_r9700_selected_exact_token_plan", "schema_version": 1,
-            "status": "command_only_not_executed", "terminal_route": route,
-            "terminal_selection": bindings["selection"], "quality_authority": bindings["quality"],
-            "bf16_source_receipt": bindings["source"], "candidate_profile": "r9700-g16",
+            "artifact_type": "ninfer_r9700_selected_exact_token_plan",
+            "schema_version": 1,
+            "status": "command_only_not_executed",
+            "terminal_route": route,
+            "terminal_selection": bindings["selection"],
+            "quality_authority": bindings["quality"],
+            "bf16_source_receipt": bindings["source"],
+            "candidate_profile": "r9700-g16",
             "bf16_source": {"path": "/source", "shard_count": 18},
             "quality_tier": "capacity-speed",
             "quality_mean_nll_gate": quality_gate,
-            "candidate_scorer": {"path": str(scorer), "sha256": file_sha256(scorer),
-                                 "file_size_bytes": scorer.stat().st_size},
-            "bf16_scorer": {"path": str(bf16_scorer), "sha256": file_sha256(bf16_scorer),
-                            "file_size_bytes": bf16_scorer.stat().st_size},
-            "corpus": {"path": str(corpus), "sha256": file_sha256(corpus),
-                       "manifest_path": str(corpus_manifest),
-                       "manifest_sha256": file_sha256(corpus_manifest)},
-            "python": {"launcher_path": str(python), "sha256": file_sha256(python),
-                       "pyvenv_cfg": {"path": str(pyvenv), "sha256": file_sha256(pyvenv)}},
-            "workload": {"concurrency": 1, "lengths": [8192, 32768], "schedule": "decode",
-                         "spec": "none", "draft_tokens": 0, "device": 0,
-                         "execution_parity_max_abs_nll": 0.0},
-            "outputs": {"campaign": str(campaign_dir),
-                        "admission": str(root / "admission.json")},
+            "candidate_scorer": {
+                "path": str(scorer),
+                "sha256": file_sha256(scorer),
+                "file_size_bytes": scorer.stat().st_size,
+            },
+            "bf16_scorer": {
+                "path": str(bf16_scorer),
+                "sha256": file_sha256(bf16_scorer),
+                "file_size_bytes": bf16_scorer.stat().st_size,
+            },
+            "corpus": {
+                "path": str(corpus),
+                "sha256": file_sha256(corpus),
+                "manifest_path": str(corpus_manifest),
+                "manifest_sha256": file_sha256(corpus_manifest),
+            },
+            "python": {
+                "launcher_path": str(python),
+                "sha256": file_sha256(python),
+                "pyvenv_cfg": {"path": str(pyvenv), "sha256": file_sha256(pyvenv)},
+            },
+            "workload": {
+                "concurrency": 1,
+                "lengths": [8192, 32768],
+                "schedule": "decode",
+                "spec": "none",
+                "draft_tokens": 0,
+                "device": 0,
+                "execution_parity_max_abs_nll": 0.0,
+            },
+            "outputs": {"campaign": str(campaign_dir), "admission": str(root / "admission.json")},
         }
         plan["command"] = [
-            str(python), str(validator_module.RUNNER),
-            "--bf16-reference-ppl-bin", str(bf16_scorer),
-            "--bf16-reference-weights", "/source",
-            "--g16-ppl-bin", str(scorer), "--g16-weights", route["artifact"]["path"],
-            "--ids", str(corpus), "--profiles", f"bf16-reference,{profile}",
-            "--quality-tier", "capacity-speed", "--gate", f"{profile}={quality_gate}",
-            "--schedule", "decode", "--prefill-chunk", "2048", "--device", "0",
-            "--spec", "none",
-            "--execution-parity-max-abs-nll", "0", "--no-position-extras",
-            "--expected-q4-activation-bits", "8", "--expected-w8-activation-bits", "8",
-            "--expected-fp8-qk-wmma", "1", "--expected-xattention-profile", "dense",
-            "--out", str(campaign_dir),
+            str(python),
+            str(validator_module.RUNNER),
+            "--bf16-reference-ppl-bin",
+            str(bf16_scorer),
+            "--bf16-reference-weights",
+            "/source",
+            "--g16-ppl-bin",
+            str(scorer),
+            "--g16-weights",
+            route["artifact"]["path"],
+            "--ids",
+            str(corpus),
+            "--profiles",
+            f"bf16-reference,{profile}",
+            "--quality-tier",
+            "capacity-speed",
+            "--gate",
+            f"{profile}={quality_gate}",
+            "--schedule",
+            "decode",
+            "--prefill-chunk",
+            "2048",
+            "--device",
+            "0",
+            "--spec",
+            "none",
+            "--execution-parity-max-abs-nll",
+            "0",
+            "--no-position-extras",
+            "--expected-q4-activation-bits",
+            "8",
+            "--expected-w8-activation-bits",
+            "8",
+            "--expected-fp8-qk-wmma",
+            "1",
+            "--expected-xattention-profile",
+            "dense",
+            "--out",
+            str(campaign_dir),
         ]
         plan_path = root / "plan.json"
         plan_path.write_text(json.dumps(plan), encoding="utf-8")
@@ -198,96 +289,211 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
         for tokens in (8192, 32768):
             raw = campaign_dir / f"{tokens}.decode.r9700-g16.json"
             scored = tokens - tokens // 2 - 1
-            raw_value = {"scheme": "r9700-g16", "schedule": "decode",
-                         "weights": route["artifact"]["path"],
-                         "model_id": "qwen3.8-27b",
-                         "weights_id": route["artifact"]["weights_id"],
-                         "prompt_tokens": tokens, "skip_tokens": tokens // 2,
-                         "tokens_scored": scored, "argmax_tokens": scored,
-                         "spec": "none", "draft_tokens": 0, "device_graph": True,
-                         "prefill_chunk": 2048, "non_finite": 0, "mean_nll": 1.0}
+            raw_value = {
+                "scheme": "r9700-g16",
+                "schedule": "decode",
+                "weights": route["artifact"]["path"],
+                "model_id": "qwen3.8-27b",
+                "weights_id": route["artifact"]["weights_id"],
+                "prompt_tokens": tokens,
+                "skip_tokens": tokens // 2,
+                "tokens_scored": scored,
+                "argmax_tokens": scored,
+                "spec": "none",
+                "draft_tokens": 0,
+                "device_graph": True,
+                "prefill_chunk": 2048,
+                "non_finite": 0,
+                "mean_nll": 1.0,
+            }
             raw.write_text(json.dumps(raw_value), encoding="utf-8")
             raw.with_suffix(".nllf32").write_bytes(struct.pack(f"<{scored}f", *([1.0] * scored)))
             raw.with_suffix(".argmaxi32").write_bytes(struct.pack(f"<{scored}i", *([1] * scored)))
-            command = [str(scorer), "--weights", route["artifact"]["path"],
-                       "--ids", str(corpus), "--scheme", "r9700-g16",
-                       "--schedule", "decode", "--skip", "half", "--tokens", str(tokens),
-                       "--prefill-chunk", "2048", "--device", "0", "--out-json", str(raw)]
-            cells.append({**raw_value, "command": command,
-                          "nll_sha256": file_sha256(raw.with_suffix(".nllf32")),
-                          "argmax_sha256": file_sha256(raw.with_suffix(".argmaxi32"))})
+            command = [
+                str(scorer),
+                "--weights",
+                route["artifact"]["path"],
+                "--ids",
+                str(corpus),
+                "--scheme",
+                "r9700-g16",
+                "--schedule",
+                "decode",
+                "--skip",
+                "half",
+                "--tokens",
+                str(tokens),
+                "--prefill-chunk",
+                "2048",
+                "--device",
+                "0",
+                "--out-json",
+                str(raw),
+            ]
+            cells.append(
+                {
+                    **raw_value,
+                    "command": command,
+                    "nll_sha256": file_sha256(raw.with_suffix(".nllf32")),
+                    "argmax_sha256": file_sha256(raw.with_suffix(".argmaxi32")),
+                }
+            )
             bf_raw = campaign_dir / f"{tokens}.decode.bf16-reference.json"
-            bf_value = {**raw_value, "scheme": "bf16-reference",
-                        "weights": "/source", "weights_id": "bf16-source",
-                        "device_graph": False,
-                        "source_config_sha256": "c" * 64,
-                        "source_index_sha256": "d" * 64,
-                        "source_shards_sha256": shard_hashes,
-                        "source_tensor_count": 1199, "source_shard_count": 18}
+            bf_value = {
+                **raw_value,
+                "scheme": "bf16-reference",
+                "weights": "/source",
+                "weights_id": "bf16-source",
+                "device_graph": False,
+                "source_config_sha256": "c" * 64,
+                "source_index_sha256": "d" * 64,
+                "source_shards_sha256": shard_hashes,
+                "source_tensor_count": 1199,
+                "source_shard_count": 18,
+            }
             bf_raw.write_text(json.dumps(bf_value), encoding="utf-8")
             bf_raw.with_suffix(".nllf32").write_bytes(struct.pack(f"<{scored}f", *([1.0] * scored)))
-            bf_raw.with_suffix(".argmaxi32").write_bytes(struct.pack(f"<{scored}i", *([1] * scored)))
-            bf_command = [str(python), str(bf16_scorer), "--weights", "/source",
-                          "--ids", str(corpus), "--scheme", "bf16-reference",
-                          "--schedule", "decode", "--skip", "half", "--tokens", str(tokens),
-                          "--prefill-chunk", "2048", "--device", "0", "--out-json", str(bf_raw)]
-            cells.append({**bf_value, "command": bf_command,
-                          "nll_sha256": file_sha256(bf_raw.with_suffix(".nllf32")),
-                          "argmax_sha256": file_sha256(bf_raw.with_suffix(".argmaxi32"))})
+            bf_raw.with_suffix(".argmaxi32").write_bytes(
+                struct.pack(f"<{scored}i", *([1] * scored))
+            )
+            bf_command = [
+                str(python),
+                str(bf16_scorer),
+                "--weights",
+                "/source",
+                "--ids",
+                str(corpus),
+                "--scheme",
+                "bf16-reference",
+                "--schedule",
+                "decode",
+                "--skip",
+                "half",
+                "--tokens",
+                str(tokens),
+                "--prefill-chunk",
+                "2048",
+                "--device",
+                "0",
+                "--out-json",
+                str(bf_raw),
+            ]
+            cells.append(
+                {
+                    **bf_value,
+                    "command": bf_command,
+                    "nll_sha256": file_sha256(bf_raw.with_suffix(".nllf32")),
+                    "argmax_sha256": file_sha256(bf_raw.with_suffix(".argmaxi32")),
+                }
+            )
         required = [(8192, "device_graph_parity"), (32768, "device_graph_parity")]
         labels = {"device_graph_parity": "eager"}
         for tokens, parity_key in required:
             raw = campaign_dir / f"{tokens}.decode.r9700-g16.{labels[parity_key]}.json"
             scored = tokens - tokens // 2 - 1
-            raw_value = {"scheme": "r9700-g16", "schedule": "decode",
-                         "weights": route["artifact"]["path"],
-                         "model_id": "qwen3.8-27b",
-                         "weights_id": route["artifact"]["weights_id"],
-                         "prompt_tokens": tokens, "skip_tokens": tokens // 2,
-                         "tokens_scored": scored, "argmax_tokens": scored,
-                         "spec": "none", "draft_tokens": 0, "device_graph": False,
-                         "prefill_chunk": 2048, "non_finite": 0, "mean_nll": 1.0}
+            raw_value = {
+                "scheme": "r9700-g16",
+                "schedule": "decode",
+                "weights": route["artifact"]["path"],
+                "model_id": "qwen3.8-27b",
+                "weights_id": route["artifact"]["weights_id"],
+                "prompt_tokens": tokens,
+                "skip_tokens": tokens // 2,
+                "tokens_scored": scored,
+                "argmax_tokens": scored,
+                "spec": "none",
+                "draft_tokens": 0,
+                "device_graph": False,
+                "prefill_chunk": 2048,
+                "non_finite": 0,
+                "mean_nll": 1.0,
+            }
             raw.write_text(json.dumps(raw_value), encoding="utf-8")
             raw.with_suffix(".nllf32").write_bytes(struct.pack(f"<{scored}f", *([1.0] * scored)))
             raw.with_suffix(".argmaxi32").write_bytes(struct.pack(f"<{scored}i", *([1] * scored)))
             primary = campaign_dir / f"{tokens}.decode.r9700-g16.json"
             parity = sidecar_parity(primary, raw, max_abs_nll=0.0)
             flags = {"device_graph_parity": ["--no-device-graph"]}[parity_key]
-            command = [str(scorer), "--weights", route["artifact"]["path"],
-                       "--ids", str(corpus), "--scheme", "r9700-g16",
-                       "--schedule", "decode", "--skip", "half", "--tokens", str(tokens),
-                       "--prefill-chunk", "2048", "--device", "0", "--out-json", str(raw),
-                       *flags]
-            cells.append({**raw_value, "command": command,
-                          "nll_sha256": file_sha256(raw.with_suffix(".nllf32")),
-                          "argmax_sha256": file_sha256(raw.with_suffix(".argmaxi32")),
-                          parity_key: parity})
+            command = [
+                str(scorer),
+                "--weights",
+                route["artifact"]["path"],
+                "--ids",
+                str(corpus),
+                "--scheme",
+                "r9700-g16",
+                "--schedule",
+                "decode",
+                "--skip",
+                "half",
+                "--tokens",
+                str(tokens),
+                "--prefill-chunk",
+                "2048",
+                "--device",
+                "0",
+                "--out-json",
+                str(raw),
+                *flags,
+            ]
+            cells.append(
+                {
+                    **raw_value,
+                    "command": command,
+                    "nll_sha256": file_sha256(raw.with_suffix(".nllf32")),
+                    "argmax_sha256": file_sha256(raw.with_suffix(".argmaxi32")),
+                    parity_key: parity,
+                }
+            )
         campaign = {
-            "artifact_type": "ninfer_r9700_ppl_campaign", "schema_version": 6, "pass": True,
-            "model_id": "qwen3.8-27b", "lengths": [8192, 32768], "schedules": ["decode"],
+            "artifact_type": "ninfer_r9700_ppl_campaign",
+            "schema_version": 6,
+            "pass": True,
+            "model_id": "qwen3.8-27b",
+            "lengths": [8192, 32768],
+            "schedules": ["decode"],
             "reference_weights_id": "bf16-source",
-            "prefill_chunk": 2048, "skip": "half",
-            "weights_inputs": {"bf16-reference": "/source",
-                               "r9700-g16": route["artifact"]["path"]},
-            "scorers": {"bf16-reference": {}, "r9700-g16": {
-                "path": str(scorer), "sha256": file_sha256(scorer), "bytes": scorer.stat().st_size}},
-            "quality_tier": "capacity-speed", "execution_parity_max_abs_nll": 0.0,
-            "spec": "none", "draft_tokens": 0,
+            "prefill_chunk": 2048,
+            "skip": "half",
+            "weights_inputs": {"bf16-reference": "/source", "r9700-g16": route["artifact"]["path"]},
+            "scorers": {
+                "bf16-reference": {},
+                "r9700-g16": {
+                    "path": str(scorer),
+                    "sha256": file_sha256(scorer),
+                    "bytes": scorer.stat().st_size,
+                },
+            },
+            "quality_tier": "capacity-speed",
+            "execution_parity_max_abs_nll": 0.0,
+            "spec": "none",
+            "draft_tokens": 0,
             "position_extras_enabled": False,
             "xattention_profile": "dense",
-            "corpus": {"path": str(corpus), "ids_sha256": file_sha256(corpus),
-                       "manifest_path": str(corpus_manifest),
-                       "manifest_sha256": file_sha256(corpus_manifest)},
-            "reference_source": {"config_sha256": "c" * 64, "index_sha256": "d" * 64,
-                                 "tensor_count": 1199, "shard_count": 18,
-                                 "shards_sha256": shard_hashes},
-            "candidate_artifact": {"weights_id": "r9700-q4g64-n16k16-eval",
-                                   "sha256": route["artifact"]["sha256"]},
+            "corpus": {
+                "path": str(corpus),
+                "ids_sha256": file_sha256(corpus),
+                "manifest_path": str(corpus_manifest),
+                "manifest_sha256": file_sha256(corpus_manifest),
+            },
+            "reference_source": {
+                "config_sha256": "c" * 64,
+                "index_sha256": "d" * 64,
+                "tensor_count": 1199,
+                "shard_count": 18,
+                "shards_sha256": shard_hashes,
+            },
+            "candidate_artifact": {
+                "weights_id": "r9700-q4g64-n16k16-eval",
+                "sha256": route["artifact"]["sha256"],
+            },
             "cells": cells,
         }
         campaign["scorers"]["bf16-reference"] = {
-            "path": str(bf16_scorer), "sha256": file_sha256(bf16_scorer),
-            "bytes": bf16_scorer.stat().st_size}
+            "path": str(bf16_scorer),
+            "sha256": file_sha256(bf16_scorer),
+            "bytes": bf16_scorer.stat().st_size,
+        }
         # External reference replay is tested by test_exact_gate; these fixtures
         # retain real raw/sidecar IO and the exact-token admission boundary.
         reference_dir = root / "retained-reference"
@@ -315,14 +521,22 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
             cell["command"][-1] = str(new_raw)
             cell["reused_bf16_campaign"] = reference_binding
             retained[cell["prompt_tokens"]] = (dict(cell), new_raw)
-        for name, value in (("load_reused_bf16_cells", retained),
-                            ("validate_bf16_repeat_comparison", repeat_binding)):
+        for name, value in (
+            ("load_reused_bf16_cells", retained),
+            ("validate_bf16_repeat_comparison", repeat_binding),
+        ):
             patcher = patch.object(validator_module, name, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
         quality_path = Path(plan["quality_authority"]["path"])
-        quality_path.write_text(json.dumps({"reused_bf16_campaign": reference_binding,
-                                            "bf16_repeat_comparison": repeat_binding}))
+        quality_path.write_text(
+            json.dumps(
+                {
+                    "reused_bf16_campaign": reference_binding,
+                    "bf16_repeat_comparison": repeat_binding,
+                }
+            )
+        )
         plan["quality_authority"]["sha256"] = file_sha256(quality_path)
         plan["bf16_reference_authority"] = reference_binding
         plan["bf16_repeat_authority"] = repeat_binding
@@ -338,12 +552,16 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             plan, campaign = self.fixture(Path(directory))
             plan_value = json.loads(plan.read_text())
-            terminal = {"winner": plan_value["terminal_route"]["winner"],
-                        "winner_artifact": plan_value["terminal_route"]["artifact"],
-                        "winner_cache_profile": plan_value["terminal_route"]["cache_profile"],
-                        "winner_execution_profile": plan_value["terminal_route"]["execution_profile"]}
-            with patch("tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
-                       return_value=(terminal, {})):
+            terminal = {
+                "winner": plan_value["terminal_route"]["winner"],
+                "winner_artifact": plan_value["terminal_route"]["artifact"],
+                "winner_cache_profile": plan_value["terminal_route"]["cache_profile"],
+                "winner_execution_profile": plan_value["terminal_route"]["execution_profile"],
+            }
+            with patch(
+                "tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
+                return_value=(terminal, {}),
+            ):
                 result = validate(plan, campaign)
             self.assertEqual(result["status"], "passed")
             self.assertEqual(result["compared_parity_cells"], 2)
@@ -370,10 +588,13 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
                     "winner_cache_profile": value["terminal_route"]["cache_profile"],
                     "winner_execution_profile": value["terminal_route"]["execution_profile"],
                 }
-                with patch(
-                    "tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
-                    return_value=(terminal, {}),
-                ), self.assertRaisesRegex(ValueError, "plan command differs"):
+                with (
+                    patch(
+                        "tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
+                        return_value=(terminal, {}),
+                    ),
+                    self.assertRaisesRegex(ValueError, "plan command differs"),
+                ):
                     validate(plan, campaign)
 
     def test_rejects_one_greedy_mismatch(self) -> None:
@@ -385,31 +606,45 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
             variant["device_graph_parity"]["argmax_mismatches"] = 1
             campaign.write_text(json.dumps(value))
             plan_value = json.loads(plan.read_text())
-            terminal = {"winner": plan_value["terminal_route"]["winner"],
-                        "winner_artifact": plan_value["terminal_route"]["artifact"],
-                        "winner_cache_profile": plan_value["terminal_route"]["cache_profile"],
-                        "winner_execution_profile": plan_value["terminal_route"]["execution_profile"]}
-            with patch("tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
-                       return_value=(terminal, {})), self.assertRaisesRegex(ValueError, "parity failed"):
+            terminal = {
+                "winner": plan_value["terminal_route"]["winner"],
+                "winner_artifact": plan_value["terminal_route"]["artifact"],
+                "winner_cache_profile": plan_value["terminal_route"]["cache_profile"],
+                "winner_execution_profile": plan_value["terminal_route"]["execution_profile"],
+            }
+            with (
+                patch(
+                    "tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
+                    return_value=(terminal, {}),
+                ),
+                self.assertRaisesRegex(ValueError, "parity failed"),
+            ):
                 validate(plan, campaign)
 
     def test_rejects_misassembled_or_unbound_raw_inventory(self) -> None:
         cases = (
-            "extra", "primary-parity", "wrong-flags", "hidden-mtp-before-output",
-            "wrong-semantic-profile", "missing-bf-sidecar", "wrong-scorer",
+            "extra",
+            "primary-parity",
+            "wrong-flags",
+            "hidden-mtp-before-output",
+            "wrong-semantic-profile",
+            "missing-bf-sidecar",
+            "wrong-scorer",
         )
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 plan, campaign = self.fixture(Path(directory))
                 value = json.loads(campaign.read_text())
-                candidate = [row for row in value["cells"]
-                             if row["scheme"] == "r9700-g16"]
+                candidate = [row for row in value["cells"] if row["scheme"] == "r9700-g16"]
                 if case == "extra":
                     value["cells"].append(dict(candidate[0]))
                 elif case == "primary-parity":
                     variant = next(row for row in candidate if "device_graph_parity" in row)
-                    primary = next(row for row in candidate
-                                   if ".eager." not in row["command"][row["command"].index("--out-json") + 1])
+                    primary = next(
+                        row
+                        for row in candidate
+                        if ".eager." not in row["command"][row["command"].index("--out-json") + 1]
+                    )
                     primary["device_graph_parity"] = variant.pop("device_graph_parity")
                 elif case == "wrong-flags":
                     variant = next(row for row in candidate if "device_graph_parity" in row)
@@ -428,22 +663,26 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
                     raw_value["draft_tokens"] = 3
                     raw_path.write_text(json.dumps(raw_value))
                 elif case == "missing-bf-sidecar":
-                    bf16 = next(row for row in value["cells"]
-                                if row["scheme"] == "bf16-reference")
+                    bf16 = next(row for row in value["cells"] if row["scheme"] == "bf16-reference")
                     raw = Path(bf16["command"][bf16["command"].index("--out-json") + 1])
                     raw.with_suffix(".argmaxi32").unlink()
                 elif case == "wrong-scorer":
                     candidate[0]["command"][0] = "/different/scorer"
                 campaign.write_text(json.dumps(value))
                 plan_value = json.loads(plan.read_text())
-                terminal = {"winner": plan_value["terminal_route"]["winner"],
-                            "winner_artifact": plan_value["terminal_route"]["artifact"],
-                            "winner_cache_profile": plan_value["terminal_route"]["cache_profile"],
-                            "winner_execution_profile": plan_value["terminal_route"]["execution_profile"]}
-                with patch(
-                    "tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
-                    return_value=(terminal, {}),
-                ), self.assertRaises(ValueError):
+                terminal = {
+                    "winner": plan_value["terminal_route"]["winner"],
+                    "winner_artifact": plan_value["terminal_route"]["artifact"],
+                    "winner_cache_profile": plan_value["terminal_route"]["cache_profile"],
+                    "winner_execution_profile": plan_value["terminal_route"]["execution_profile"],
+                }
+                with (
+                    patch(
+                        "tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
+                        return_value=(terminal, {}),
+                    ),
+                    self.assertRaises(ValueError),
+                ):
                     validate(plan, campaign)
 
     def test_hybrid_requires_bound_planner_and_command_flag(self) -> None:
@@ -457,7 +696,9 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
                 "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
             )
             plan_value["terminal_route"]["hybrid_width_tool"] = {
-                "path": str(tool), "sha256": file_sha256(tool)}
+                "path": str(tool),
+                "sha256": file_sha256(tool),
+            }
             plan_value["command"].insert(
                 plan_value["command"].index("--out"), "--require-fp8-hybrid"
             )
@@ -475,12 +716,16 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
             campaign_value["required_candidate_identity"] = "fp8-hybrid-selection-authority"
             plan.write_text(json.dumps(plan_value))
             campaign.write_text(json.dumps(campaign_value))
-            terminal = {"winner": plan_value["terminal_route"]["winner"],
-                        "winner_artifact": plan_value["terminal_route"]["artifact"],
-                        "winner_cache_profile": plan_value["terminal_route"]["cache_profile"],
-                        "winner_execution_profile": plan_value["terminal_route"]["execution_profile"]}
-            with patch("tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
-                       return_value=(terminal, {})):
+            terminal = {
+                "winner": plan_value["terminal_route"]["winner"],
+                "winner_artifact": plan_value["terminal_route"]["artifact"],
+                "winner_cache_profile": plan_value["terminal_route"]["cache_profile"],
+                "winner_execution_profile": plan_value["terminal_route"]["execution_profile"],
+            }
+            with patch(
+                "tools.ppl.validate_selected_exact_token.validate_terminal_production_authority",
+                return_value=(terminal, {}),
+            ):
                 self.assertEqual(validate(plan, campaign)["status"], "passed")
                 plan_value["command"].remove("--require-fp8-hybrid")
                 plan.write_text(json.dumps(plan_value))

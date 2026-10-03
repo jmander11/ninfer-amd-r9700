@@ -81,8 +81,7 @@ def validate_inventory() -> None:
     expected_counts = {BF16: 582, FP32: 96, I32: 1, F8E4M3_ROW_F32S: 439}
     if FORMAT_COUNTS != expected_counts:
         raise ValueError(
-            "rowwise-E4M3 format counts differ: "
-            f"expected {expected_counts}, got {FORMAT_COUNTS}"
+            f"rowwise-E4M3 format counts differ: expected {expected_counts}, got {FORMAT_COUNTS}"
         )
     expected_bytes = {
         BF16: 58_647_008,

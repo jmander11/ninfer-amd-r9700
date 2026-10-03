@@ -10,7 +10,8 @@ import subprocess
 import sys
 
 from tools.ppl.compare_selective_q4g128_source import (
-    _load_score, validate_comparison,
+    _load_score,
+    validate_comparison,
 )
 
 
@@ -47,7 +48,9 @@ def _ensure_namespace() -> None:
     observed = frozenset(OUTPUT.iterdir())
     unexpected = observed - allowed
     if unexpected:
-        raise ValueError(f"unexpected selective Q4G128 output entries: {sorted(map(str, unexpected))}")
+        raise ValueError(
+            f"unexpected selective Q4G128 output entries: {sorted(map(str, unexpected))}"
+        )
 
 
 def _arm_state(profile: str, path: Path) -> str:
@@ -64,10 +67,23 @@ def _arm_state(profile: str, path: Path) -> str:
 
 def _score_command(profile: str, path: Path) -> list[str]:
     return [
-        str(PYTHON), "-m", "tools.ppl.selective_q4g128_source_diagnostic",
-        "--weights", str(WEIGHTS), "--ids", str(IDS), "--codec", profile,
-        "--source-screen", str(SCREEN), "--bf16", str(BF16), "--device", "0",
-        "--out", str(path),
+        str(PYTHON),
+        "-m",
+        "tools.ppl.selective_q4g128_source_diagnostic",
+        "--weights",
+        str(WEIGHTS),
+        "--ids",
+        str(IDS),
+        "--codec",
+        profile,
+        "--source-screen",
+        str(SCREEN),
+        "--bf16",
+        str(BF16),
+        "--device",
+        "0",
+        "--out",
+        str(path),
     ]
 
 
@@ -82,22 +98,25 @@ def run() -> int:
     if COMPARISON.exists() or COMPARISON.is_symlink():
         if COMPARISON.is_symlink() or not COMPARISON.is_file():
             raise ValueError("selective Q4G128 comparison is not a regular file")
-        report = validate_comparison(
-            COMPARISON, ARMS["q4g64-absmax"], ARMS["q4g128-mse"], BF16
-        )
+        report = validate_comparison(COMPARISON, ARMS["q4g64-absmax"], ARMS["q4g128-mse"], BF16)
     else:
         command = [
-            str(PYTHON), "-m", "tools.ppl.compare_selective_q4g128_source",
-            "--q4g64", str(ARMS["q4g64-absmax"]),
-            "--q4g128", str(ARMS["q4g128-mse"]),
-            "--bf16", str(BF16), "--out", str(COMPARISON),
+            str(PYTHON),
+            "-m",
+            "tools.ppl.compare_selective_q4g128_source",
+            "--q4g64",
+            str(ARMS["q4g64-absmax"]),
+            "--q4g128",
+            str(ARMS["q4g128-mse"]),
+            "--bf16",
+            str(BF16),
+            "--out",
+            str(COMPARISON),
         ]
         completed = subprocess.run(command, check=False)
         if completed.returncode not in (0, 1):
             raise RuntimeError(f"selective Q4G128 comparator failed: {completed.returncode}")
-        report = validate_comparison(
-            COMPARISON, ARMS["q4g64-absmax"], ARMS["q4g128-mse"], BF16
-        )
+        report = validate_comparison(COMPARISON, ARMS["q4g64-absmax"], ARMS["q4g128-mse"], BF16)
     return 0 if report["pass"] else 1
 
 
@@ -106,8 +125,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.parse_args(argv)
     try:
         return run()
-    except (FileExistsError, OSError, RuntimeError, ValueError,
-            subprocess.SubprocessError) as error:
+    except (
+        FileExistsError,
+        OSError,
+        RuntimeError,
+        ValueError,
+        subprocess.SubprocessError,
+    ) as error:
         print(f"run-selective-q4g128-source-gate: {error}", file=sys.stderr)
         return 2
 

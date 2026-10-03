@@ -101,9 +101,7 @@ def validate_specs(specs: Sequence[TensorSpec], recipe: MatrixRecipe | str) -> N
         raise ValueError("DFlash2 private convolution state must remain BF16")
 
 
-def summary(
-    canonical_specs: Sequence[TensorSpec], recipe: MatrixRecipe | str
-) -> dict[str, object]:
+def summary(canonical_specs: Sequence[TensorSpec], recipe: MatrixRecipe | str) -> dict[str, object]:
     selected = _resolve(recipe)
     specs = tensor_specs(canonical_specs, selected)
     counts = dict(sorted(Counter(spec.format for spec in specs).items()))
@@ -178,9 +176,7 @@ def encode_matrix_reference(
     if selected.key == CANONICAL_Q4G64:
         return codec.encode_q4g64_n16k16_reference(values, rows, columns)
     if selected.key == SOURCE_MSE_Q4G64:
-        return codec.encode_q4g64_n16k16_reference(
-            values, rows, columns, refined=True
-        )
+        return codec.encode_q4g64_n16k16_reference(values, rows, columns, refined=True)
     if selected.key == SOURCE_MSE_W8G32:
         return codec.encode_w8g32_mse_reference(values, rows, columns)
     raise AssertionError("unreachable DFlash2 recipe dispatch")

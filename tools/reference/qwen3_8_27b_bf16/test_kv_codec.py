@@ -104,13 +104,10 @@ class ExactInt4Fp16Test(unittest.TestCase):
         whole = kv_codec.encode_value_group(values, 32)
         split_error = sum(
             (source - decoded) ** 2
-            for source, decoded in zip(
-                values, first.decoded() + second.decoded(), strict=True
-            )
+            for source, decoded in zip(values, first.decoded() + second.decoded(), strict=True)
         )
         whole_error = sum(
-            (source - decoded) ** 2
-            for source, decoded in zip(values, whole.decoded(), strict=True)
+            (source - decoded) ** 2 for source, decoded in zip(values, whole.decoded(), strict=True)
         )
         self.assertLess(split_error, whole_error)
 
@@ -199,9 +196,7 @@ class TensorCodecCpuCrossCheckTest(unittest.TestCase):
         represented = tensor.float().flatten().tolist()
         for group_size in (16, 32):
             expected_groups = [
-                kv_codec.encode_value_group(
-                    represented[begin : begin + group_size], group_size
-                )
+                kv_codec.encode_value_group(represented[begin : begin + group_size], group_size)
                 for begin in range(0, 32, group_size)
             ]
             packed, scales = quantize_values(tensor, group_size)
@@ -238,9 +233,7 @@ class TensorCodecCpuCrossCheckTest(unittest.TestCase):
         packed, scales = quantize_values(tiny, 16)
         self.assertEqual(scales.view(torch.int16).item() & 0xFFFF, 0)
         self.assertEqual(bytes(packed.flatten().tolist()), bytes(8))
-        maximum = torch.full(
-            (1, 1, 16), torch.finfo(torch.bfloat16).max, dtype=torch.bfloat16
-        )
+        maximum = torch.full((1, 1, 16), torch.finfo(torch.bfloat16).max, dtype=torch.bfloat16)
         with self.assertRaisesRegex(OverflowError, "finite FP16"):
             quantize_values(maximum, 16)
 

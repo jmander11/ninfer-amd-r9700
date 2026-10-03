@@ -354,10 +354,10 @@ std::string placeholder(const VisionItem& item) {
 std::size_t find_markup(const RenderedChat& rendered, std::string_view needle, std::size_t from) {
     std::size_t position = rendered.text.find(needle, from);
     while (position != std::string::npos) {
-        const std::size_t end = position + needle.size();
-        const auto overlapping =
-            std::find_if(rendered.literal_spans.begin(), rendered.literal_spans.end(),
-                         [&](const ByteSpan& span) { return span.begin < end && position < span.end; });
+        const std::size_t end  = position + needle.size();
+        const auto overlapping = std::find_if(
+            rendered.literal_spans.begin(), rendered.literal_spans.end(),
+            [&](const ByteSpan& span) { return span.begin < end && position < span.end; });
         if (overlapping == rendered.literal_spans.end()) { return position; }
         position = rendered.text.find(needle, overlapping->end);
     }
@@ -378,7 +378,7 @@ RenderedChat expand_placeholders(RenderedChat rendered, const std::vector<Vision
         const std::string replacement = placeholder(item);
         if (rendered.final_assistant_byte_begin) {
             const std::size_t boundary = *rendered.final_assistant_byte_begin;
-            const std::size_t end = position + needle.size();
+            const std::size_t end      = position + needle.size();
             if (position < boundary && boundary < end) {
                 throw std::logic_error("assistant boundary intersects a media placeholder");
             }
@@ -395,7 +395,8 @@ RenderedChat expand_placeholders(RenderedChat rendered, const std::vector<Vision
             return boundary;
         };
         if (rendered.rewrite_checkpoint) {
-            rendered.rewrite_checkpoint->offset = shift_boundary(rendered.rewrite_checkpoint->offset);
+            rendered.rewrite_checkpoint->offset =
+                shift_boundary(rendered.rewrite_checkpoint->offset);
         }
         for (std::size_t& offset : rendered.turn_closure_offsets) {
             offset = shift_boundary(offset);
@@ -528,8 +529,7 @@ void assign_positions(ProcessedInput& output) {
 void validate_special_token(const Tokenizer& tokenizer, std::string_view text, int expected) {
     const std::vector<int> ids = tokenizer.encode(text);
     if (ids.size() != 1 || ids.front() != expected) {
-        throw std::invalid_argument(
-            "Qwen3 tokenizer vision token IDs do not match model contract");
+        throw std::invalid_argument("Qwen3 tokenizer vision token IDs do not match model contract");
     }
 }
 
@@ -608,9 +608,10 @@ std::span<const std::int32_t> ProcessedInput::position_axis(int axis) const {
         static_cast<std::size_t>(axis) * input_ids.size(), input_ids.size());
 }
 
-std::optional<std::size_t>
-checkpoint_prefix_tokens(const Tokenizer& tokenizer, std::string_view text, std::size_t offset,
-                         std::span<const ByteSpan> literal_spans, const EncodedText& encoded) {
+std::optional<std::size_t> checkpoint_prefix_tokens(const Tokenizer& tokenizer,
+                                                    std::string_view text, std::size_t offset,
+                                                    std::span<const ByteSpan> literal_spans,
+                                                    const EncodedText& encoded) {
     if (encoded.prefix_tokens && *encoded.prefix_tokens != 0 &&
         *encoded.prefix_tokens <= encoded.ids.size()) {
         return *encoded.prefix_tokens;
@@ -669,8 +670,8 @@ EncodedChat encode_rendered_chat(const Tokenizer& tokenizer, const RenderedChat&
     if (*prefix > std::numeric_limits<std::uint32_t>::max()) {
         throw std::overflow_error("rewrite checkpoint token frontier exceeds uint32");
     }
-    const auto frontier = static_cast<std::uint32_t>(*prefix);
-    encoded.input_ids   = std::move(tokens.ids);
+    const auto frontier        = static_cast<std::uint32_t>(*prefix);
+    encoded.input_ids          = std::move(tokens.ids);
     encoded.rewrite_checkpoint = RewriteCheckpointSpec{
         .kind              = rendered.rewrite_checkpoint->kind,
         .frontier          = frontier,
@@ -742,11 +743,11 @@ ProcessedInput Processor::process(const std::vector<ChatMessage>& messages,
         throw std::logic_error("preprocessed patch count does not match processor budget");
     }
 
-    rendered                  = expand_placeholders(std::move(rendered), items);
-    EncodedChat encoded       = encode_rendered_chat(tokenizer_, rendered);
-    output.input_ids              = std::move(encoded.input_ids);
-    output.rewrite_checkpoint     = encoded.rewrite_checkpoint;
-    output.turn_closure_frontiers = std::move(encoded.turn_closure_frontiers);
+    rendered                           = expand_placeholders(std::move(rendered), items);
+    EncodedChat encoded                = encode_rendered_chat(tokenizer_, rendered);
+    output.input_ids                   = std::move(encoded.input_ids);
+    output.rewrite_checkpoint          = encoded.rewrite_checkpoint;
+    output.turn_closure_frontiers      = std::move(encoded.turn_closure_frontiers);
     output.final_assistant_token_begin = encoded.final_assistant_token_begin;
     output.token_types.resize(output.input_ids.size(), 0);
     for (std::size_t i = 0; i < output.input_ids.size(); ++i) {

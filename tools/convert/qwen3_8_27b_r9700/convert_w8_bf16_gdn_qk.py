@@ -46,9 +46,7 @@ def preflight_conversion(
 ) -> W8Bf16GdnQueryKeyConversionPreflight:
     model = Path(model_dir)
     w8_bf16_gdn_qk_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
@@ -118,12 +116,8 @@ def convert(
             preflight.object_plan.specs,
         ) as writer:
             if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError(
-                    "W8/BF16-GDN-QK writer plan differs from completed preflight"
-                )
-            for index, spec in enumerate(
-                w8_bf16_gdn_qk_inventory.OBJECT_SPECS, start=1
-            ):
+                raise RuntimeError("W8/BF16-GDN-QK writer plan differs from completed preflight")
+            for index, spec in enumerate(w8_bf16_gdn_qk_inventory.OBJECT_SPECS, start=1):
                 if isinstance(spec, w8_bf16_gdn_qk_inventory.ResourceSpec):
                     payload = resource_payloads[spec.name]
                 else:
@@ -173,8 +167,7 @@ def convert(
         "status": "registered-evaluation-only",
         "weight_recipe_selected": False,
         "comparison_role": (
-            "all-W8G32 except represented source-BF16 GDN query/key projections "
-            "in every GDN layer"
+            "all-W8G32 except represented source-BF16 GDN query/key projections in every GDN layer"
         ),
         "tensor_encoded_bytes": w8_bf16_gdn_qk_inventory.TENSOR_ENCODED_BYTES,
         "device_arena_bytes": w8_bf16_gdn_qk_inventory.DEVICE_ARENA_BYTES,

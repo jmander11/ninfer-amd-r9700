@@ -4,8 +4,15 @@ import statistics
 import unittest
 
 from tools.r9700.run_a8q4_dflash_small_t_gate import (
-    CELL_SCHEMA, CRITERION, ORACLE, PRIOR_ELIGIBLE, SHAPES, SCOPE, TOKENS,
-    validate_cell, validate_prior_summary,
+    CELL_SCHEMA,
+    CRITERION,
+    ORACLE,
+    PRIOR_ELIGIBLE,
+    SHAPES,
+    SCOPE,
+    TOKENS,
+    validate_cell,
+    validate_prior_summary,
 )
 
 EXECUTABLE = {"path": "/qualified/binary", "sha256": "a" * 64}
@@ -17,10 +24,8 @@ def report(candidate: float = 0.8, incumbent: float = 1.0) -> dict:
     incumbent_reverse = [incumbent + 0.002 + index * 0.001 for index in range(7)]
     candidate_forward = [candidate + index * 0.001 for index in range(7)]
     candidate_reverse = [candidate + 0.002 + index * 0.001 for index in range(7)]
-    incumbent_balanced = [(a + b) * 0.5 for a, b in zip(
-        incumbent_forward, incumbent_reverse)]
-    candidate_balanced = [(a + b) * 0.5 for a, b in zip(
-        candidate_forward, candidate_reverse)]
+    incumbent_balanced = [(a + b) * 0.5 for a, b in zip(incumbent_forward, incumbent_reverse)]
+    candidate_balanced = [(a + b) * 0.5 for a, b in zip(candidate_forward, candidate_reverse)]
     forward_ratios = [a / b for a, b in zip(candidate_forward, incumbent_forward)]
     reverse_ratios = [a / b for a, b in zip(candidate_reverse, incumbent_reverse)]
     ratios = forward_ratios + reverse_ratios
@@ -31,11 +36,13 @@ def report(candidate: float = 0.8, incumbent: float = 1.0) -> dict:
     ratio_upper = ratio_mean + 2.0 * ratio_sd / math.sqrt(14)
     order_ratio_delta = abs(forward_median - reverse_median)
     accepted = (
-        statistics.median(candidate_balanced) < statistics.median(incumbent_balanced) and
-        statistics.median(candidate_forward) < statistics.median(incumbent_forward) and
-        statistics.median(candidate_reverse) < statistics.median(incumbent_reverse) and
-        forward_median < 1.0 and reverse_median < 1.0 and ratio_upper < 1.0 and
-        order_ratio_delta <= 0.02
+        statistics.median(candidate_balanced) < statistics.median(incumbent_balanced)
+        and statistics.median(candidate_forward) < statistics.median(incumbent_forward)
+        and statistics.median(candidate_reverse) < statistics.median(incumbent_reverse)
+        and forward_median < 1.0
+        and reverse_median < 1.0
+        and ratio_upper < 1.0
+        and order_ratio_delta <= 0.02
     )
     decision = {
         "criterion": CRITERION,
@@ -63,19 +70,25 @@ def report(candidate: float = 0.8, incumbent: float = 1.0) -> dict:
         "production_dispatch_changed": False,
         "scope": SCOPE,
         "hardware": {
-            "device": "AMD Radeon AI PRO R9700", "architecture": "gfx1201",
-            "pci_bus_id": "0000:03:00.0", "pci_vendor_device": "1002:7551",
-            "integrated": False, "wavefront_width": 32,
+            "device": "AMD Radeon AI PRO R9700",
+            "architecture": "gfx1201",
+            "pci_bus_id": "0000:03:00.0",
+            "pci_vendor_device": "1002:7551",
+            "integrated": False,
+            "wavefront_width": 32,
             "power_profile_before_after": "auto",
         },
         "shape": {"rows": 34816, "columns": 5120, "tokens": 8},
         "numeric": {
-            "oracle": ORACLE, "maximum_bf16_steps_allowed": 2,
-            "candidate_maximum_bf16_steps": 1, "incumbent_maximum_bf16_steps": 1,
+            "oracle": ORACLE,
+            "maximum_bf16_steps_allowed": 2,
+            "candidate_maximum_bf16_steps": 1,
+            "incumbent_maximum_bf16_steps": 1,
             "pairwise_bit_exact_diagnostic": False,
         },
         "timing": {
-            "method": "unprofiled HIP events", "iterations_per_sample": 10,
+            "method": "unprofiled HIP events",
+            "iterations_per_sample": 10,
             "forward_reverse_pairs": 7,
             "incumbent_forward_ms": incumbent_forward,
             "candidate_forward_ms": candidate_forward,
@@ -128,8 +141,10 @@ class GateTest(unittest.TestCase):
             self.validate(value)
 
     def test_rejects_nonfinite_raw_or_decision(self) -> None:
-        for section, name in (("timing", "candidate_forward_ms"),
-                              ("decision", "candidate_over_incumbent")):
+        for section, name in (
+            ("timing", "candidate_forward_ms"),
+            ("decision", "candidate_over_incumbent"),
+        ):
             with self.subTest(section=section):
                 value = report()
                 if section == "timing":
@@ -161,9 +176,13 @@ class GateTest(unittest.TestCase):
         ]
         value = {
             "schema": "ninfer.r9700.a8q4-dflash-small-t-gate.v2",
-            "status": "passed", "complete_screen": True, "routing_authorized": False,
-            "required_cell_count": 39, "eligible_cells": eligible,
-            "forbidden_cells": [{}] * 36, "cells": [{"evidence_valid": True}] * 39,
+            "status": "passed",
+            "complete_screen": True,
+            "routing_authorized": False,
+            "required_cell_count": 39,
+            "eligible_cells": eligible,
+            "forbidden_cells": [{}] * 36,
+            "cells": [{"evidence_valid": True}] * 39,
         }
         validate_prior_summary(value)
         value["eligible_cells"] = eligible[:-1]

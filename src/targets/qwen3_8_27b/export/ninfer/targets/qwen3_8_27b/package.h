@@ -69,31 +69,37 @@ enum class WeightsProfile : std::uint8_t {
     switch (profile) {
     case WeightsProfile::R9700Fp8Lut4:
         return WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
-#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
-    case WeightsProfile::symbol: return WeightsProfile::base;
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
+    case WeightsProfile::symbol:                                                                   \
+        return WeightsProfile::base;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default: return profile;
+    default:
+        return profile;
     }
 }
 
 [[nodiscard]] constexpr bool fp8_capped_w8_embedding(WeightsProfile profile) noexcept {
     switch (profile) {
-#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
-    case WeightsProfile::symbol: return embed != 0;
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
+    case WeightsProfile::symbol:                                                                   \
+        return embed != 0;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default: return false;
+    default:
+        return false;
     }
 }
 
 [[nodiscard]] constexpr bool fp8_capped_w8_head(WeightsProfile profile) noexcept {
     switch (profile) {
-#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
-    case WeightsProfile::symbol: return head != 0;
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
+    case WeightsProfile::symbol:                                                                   \
+        return head != 0;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default: return false;
+    default:
+        return false;
     }
 }
 

@@ -338,7 +338,7 @@ constexpr std::uint64_t kEmptyBpeKey = ~std::uint64_t{0};
 }
 
 std::size_t bpe_table_size(std::size_t pair_count) {
-    std::size_t size = 8;
+    std::size_t size         = 8;
     const std::size_t needed = pair_count * 2 + 1;
     while (size < needed) { size *= 2; }
     return size;
@@ -354,7 +354,9 @@ void insert_bpe_pair(BpePairTable& table, std::uint64_t key, int rank, int resul
             slot.result = result;
             return;
         }
-        if (slot.key == key) { throw std::invalid_argument("duplicate merge pair in model.merges"); }
+        if (slot.key == key) {
+            throw std::invalid_argument("duplicate merge pair in model.merges");
+        }
         index = (index + 1) & table.mask;
     }
     throw std::logic_error("BPE pair table is full");
@@ -479,8 +481,8 @@ template <class Emit>
 void for_each_ascii_qwen_word(std::string_view text, Emit&& emit) {
     const std::size_t n = text.size();
     for (std::size_t i = 0; i < n;) {
-        const std::size_t begin        = i;
-        const std::int32_t cp          = static_cast<unsigned char>(text[i]);
+        const std::size_t begin = i;
+        const std::int32_t cp   = static_cast<unsigned char>(text[i]);
 
         if (cp == '\'') {
             constexpr std::string_view suffixes[] = {"s", "t", "re", "ve", "m", "ll", "d"};
@@ -512,8 +514,7 @@ void for_each_ascii_qwen_word(std::string_view text, Emit&& emit) {
         }
 
         const bool punct = !ascii_whitespace(cp) && !ascii_letter(cp) && !ascii_number(cp);
-        if ((cp == ' ' && i + 1 < n &&
-             !ascii_whitespace(static_cast<unsigned char>(text[i + 1])) &&
+        if ((cp == ' ' && i + 1 < n && !ascii_whitespace(static_cast<unsigned char>(text[i + 1])) &&
              !ascii_letter(static_cast<unsigned char>(text[i + 1])) &&
              !ascii_number(static_cast<unsigned char>(text[i + 1]))) ||
             punct) {
@@ -577,7 +578,8 @@ void for_each_unicode_qwen_word(std::string_view text, Emit&& emit) {
                            spans[end].offset < begin_offset + 1 + suffix.size()) {
                         ++end;
                     }
-                    emit(text.substr(begin_offset, span_end_offset(text, spans, end) - begin_offset));
+                    emit(text.substr(begin_offset,
+                                     span_end_offset(text, spans, end) - begin_offset));
                     i       = end;
                     matched = true;
                     break;
@@ -677,11 +679,13 @@ void append_bpe_word(std::vector<int>& ids, std::string_view word, const BpePair
                      const std::array<int, 256>& byte_to_intern_id,
                      const std::vector<std::vector<int>>& intern_emit_ids) {
     if (word.empty()) { return; }
+
     struct Node {
         int intern_id = -1;
         int prev      = -1;
         int next      = -1;
     };
+
     std::vector<Node> nodes;
     nodes.reserve(word.size());
     for (const unsigned char byte : word) {
@@ -711,10 +715,10 @@ void append_bpe_word(std::vector<int>& ids, std::string_view word, const BpePair
             }
         }
         if (best_left < 0) { break; }
-        Node& left                = nodes[static_cast<std::size_t>(best_left)];
-        const int right           = left.next;
-        left.intern_id            = best_result;
-        left.next                 = nodes[static_cast<std::size_t>(right)].next;
+        Node& left      = nodes[static_cast<std::size_t>(best_left)];
+        const int right = left.next;
+        left.intern_id  = best_result;
+        left.next       = nodes[static_cast<std::size_t>(right)].next;
         if (left.next >= 0) { nodes[static_cast<std::size_t>(left.next)].prev = best_left; }
         --live;
     }
@@ -845,7 +849,7 @@ Tokenizer::Tokenizer(TokenizerResources resources) {
     special_token_ids_.assign(id_to_token_.size(), 0);
     added_token_ids_.assign(id_to_token_.size(), 0);
     for (const AddedToken& token : added_tokens_) {
-        const auto index = static_cast<std::size_t>(token.id);
+        const auto index           = static_cast<std::size_t>(token.id);
         added_token_ids_.at(index) = 1;
         if (token.special) { special_token_ids_.at(index) = 1; }
     }
@@ -857,7 +861,7 @@ Tokenizer::Tokenizer(TokenizerResources resources) {
         const std::string& content = added_tokens_[token_index].content;
         if (content.empty()) { continue; }
         added_start_bytes_[static_cast<unsigned char>(content[0])] = 1;
-        int node = 0;
+        int node                                                   = 0;
         for (const unsigned char byte : content) {
             int child = added_trie_[static_cast<std::size_t>(node)].next[byte];
             if (child < 0) {
@@ -920,9 +924,8 @@ Tokenizer::find_leftmost_added(std::string_view text, std::size_t pos,
         int best             = -1;
         std::size_t best_len = 0;
         for (std::size_t j = i; j < limit; ++j) {
-            const int child =
-                added_trie_[static_cast<std::size_t>(node)].next[static_cast<unsigned char>(
-                    text[j])];
+            const int child = added_trie_[static_cast<std::size_t>(node)]
+                                  .next[static_cast<unsigned char>(text[j])];
             if (child < 0) { break; }
             node                  = child;
             const int token_index = added_trie_[static_cast<std::size_t>(node)].token_index;
@@ -1068,8 +1071,7 @@ bool Tokenizer::is_valid_token(int id) const noexcept {
 
 bool Tokenizer::has_exact_token_domain(std::size_t size) const noexcept {
     return valid_token_ids_.size() == size &&
-           std::find(valid_token_ids_.begin(), valid_token_ids_.end(), 0) ==
-               valid_token_ids_.end();
+           std::find(valid_token_ids_.begin(), valid_token_ids_.end(), 0) == valid_token_ids_.end();
 }
 
 } // namespace ninfer::targets::qwen3::frontend_internal

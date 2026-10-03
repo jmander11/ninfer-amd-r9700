@@ -109,11 +109,11 @@ def validate_inventory() -> None:
     promoted = tuple(spec for spec in TENSOR_SPECS if _is_promoted(spec))
     if len(promoted) != 16 or any(spec.format != BF16 for spec in promoted):
         raise ValueError("W8/BF16-attention-QK promoted role family changed")
-    for source, candidate in zip(
-        source_inventory.TENSOR_SPECS, TENSOR_SPECS, strict=True
-    ):
-        expected = BF16 if _is_promoted(source) else (
-            source.format if source.format in DIRECT_FORMATS else W8
+    for source, candidate in zip(source_inventory.TENSOR_SPECS, TENSOR_SPECS, strict=True):
+        expected = (
+            BF16
+            if _is_promoted(source)
+            else (source.format if source.format in DIRECT_FORMATS else W8)
         )
         if candidate.format != expected:
             raise ValueError(f"W8/BF16-attention-QK format mismatch for {candidate.name}")

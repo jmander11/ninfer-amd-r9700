@@ -17,7 +17,12 @@ from typing import Iterator
 
 import torch
 
-from tools.artifact.layouts import fp8lut4_geometry, fp8lut4_magnitude_table, fp8lut4_tile_codes, fp8lut4_tile_groups
+from tools.artifact.layouts import (
+    fp8lut4_geometry,
+    fp8lut4_magnitude_table,
+    fp8lut4_tile_codes,
+    fp8lut4_tile_groups,
+)
 
 GROUP = 32
 _E_MIN, _E_MAX = -26, 5
@@ -28,8 +33,9 @@ def _magnitudes(device: torch.device) -> torch.Tensor:
     return words.view(torch.float8_e4m3fn).to(torch.float32).to(device)  # [256, 8]
 
 
-def _search_groups(grouped: torch.Tensor, table: torch.Tensor,
-                   importance: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+def _search_groups(
+    grouped: torch.Tensor, table: torch.Tensor, importance: torch.Tensor | None = None
+) -> tuple[torch.Tensor, torch.Tensor]:
     """grouped FP32 [r, G, 32] in row-multiplier units -> (magnitude indices u8 [r, G, 32], group
     codes u8 [r, G]) minimizing the (importance-weighted) decoded squared error."""
 
@@ -42,10 +48,10 @@ def _search_groups(grouped: torch.Tensor, table: torch.Tensor,
     for delta in (-1.0, 0.0, 1.0):
         exponent = (e0 + delta).clamp(_E_MIN, _E_MAX)
         for step in range(8):
-            code = ((exponent - _E_MIN) * 8 + step).to(torch.long)              # [r, G]
-            book = table[code]                                                  # [r, G, 8]
-            middle = 0.5 * (book[..., 1:] + book[..., :-1])                     # [r, G, 7]
-            index = (magnitude[..., None] > middle[..., None, :]).sum(-1)       # [r, G, 32]
+            code = ((exponent - _E_MIN) * 8 + step).to(torch.long)  # [r, G]
+            book = table[code]  # [r, G, 8]
+            middle = 0.5 * (book[..., 1:] + book[..., :-1])  # [r, G, 7]
+            index = (magnitude[..., None] > middle[..., None, :]).sum(-1)  # [r, G, 32]
             squared = (magnitude - torch.gather(book, -1, index)) ** 2
             error = (squared if importance is None else squared * importance).sum(-1)
             better = error < best_error
@@ -75,14 +81,17 @@ class Calibration:
         diagonal[self.dead] = 1.0
         diagonal += damping * diagonal[~self.dead].mean() if bool((~self.dead).any()) else 0.0
         lower_inverse = torch.linalg.solve_triangular(
-            torch.linalg.cholesky(h), torch.eye(h.shape[0], dtype=h.dtype, device=h.device),
-            upper=False)
+            torch.linalg.cholesky(h),
+            torch.eye(h.shape[0], dtype=h.dtype, device=h.device),
+            upper=False,
+        )
         inverse = lower_inverse.t() @ lower_inverse
         self.factor = torch.linalg.cholesky(inverse, upper=True)
 
 
-def _gptq(scaled: torch.Tensor, calibration: Calibration,
-          table: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _gptq(
+    scaled: torch.Tensor, calibration: Calibration, table: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Column-sequential error-compensated rounding onto the FP8LUT4 grid (GPTQ): each 32-wide
     group code is searched on the error-updated weights at the group's first column, weighted by
     1 / U_jj^2, and every column's rounding error is propagated through U to the later columns."""
@@ -103,11 +112,12 @@ def _gptq(scaled: torch.Tensor, calibration: Calibration,
         for j in range(end - begin):
             column = begin + j
             if column % GROUP == 0:
-                _, code = _search_groups(current[:, None, j:j + GROUP], table,
-                                         importance[column:column + GROUP])
+                _, code = _search_groups(
+                    current[:, None, j : j + GROUP], table, importance[column : column + GROUP]
+                )
                 groups[:, column // GROUP] = code[:, 0]
-                book = table[code[:, 0].long()]                                 # [r, 8]
-                middle = 0.5 * (book[:, 1:] + book[:, :-1])                     # [r, 7]
+                book = table[code[:, 0].long()]  # [r, 8]
+                middle = 0.5 * (book[:, 1:] + book[:, :-1])  # [r, 7]
             value = current[:, j]
             index = (value.abs()[:, None] > middle).sum(-1)
             quantized = torch.gather(book, 1, index[:, None])[:, 0].copysign(value)
@@ -119,8 +129,9 @@ def _gptq(scaled: torch.Tensor, calibration: Calibration,
     return codes, groups
 
 
-def quantize_rows(weight: torch.Tensor, calibration: Calibration | None = None
-                  ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def quantize_rows(
+    weight: torch.Tensor, calibration: Calibration | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """weight FP32 [r, K_pad] (K_pad % 32 == 0) -> (codes u8 [r, K_pad], groups u8 [r, K_pad/32],
     row multipliers FP32 [r]). Without calibration every group is rounded independently; with
     one, the rounding is error-compensated against that projection's input statistics."""
@@ -159,9 +170,13 @@ def interleave_gate_up(weight: torch.Tensor) -> torch.Tensor:
     return weight.reshape(2, rows // 16, 8, columns).permute(1, 0, 2, 3).reshape(rows, columns)
 
 
-def encode_chunks(weight: torch.Tensor, *, device: str | torch.device = "cpu",
-                  rows_per_chunk: int = 2048,
-                  calibration: Calibration | None = None) -> Iterator[bytes]:
+def encode_chunks(
+    weight: torch.Tensor,
+    *,
+    device: str | torch.device = "cpu",
+    rows_per_chunk: int = 2048,
+    calibration: Calibration | None = None,
+) -> Iterator[bytes]:
     """Yield one r9700-fp8lut4-n16k64-v1 payload for represented BF16 [N, K] in plane order."""
 
     if weight.dim() != 2 or weight.dtype != torch.bfloat16:
@@ -172,12 +187,14 @@ def encode_chunks(weight: torch.Tensor, *, device: str | torch.device = "cpu",
         raise ValueError("FP8LUT4 encoding chunks must hold whole 16-row tiles")
     codes_out, groups_out, scales_out = [], [], []
     for begin in range(0, rows, rows_per_chunk):
-        block = weight[begin:begin + rows_per_chunk].to(device=device, dtype=torch.float32)
+        block = weight[begin : begin + rows_per_chunk].to(device=device, dtype=torch.float32)
         if geometry.k_pad != columns:
             block = torch.nn.functional.pad(block, (0, geometry.k_pad - columns))
         codes, groups, scales = quantize_rows(block, calibration)
         codes = codes.cpu()
-        codes_out.append(fp8lut4_tile_codes(codes[:, 0::2] | (codes[:, 1::2] << 4)).numpy().tobytes())
+        codes_out.append(
+            fp8lut4_tile_codes(codes[:, 0::2] | (codes[:, 1::2] << 4)).numpy().tobytes()
+        )
         groups_out.append(fp8lut4_tile_groups(groups.cpu()).numpy().tobytes())
         scales_out.append(scales.cpu().numpy().astype("<f4").tobytes())
     yield from codes_out

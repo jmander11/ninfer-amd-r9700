@@ -24,8 +24,7 @@ except ModuleNotFoundError:
 
 class Q4W8MseInventoryTest(unittest.TestCase):
     def test_identity_and_byte_plan_are_stable(self) -> None:
-        self.assertEqual(q4_w8_mse_inventory.WEIGHTS_ID,
-                         "r9700-q4-w8-mse-n16k16-eval")
+        self.assertEqual(q4_w8_mse_inventory.WEIGHTS_ID, "r9700-q4-w8-mse-n16k16-eval")
         self.assertEqual(
             q4_w8_mse_inventory.RECIPE_ID,
             "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
@@ -71,8 +70,10 @@ class Q4W8MseConverterTest(unittest.TestCase):
             model_dir=Path("synthetic-model"),
             config_summary={"architecture": "Qwen3_5ForConditionalGeneration"},
             source=SimpleNamespace(
-                recipe_count=1118, source_tensor_count=1199,
-                source_shard_count=shards, source_dtype_counts={"BF16": 1199},
+                recipe_count=1118,
+                source_tensor_count=1199,
+                source_shard_count=shards,
+                source_dtype_counts={"BF16": 1199},
             ),
             resources=tuple(
                 SimpleNamespace(name=name, data=f"resource-{index}".encode())
@@ -80,9 +81,11 @@ class Q4W8MseConverterTest(unittest.TestCase):
             ),
             draft=SimpleNamespace(n=131072),
             draft_ranking=SimpleNamespace(
-                ranking_path=Path("ranking.i64"), ranking_sha256="1" * 64,
+                ranking_path=Path("ranking.i64"),
+                ranking_sha256="1" * 64,
                 sidecar_path=Path("ranking.i64.provenance.json"),
-                sidecar_sha256="2" * 64, total_tokens=32768,
+                sidecar_sha256="2" * 64,
+                total_tokens=32768,
                 distinct_token_ids=3933,
             ),
             object_plan=SimpleNamespace(objects=objects),
@@ -91,16 +94,22 @@ class Q4W8MseConverterTest(unittest.TestCase):
     def test_preflight_summary_binds_exact_source_recipe_and_complete_write_plan(self) -> None:
         statistics = {"count": len(q4_w8_mse_inventory.OBJECT_SPECS)}
         checkpoint = {"indexed_tensor_count": 1199, "shards": [{"name": "s", "bytes": 1}]}
-        with mock.patch.object(
-            convert_q4_w8_mse.family_conversion, "object_statistics", return_value=statistics
-        ), mock.patch.object(
-            convert_q4_w8_mse, "_checkpoint_receipt", return_value=checkpoint
+        with (
+            mock.patch.object(
+                convert_q4_w8_mse.family_conversion, "object_statistics", return_value=statistics
+            ),
+            mock.patch.object(convert_q4_w8_mse, "_checkpoint_receipt", return_value=checkpoint),
         ):
             summary = convert_q4_w8_mse.preflight_summary(self.synthetic_preflight())
-        self.assertEqual(summary["source"], {
-            "recipes": 1118, "tensors": 1199, "shards": 18,
-            "dtypes": {"BF16": 1199},
-        })
+        self.assertEqual(
+            summary["source"],
+            {
+                "recipes": 1118,
+                "tensors": 1199,
+                "shards": 18,
+                "dtypes": {"BF16": 1199},
+            },
+        )
         self.assertEqual(summary["objects"], statistics)
         self.assertEqual(summary["checkpoint"], checkpoint)
         self.assertEqual(
@@ -127,24 +136,41 @@ class Q4W8MseConverterTest(unittest.TestCase):
             mock.patch.object(convert_q4_w8_mse, "pick_device") as pick_device,
             redirect_stdout(stdout),
         ):
-            convert_q4_w8_mse.main([
-                "--model", "synthetic-model", "--draft-ranking", "ranking.i64",
-                "--preflight-only",
-            ])
+            convert_q4_w8_mse.main(
+                [
+                    "--model",
+                    "synthetic-model",
+                    "--draft-ranking",
+                    "ranking.i64",
+                    "--preflight-only",
+                ]
+            )
         self.assertEqual(json.loads(stdout.getvalue()), summary)
         pick_device.assert_not_called()
 
     def test_preflight_only_rejects_output_and_conversion_requires_output_device(self) -> None:
         with redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
-                convert_q4_w8_mse.main([
-                    "--model", "synthetic-model", "--draft-ranking", "ranking.i64",
-                    "--out", "forbidden.ninfer", "--preflight-only",
-                ])
+                convert_q4_w8_mse.main(
+                    [
+                        "--model",
+                        "synthetic-model",
+                        "--draft-ranking",
+                        "ranking.i64",
+                        "--out",
+                        "forbidden.ninfer",
+                        "--preflight-only",
+                    ]
+                )
             with self.assertRaises(SystemExit):
-                convert_q4_w8_mse.main([
-                    "--model", "synthetic-model", "--draft-ranking", "ranking.i64",
-                ])
+                convert_q4_w8_mse.main(
+                    [
+                        "--model",
+                        "synthetic-model",
+                        "--draft-ranking",
+                        "ranking.i64",
+                    ]
+                )
 
     def test_dispatches_each_integer_format_to_its_exact_mse_codec(self) -> None:
         values = [-8.0] + [-1.0] * 63 + [float((index % 11) - 5) for index in range(65)]
@@ -182,8 +208,7 @@ class Q4W8MseConverterTest(unittest.TestCase):
         metadata = convert_q4_w8_mse._candidate_metadata()
         self.assertFalse(metadata["weight_recipe_selected"])
         self.assertTrue(metadata["same_format_and_byte_plan_as_reference"])
-        self.assertEqual(metadata["layout_reference_weights_id"],
-                         "r9700-q4-w8-n16k16-eval")
+        self.assertEqual(metadata["layout_reference_weights_id"], "r9700-q4-w8-n16k16-eval")
         self.assertEqual(metadata["format_counts"], q4_w8_inventory.FORMAT_COUNTS)
         objective = metadata["scale_objective"]
         self.assertEqual(objective["represented_input"], "original source BF16 weight values")

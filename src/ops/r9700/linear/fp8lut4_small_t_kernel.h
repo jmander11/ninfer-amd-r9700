@@ -25,7 +25,7 @@ inline constexpr std::uint16_t kCanonicalBf16QuietNan = 0x7FC0U;
 // Branch-free round-to-nearest-even to BF16 (identical to hip_bfloat16 for every non-NaN value;
 // NaN becomes the canonical quiet NaN).
 __device__ __forceinline__ std::uint16_t round_bf16(float value) {
-    const std::uint32_t bits = __float_as_uint(value);
+    const std::uint32_t bits    = __float_as_uint(value);
     const std::uint32_t rounded = (bits + 0x7FFFU + ((bits >> 16U) & 1U)) >> 16U;
     return value != value ? kCanonicalBf16QuietNan : static_cast<std::uint16_t>(rounded);
 }
@@ -41,17 +41,17 @@ struct KernelArgs {
     Fp8Lut4Weight second{};
     Fp8Lut4Output second_output{};
     const std::uint8_t* activation = nullptr;
-    const float* token_scales = nullptr;
-    const std::uint32_t* status = nullptr;
-    std::uint32_t tokens = 0;
+    const float* token_scales      = nullptr;
+    const std::uint32_t* status    = nullptr;
+    std::uint32_t tokens           = 0;
 };
 
 // Element (token, row) of one published output.
 __device__ __forceinline__ std::uint16_t* output_at(const Fp8Lut4Weight& weight,
-                                                    const Fp8Lut4Output& output, std::uint32_t token,
-                                                    std::uint32_t row) {
+                                                    const Fp8Lut4Output& output,
+                                                    std::uint32_t token, std::uint32_t row) {
     const std::uint32_t rows = weight.rows, split = output.split;
-    const bool leading = split == 0U || row < split;
+    const bool leading        = split == 0U || row < split;
     const std::uint32_t width = split == 0U ? rows : (leading ? split : rows - split);
     auto* base = reinterpret_cast<std::uint16_t*>(leading ? output.leading : output.trailing);
     return base + static_cast<std::size_t>(token) * width + (leading ? row : row - split);
@@ -80,31 +80,30 @@ struct SmallTShared {
 
 template <bool kAccumulate, bool kSiluPair, std::uint32_t kSplit, std::uint32_t kSteps,
           std::uint32_t kTiles, class Cta>
-__device__ __forceinline__ void small_t_body(const Cta& cta,
-                                             SmallTShared<kSiluPair, kSplit, kTiles>& shared,
-                                             const KernelArgs& a) {
+__device__ __forceinline__ void
+small_t_body(const Cta& cta, SmallTShared<kSiluPair, kSplit, kTiles>& shared, const KernelArgs& a) {
     const std::uint32_t first_blocks = a.weight.rows / 16U;
-    const std::uint32_t block = cta.block().x;
-    const bool second = block >= first_blocks;
+    const std::uint32_t block        = cta.block().x;
+    const bool second                = block >= first_blocks;
     // By value: the CTA-uniform selection stays in scalar registers.
-    const Fp8Lut4Weight weight = second ? a.second : a.weight;
-    const Fp8Lut4Output output = second ? a.second_output : a.output;
+    const Fp8Lut4Weight weight   = second ? a.second : a.weight;
+    const Fp8Lut4Output output   = second ? a.second_output : a.output;
     const std::uint32_t row_base = (second ? block - first_blocks : block) * 16U;
     fp8lut4::load_table(shared.table, cta.thread(), 32U * kSplit);
     const auto publish = [&](std::uint32_t token, std::uint32_t row, float value) {
-            if constexpr (kSiluPair) {
-                shared.staged[row - row_base][token] = value;
-                return;
-            }
-            auto* out = persistent::global(output_at(weight, output, token, row));
-            if (persistent::global(a.status)[token] != Fp8ActivationOk) {
-                *out = kCanonicalBf16QuietNan;
-            } else if constexpr (kAccumulate) {
-                *out = round_bf16(bf16_float(*out) + bf16_float(round_bf16(value)));
-            } else {
-                *out = round_bf16(value);
-            }
-        };
+        if constexpr (kSiluPair) {
+            shared.staged[row - row_base][token] = value;
+            return;
+        }
+        auto* out = persistent::global(output_at(weight, output, token, row));
+        if (persistent::global(a.status)[token] != Fp8ActivationOk) {
+            *out = kCanonicalBf16QuietNan;
+        } else if constexpr (kAccumulate) {
+            *out = round_bf16(bf16_float(*out) + bf16_float(round_bf16(value)));
+        } else {
+            *out = round_bf16(value);
+        }
+    };
     fp8lut4::small_t_rows<kSplit, kSteps, kTiles>(cta, weight, row_base, a.activation,
                                                   a.token_scales, a.tokens, shared.table,
                                                   shared.partial, publish);
@@ -115,9 +114,10 @@ __device__ __forceinline__ void small_t_body(const Cta& cta,
             const std::uint32_t feature = index % 8U, token = index / 8U;
             auto* out = persistent::global(reinterpret_cast<std::uint16_t*>(output.leading)) +
                         static_cast<std::size_t>(token) * features + row_base / 2U + feature;
-            *out = persistent::global(a.status)[token] != Fp8ActivationOk
-                ? kCanonicalBf16QuietNan
-                : silu_pair_value(shared.staged[feature][token], shared.staged[feature + 8U][token]);
+            *out      = persistent::global(a.status)[token] != Fp8ActivationOk
+                            ? kCanonicalBf16QuietNan
+                            : silu_pair_value(shared.staged[feature][token],
+                                              shared.staged[feature + 8U][token]);
         }
     }
 }

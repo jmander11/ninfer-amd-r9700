@@ -62,9 +62,12 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     selected_server = (build / "apps/ninfer-serve").resolve(strict=True)
     expected_server = {
         **file_identity(selected_server),
-        "host": "127.0.0.1", "port": 18081,
-        "max_context": 262144, "kv_capacity": 262144,
-        "max_concurrency": 1, "prefix_reuse": False,
+        "host": "127.0.0.1",
+        "port": 18081,
+        "max_context": 262144,
+        "kv_capacity": 262144,
+        "max_concurrency": 1,
+        "prefix_reuse": False,
     }
     expected_outputs = {
         "server_log": str(root / "server.requests.jsonl"),
@@ -77,10 +80,16 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
         plan.get("artifact_type") != "ninfer_r9700_selected_niah_plan"
         or plan.get("schema_version") != 1
         or plan.get("status") != "command_only_not_executed"
-        or workload != {
-            "model": "qwen3.8-27b", "length": "64k", "positions": list(POSITIONS),
-            "runs_per_cell": 1, "max_tokens": 64, "thinking": False,
-            "needle": DEFAULT_NEEDLE, "answer_match": "exact",
+        or workload
+        != {
+            "model": "qwen3.8-27b",
+            "length": "64k",
+            "positions": list(POSITIONS),
+            "runs_per_cell": 1,
+            "max_tokens": 64,
+            "thinking": False,
+            "needle": DEFAULT_NEEDLE,
+            "answer_match": "exact",
             "maximum_concurrency": 1,
         }
         or route.get("maximum_runtime_concurrency") != 4
@@ -109,12 +118,16 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     evidence = json.loads(evidence_raw)
     if (
         evidence.get("artifact_type") != "ninfer_niah_evidence"
-        or evidence.get("schema_version") != 2 or evidence.get("pass") is not True
+        or evidence.get("schema_version") != 2
+        or evidence.get("pass") is not True
         or evidence.get("evidence_mode") != "provenance-bound"
-        or evidence.get("model") != "qwen3.8-27b" or evidence.get("needle") != DEFAULT_NEEDLE
+        or evidence.get("model") != "qwen3.8-27b"
+        or evidence.get("needle") != DEFAULT_NEEDLE
         or evidence.get("answer_match") != "exact"
-        or evidence.get("max_tokens") != 64 or evidence.get("thinking") is not False
-        or evidence.get("seed") is not None or evidence.get("runs") != 1
+        or evidence.get("max_tokens") != 64
+        or evidence.get("thinking") is not False
+        or evidence.get("seed") is not None
+        or evidence.get("runs") != 1
         or [row.get("label") for row in evidence.get("cases", [])] != expected_labels
         or evidence.get("fresh_full_prefill", {}).get("pass") is not True
         or evidence.get("fresh_full_prefill", {}).get("request_count") != 5
@@ -135,9 +148,8 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
             or case.get("total") != 1
             or case.get("recall") != 1.0
             or case.get("fixture") != fixture["ref"]
-            or case.get("fixture_identity") != {
-                key: fixture[key] for key in ("path", "bytes", "sha256")
-            }
+            or case.get("fixture_identity")
+            != {key: fixture[key] for key in ("path", "bytes", "sha256")}
             or case.get("fixture_unchanged") is not True
             or not isinstance(requests, list)
             or len(requests) != 1
@@ -181,19 +193,17 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
         raise ValueError("NIAH evidence differs from terminal route")
     serve = Path(provenance["server_executable"]["path"])
     if (
-        provenance["server_executable"] != {
-            key: plan["server"][key] for key in ("path", "bytes", "sha256")
-        }
+        provenance["server_executable"]
+        != {key: plan["server"][key] for key in ("path", "bytes", "sha256")}
         or file_identity(serve) != provenance["server_executable"]
     ):
         raise ValueError("NIAH server executable bytes changed")
     server_log = Path(plan["outputs"]["server_log"]).resolve(strict=True)
     log_bytes = server_log.read_bytes()
     fresh = evidence["fresh_full_prefill"]
-    if (
-        len(log_bytes) != fresh.get("validated_log_bytes")
-        or hashlib.sha256(log_bytes).hexdigest() != fresh.get("validated_log_sha256")
-    ):
+    if len(log_bytes) != fresh.get("validated_log_bytes") or hashlib.sha256(
+        log_bytes
+    ).hexdigest() != fresh.get("validated_log_sha256"):
         raise ValueError("NIAH server log differs from validated fresh-prefill evidence")
     if sha(plan_path) != hashlib.sha256(plan_raw).hexdigest():
         raise ValueError("NIAH plan changed while validating")
@@ -201,7 +211,9 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
         raise ValueError("NIAH evidence changed while validating")
     return {
         "artifact_type": "ninfer_r9700_selected_niah_admission",
-        "schema_version": 1, "status": "pass", "terminal_route": route,
+        "schema_version": 1,
+        "status": "pass",
+        "terminal_route": route,
         "campaign": {
             "plan": {"path": str(plan_path), "sha256": sha(plan_path)},
             "prepared_closure": {

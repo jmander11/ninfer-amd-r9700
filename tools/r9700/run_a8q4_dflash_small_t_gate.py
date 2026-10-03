@@ -30,7 +30,9 @@ WIDTH_ROLES = {
     24: ("W6_C4_verification",),
 }
 PRIOR_ELIGIBLE = (
-    (34816, 5120, 4), (34816, 5120, 5), (34816, 5120, 6),
+    (34816, 5120, 4),
+    (34816, 5120, 5),
+    (34816, 5120, 6),
 )
 PRIOR_SUMMARY_SHA256 = "27cba6590e4272908b30e5a1ad6073610288c6e26b27100f5ad662d25648b122"
 CELL_SCHEMA = "ninfer.r9700.a8q4-dflash-small-t-cell.v3"
@@ -108,26 +110,36 @@ def validate_cell(
         raise ValueError("small-T cell has the wrong scope")
     hardware = report.get("hardware")
     if not isinstance(hardware, dict) or set(hardware) != {
-        "device", "architecture", "pci_bus_id", "pci_vendor_device", "integrated",
-        "wavefront_width", "power_profile_before_after",
+        "device",
+        "architecture",
+        "pci_bus_id",
+        "pci_vendor_device",
+        "integrated",
+        "wavefront_width",
+        "power_profile_before_after",
     }:
         raise ValueError("small-T cell has incomplete hardware identity")
-    if (hardware["device"] != "AMD Radeon AI PRO R9700" or
-            hardware["architecture"] != "gfx1201" or
-            hardware["pci_vendor_device"] != "1002:7551" or
-            hardware["integrated"] is not False or hardware["wavefront_width"] != 32 or
-            hardware["power_profile_before_after"] != "auto" or
-            not isinstance(hardware["pci_bus_id"], str) or
-            re.fullmatch(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]",
-                         hardware["pci_bus_id"]) is None):
+    if (
+        hardware["device"] != "AMD Radeon AI PRO R9700"
+        or hardware["architecture"] != "gfx1201"
+        or hardware["pci_vendor_device"] != "1002:7551"
+        or hardware["integrated"] is not False
+        or hardware["wavefront_width"] != 32
+        or hardware["power_profile_before_after"] != "auto"
+        or not isinstance(hardware["pci_bus_id"], str)
+        or re.fullmatch(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", hardware["pci_bus_id"])
+        is None
+    ):
         raise ValueError("small-T cell has the wrong hardware identity")
-    if report.get("executable") != expected_executable or \
-            report.get("sources") != expected_sources:
+    if report.get("executable") != expected_executable or report.get("sources") != expected_sources:
         raise ValueError("small-T cell is not bound to the preflight identities")
 
     numeric = report.get("numeric")
-    if not isinstance(numeric, dict) or numeric.get("oracle") != ORACLE or \
-            numeric.get("maximum_bf16_steps_allowed") != 2:
+    if (
+        not isinstance(numeric, dict)
+        or numeric.get("oracle") != ORACLE
+        or numeric.get("maximum_bf16_steps_allowed") != 2
+    ):
         raise ValueError("small-T cell lacks the direct oracle contract")
     for route in ("candidate", "incumbent"):
         value = numeric.get(f"{route}_maximum_bf16_steps")
@@ -137,29 +149,28 @@ def validate_cell(
         raise ValueError("small-T cell lacks the pairwise diagnostic")
 
     timing = report.get("timing")
-    if not isinstance(timing, dict) or timing.get("method") != "unprofiled HIP events" or \
-            timing.get("iterations_per_sample") != 10 or \
-            timing.get("forward_reverse_pairs") != 7:
+    if (
+        not isinstance(timing, dict)
+        or timing.get("method") != "unprofiled HIP events"
+        or timing.get("iterations_per_sample") != 10
+        or timing.get("forward_reverse_pairs") != 7
+    ):
         raise ValueError("small-T cell has the wrong timing contract")
     incumbent_forward = _samples(timing, "incumbent_forward_ms")
     candidate_forward = _samples(timing, "candidate_forward_ms")
     candidate_reverse = _samples(timing, "candidate_reverse_ms")
     incumbent_reverse = _samples(timing, "incumbent_reverse_ms")
     incumbent_balanced = [
-        (forward + reverse) * 0.5
-        for forward, reverse in zip(incumbent_forward, incumbent_reverse)
+        (forward + reverse) * 0.5 for forward, reverse in zip(incumbent_forward, incumbent_reverse)
     ]
     candidate_balanced = [
-        (forward + reverse) * 0.5
-        for forward, reverse in zip(candidate_forward, candidate_reverse)
+        (forward + reverse) * 0.5 for forward, reverse in zip(candidate_forward, candidate_reverse)
     ]
     forward_ratios = [
-        candidate / incumbent
-        for candidate, incumbent in zip(candidate_forward, incumbent_forward)
+        candidate / incumbent for candidate, incumbent in zip(candidate_forward, incumbent_forward)
     ]
     reverse_ratios = [
-        candidate / incumbent
-        for candidate, incumbent in zip(candidate_reverse, incumbent_reverse)
+        candidate / incumbent for candidate, incumbent in zip(candidate_reverse, incumbent_reverse)
     ]
     for name, expected in (
         ("incumbent_balanced_ms", incumbent_balanced),
@@ -186,11 +197,13 @@ def validate_cell(
     order_ratio_delta = abs(forward_ratio_median - reverse_ratio_median)
     maximum_order_ratio_delta = 0.02
     accepted = (
-        candidate_median < incumbent_median and
-        candidate_forward_median < incumbent_forward_median and
-        candidate_reverse_median < incumbent_reverse_median and
-        forward_ratio_median < 1.0 and reverse_ratio_median < 1.0 and
-        ratio_upper < 1.0 and order_ratio_delta <= maximum_order_ratio_delta
+        candidate_median < incumbent_median
+        and candidate_forward_median < incumbent_forward_median
+        and candidate_reverse_median < incumbent_reverse_median
+        and forward_ratio_median < 1.0
+        and reverse_ratio_median < 1.0
+        and ratio_upper < 1.0
+        and order_ratio_delta <= maximum_order_ratio_delta
     )
     expected_decision = {
         "incumbent_median_ms": incumbent_median,
@@ -209,8 +222,11 @@ def validate_cell(
         "maximum_order_ratio_delta": maximum_order_ratio_delta,
     }
     decision = report.get("decision")
-    if not isinstance(decision, dict) or decision.get("criterion") != CRITERION or \
-            decision.get("accepted") is not accepted:
+    if (
+        not isinstance(decision, dict)
+        or decision.get("criterion") != CRITERION
+        or decision.get("accepted") is not accepted
+    ):
         raise ValueError("small-T cell decision is inconsistent")
     for name, expected in expected_decision.items():
         _close(decision.get(name), expected, f"decision.{name}")
@@ -228,7 +244,9 @@ def _committed_package(repo: Path) -> tuple[str, dict[str, str]]:
     for relative in PACKAGE_PATHS:
         current = (repo / relative).read_bytes()
         retained = subprocess.run(
-            ["git", "show", f"HEAD:{relative.as_posix()}"], cwd=repo, check=True,
+            ["git", "show", f"HEAD:{relative.as_posix()}"],
+            cwd=repo,
+            check=True,
             capture_output=True,
         ).stdout
         if current != retained:
@@ -238,22 +256,31 @@ def _committed_package(repo: Path) -> tuple[str, dict[str, str]]:
 
 
 def validate_prior_summary(report: object) -> None:
-    if not isinstance(report, dict) or \
-            report.get("schema") != "ninfer.r9700.a8q4-dflash-small-t-gate.v2" or \
-            report.get("status") != "passed" or report.get("complete_screen") is not True or \
-            report.get("routing_authorized") is not False or \
-            report.get("required_cell_count") != 39:
+    if (
+        not isinstance(report, dict)
+        or report.get("schema") != "ninfer.r9700.a8q4-dflash-small-t-gate.v2"
+        or report.get("status") != "passed"
+        or report.get("complete_screen") is not True
+        or report.get("routing_authorized") is not False
+        or report.get("required_cell_count") != 39
+    ):
         raise ValueError("retained C1 screen is not the closed schema-v2 authority")
     eligible = report.get("eligible_cells")
     expected = [
         {"rows": rows, "columns": columns, "tokens": tokens}
         for rows, columns, tokens in PRIOR_ELIGIBLE
     ]
-    if eligible != expected or not isinstance(report.get("forbidden_cells"), list) or \
-            len(report["forbidden_cells"]) != 36 or \
-            not isinstance(report.get("cells"), list) or len(report["cells"]) != 39 or \
-            not all(isinstance(cell, dict) and cell.get("evidence_valid") is True
-                    for cell in report["cells"]):
+    if (
+        eligible != expected
+        or not isinstance(report.get("forbidden_cells"), list)
+        or len(report["forbidden_cells"]) != 36
+        or not isinstance(report.get("cells"), list)
+        or len(report["cells"]) != 39
+        or not all(
+            isinstance(cell, dict) and cell.get("evidence_valid") is True
+            for cell in report["cells"]
+        )
+    ):
         raise ValueError("retained C1 screen has the wrong exact eligibility set")
 
 
@@ -265,10 +292,10 @@ def _write_exclusive(path: Path, value: object) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", type=Path,
-                        default=Path("tools/r9700/build/a8q4_dflash_small_t_qual"))
-    parser.add_argument("--assembly", type=Path,
-                        default=Path("tools/r9700/build/q4g64_linear.s"))
+    parser.add_argument(
+        "--binary", type=Path, default=Path("tools/r9700/build/a8q4_dflash_small_t_qual")
+    )
+    parser.add_argument("--assembly", type=Path, default=Path("tools/r9700/build/q4g64_linear.s"))
     parser.add_argument("--c1-summary", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
@@ -280,8 +307,7 @@ def main() -> int:
         raise RuntimeError("retained C1 summary has the wrong SHA-256")
     validate_prior_summary(json.loads(prior_summary.read_text()))
     commit, package_hashes = _committed_package(repo)
-    source_hashes = {name: package_hashes[path.as_posix()]
-                     for name, path in SOURCE_PATHS.items()}
+    source_hashes = {name: package_hashes[path.as_posix()] for name, path in SOURCE_PATHS.items()}
     executable_identity = {"path": str(binary), "sha256": sha256(binary)}
     static_result = check_static(assembly.read_text())
     preflight = {
@@ -292,7 +318,8 @@ def main() -> int:
         "assembly": {"path": str(assembly), "sha256": sha256(assembly)},
         "static": {str(tokens): values for tokens, values in static_result.items()},
         "retained_c1_screen": {
-            "path": str(prior_summary), "sha256": PRIOR_SUMMARY_SHA256,
+            "path": str(prior_summary),
+            "sha256": PRIOR_SUMMARY_SHA256,
             "eligible_cells": [
                 {"rows": rows, "columns": columns, "tokens": tokens}
                 for rows, columns, tokens in PRIOR_ELIGIBLE
@@ -310,41 +337,52 @@ def main() -> int:
             stem = f"n{rows}-k{columns}-t{tokens}"
             name = f"{stem}.json"
             path = args.output_dir / name
-            command = [str(binary), str(rows), str(columns), str(tokens),
-                       "--out-json", str(path)]
+            command = [str(binary), str(rows), str(columns), str(tokens), "--out-json", str(path)]
             process = subprocess.run(command, check=False, capture_output=True, text=True)
             process_name = f"{stem}.process.json"
-            _write_exclusive(args.output_dir / process_name, {
-                "command": command,
-                "returncode": process.returncode,
-                "stdout": process.stdout,
-                "stderr": process.stderr,
-            })
+            _write_exclusive(
+                args.output_dir / process_name,
+                {
+                    "command": command,
+                    "returncode": process.returncode,
+                    "stdout": process.stdout,
+                    "stderr": process.stderr,
+                },
+            )
             cell = {
-                "rows": rows, "columns": columns, "tokens": tokens,
-                "eligible": False, "evidence_valid": False, "report": name,
-                "process": process_name, "applicability": list(WIDTH_ROLES[tokens]),
+                "rows": rows,
+                "columns": columns,
+                "tokens": tokens,
+                "eligible": False,
+                "evidence_valid": False,
+                "report": name,
+                "process": process_name,
+                "applicability": list(WIDTH_ROLES[tokens]),
             }
             try:
                 if process.returncode not in (0, 1) or not path.is_file():
                     raise ValueError("cell process did not retain a decision")
+
                 def reject_constant(item: str) -> object:
                     raise ValueError(f"nonfinite JSON constant {item}")
+
                 value = json.loads(path.read_text(), parse_constant=reject_constant)
                 validated = validate_cell(
                     value, rows, columns, tokens, executable_identity, source_hashes
                 )
                 if (process.returncode == 0) is not validated["eligible"]:
                     raise ValueError("cell exit status disagrees with recomputed decision")
-                cell.update({
-                    "eligible": validated["eligible"],
-                    "evidence_valid": True,
-                    "status": value["status"],
-                    "sha256": sha256(path),
-                    "candidate_over_incumbent": value["decision"]["candidate_over_incumbent"],
-                    "paired_ratio_upper": value["decision"]["paired_ratio_upper"],
-                    "order_ratio_delta": value["decision"]["order_ratio_delta"],
-                })
+                cell.update(
+                    {
+                        "eligible": validated["eligible"],
+                        "evidence_valid": True,
+                        "status": value["status"],
+                        "sha256": sha256(path),
+                        "candidate_over_incumbent": value["decision"]["candidate_over_incumbent"],
+                        "paired_ratio_upper": value["decision"]["paired_ratio_upper"],
+                        "order_ratio_delta": value["decision"]["order_ratio_delta"],
+                    }
+                )
             except (OSError, json.JSONDecodeError, ValueError) as error:
                 cell["status"] = "invalid"
                 cell["error"] = str(error)
@@ -354,11 +392,13 @@ def main() -> int:
 
     new_eligible = [
         {"rows": cell["rows"], "columns": cell["columns"], "tokens": cell["tokens"]}
-        for cell in cells if cell["eligible"]
+        for cell in cells
+        if cell["eligible"]
     ]
     forbidden = [
         {"rows": cell["rows"], "columns": cell["columns"], "tokens": cell["tokens"]}
-        for cell in cells if not cell["eligible"]
+        for cell in cells
+        if not cell["eligible"]
     ]
     complete = len(cells) == len(SHAPES) * len(TOKENS) and all(
         cell["evidence_valid"] for cell in cells
@@ -373,13 +413,16 @@ def main() -> int:
         "status": "passed" if passed else "rejected",
         "scope": SCOPE,
         "production_dispatch_changed": False,
-        "preflight": {"report": "preflight.json", "sha256": sha256(args.output_dir / "preflight.json")},
+        "preflight": {
+            "report": "preflight.json",
+            "sha256": sha256(args.output_dir / "preflight.json"),
+        },
         "required_shapes": [list(shape) for shape in SHAPES],
         "required_tokens": list(TOKENS),
         "width_applicability": {str(tokens): list(WIDTH_ROLES[tokens]) for tokens in TOKENS},
         "required_cell_count": len(SHAPES) * len(TOKENS),
         "complete_screen": complete,
-        "retained_c1_eligible_cells": combined_eligible[:len(PRIOR_ELIGIBLE)],
+        "retained_c1_eligible_cells": combined_eligible[: len(PRIOR_ELIGIBLE)],
         "new_eligible_cells": new_eligible,
         "eligible_cells": combined_eligible,
         "forbidden_cells": forbidden,

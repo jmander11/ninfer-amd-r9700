@@ -26,7 +26,10 @@ class OrdinaryDecodeReportTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         completed = subprocess.run(
             [sys.executable, "tools/bench/check_ordinary_decode_report.py", "--help"],
-            cwd=root, capture_output=True, text=True, check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("--executable", completed.stdout)
@@ -43,78 +46,149 @@ class OrdinaryDecodeReportTest(unittest.TestCase):
         report_path.parent.mkdir(parents=True)
         report_path.write_text("{}", encoding="utf-8")
         case = build_cases("ordinary-diagnostic")[0]
-        command = add_repetition_args([
-            str(executable), "--weights", str(artifact), "--corpus", str(corpus),
-            "--device", "0", "--concurrency", "1", *case.args,
-            "--output", "json", "--output-file", str(report_path),
-        ], case, None, None)
+        command = add_repetition_args(
+            [
+                str(executable),
+                "--weights",
+                str(artifact),
+                "--corpus",
+                str(corpus),
+                "--device",
+                "0",
+                "--concurrency",
+                "1",
+                *case.args,
+                "--output",
+                "json",
+                "--output-file",
+                str(report_path),
+            ],
+            case,
+            None,
+            None,
+        )
         manifest = {
-            "artifact_type": "ninfer_bench_matrix_run", "schema_version": MATRIX_SCHEMA_VERSION,
-            "preset": "ordinary-diagnostic", "dry_run": False,
-            "case_count": 1, "point_count": 1, "concurrency": [1],
-            "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
+            "artifact_type": "ninfer_bench_matrix_run",
+            "schema_version": MATRIX_SCHEMA_VERSION,
+            "preset": "ordinary-diagnostic",
+            "dry_run": False,
+            "case_count": 1,
+            "point_count": 1,
+            "concurrency": [1],
+            "expected_kv_value_group": 16,
+            "expected_q4_activation_bits": 8,
             "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-            "expected_w8_activation_bits": 8, "expected_split512_enabled": True,
+            "expected_w8_activation_bits": 8,
+            "expected_split512_enabled": True,
             "expected_decode_attention_profile": DECODE_ATTENTION_PROFILE,
             "expected_packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
             "expected_split512_min_context": SPLIT512_MIN_CONTEXT,
             "expected_xattention_profile": "b128-s16-tau900",
-            "power_profile": {"required": "auto", "sysfs_path": str(R9700_POWER_PROFILE),
-                              "observed": "auto", "rechecked_after": "auto"},
+            "power_profile": {
+                "required": "auto",
+                "sysfs_path": str(R9700_POWER_PROFILE),
+                "observed": "auto",
+                "rechecked_after": "auto",
+            },
             "bench": {"path": str(executable), "sha256": "a" * 64},
             "artifact": {"path": str(artifact), "sha256": "b" * 64},
             "corpus": str(corpus),
             "corpus_sha256": __import__("hashlib").sha256(corpus.read_bytes()).hexdigest(),
-            "commands": [{"suite": "ordinary_decode",
-                          "case": "whole_p8192_g256_none_graph", "concurrency": 1,
-                          "report": str(report_path), "command": command}],
+            "commands": [
+                {
+                    "suite": "ordinary_decode",
+                    "case": "whole_p8192_g256_none_graph",
+                    "concurrency": 1,
+                    "report": str(report_path),
+                    "command": command,
+                }
+            ],
         }
         (matrix / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         disabled = {
-            "enabled": False, "draft_window": 0, "rounds": 0, "drafted_tokens": 0,
-            "accepted_tokens": 0, "fallback_steps": 0, "acceptance_rate": None,
-            "acceptance_length": None, "accepted_per_position": [],
+            "enabled": False,
+            "draft_window": 0,
+            "rounds": 0,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "fallback_steps": 0,
+            "acceptance_rate": None,
+            "acceptance_length": None,
+            "accepted_per_position": [],
         }
         report = {
             "command": " ".join(command),
-            "config": {"spec": "none", "draft_tokens": 0,
-                       "speculative_execution": False, "use_device_graph": True,
-                       "decode_path": "device_graph", "concurrency": 1,
-                       "repetitions": 3, "warmup": 1, "prefill_chunk": 4096},
-            "tests": [{"kind": "whole", "n_prompt": 8192, "n_gen": 256,
-                       "prepare_seconds_mean": 0.1, "prepare_seconds_stddev": 0.0,
-                       "prefill_seconds_mean": 80.0, "prefill_seconds_stddev": 0.0,
-                       "decode_seconds_mean": 12.0, "decode_seconds_stddev": 0.0,
-                       "total_seconds_mean": 92.0, "total_seconds_stddev": 0.0,
-                       "prefill_tok_s_mean": 102.4, "prefill_tok_s_stddev": 0.0,
-                       "decode_output_tok_s_mean": 256.0 / 12.0,
-                       "decode_output_tok_s_stddev": 0.0,
-                       "decode_engine_tok_s_mean": 256.0 / 12.0,
-                       "decode_engine_tok_s_stddev": 0.0,
-                       "whole_output_tok_s_mean": 257.0 / 92.0,
-                       "whole_output_tok_s_stddev": 0.0,
-                       "speculative": disabled,
-                       "reps": [{"generated_output_tokens": 257,
-                                 "decode_output_tokens": 256,
-                                 "decode_engine_tokens": 256,
-                                 "timings": {"prepare_seconds": 0.1,
-                                             "vision_seconds": 0.0,
-                                             "prefill_seconds": 80.0,
-                                             "decode_seconds": 12.0,
-                                             "total_seconds": 92.0},
-                                 "speculative": disabled} for _ in range(3)]}],
+            "config": {
+                "spec": "none",
+                "draft_tokens": 0,
+                "speculative_execution": False,
+                "use_device_graph": True,
+                "decode_path": "device_graph",
+                "concurrency": 1,
+                "repetitions": 3,
+                "warmup": 1,
+                "prefill_chunk": 4096,
+            },
+            "tests": [
+                {
+                    "kind": "whole",
+                    "n_prompt": 8192,
+                    "n_gen": 256,
+                    "prepare_seconds_mean": 0.1,
+                    "prepare_seconds_stddev": 0.0,
+                    "prefill_seconds_mean": 80.0,
+                    "prefill_seconds_stddev": 0.0,
+                    "decode_seconds_mean": 12.0,
+                    "decode_seconds_stddev": 0.0,
+                    "total_seconds_mean": 92.0,
+                    "total_seconds_stddev": 0.0,
+                    "prefill_tok_s_mean": 102.4,
+                    "prefill_tok_s_stddev": 0.0,
+                    "decode_output_tok_s_mean": 256.0 / 12.0,
+                    "decode_output_tok_s_stddev": 0.0,
+                    "decode_engine_tok_s_mean": 256.0 / 12.0,
+                    "decode_engine_tok_s_stddev": 0.0,
+                    "whole_output_tok_s_mean": 257.0 / 92.0,
+                    "whole_output_tok_s_stddev": 0.0,
+                    "speculative": disabled,
+                    "reps": [
+                        {
+                            "generated_output_tokens": 257,
+                            "decode_output_tokens": 256,
+                            "decode_engine_tokens": 256,
+                            "timings": {
+                                "prepare_seconds": 0.1,
+                                "vision_seconds": 0.0,
+                                "prefill_seconds": 80.0,
+                                "decode_seconds": 12.0,
+                                "total_seconds": 92.0,
+                            },
+                            "speculative": disabled,
+                        }
+                        for _ in range(3)
+                    ],
+                }
+            ],
         }
         return matrix, executable, artifact, report
 
-    def validate(self, matrix: Path, executable: Path, artifact: Path, report: dict,
-                 power: str = "auto") -> dict:
+    def validate(
+        self, matrix: Path, executable: Path, artifact: Path, report: dict, power: str = "auto"
+    ) -> dict:
         manifest = json.loads((matrix / "manifest.json").read_text(encoding="utf-8"))
-        with patch("tools.bench.check_ordinary_decode_report.inspect_executable",
-                   return_value=manifest["bench"]), \
-             patch("tools.bench.check_ordinary_decode_report.inspect_artifact",
-                   return_value=manifest["artifact"]), \
-             patch("tools.bench.check_ordinary_decode_report.load_bench_report",
-                   return_value=report):
+        with (
+            patch(
+                "tools.bench.check_ordinary_decode_report.inspect_executable",
+                return_value=manifest["bench"],
+            ),
+            patch(
+                "tools.bench.check_ordinary_decode_report.inspect_artifact",
+                return_value=manifest["artifact"],
+            ),
+            patch(
+                "tools.bench.check_ordinary_decode_report.load_bench_report", return_value=report
+            ),
+        ):
             return validate_matrix(matrix, executable, artifact, lambda _path: power)
 
     def test_accepts_exact_non_speculative_report(self) -> None:
@@ -162,7 +236,8 @@ class OrdinaryDecodeReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             matrix, executable, artifact, report = self.fixture(Path(directory))
             report["tests"][0]["reps"][0]["speculative"] = {
-                **report["tests"][0]["speculative"], "rounds": 1,
+                **report["tests"][0]["speculative"],
+                "rounds": 1,
             }
             with self.assertRaisesRegex(ValueError, "separate prefill/decode"):
                 self.validate(matrix, executable, artifact, report)

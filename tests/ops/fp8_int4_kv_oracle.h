@@ -32,16 +32,14 @@
 namespace ninfer::test::fp8_int4_kv_oracle {
 
 inline double decode_e4m3fn(std::uint8_t word) {
-    const bool negative       = (word & 0x80U) != 0;
-    const std::uint32_t exp   = (word >> 3) & 0x0fU;
+    const bool negative          = (word & 0x80U) != 0;
+    const std::uint32_t exp      = (word >> 3) & 0x0fU;
     const std::uint32_t fraction = word & 0x07U;
-    double magnitude = 0.0;
+    double magnitude             = 0.0;
     if (exp == 0) {
         magnitude = static_cast<double>(fraction) * std::ldexp(1.0, -9);
     } else {
-        if (exp == 15 && fraction == 7) {
-            throw std::invalid_argument("FP8 E4M3FN NaN word");
-        }
+        if (exp == 15 && fraction == 7) { throw std::invalid_argument("FP8 E4M3FN NaN word"); }
         magnitude = (1.0 + static_cast<double>(fraction) / 8.0) *
                     std::ldexp(1.0, static_cast<int>(exp) - 7);
     }
@@ -49,10 +47,8 @@ inline double decode_e4m3fn(std::uint8_t word) {
 }
 
 inline std::uint8_t encode_e4m3fn(float source) {
-    if (!std::isfinite(source)) {
-        throw std::invalid_argument("FP8 E4M3FN source must be finite");
-    }
-    const bool negative = std::signbit(source);
+    if (!std::isfinite(source)) { throw std::invalid_argument("FP8 E4M3FN source must be finite"); }
+    const bool negative    = std::signbit(source);
     const double magnitude = std::abs(static_cast<double>(source));
     if (magnitude == 0.0) { return negative ? 0x80U : 0x00U; }
     if (magnitude >= 448.0) { return static_cast<std::uint8_t>((negative ? 0x80U : 0U) | 0x7eU); }
@@ -60,14 +56,14 @@ inline std::uint8_t encode_e4m3fn(float source) {
     // Exhaustive selection is intentionally independent of any device conversion intrinsic.
     // Positive finite E4M3FN words are monotonic in [0x00,0x7e]. The word's low bit is
     // the retained significand LSB, so an even word is the ties-to-even winner.
-    std::uint8_t best = 0;
+    std::uint8_t best    = 0;
     double best_distance = magnitude;
     for (std::uint16_t candidate = 1; candidate <= 0x7eU; ++candidate) {
         const double distance =
             std::abs(magnitude - decode_e4m3fn(static_cast<std::uint8_t>(candidate)));
         if (distance < best_distance ||
             (distance == best_distance && (candidate & 1U) == 0U && (best & 1U) != 0U)) {
-            best = static_cast<std::uint8_t>(candidate);
+            best          = static_cast<std::uint8_t>(candidate);
             best_distance = distance;
         }
     }
@@ -78,23 +74,23 @@ namespace detail {
 
 inline std::uint32_t round_shift_rne(std::uint32_t value, int shift) {
     if (shift <= 0) { return value; }
-    const std::uint32_t mask = (1U << shift) - 1U;
-    const std::uint32_t half = 1U << (shift - 1);
-    const std::uint32_t base = value >> shift;
+    const std::uint32_t mask      = (1U << shift) - 1U;
+    const std::uint32_t half      = 1U << (shift - 1);
+    const std::uint32_t base      = value >> shift;
     const std::uint32_t remainder = value & mask;
     return base + ((remainder > half || (remainder == half && (base & 1U) != 0U)) ? 1U : 0U);
 }
 
 inline std::uint16_t fp32_to_fp16_rne(float source) {
-    const std::uint32_t bits = std::bit_cast<std::uint32_t>(source);
-    const std::uint32_t sign = (bits >> 16) & 0x8000U;
+    const std::uint32_t bits     = std::bit_cast<std::uint32_t>(source);
+    const std::uint32_t sign     = (bits >> 16) & 0x8000U;
     const std::uint32_t absolute = bits & 0x7fffffffU;
     if (absolute >= 0x7f800000U) {
         const std::uint32_t mantissa = absolute & 0x007fffffU;
         return static_cast<std::uint16_t>(sign | 0x7c00U | (mantissa != 0 ? 0x0200U : 0U));
     }
 
-    int exponent = static_cast<int>((absolute >> 23) & 0xffU) - 127 + 15;
+    int exponent           = static_cast<int>((absolute >> 23) & 0xffU) - 127 + 15;
     std::uint32_t mantissa = absolute & 0x007fffffU;
     if (exponent <= 0) {
         if (exponent < -10) { return static_cast<std::uint16_t>(sign); }
@@ -115,8 +111,8 @@ inline std::uint16_t fp32_to_fp16_rne(float source) {
 
 inline float fp16_to_fp32(std::uint16_t word) {
     const std::uint32_t sign = (static_cast<std::uint32_t>(word) & 0x8000U) << 16;
-    std::uint32_t exponent = (static_cast<std::uint32_t>(word) >> 10) & 0x1fU;
-    std::uint32_t mantissa = static_cast<std::uint32_t>(word) & 0x03ffU;
+    std::uint32_t exponent   = (static_cast<std::uint32_t>(word) >> 10) & 0x1fU;
+    std::uint32_t mantissa   = static_cast<std::uint32_t>(word) & 0x03ffU;
     if (exponent == 0) {
         if (mantissa == 0) { return std::bit_cast<float>(sign); }
         int unbiased = -14;
@@ -125,19 +121,16 @@ inline float fp16_to_fp32(std::uint16_t word) {
             --unbiased;
         }
         mantissa &= 0x03ffU;
-        return std::bit_cast<float>(sign |
-                                    (static_cast<std::uint32_t>(unbiased + 127) << 23) |
+        return std::bit_cast<float>(sign | (static_cast<std::uint32_t>(unbiased + 127) << 23) |
                                     (mantissa << 13));
     }
-    if (exponent == 31) {
-        return std::bit_cast<float>(sign | 0x7f800000U | (mantissa << 13));
-    }
+    if (exponent == 31) { return std::bit_cast<float>(sign | 0x7f800000U | (mantissa << 13)); }
     exponent = exponent - 15 + 127;
     return std::bit_cast<float>(sign | (exponent << 23) | (mantissa << 13));
 }
 
 inline int round_nearest_even(double value) {
-    const double lower = std::floor(value);
+    const double lower    = std::floor(value);
     const double fraction = value - lower;
     if (fraction < 0.5) { return static_cast<int>(lower); }
     if (fraction > 0.5) { return static_cast<int>(lower + 1.0); }
@@ -191,8 +184,8 @@ struct Int4Values {
         }
         const std::uint8_t packed = packed_codes[(token * dimension + lane) / 2];
         const std::uint8_t nibble = (lane & 1U) == 0U ? packed & 0x0fU : packed >> 4;
-        const int code = (nibble & 0x08U) == 0U ? static_cast<int>(nibble)
-                                                : static_cast<int>(nibble) - 16;
+        const int code =
+            (nibble & 0x08U) == 0U ? static_cast<int>(nibble) : static_cast<int>(nibble) - 16;
         if (code == -8) { throw std::invalid_argument("reserved symmetric INT4 code -8"); }
         return code;
     }
@@ -203,9 +196,8 @@ struct Int4Values {
             throw std::invalid_argument("INT4 value scale storage is invalid");
         }
         const std::size_t groups_per_token = dimension / group_size;
-        const std::uint16_t scale_word =
-            fp16_scales[token * groups_per_token + lane / group_size];
-        const double scale = static_cast<double>(detail::fp16_to_fp32(scale_word));
+        const std::uint16_t scale_word = fp16_scales[token * groups_per_token + lane / group_size];
+        const double scale             = static_cast<double>(detail::fp16_to_fp32(scale_word));
         if (!std::isfinite(scale) || scale < 0.0) {
             throw std::invalid_argument("INT4 value scale must be finite and non-negative");
         }
@@ -222,16 +214,14 @@ inline Int4Values encode_values(std::span<const float> source, std::size_t token
             "INT4 values require an even dimension divisible by G16 or G32");
     }
     const std::size_t groups_per_token = dimension / group_size;
-    Int4Values result{tokens,
-                      dimension,
-                      group_size,
+    Int4Values result{tokens, dimension, group_size,
                       std::vector<std::uint8_t>(tokens * dimension / 2, 0),
                       std::vector<std::uint16_t>(tokens * groups_per_token, 0)};
 
     for (std::size_t token = 0; token < tokens; ++token) {
         for (std::size_t group = 0; group < groups_per_token; ++group) {
             const std::size_t base = token * dimension + group * group_size;
-            float maximum = 0.0F;
+            float maximum          = 0.0F;
             for (std::size_t lane = 0; lane < group_size; ++lane) {
                 const float value = source[base + lane];
                 if (!std::isfinite(value)) {
@@ -243,7 +233,7 @@ inline Int4Values encode_values(std::span<const float> source, std::size_t token
 
             // FP32 division followed by exact IEEE binary16 RNE is part of this storage contract.
             const std::uint16_t scale_word = detail::fp32_to_fp16_rne(maximum / 7.0F);
-            const float scale = detail::fp16_to_fp32(scale_word);
+            const float scale              = detail::fp16_to_fp32(scale_word);
             if (!std::isfinite(scale)) {
                 throw std::overflow_error("INT4 value scale is not representable as finite FP16");
             }
@@ -253,11 +243,11 @@ inline Int4Values encode_values(std::span<const float> source, std::size_t token
             result.fp16_scales[token * groups_per_token + group] = scale_word;
             for (std::size_t lane = 0; lane < group_size; ++lane) {
                 const float quotient = source[base + lane] / scale;
-                const int rounded = detail::round_nearest_even(static_cast<double>(quotient));
-                const int code = std::clamp(rounded, -7, 7);
+                const int rounded    = detail::round_nearest_even(static_cast<double>(quotient));
+                const int code       = std::clamp(rounded, -7, 7);
                 const std::uint8_t nibble = static_cast<std::uint8_t>(code) & 0x0fU;
                 const std::size_t logical = base + lane;
-                std::uint8_t& packed = result.packed_codes[logical / 2];
+                std::uint8_t& packed      = result.packed_codes[logical / 2];
                 if ((lane & 1U) == 0U) {
                     packed = static_cast<std::uint8_t>((packed & 0xf0U) | nibble);
                 } else {
@@ -291,7 +281,7 @@ inline std::vector<double> attention_fp64(std::span<const float> represented_que
         scores[token] = dot * attention_scale;
     }
     const double maximum = *std::max_element(scores.begin(), scores.end());
-    double denominator = 0.0;
+    double denominator   = 0.0;
     for (double& score : scores) {
         score = std::exp(score - maximum);
         denominator += score;
@@ -323,7 +313,7 @@ inline GreedyResult attention_greedy_fp64(std::span<const float> represented_que
                                           std::size_t vocabulary,
                                           std::span<const float> represented_bias = {}) {
     GreedyResult result;
-    result.attention = attention_fp64(represented_query, keys, values, attention_scale);
+    result.attention            = attention_fp64(represented_query, keys, values, attention_scale);
     const std::size_t dimension = result.attention.size();
     if (vocabulary == 0 || vocabulary > std::numeric_limits<std::size_t>::max() / dimension ||
         represented_output_weight.size() != vocabulary * dimension ||

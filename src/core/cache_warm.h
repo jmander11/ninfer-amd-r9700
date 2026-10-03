@@ -7,7 +7,7 @@
 #include <cstdint>
 
 #if defined(__HIPCC__)
-#include <hip/hip_runtime.h>
+#    include <hip/hip_runtime.h>
 #endif
 
 namespace ninfer {
@@ -22,6 +22,7 @@ struct CacheWarmRange {
 
 struct CacheWarm {
     CacheWarmRange ranges[2]{};
+
     [[nodiscard]] bool empty() const noexcept {
         return ranges[0].bytes == 0U && ranges[1].bytes == 0U;
     }
@@ -33,7 +34,7 @@ struct CacheWarm {
                                            std::size_t bytes) noexcept {
     CacheWarm warm{};
     if (weight.qdata == nullptr || offset >= weight.qdata_bytes) return warm;
-    bytes = std::min<std::size_t>(bytes, weight.qdata_bytes - offset);
+    bytes          = std::min<std::size_t>(bytes, weight.qdata_bytes - offset);
     warm.ranges[0] = {static_cast<const std::uint8_t*>(weight.qdata) + offset, bytes};
     if (weight.qhigh != nullptr && weight.high_plane_bytes != 0U) {
         // The same row fraction of the high plane, clamped to it.
@@ -41,10 +42,10 @@ struct CacheWarm {
             return static_cast<std::size_t>(static_cast<unsigned __int128>(value) *
                                             weight.high_plane_bytes / weight.qdata_bytes);
         };
-        const std::size_t high_offset = scaled(offset) / 4U * 4U;  // dword touches
-        warm.ranges[1] = {static_cast<const std::uint8_t*>(weight.qhigh) + high_offset,
-                          std::min<std::size_t>(scaled(bytes),
-                                                weight.high_plane_bytes - high_offset)};
+        const std::size_t high_offset = scaled(offset) / 4U * 4U; // dword touches
+        warm.ranges[1]                = {
+            static_cast<const std::uint8_t*>(weight.qhigh) + high_offset,
+            std::min<std::size_t>(scaled(bytes), weight.high_plane_bytes - high_offset)};
     }
     return warm;
 }
@@ -74,7 +75,7 @@ inline constexpr std::size_t kCacheWarmStride = 256U;
 __device__ inline void warm_cache(const CacheWarm& warm, std::uint32_t cta, std::uint32_t ctas,
                                   std::uint32_t thread, std::uint32_t threads) {
     std::uint32_t sink = 0U;
-    std::size_t line = static_cast<std::size_t>(cta) * threads + thread;
+    std::size_t line   = static_cast<std::size_t>(cta) * threads + thread;
     for (const CacheWarmRange& range : warm.ranges) {
         const std::size_t lines = range.data == nullptr ? 0U : range.bytes / kCacheWarmStride;
         for (; line < lines; line += static_cast<std::size_t>(ctas) * threads)
