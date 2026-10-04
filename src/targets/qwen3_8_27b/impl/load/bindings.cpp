@@ -641,6 +641,7 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
                                                                NumericFormat::BF16, {5120});
             weights.query_key_value =
                 materialized_weight(backing, layer_plan.query_key_value, 6144, 5120);
+            weights.context_key_value = row_view(weights.query_key_value, 4096, 2048);
             weights.query_norm = artifact::materialized_tensor(backing, layer_plan.query_norm,
                                                                NumericFormat::BF16, {128});
             weights.key_norm   = artifact::materialized_tensor(backing, layer_plan.key_norm,

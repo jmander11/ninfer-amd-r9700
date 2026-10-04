@@ -1110,13 +1110,26 @@ all-layer transaction and publication contract.
 split by ownership: `ninfer_r9700_state_qual` covers all-layer host/device append, compact
 publication, invalid device-position frontier preservation, and publication-local poisoning;
 `ninfer_r9700_kv_ram_qual` covers exact three-plane capture/restore and fingerprint
-rejection, and `ninfer_r9700_full_attention_qual` covers the target attention consumer.
+rejection, plus exact RAM/disk current-versus-rewrite state selection for frontier, turn,
+response and checkpoint-drop reuse. It verifies kept and untouched GDN, hidden and DFlash cyclic
+bytes, and the disk state-decode count. `ninfer_r9700_full_attention_qual` covers the target
+attention consumer.
 
 `ninfer_r9700_kv_cache_append_prefix_qual` covers the separate DFlash BF16 state mutation. It
 checks bit-exact D128/Hkv8 device-count prefix writes, inert physical tails, wraparound in the live
 2048-token DFlash2 cyclic state, lane selection, fragmented Full-cache page/table-row selection,
 unchanged represented inputs, and dynamic count replay through a HIP Graph. It does not publish a
 frontier and never enters the asymmetric FP8-K/INT4-V Text/MTP transaction contract.
+
+`ninfer_r9700_dflash_context_kv_qual` checks the passive 2048-row K/V view of a packed
+6144-row QKV weight against the independent FP64 Linear oracle, with the native A8 error budget,
+at T1/4/8/9/16/17/32/64/65/128/129, including eager and captured producer-image projections
+against the same public oracle and exact canonical-projection equality. Full-QKV output equality
+is supplementary. Its fused append
+oracle evaluates complete FP64 RMSNorm/RoPE from represented BF16 K and weights, with exact V
+and untouched-cache checks. It covers B1/4/8, W1/8/64, W2048/B1, wraparound, mixed device counts,
+shuffled lanes and captured replay with changed counts. Alternating captured event timings
+measure warm-L2 selective projection and norm/RoPE/append edges, not cold-weight bandwidth.
 
 `ninfer_r9700_mtp_round_qual` covers the exact MTP next-round state transition over every fixed
 product shape K=1..5 and B=1..8. It compares alignment IDs, next proposal extents, AR positions,

@@ -5,10 +5,10 @@ repository by custom AMD ports, not merged ancestry; `AGENTS.md` states the sync
 
 ## Baseline
 
-Reconciled through upstream `48eb0b013b053c932851f6fbb97946ba2e656236` (2026-10-03), advanced
-from `593c2d0c` (2026-10-03), `574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
+Reconciled through upstream `945515eafdbccdf3f80f19bce40c70f1ccf2a282` (2026-10-04), advanced
+from `48eb0b01` (2026-10-03), `593c2d0c` (2026-10-03), `574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
 `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`,
-`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `48eb0b01`
+`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `945515ea`
 against current AMD behavior.
 
 ## Ported features (`c450798c..e04fad37`)
@@ -266,3 +266,34 @@ the `quality/clang-tidy-backlog` branch, so `4051ebf0..26ba4203` are not descend
   and tree-record kernel, and tree verify in the persistent C1 decode kernel. Its p-less default
   0.8 is superseded by `24d527d1`, and the selector-lattice dump probe is offline tree-research
   tooling.
+
+## `48eb0b01..945515ea` (3 upstream commits, reconciled 2026-10-04)
+
+- `aa3252fadaa6c07cdd779634d295abb321634a55`: ported planned-state selection to RAM and
+  disk restore. Turn/response checkpoint reuse skips current frontier GDN, hidden and DFlash
+  cyclic state; requests dropping an unused rewrite checkpoint skip its host image and clear
+  its metadata. Disk also skips the corresponding state decode jobs. Existing AMD context-head
+  filtering, per-image fences and retained-block lifetime remain authoritative. The expanded
+  RAM/disk qualifier checks exact kept and untouched bytes for all four reuse dispositions;
+  frontier-plus-rewrite decodes six state images, checkpoint-only or frontier/drop decodes three.
+- `442099cb99479bb62a4ee9d9960ceae92269a232`: ported selective DFlash context K/V projection
+  as a passive 2048-row binder view of the packed 6144-row QKV weight, with native N2048/K5120
+  A8/Q4 routes, and a fused BF16 local K RMSNorm/RoPE/cache append. Existing AMD query
+  normalization/RoPE was already fused. MTP selective K/V is already equivalent through its
+  binder row views; the new MTP dual-RMS optimization is explicitly not ported: the current
+  performance authority retains MTP for regression and directs new speculative optimization
+  to DFlash, and upstream reports flat MTP Engine performance. CUDA/NVFP4 kernels, NVIDIA
+  bench executables and exploratory experiment diaries are excluded; their applicable
+  numerical/cache and timing checks are represented by the native context qualifier.
+- `945515eafdbccdf3f80f19bce40c70f1ccf2a282`: explicitly not ported after native evaluation.
+  AMD already fuses finish and residual. A native parallel finish/residual/RMSNorm candidate
+  passed the independent FP64 oracle and memory/race checks and saved the 64-column Op edge,
+  but changed late greedy tokens at C8. Disabling only that fusion restored exact token parity.
+  Preserving the existing RMS reduction inside the fused kernel restored parity but slowed the
+  64-column reset-plus-edge from about 43 to 130 us. Neither candidate is admitted; the existing
+  draft normalization schedule and arena ownership remain. CUDA launchers, NVIDIA benches and
+  experiment diaries are excluded. The upstream three-to-one launch claim does not apply to
+  AMD's existing two-kernel edge.
+
+Verification and R9700 timing scope are recorded in `docs/performance.md`; upstream's 5090
+numbers are not AMD evidence. This reconciliation changes no ancestry and creates no merge.

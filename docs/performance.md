@@ -64,6 +64,93 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Upstream sync qualification (2026-10-04, initial AMD base `687c84db`)
+
+Native ROCm 10 Release on one R9700, `gfx1201` wave32, uniform A8/Q4, FP8-K/INT4-V G16
+Text/MTP cache and private BF16 DFlash state. Every GPU command held the shared AMD GPU lock.
+The context qualifier verified the physical PCI identity and `auto` power mode before device
+construction and again after its oracle and timing work. These are complete Op edge timings,
+with warmed weights, alternating captured 64-edge graphs, ten retained trials and median HIP
+events; they are not cold-weight bandwidth or whole-inference gains.
+
+| Context projection tokens | Full 6144 QKV rows (us) | Selected 2048 K/V rows (us) |
+|---:|---:|---:|
+| 1 | 57.95 | 56.56 |
+| 8 | 21.99 | 14.40 |
+| 16 | 24.75 | 15.68 |
+| 32 | 31.98 | 22.53 |
+| 64 | 48.80 | 27.16 |
+| 128 | 94.01 | 62.95 |
+
+The passive binder row view consumes the original Q4 codes/scales without repacking. All outputs
+passed the independent FP64 public-input Linear oracle with the native A8 error budget;
+supplementary selected-row equality with the full projection was exact at
+T1/4/8/9/16/17/32/64/65/128/129. The fused local K RMSNorm/RoPE/append oracle used complete FP64
+normalization and rotation, with max-absolute error <=0.02 and relative RMS <0.004; it did not
+copy the kernel's private BF16 normalization staging. V, unselected lanes and rejected rows were
+exact, including wraparound and graph replay with changed device counts.
+
+Norm/RoPE plus append became one kernel: B1/W8 improved 7.72 to 4.82 us, B4/W8 8.52 to
+5.19 us, B8/W8 10.18 to 6.78 us, and the B1/W2048 prefill edge 72.69 to 62.08 us. This is
+not a universal geometry claim: the nonproduction B4/W64 append cell regressed 18.20 to 21.99 us.
+The current multi-request decode append width is at most eight; prefill appends one owner.
+
+The proposed convolution finish/residual/RMSNorm fusion was rejected. Its parallel normalization
+passed the FP64 oracle, memcheck and racecheck, and reduced the 64-column reset-plus-edge from
+about 43 to 16 us, but changed late public greedy tokens at C8. The same context-KV port with
+only finish fusion disabled restored exact tokens. A fused version preserving the incumbent
+serial FP32 RMS reduction restored exact C8 tokens in all three repetitions but regressed the
+edge to about 130 us. Timings used alternating captured 100-edge graphs with a common D2D
+residual reset; the reset is included in both values. Intermediate 35/40/48/56-column parallel
+cells also lost to the existing two-kernel route. Neither candidate nor its extra normalized
+panel is retained. Upstream's NVIDIA three-to-one launch reduction does not apply to AMD's
+existing residual-fused finish.
+
+The retained port on the initial AMD base was compared against that pulled snapshot using the explicit production
+artifact
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/qwen3.8-27b-r9700-fp8lut4.ninfer`
+and `ninfer_bench -pg 512,128 --spec dflash --draft-tokens 7 --lm-head-draft --max-ctx 4096
+--warmup 1 -r 3 --retain-token-ids`, at fixed C1 and C8 with Device Graphs enabled. All three
+repetitions matched every generated greedy token and all speculative counters at both
+concurrencies. Decode-output throughput was 99.47 to 100.02 tok/s at C1 and 352.89 to
+354.18 tok/s aggregate at C8; these small observed gains do not establish a broad end-to-end
+speedup. C1 prefill was 3208 to 3255 tok/s; concurrent prefill has no scalar throughput result
+in this report. Reported workspace and allocator peaks were unchanged. Summarized qualification
+and schema-24 reports are under `profiles/bench/r9700-upstream-sync-20261004/`.
+
+Planned RAM/disk state selection passed exact kept/untouched GDN, hidden and DFlash cyclic byte
+checks for frontier, turn, response and checkpoint-drop reuse. The synthetic disk case decoded
+six state images when both sets were kept and three when only one was needed. Context, RAM/disk
+restore qualifiers passed memcheck; the independent disk integration test passed exact bytes,
+restart, identity, CRC and invalidation. Real selected-artifact DFlash and MTP recovery passed
+resident and RAM reuse, abort/restore, and decoded retries with matched state and continuation.
+The runtime planner passed C1..8 workspace/graph inventory checks; six affected host tests,
+affected Release targets, formatter, clang-tidy and diff whitespace checks passed.
+
+### Push-time integration with AMD base `dc05db28`
+
+Before publication, origin advanced through `38de9cd6` (producer-written Q4 images), `567d5b94`
+(single-launch column top-16) and `dc05db28` (benchmark record). The sync was rebased onto this
+base. Context still quantizes its shared activation image once, and every layer projects only
+the selected 2048 K/V rows from that image before the fused normalization/RoPE/append. The
+new producer-image qualifier compares eager and captured N2048 projection directly with the
+same independent FP64 public-input oracle and requires exact canonical-projection equality at
+all listed token widths. Subagent review cleared the merged image lifetime, row view and arena
+recipe before GPU work.
+
+The combined Release build passed the context/image, Q4 producer, column top-16, convolution,
+RAM/disk restore and runtime-planner qualifiers, selected-artifact DFlash/MTP recovery, context
+memcheck, six affected host tests and scoped clang-tidy. A matched Device-Graph Engine A/B
+against `dc05db28`'s context/proposal schedule used the same explicit production artifact,
+pp512/tg128, fixed K7, shortlist head, context4096, one warmup and three repetitions. Every
+generated greedy token and every speculative counter matched at C1 and C8. Decode-output
+throughput was 100.38 to 100.71 tok/s at C1 and 356.97 to 357.43 tok/s aggregate at C8;
+these are small observations, not a broad speed claim. GPU work held the shared lock, with
+`auto` checked before and after the Engine batch. Results are under
+`profiles/bench/r9700-upstream-sync-push-20261004/`. The earlier rejected upstream fusion
+candidate remains excluded; origin's independently qualified producer/carry implementation
+is preserved.
+
 ## Current production (2026-09-28)
 
 Artifact `qwen3.8-27b-r9700-fp8lut4` (FP8LUT4 Text and output head, 21 row-scaled FP8

@@ -4,6 +4,7 @@
 #include "core/fp8_int4_paged_kv_cache.h"
 #include "core/linear_attention_state.h"
 #include "targets/qwen3/impl/runtime/kv_ram_cache.h"
+#include "targets/qwen3/impl/runtime/kv_disk_cache.h"
 #include "targets/qwen3/impl/runtime/prefix_identity.h"
 
 #include <algorithm>
@@ -12,7 +13,9 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
+#include <unistd.h>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -353,8 +356,11 @@ void failed_unpack_fences_enqueued_reads(ninfer::DeviceContext& device,
 
 // Rewrite checkpoints live in lane-owned pinned host images. The RAM tier copies those images
 // host-to-host on capture and restore, beside the device GDN/DFlash current state. Exact bytes.
+enum class StateRestore : std::uint8_t { Frontier, Turn, Response, Drop };
+
 void rewrite_images_round_trip(ninfer::DeviceContext& device,
-                               const ninfer::Fp8KInt4VPagedKVSpec& text_spec) {
+                               const ninfer::Fp8KInt4VPagedKVSpec& text_spec, StateRestore mode,
+                               bool from_disk) {
     CopyFixture fixture(text_spec);
     ninfer::LayoutBuilder state_builder;
     const auto gdn_layout = ninfer::plan_linear_attention_state_pool(
@@ -410,6 +416,9 @@ void rewrite_images_round_trip(ninfer::DeviceContext& device,
         capture.source.dflash_lane               = lane;
         capture.source.rewrite_valid             = true;
         capture.source.rewrite_frontier          = 4;
+        capture.source.rewrite_kind              = mode == StateRestore::Response
+                                                       ? q3::RewriteCheckpointKind::ResponseReplay
+                                                       : q3::RewriteCheckpointKind::TurnClosure;
         capture.source.rewrite_checkpoint_hidden = &rewrite_hidden;
         capture.source.rewrite_state             = {rewrite_conv.data(), rewrite_rec.data(),
                                                     rewrite_cyclic.data()};
@@ -421,7 +430,10 @@ void rewrite_images_round_trip(ninfer::DeviceContext& device,
         entry_id = result.entry_id;
     }
 
+    const bool read_frontier = mode == StateRestore::Frontier || mode == StateRestore::Drop;
+    const bool read_rewrite  = mode != StateRestore::Drop;
     gdn.zero_slot(lane, device.stream);
+    hidden_bytes.fill(0xcc);
     std::vector<std::uint8_t> zero_cyclic(cyclic_bytes, 0);
     cyclic.copy_lane_from_host(zero_cyclic.data(), lane, device.stream);
     auto dest = fixture.pool->reserve(1);
@@ -443,9 +455,74 @@ void rewrite_images_round_trip(ninfer::DeviceContext& device,
     target.dflash_local              = &cyclic;
     target.dflash_lane               = lane;
     target.stream                    = device.copy_stream;
-    cache.claim(entry_id);
-    const q3::detail::RamRestoredHost restored = cache.unpack_device(entry_id, target);
-    cache.consume(entry_id);
+    target.keep_rewrite_checkpoint   = read_rewrite;
+    target.reuse      = mode == StateRestore::Turn ? ninfer::PrefixReusePath::RestoreTurnCheckpoint
+                        : mode == StateRestore::Response
+                            ? ninfer::PrefixReusePath::RestoreResponseCheckpoint
+                            : ninfer::PrefixReusePath::AppendAtFrontier;
+    target.reuse_base = read_frontier ? 6 : 4;
+    if (from_disk) {
+        std::string temporary =
+            (std::filesystem::temp_directory_path() / "ninfer-state-restore-XXXXXX").string();
+        require(::mkdtemp(temporary.data()) != nullptr, "disk state scratch creation failed");
+
+        struct Scratch {
+            std::filesystem::path path;
+
+            ~Scratch() {
+                std::error_code ignored;
+                std::filesystem::remove_all(path, ignored);
+            }
+        } scratch{temporary};
+
+        q3::detail::DiskOpenConfig config;
+        config.location           = scratch.path;
+        config.capacity_bytes     = 64ULL << 20;
+        config.max_context        = 64;
+        config.ram                = &cache;
+        config.text_pool          = fixture.pool.get();
+        config.logical_page_bytes = ninfer::paged_kv_logical_page_bytes(*fixture.pool);
+        config.hidden_bytes       = 1024;
+        config.fingerprint        = q3::detail::make_disk_fingerprint(
+            "qwen3.8-27b", "r9700-fp8lut4", "state-restore-fixture",
+            ninfer::SpeculativeBackend::DFlash, *fixture.pool, nullptr, fixture.semantics,
+            std::nullopt, &gdn, &cyclic);
+        q3::detail::KVDiskCache disk(config);
+        disk.note_ram_resident(entry_id, 0);
+        require(disk.emergency_spill_ram(entry_id), "state-image disk spill failed");
+        disk.wait_idle_and_fsync();
+        const auto id = cache.load_host(entry_id).disk_entry_id;
+        require(id != 0 && disk.claim(id), "state-image disk claim failed");
+        q3::detail::DiskRestoreTarget disk_target;
+        disk_target.text                      = target.text;
+        disk_target.text_pool                 = target.text_pool;
+        disk_target.text_semantics            = target.text_semantics;
+        disk_target.text_dst_pages            = target.text_dst_pages;
+        disk_target.gdn                       = target.gdn;
+        disk_target.gdn_current_slot          = target.gdn_current_slot;
+        disk_target.rewrite_state             = target.rewrite_state;
+        disk_target.tail_hidden               = target.tail_hidden;
+        disk_target.rewrite_checkpoint_hidden = target.rewrite_checkpoint_hidden;
+        disk_target.dflash_local              = target.dflash_local;
+        disk_target.dflash_lane               = target.dflash_lane;
+        disk_target.keep_rewrite_checkpoint   = target.keep_rewrite_checkpoint;
+        disk_target.reuse                     = target.reuse;
+        disk_target.reuse_base                = target.reuse_base;
+        disk_target.stream                    = target.stream;
+        const auto ticket                     = disk.restore_device(id, disk_target);
+        disk.wait_copies(ticket);
+        require(!disk.restore_failed(), "state-image disk restore failed");
+        require(disk.test_state_decode_count() == (mode == StateRestore::Frontier ? 6 : 3),
+                "disk decoded a state set the planned path discards");
+        disk.release_restore_ticket(ticket);
+        disk.release(id);
+    } else {
+        cache.claim(entry_id);
+        const auto restored = cache.unpack_device(entry_id, target);
+        require(restored.rewrite_valid && restored.rewrite_frontier == 4,
+                "RAM restore lost the rewrite checkpoint metadata");
+        cache.consume(entry_id);
+    }
     device.synchronize_all();
     std::vector<std::uint8_t> back_conv(conv_bytes);
     std::vector<std::uint8_t> back_rec(rec_bytes);
@@ -454,12 +531,23 @@ void rewrite_images_round_trip(ninfer::DeviceContext& device,
     cyclic.copy_lane_to_host(lane, back_cyclic.data(), device.stream);
     HIP_CHECK(hipStreamSynchronize(device.stream));
     dest.release();
-    require(restored.rewrite_valid && restored.rewrite_frontier == 4,
-            "RAM restore lost the rewrite checkpoint metadata");
-    require(out_conv == rewrite_conv && out_rec == rewrite_rec && out_cyclic == rewrite_cyclic,
-            "RAM restore did not reproduce the rewrite host images byte-exactly");
-    require(back_conv == current_conv && back_rec == current_rec && back_cyclic == current_cyclic,
-            "RAM restore did not reproduce the current GDN/DFlash lane byte-exactly");
+    require(out_conv == (read_rewrite ? rewrite_conv : std::vector<std::uint8_t>(conv_bytes, 0)) &&
+                out_rec == (read_rewrite ? rewrite_rec : std::vector<std::uint8_t>(rec_bytes, 0)) &&
+                out_cyclic == (read_rewrite ? rewrite_cyclic : zero_cyclic),
+            "restore changed or omitted the wrong rewrite host image");
+    require(
+        back_conv == (read_frontier ? current_conv : std::vector<std::uint8_t>(conv_bytes, 0)) &&
+            back_rec == (read_frontier ? current_rec : std::vector<std::uint8_t>(rec_bytes, 0)) &&
+            back_cyclic == (read_frontier ? current_cyclic : zero_cyclic),
+        "restore changed or omitted the wrong frontier GDN/DFlash lane");
+    std::vector<std::uint8_t> hidden_got(hidden_bytes.size());
+    hidden_bytes.copy_to_host(hidden_got.data(), hidden_got.size());
+    require(
+        std::all_of(hidden_got.begin(), hidden_got.begin() + 1024,
+                    [read_frontier](auto byte) { return byte == (read_frontier ? 0x5a : 0xcc); }) &&
+            std::all_of(hidden_got.begin() + 1024, hidden_got.end(),
+                        [read_rewrite](auto byte) { return byte == (read_rewrite ? 0x5a : 0xcc); }),
+        "restore changed or omitted the wrong hidden panel");
 }
 
 } // namespace
@@ -649,7 +737,12 @@ int main() {
         two_pending_loads_fold_as_loads(device, text_spec);
         stream_wait_does_not_block_host(device, text_spec);
         failed_unpack_fences_enqueued_reads(device, text_spec);
-        rewrite_images_round_trip(device, text_spec);
+        for (bool disk : {false, true}) {
+            for (StateRestore mode : {StateRestore::Frontier, StateRestore::Turn,
+                                      StateRestore::Response, StateRestore::Drop}) {
+                rewrite_images_round_trip(device, text_spec, mode, disk);
+            }
+        }
 
         std::cout << "kv_ram_cache: PASS text_planes=" << text_source_pool.plane_count()
                   << " mtp_planes=" << mtp_source_pool.plane_count()

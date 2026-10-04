@@ -142,16 +142,17 @@ enum class A8Q4PrefillRoute : std::uint8_t {
     const bool qualified_tokens = tokens > 32U;
     const bool vision_mlp =
         (rows == 4304U && columns == 1152U) || (rows == 1152U && columns == 4304U);
-    const bool vision_shape    = (rows == 1152U && (columns == 1536U || columns == 1152U)) ||
-                                 (rows == 3456U && columns == 1152U) ||
-                                 (columns == 4608U && (rows == 4608U || rows == 5120U)) ||
-                                 (vision_mlp && tokens > 128U);
-    const bool qualified_shape = ((rows == 7168U || rows == 4096U || rows == 12288U ||
-                                   rows == 34816U || rows == 1024U || rows == 6144U) &&
-                                  columns == 5120U) ||
-                                 (rows == 5120U && (columns == 6144U || columns == 10240U ||
-                                                    columns == 17408U || columns == 25600U)) ||
-                                 vision_shape;
+    const bool vision_shape = (rows == 1152U && (columns == 1536U || columns == 1152U)) ||
+                              (rows == 3456U && columns == 1152U) ||
+                              (columns == 4608U && (rows == 4608U || rows == 5120U)) ||
+                              (vision_mlp && tokens > 128U);
+    const bool qualified_shape =
+        ((rows == 7168U || rows == 4096U || rows == 12288U || rows == 34816U || rows == 1024U ||
+          rows == 2048U || rows == 6144U) &&
+         columns == 5120U) ||
+        (rows == 5120U &&
+         (columns == 6144U || columns == 10240U || columns == 17408U || columns == 25600U)) ||
+        vision_shape;
     return kQ4ActivationBits == 8U && qualified_tokens && qualified_shape;
 }
 

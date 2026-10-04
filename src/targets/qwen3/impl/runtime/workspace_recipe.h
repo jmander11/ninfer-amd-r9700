@@ -223,18 +223,12 @@ DFlashContextRoots dflash_context(Allocator& allocator, std::int32_t tokens) {
 }
 
 struct DFlashContextLayerRoots {
-    Tensor value;
-    Tensor key;
-    Tensor fused_qkv;
+    Tensor fused_kv;
 };
 
 template <class Config, class Allocator>
 DFlashContextLayerRoots dflash_context_layer(Allocator& allocator, std::int32_t tokens) {
-    return {
-        matrix(allocator, DType::BF16, Config::kv_size, tokens),
-        matrix(allocator, DType::BF16, Config::kv_size, tokens),
-        matrix(allocator, DType::BF16, Config::query_size + 2 * Config::kv_size, tokens),
-    };
+    return {matrix(allocator, DType::BF16, 2 * Config::kv_size, tokens)};
 }
 
 struct DFlashProposalRoots {

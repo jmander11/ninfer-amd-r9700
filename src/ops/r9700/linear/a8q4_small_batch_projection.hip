@@ -149,7 +149,7 @@ hipError_t launch_wide(const A8Q4G64LinearArgs& a, hipStream_t stream) {
 template <unsigned N, unsigned K>
 constexpr bool has_wide_cells() {
     return (N == 5120 && (K == 4096 || K == 17408 || K == 25600)) ||
-           ((N == 34816 || N == 6144 || N == 1280 || N == 131072) && K == 5120);
+           ((N == 34816 || N == 6144 || N == 2048 || N == 1280 || N == 131072) && K == 5120);
 }
 
 // T>16 table cells (tiled body) of shapes whose T17..64 widths all take a token-tile route are
@@ -394,6 +394,7 @@ hipError_t detail::launch_a8q4_small_batch_projection(const A8Q4G64LinearArgs& a
     if (a.rows == 5120 && a.columns == 4096) return launch_prepared<5120, 4096>(a, stream);
     if (a.rows == 5120) return launch_prepared<5120, 6144>(a, stream);
     if (a.rows == 7168) return launch_prepared<7168, 5120>(a, stream);
+    if (a.rows == 2048) return launch_prepared<2048, 5120>(a, stream);
     if (a.rows == 6144) return launch_prepared<6144, 5120>(a, stream);
     if (a.rows == 1280) return launch_prepared<1280, 5120>(a, stream);
     if (a.rows == 12288) return launch_prepared<12288, 5120>(a, stream);
@@ -411,6 +412,7 @@ hipError_t a8q4_small_batch_projection(const A8Q4G64CandidateArgs& a, hipStream_
     if (a.rows == 5120 && a.columns == 4096) return launch<5120, 4096>(a, stream);
     if (a.rows == 5120 && a.columns == 6144) return launch<5120, 6144>(a, stream);
     if (a.rows == 7168 && a.columns == 5120) return launch<7168, 5120>(a, stream);
+    if (a.rows == 2048 && a.columns == 5120) return launch<2048, 5120>(a, stream);
     if (a.rows == 6144 && a.columns == 5120) return launch<6144, 5120>(a, stream);
     if (a.rows == 1280 && a.columns == 5120) return launch<1280, 5120>(a, stream);
     if (a.rows == 12288 && a.columns == 5120) return launch<12288, 5120>(a, stream);

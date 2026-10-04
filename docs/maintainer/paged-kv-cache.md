@@ -325,6 +325,16 @@ lane/mapping, writes exact physical bytes, then orders compute after the copy ev
 before prefill. A later payload/checkpoint parse failure is fenced before the Program falls back
 to cold prefill; no incomplete restored state is published.
 
+RAM and disk restore read only the state sets retained by the planned reuse path. Ordinary
+frontier reuse installs current GDN, DFlash cyclic state and tail hidden. Turn or response
+checkpoint reuse skips that frontier state and reads the rewrite image instead. For an exact
+prompt hit, prefill installs checkpoint hidden; a suffix prefill produces a new tail hidden. A request dropping an unused rewrite
+checkpoint skips its image and clears its metadata, so cancellation cannot select unread state.
+Context-head selection still installs only heads at or before the restored base. The retained
+KV planes and their copy/event lifetime rules are unchanged. Disk qualification observes six
+state decodes when both frontier and rewrite are kept, and three for checkpoint-only or
+frontier-with-drop reuse.
+
 Resident and RAM reuse candidates must satisfy the selected backend's readiness requirements
 before longest-prefix ranking; an unusable longer candidate cannot hide a usable shorter one.
 An exact ordinary hit requires valid tail hidden state. Each staged checkpoint's lifetime event

@@ -366,6 +366,15 @@ captures the five target residuals after completing layers `5, 19, 33, 47, 61` (
 all five draft layers. Decode appends only newly committed target features. Rejected query K/V is
 not context. There is no growing DFlash Full pool.
 
+Context projection binds the 2048 K/V rows of the original 6144-row packed QKV weight as a
+passive row view; it neither computes unused Q rows nor repacks weights. Q4 context layers share
+one producer-written activation image of the context panel, consumed before any subsequent
+producer overwrites that serialized region. One native Op consumes
+the compact BF16 K/V panel, normalizes K per head, applies RoPE, and appends directly to the
+private BF16 cyclic lane selected by device counts and lane IDs. V is copied exactly; rejected
+rows and other lanes remain untouched. The normalization's private BF16 staging is a qualified
+implementation profile, not an extra semantic boundary.
+
 One propose block:
 
 1. Query rows are the anchor embedding plus the configured K MASK embeddings (id **248070**) at

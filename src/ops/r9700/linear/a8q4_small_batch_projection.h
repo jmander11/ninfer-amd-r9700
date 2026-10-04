@@ -58,7 +58,7 @@ select_a8q4_small_batch_wide_route(unsigned tokens, unsigned rows, unsigned colu
     if (rows == 34816 && columns == 5120)
         return tokens <= 32 ? R::TokenTileN64 : R::TokenTileN64SplitK;
     if ((rows == 5120 && (columns == 17408 || columns == 25600 || columns == 4096)) ||
-        (rows == 6144 && columns == 5120))
+        ((rows == 6144 || rows == 2048) && columns == 5120))
         return R::TokenTileN64SplitK;
     if (rows == 131072 && columns == 5120)
         return tokens >= 32 && tokens <= 48 ? R::TokenTileN128 : R::TokenTileN64SplitK;
@@ -85,11 +85,11 @@ select_a8q4_small_batch_wide_route(unsigned tokens, unsigned rows, unsigned colu
     const bool t1_4 = tokens >= 1 && tokens <= 4, t4_8 = tokens >= 4 && tokens <= 8;
     const bool t10_16 =
         tokens == 10 || tokens == 12 || tokens == 14 || tokens == 15 || tokens == 16;
-    const bool t18_32 = tokens == 18 || tokens == 20 || tokens == 21 || tokens == 24 ||
-                        tokens == 28 || tokens == 32;
-    const bool k5120_projection =
-        (rows == 12288 || rows == 4096 || rows == 7168 || rows == 6144 || rows == 1280) &&
-        columns == 5120;
+    const bool t18_32           = tokens == 18 || tokens == 20 || tokens == 21 || tokens == 24 ||
+                                  tokens == 28 || tokens == 32;
+    const bool k5120_projection = (rows == 12288 || rows == 4096 || rows == 7168 || rows == 6144 ||
+                                   rows == 2048 || rows == 1280) &&
+                                  columns == 5120;
     const bool mlp      = (rows == 34816 && columns == 5120) || (rows == 5120 && columns == 17408);
     const bool selector = rows == 256 && columns == 5120 && tokens >= 1 && tokens <= 8;
     return use_a8q4_small_batch_wide(tokens, rows, columns, padded_columns) ||

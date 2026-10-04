@@ -65,6 +65,7 @@ struct DFlash2ConvWeights {
 struct DFlash2LayerWeights {
     Tensor input_norm;
     Weight query_key_value;
+    Weight context_key_value; // final K|V rows of query_key_value, bound without repacking
     Tensor query_norm;
     Tensor key_norm;
     Weight attention_output;

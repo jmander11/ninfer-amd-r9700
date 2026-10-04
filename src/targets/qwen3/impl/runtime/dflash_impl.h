@@ -10,6 +10,7 @@
 #include "ninfer/ops/grouped_dynamic_conv.h"
 #include "ninfer/ops/kv_cache_append_prefix.h"
 #include "ninfer/ops/linear.h"
+#include "ninfer/ops/normalized_rope_kv_append.h"
 #include "ninfer/ops/position.h"
 #include "ninfer/ops/prepare_masked_block.h"
 #include "ninfer/ops/prepare_ragged_prefix.h"
@@ -185,7 +186,7 @@ void append_context_impl(Context& state, const Tensor& features, const Tensor& p
             region.data != nullptr &&
             region.bytes >= ops::q4_activation_image_bytes(layer_columns, Config::hidden);
         for (const auto& weight : layers) {
-            shared_image = shared_image && weight.query_key_value.qtype == QType::Q4G64_F16S;
+            shared_image = shared_image && weight.context_key_value.qtype == QType::Q4G64_F16S;
         }
         if (shared_image) {
             ops::quantize_q4_activation_image(layer_context, region, state.execution.device.stream);
@@ -195,25 +196,17 @@ void append_context_impl(Context& state, const Tensor& features, const Tensor& p
             const auto& weight = layers.at(static_cast<std::size_t>(layer));
             auto layer_roots =
                 workspace_recipe::dflash_context_layer<Config>(state.execution.work, layer_columns);
-            Tensor value =
-                layer_roots.value.view({Config::head_dim, Config::kv_heads, layer_columns});
             if (shared_image) {
-                ops::linear_q4_activation_image(weight.query_key_value, layer_roots.fused_qkv,
+                ops::linear_q4_activation_image(weight.context_key_value, layer_roots.fused_kv,
                                                 region, state.execution.device.stream);
             } else {
-                serialized_linear(state.execution, layer_context, weight.query_key_value,
-                                  layer_roots.fused_qkv);
+                serialized_linear(state.execution, layer_context, weight.context_key_value,
+                                  layer_roots.fused_kv);
             }
-            Tensor key = layer_roots.key.view({Config::head_dim, Config::kv_heads, layer_columns});
-            ops::dflash_qkv_norm_rope(layer_positions.view({layer_columns}), layer_roots.fused_qkv,
-                                      weight.query_norm, weight.key_norm, Config::rms_epsilon,
-                                      nullptr, key, value, state.execution.device.stream);
-            Tensor key_batch = key.view({Config::head_dim, Config::kv_heads, layer_width, batch});
-            Tensor value_batch =
-                value.view({Config::head_dim, Config::kv_heads, layer_width, batch});
             Tensor position_batch = layer_positions.view({layer_width, batch});
-            ops::kv_cache_append_prefix(
-                key_batch, value_batch, position_batch, local_counts, lanes, local_envelope,
+            ops::normalized_rope_kv_append(
+                layer_roots.fused_kv, weight.key_norm, position_batch, local_counts, lanes,
+                Config::rms_epsilon, local_envelope,
                 dflash_state(state).local_layer(static_cast<std::uint32_t>(layer)),
                 state.execution.device.stream);
         }

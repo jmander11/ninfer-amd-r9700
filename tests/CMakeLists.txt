@@ -324,6 +324,7 @@ set(ninfer_r9700_qualifiers
   ninfer_r9700_dflash_state_qual
   ninfer_r9700_dflash2_select_qual
   ninfer_r9700_bidirectional_gqa_qual
+  ninfer_r9700_dflash_context_kv_qual
   ninfer_r9700_grouped_dynamic_conv_qual
   ninfer_r9700_swa_qual
   ninfer_r9700_kv_cache_append_prefix_qual

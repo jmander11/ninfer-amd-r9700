@@ -1,7 +1,9 @@
 // Native wave32 gfx1201 implementation of the complete Qwen3.8 RoPE public Op boundary.
 #include "ninfer/ops/rope.h"
+#include "ninfer/ops/normalized_rope_kv_append.h"
 
 #include "core/device.h"
+#include "ninfer/types.h"
 #include "ops/r9700/rope/rope_kernels.h"
 
 #include <hip/hip_bfloat16.h>
@@ -70,11 +72,13 @@ __global__ __launch_bounds__(Split ? kSplitBlock : kCombinedBlock) void rope_ker
 constexpr int kDflashFusedRows  = (kDflashQ + 2 * kDflashK) * kDflashD;
 constexpr int kDflashFrontWaves = 4;
 
+template <bool Append>
 __global__ __launch_bounds__(kDflashFrontWaves * 32) void dflash_qkv_norm_rope_kernel(
     const std::int32_t* positions, const hip_bfloat16* fused, const hip_bfloat16* q_norm,
     const hip_bfloat16* k_norm, float eps, hip_bfloat16* qn, hip_bfloat16* kn, hip_bfloat16* v,
-    int tokens, int first_head) {
-    constexpr int heads = kDflashQ + 2 * kDflashK;
+    int tokens, int first_head, const std::int32_t* counts, const std::int32_t* lanes, int width,
+    int capacity) {
+    constexpr int heads = (Append ? 0 : kDflashQ) + 2 * kDflashK;
     const int per_token = heads - first_head;
     const int groups    = (per_token + kDflashFrontWaves - 1) / kDflashFrontWaves;
     const int token     = static_cast<int>(blockIdx.x) / groups;
@@ -82,16 +86,29 @@ __global__ __launch_bounds__(kDflashFrontWaves * 32) void dflash_qkv_norm_rope_k
                           static_cast<int>(threadIdx.x) / 32;
     const int lane      = static_cast<int>(threadIdx.x) & 31;
     if (token >= tokens || head >= heads) { return; }
-    const hip_bfloat16* row = fused + static_cast<std::int64_t>(token) * kDflashFusedRows +
-                              static_cast<std::int64_t>(head) * kDflashD;
-    const uint2 packed      = reinterpret_cast<const uint2*>(row)[lane];
-    if (head >= kDflashQ + kDflashK) {
-        reinterpret_cast<uint2*>(
-            v + (static_cast<std::int64_t>(token) * kDflashK + head - kDflashQ - kDflashK) *
-                    kDflashD)[lane] = packed;
+    if constexpr (Append) {
+        if (token % width >= counts[token / width]) return;
+    }
+    const auto kv_offset = [&](int kv_head) {
+        if constexpr (Append) {
+            return ((static_cast<std::int64_t>(lanes[token / width]) * kDflashK + kv_head) *
+                        capacity +
+                    positions[token] % capacity) *
+                   kDflashD;
+        } else {
+            return (static_cast<std::int64_t>(token) * kDflashK + kv_head) * kDflashD;
+        }
+    };
+    constexpr int query_heads = Append ? 0 : kDflashQ;
+    constexpr int fused_rows  = heads * kDflashD;
+    const hip_bfloat16* row   = fused + static_cast<std::int64_t>(token) * fused_rows +
+                                static_cast<std::int64_t>(head) * kDflashD;
+    const uint2 packed        = reinterpret_cast<const uint2*>(row)[lane];
+    if (head >= query_heads + kDflashK) {
+        reinterpret_cast<uint2*>(v + kv_offset(head - query_heads - kDflashK))[lane] = packed;
         return;
     }
-    const bool is_query = head < kDflashQ;
+    const bool is_query = head < query_heads;
     const auto element  = [](std::uint32_t word, bool high) {
         return __uint_as_float(high ? word & 0xffff0000U : word << 16);
     };
@@ -132,7 +149,7 @@ __global__ __launch_bounds__(kDflashFrontWaves * 32) void dflash_qkv_norm_rope_k
     }
     hip_bfloat16* destination =
         is_query ? qn + (static_cast<std::int64_t>(token) * kDflashQ + head) * kDflashD
-                 : kn + (static_cast<std::int64_t>(token) * kDflashK + head - kDflashQ) * kDflashD;
+                 : kn + kv_offset(head - query_heads);
     reinterpret_cast<uint2*>(destination)[lane] =
         uint2{static_cast<std::uint32_t>(out[0]) | (static_cast<std::uint32_t>(out[1]) << 16),
               static_cast<std::uint32_t>(out[2]) | (static_cast<std::uint32_t>(out[3]) << 16)};
@@ -454,13 +471,56 @@ void dflash_qkv_norm_rope(const Tensor& positions, const Tensor& fused, const Te
     const int first_head = qn != nullptr ? 0 : kDflashQ;
     const int per_token  = kDflashQ + 2 * kDflashK - first_head;
     const int groups     = (per_token + kDflashFrontWaves - 1) / kDflashFrontWaves;
-    dflash_qkv_norm_rope_kernel<<<tokens * groups, kDflashFrontWaves * 32, 0, stream>>>(
+    dflash_qkv_norm_rope_kernel<false><<<tokens * groups, kDflashFrontWaves * 32, 0, stream>>>(
         static_cast<const std::int32_t*>(positions.data),
         static_cast<const hip_bfloat16*>(fused.data), static_cast<const hip_bfloat16*>(q_norm.data),
         static_cast<const hip_bfloat16*>(k_norm.data), eps,
         qn != nullptr ? static_cast<hip_bfloat16*>(qn->data) : nullptr,
-        static_cast<hip_bfloat16*>(kn.data), static_cast<hip_bfloat16*>(v.data), tokens,
-        first_head);
+        static_cast<hip_bfloat16*>(kn.data), static_cast<hip_bfloat16*>(v.data), tokens, first_head,
+        nullptr, nullptr, 0, 0);
+    HIP_CHECK(hipGetLastError());
+}
+
+void normalized_rope_kv_append(const Tensor& fused_kv, const Tensor& key_norm,
+                               const Tensor& positions, const Tensor& counts, const Tensor& lanes,
+                               float eps, KVCacheAppendPrefixExecutionEnvelope envelope,
+                               const CyclicKVCacheLayerView& cache, hipStream_t stream) {
+    const int width = positions.ne[0], batch = positions.ne[1];
+    const auto valid = [](const Tensor& tensor, DType type, int x, int y, int z, int w) {
+        return tensor.dtype == type && tensor.data != nullptr && tensor.is_contiguous() &&
+               tensor.ne[0] == x && tensor.ne[1] == y && tensor.ne[2] == z && tensor.ne[3] == w &&
+               reinterpret_cast<std::uintptr_t>(tensor.data) % (type == DType::I32 ? 4U : 16U) ==
+                   0U;
+    };
+    if (width <= 0 || width > 2048 || batch < 1 || batch > static_cast<int>(kMaximumConcurrency) ||
+        cache.capacity != 2048 || cache.padded_capacity != 2048 || cache.head_dim != 128 ||
+        cache.num_kv_heads != 8 || cache.lane_capacity < batch ||
+        cache.lane_capacity > static_cast<int>(kMaximumConcurrency) ||
+        envelope.min_count > envelope.max_count ||
+        envelope.max_count > static_cast<unsigned>(width) || !(eps > 0.0F) || !std::isfinite(eps) ||
+        !valid(fused_kv, DType::BF16, 2048, width * batch, 1, 1) ||
+        !valid(key_norm, DType::BF16, 128, 1, 1, 1) ||
+        !valid(positions, DType::I32, width, batch, 1, 1) ||
+        !valid(counts, DType::I32, batch, 1, 1, 1) || !valid(lanes, DType::I32, batch, 1, 1, 1) ||
+        !valid(cache.k, DType::BF16, 128, 2048, 8, cache.lane_capacity) ||
+        !valid(cache.v, DType::BF16, 128, 2048, 8, cache.lane_capacity)) {
+        throw std::invalid_argument("normalized_rope_kv_append: invalid tensors or envelope");
+    }
+    for (const Tensor* input : {&fused_kv, &key_norm, &positions, &counts, &lanes}) {
+        if (overlaps(input->data, input->bytes(), cache.k.data, cache.k.bytes()) ||
+            overlaps(input->data, input->bytes(), cache.v.data, cache.v.bytes()))
+            throw std::invalid_argument("normalized_rope_kv_append: cache aliases input");
+    }
+    if (overlaps(cache.k.data, cache.k.bytes(), cache.v.data, cache.v.bytes()))
+        throw std::invalid_argument("normalized_rope_kv_append: cache planes overlap");
+    if (envelope.max_count == 0) return;
+    dflash_qkv_norm_rope_kernel<true><<<width * batch * 4, kDflashFrontWaves * 32, 0, stream>>>(
+        static_cast<const std::int32_t*>(positions.data),
+        static_cast<const hip_bfloat16*>(fused_kv.data), nullptr,
+        static_cast<const hip_bfloat16*>(key_norm.data), eps, nullptr,
+        static_cast<hip_bfloat16*>(cache.k.data), static_cast<hip_bfloat16*>(cache.v.data),
+        width * batch, 0, static_cast<const std::int32_t*>(counts.data),
+        static_cast<const std::int32_t*>(lanes.data), width, 2048);
     HIP_CHECK(hipGetLastError());
 }
 
