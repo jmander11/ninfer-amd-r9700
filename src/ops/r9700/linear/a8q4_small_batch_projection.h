@@ -11,6 +11,8 @@ namespace ninfer::ops::r9700::linear {
 // T5..8 draft down/feature: N5120/K17408 and N5120/K25600.
 // T5..8 attention/auxiliary: N7168/K5120, N6144/K5120, N1280/K5120,
 // N5120/K4096. Other widths retain their existing route.
+// T1..8 DFlash2 selector hidden projection N256/K5120: 16 row tiles, so the K range is split
+// over 16 waves per tile (the wmma32 route walked K serially in 16 single-wave CTAs).
 // N12288 T5..8 retains scale-gather; other admitted cells use successor pipelining.
 // Concurrent-DFlash widths T17..64 of the drafter shapes and the N131072/K5120 draft head take
 // the measured wide route below (N1280/K5120: its TiledM widths and T49..64).
@@ -88,8 +90,10 @@ select_a8q4_small_batch_wide_route(unsigned tokens, unsigned rows, unsigned colu
     const bool k5120_projection =
         (rows == 12288 || rows == 4096 || rows == 7168 || rows == 6144 || rows == 1280) &&
         columns == 5120;
-    const bool mlp = (rows == 34816 && columns == 5120) || (rows == 5120 && columns == 17408);
+    const bool mlp      = (rows == 34816 && columns == 5120) || (rows == 5120 && columns == 17408);
+    const bool selector = rows == 256 && columns == 5120 && tokens >= 1 && tokens <= 8;
     return use_a8q4_small_batch_wide(tokens, rows, columns, padded_columns) ||
+           (columns == padded_columns && selector) ||
            (columns == padded_columns &&
             ((t4_8 && ((rows == 5120 && (columns == 4096 || columns == 6144 || columns == 17408 ||
                                          columns == 25600)) ||

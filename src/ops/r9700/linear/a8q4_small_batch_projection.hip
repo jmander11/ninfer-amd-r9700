@@ -8,7 +8,7 @@ namespace {
 // few G64 payloads in flight to saturate DRAM on the narrower projections.
 template <unsigned N, unsigned K>
 constexpr unsigned k_split() {
-    if constexpr (N == 1280)
+    if constexpr (N == 1280 || N == 256)
         return 16;
     else if constexpr (N == 5120 && (K == 4096 || K == 6144))
         return 8;
@@ -257,10 +257,12 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
     if constexpr (N == 131072) {
         return hipErrorInvalidValue;
     } else {
-        if constexpr ((N == 34816 && K == 5120) || (N == 5120 && (K == 17408 || K == 6144))) {
+        if constexpr ((N == 34816 && K == 5120) || (N == 5120 && (K == 17408 || K == 6144)) ||
+                      (N == 256 && K == 5120)) {
             if (a.tokens == 1) return launch_width<N, K, 1>(a, stream);
         }
-        if constexpr ((N == 34816 && K == 5120) || (N == 5120 && (K == 17408 || K == 6144))) {
+        if constexpr ((N == 34816 && K == 5120) || (N == 5120 && (K == 17408 || K == 6144)) ||
+                      (N == 256 && K == 5120)) {
             switch (a.tokens) {
             case 2:
                 return launch_width<N, K, 2>(a, stream);
@@ -395,6 +397,7 @@ hipError_t detail::launch_a8q4_small_batch_projection(const A8Q4G64LinearArgs& a
     if (a.rows == 6144) return launch_prepared<6144, 5120>(a, stream);
     if (a.rows == 1280) return launch_prepared<1280, 5120>(a, stream);
     if (a.rows == 12288) return launch_prepared<12288, 5120>(a, stream);
+    if (a.rows == 256) return launch_prepared<256, 5120>(a, stream);
     return launch_prepared<4096, 5120>(a, stream);
 }
 
@@ -412,6 +415,7 @@ hipError_t a8q4_small_batch_projection(const A8Q4G64CandidateArgs& a, hipStream_
     if (a.rows == 1280 && a.columns == 5120) return launch<1280, 5120>(a, stream);
     if (a.rows == 12288 && a.columns == 5120) return launch<12288, 5120>(a, stream);
     if (a.rows == 4096 && a.columns == 5120) return launch<4096, 5120>(a, stream);
+    if (a.rows == 256 && a.columns == 5120) return launch<256, 5120>(a, stream);
     return hipErrorInvalidValue;
 }
 } // namespace ninfer::ops::r9700::linear

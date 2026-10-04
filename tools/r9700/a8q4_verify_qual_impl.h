@@ -936,7 +936,7 @@ int main(int argc, char** argv) {
                 : wide_only       ? "wide_only"
                                   : "complete_owner")
             << "\",\"cells\":[";
-        constexpr std::array<std::array<unsigned, 2>, 11> shapes{{{34816, 5120},
+        constexpr std::array<std::array<unsigned, 2>, 12> shapes{{{34816, 5120},
                                                                   {5120, 6144},
                                                                   {12288, 5120},
                                                                   {4096, 5120},
@@ -946,7 +946,8 @@ int main(int argc, char** argv) {
                                                                   {6144, 5120},
                                                                   {1280, 5120},
                                                                   {5120, 4096},
-                                                                  {131072, 5120}}};
+                                                                  {131072, 5120},
+                                                                  {256, 5120}}};
         std::vector<std::array<unsigned, 3>> timed;
         bool first = true;
         for (const auto& shape : shapes) {
@@ -963,7 +964,8 @@ int main(int argc, char** argv) {
             if (projection_only && shape != std::array<unsigned, 2>{7168, 5120} &&
                 shape != std::array<unsigned, 2>{6144, 5120} &&
                 shape != std::array<unsigned, 2>{1280, 5120} &&
-                shape != std::array<unsigned, 2>{5120, 4096})
+                shape != std::array<unsigned, 2>{5120, 4096} &&
+                shape != std::array<unsigned, 2>{256, 5120})
                 continue;
             N = shape[0];
             K = shape[1];
