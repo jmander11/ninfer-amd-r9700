@@ -360,6 +360,16 @@ struct Variant {
     static constexpr bool supports_dflash                      = DFlashConfig::supported;
     static constexpr std::int32_t draft_head_rows              = 131072;
 
+    // Cold-start DFlash2 p-less proposal temperature for a p-less target temperature T, used
+    // until the online proposal calibration has observed rounds at T. Upstream offline replay of
+    // p-less selector dumps put the effective optimum near 0.3-0.45 at T=1.5 and 0.6-0.8 at T=2,
+    // and the R9700 measured 0.4 best at T=1.5; 0.8*(T-1) passes through both, clamped to the
+    // calibration grid.
+    [[nodiscard]] static constexpr float dflash_p_less_draft_temperature_prior(float temperature) {
+        const float prior = 0.8f * (temperature - 1.0f);
+        return prior < 0.2f ? 0.2f : (prior > 1.25f ? 1.25f : prior);
+    }
+
     // The target-verify leaves receive route_tokens: the C=1 width of a packed verify round (0
     // when the round is not batched packed verify). It selects the C=1 quantization family for
     // the single aggregate launch; see the pinned policy in variant.cpp.

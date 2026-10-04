@@ -12,6 +12,7 @@
 
 #include "targets/qwen3/impl/runtime/context_checkpoint.h"
 #include "targets/qwen3/impl/runtime/adaptive_draft.h"
+#include "targets/qwen3/impl/runtime/p_less_draft_calibration.h"
 #include "targets/qwen3/impl/runtime/context_checkpoint_image.h"
 #include "targets/qwen3/impl/runtime/kv_gpu_snapshot.h"
 #include "targets/qwen3/impl/runtime/kv_ram_cache.h"
@@ -357,7 +358,10 @@ public:
     void set_suppressed_tokens_lane(std::uint32_t lane, std::span<const TokenId> tokens);
     void clear_suppressed_tokens_lane(std::uint32_t lane);
     void set_typical_cycle_reasoning_lane(std::uint32_t lane, bool enabled);
-    void bind_tool_mask_batch(std::span<const std::uint32_t> lanes);
+    // Binds the batch's output sessions and the sampling configs the round runs with (its host
+    // ingress), so masked accept configs match the drafted rows.
+    void bind_tool_mask_batch(std::span<const std::uint32_t> lanes,
+                              std::span<const ops::SamplingConfig> configs);
     void resolve_prefill_lane(std::uint32_t lane, bool terminal);
     void resolve_pending_batch(std::span<const std::uint32_t> lanes,
                                std::span<const std::uint32_t> accepted_tokens,
@@ -460,7 +464,16 @@ public:
     const std::uint32_t draft_window;
     const std::uint32_t dflash_verify_width;
     const bool adaptive_draft;
-    const float p_less_draft_temperature;
+    // Pinned DFlash2 p-less draft temperature; unset, chain rounds use p_less_calibration.
+    const std::optional<float> p_less_draft_temperature;
+    qwen3::PLessDraftCalibration p_less_calibration{};
+    static_assert(qwen3::kPLessCalibrationHops == qwen3::kDFlashDecodeMaximumDrafts);
+
+    [[nodiscard]] bool calibrates_p_less_drafts() const {
+        return !p_less_draft_temperature.has_value() &&
+               speculative_backend == SpeculativeBackend::DFlash;
+    }
+
     const std::vector<std::uint32_t> captured_ks;
     std::array<qwen3::AdaptiveRoundTimeState, kMaximumConcurrency> adaptive_t_by_batch{};
     std::array<qwen3::AdaptiveBatchKState, kMaximumConcurrency> adaptive_batch_k_by_c{};

@@ -735,6 +735,192 @@ void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int 
     }
 }
 
+// Proposal calibration against an FP64 oracle: per (temperature g, hop j, row b), the overlap
+// sum_c min(p'_j(c), q_j(c)^(T_d/T_g) / Z) between the independent p-less target law of verify
+// column j and the recorded proposal re-tempered to T_g. Row 0 is p-less with T_d = 0.6, a typical
+// exclusion on a supported candidate (hop 0 only), and extent 2 < K so hop 2 is undrafted; row 1
+// draws greedy drafts (draft_temperature 0), so every row-1 entry is -1.
+void run_p_less_proposal_calibration(ninfer::DeviceContext& device) {
+    constexpr int physical_rows = kRealVocabulary;
+    constexpr int token_domain  = 248077;
+    constexpr int k             = 3;
+    constexpr int columns       = k + 1;
+    constexpr int batch         = 2;
+    constexpr int cap           = 16;
+    constexpr int active        = 48;
+    constexpr int grid          = ninfer::ops::kPLessProposalCalibrationTemperatureCount;
+    constexpr float draft_temp  = 0.6F;
+    constexpr float temperature = 1.5F;
+    std::vector<hip_bfloat16> logits(static_cast<std::size_t>(physical_rows) * columns * batch,
+                                     bf16(-20.0F));
+    for (int row = 0; row < batch; ++row) {
+        for (int column = 0; column < columns; ++column) {
+            auto* base = logits.data() + static_cast<std::size_t>(row * columns + column) *
+                                             static_cast<std::size_t>(physical_rows);
+            for (int token = 0; token < active; ++token) {
+                base[token] =
+                    bf16(2.0F * std::sin((0.6F + 0.11F * static_cast<float>(column + row)) *
+                                         static_cast<float>(token)) +
+                         0.05F * static_cast<float>(token));
+            }
+            for (int token = token_domain; token < physical_rows; ++token) {
+                base[token] = bf16(100.0F);
+            }
+        }
+    }
+    // Selector layout [C,K,B]: (b, h) owns entries [(b*K + h)*C, +C). Distinct ids per hop.
+    std::vector<int> ids(static_cast<std::size_t>(cap) * k * batch);
+    std::vector<float> q(ids.size());
+    for (int row = 0; row < batch; ++row) {
+        for (int hop = 0; hop < k; ++hop) {
+            const std::size_t base = static_cast<std::size_t>(row * k + hop) * cap;
+            double total           = 0.0;
+            for (int c = 0; c < cap; ++c) {
+                ids[base + c]  = (c * (5 + 2 * hop) + 1 + hop + row) % active;
+                const double w = std::exp(0.9 * std::cos(0.7 * static_cast<double>(c + hop + row)));
+                q[base + c]    = static_cast<float>(w);
+                total += w;
+            }
+            for (int c = 0; c < cap; ++c) {
+                q[base + c] = static_cast<float>(static_cast<double>(q[base + c]) / total);
+            }
+        }
+    }
+    const auto column_law = [&](int row, int column, const ninfer::ops::SamplingConfig& config) {
+        std::vector<double> values(static_cast<std::size_t>(token_domain));
+        const auto* base = logits.data() + static_cast<std::size_t>(row * columns + column) *
+                                               static_cast<std::size_t>(physical_rows);
+        for (int token = 0; token < token_domain; ++token) {
+            values[static_cast<std::size_t>(token)] = represented(base[token]);
+        }
+        return sampling_reference::p_less(values, config);
+    };
+    std::vector<ninfer::ops::SamplingConfig> configs(batch);
+    for (auto& config : configs) {
+        config.temperature = temperature;
+        config.p_less      = 1;
+    }
+    configs[0].draft_temperature = draft_temp;
+    {
+        const auto support = column_law(0, 0, configs[0]);
+        for (int c = 0; c < cap && configs[0].typical_exclude < 0; ++c) {
+            if (std::find(support.ids.begin(), support.ids.end(),
+                          ids[static_cast<std::size_t>(c)]) != support.ids.end()) {
+                configs[0].typical_exclude = ids[static_cast<std::size_t>(c)];
+            }
+        }
+        require(support.ids.size() >= 2 && configs[0].typical_exclude >= 0,
+                "p-less proposal calibration: fixture lacks an excludable supported candidate");
+    }
+    const std::vector<int> extents{2, k};
+    const std::vector<int> targets(static_cast<std::size_t>(columns) * batch, 0);
+    const std::vector<int> drafts(static_cast<std::size_t>(k) * batch, 0);
+    const std::vector<int> lengths(batch, 10);
+    ninfer::DeviceBuffer d_targets(targets.size() * sizeof(int));
+    ninfer::DeviceBuffer d_logits(logits.size() * sizeof(hip_bfloat16));
+    ninfer::DeviceBuffer d_drafts(drafts.size() * sizeof(int));
+    ninfer::DeviceBuffer d_extents(extents.size() * sizeof(int));
+    ninfer::DeviceBuffer d_lengths(lengths.size() * sizeof(int));
+    ninfer::DeviceBuffer d_anchors(static_cast<std::size_t>(batch) * sizeof(int));
+    ninfer::DeviceBuffer d_licensed(static_cast<std::size_t>(columns) * batch * sizeof(int));
+    ninfer::DeviceBuffer d_licensed_counts(static_cast<std::size_t>(batch) * sizeof(int));
+    ninfer::DeviceBuffer d_accepted(static_cast<std::size_t>(batch) * sizeof(int));
+    ninfer::DeviceBuffer d_configs(configs.size() * sizeof(ninfer::ops::SamplingConfig));
+    ninfer::DeviceBuffer d_selector_ids(ids.size() * sizeof(int));
+    ninfer::DeviceBuffer d_selector_q(q.size() * sizeof(float));
+    ninfer::DeviceBuffer d_calibration(static_cast<std::size_t>(grid) * k * batch * sizeof(float));
+    d_targets.copy_from_host(targets.data(), targets.size() * sizeof(int));
+    d_logits.copy_from_host(logits.data(), logits.size() * sizeof(hip_bfloat16));
+    d_drafts.copy_from_host(drafts.data(), drafts.size() * sizeof(int));
+    d_extents.copy_from_host(extents.data(), extents.size() * sizeof(int));
+    d_lengths.copy_from_host(lengths.data(), lengths.size() * sizeof(int));
+    d_configs.copy_from_host(configs.data(), configs.size() * sizeof(ninfer::ops::SamplingConfig));
+    d_selector_ids.copy_from_host(ids.data(), ids.size() * sizeof(int));
+    d_selector_q.copy_from_host(q.data(), q.size() * sizeof(float));
+    const std::vector<float> poison(static_cast<std::size_t>(grid) * k * batch,
+                                    std::numeric_limits<float>::quiet_NaN());
+    d_calibration.copy_from_host(poison.data(), poison.size() * sizeof(float));
+
+    ninfer::Tensor target_tensor(d_targets.data(), ninfer::DType::I32, {columns, batch});
+    ninfer::Tensor logits_tensor(d_logits.data(), ninfer::DType::BF16,
+                                 {physical_rows, columns, batch});
+    ninfer::Tensor draft_tensor(d_drafts.data(), ninfer::DType::I32, {k, batch});
+    ninfer::Tensor extent_tensor(d_extents.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor length_tensor(d_lengths.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor anchor_tensor(d_anchors.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor licensed_tensor(d_licensed.data(), ninfer::DType::I32, {columns, batch});
+    ninfer::Tensor licensed_count_tensor(d_licensed_counts.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor accepted_tensor(d_accepted.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor selector_ids_tensor(d_selector_ids.data(), ninfer::DType::I32, {cap, k, batch});
+    ninfer::Tensor selector_q_tensor(d_selector_q.data(), ninfer::DType::FP32, {cap, k, batch});
+    ninfer::Tensor calibration_tensor(d_calibration.data(), ninfer::DType::FP32, {grid, k, batch});
+    ninfer::DeviceArena workspace(std::max<std::size_t>(
+        ninfer::ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(token_domain, k, k,
+                                                                               batch, batch),
+        1));
+    ninfer::ops::speculative_accept_greedy_drafts(
+        target_tensor, logits_tensor, draft_tensor, extent_tensor, length_tensor, anchor_tensor,
+        licensed_tensor, licensed_count_tensor, accepted_tensor, token_domain,
+        static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()), workspace, device.stream,
+        &selector_ids_tensor, &selector_q_tensor, &calibration_tensor);
+    device.synchronize();
+    const std::vector<float> got =
+        copy_from<float>(d_calibration, static_cast<std::size_t>(grid) * k * batch);
+
+    double worst = 0.0;
+    for (int row = 0; row < batch; ++row) {
+        for (int hop = 0; hop < k; ++hop) {
+            const bool scored = row == 0 && hop < extents[static_cast<std::size_t>(row)];
+            std::vector<double> target(cap, 0.0);
+            if (scored) {
+                const auto law = column_law(
+                    row, hop, column_config(configs[static_cast<std::size_t>(row)], hop));
+                for (int c = 0; c < cap; ++c) {
+                    const int id  = ids[static_cast<std::size_t>(row * k + hop) * cap + c];
+                    const auto it = std::find(law.ids.begin(), law.ids.end(), id);
+                    if (it != law.ids.end()) {
+                        target[static_cast<std::size_t>(c)] =
+                            law.probabilities[static_cast<std::size_t>(it - law.ids.begin())];
+                    }
+                }
+            }
+            for (int g = 0; g < grid; ++g) {
+                const float value =
+                    got[(static_cast<std::size_t>(row) * k + static_cast<std::size_t>(hop)) * grid +
+                        static_cast<std::size_t>(g)];
+                double expected = -1.0;
+                if (scored) {
+                    const double ratio =
+                        draft_temp /
+                        ninfer::ops::kPLessProposalCalibrationTemperatures[static_cast<std::size_t>(
+                            g)];
+                    std::vector<double> retempered(cap);
+                    double z = 0.0;
+                    for (int c = 0; c < cap; ++c) {
+                        retempered[static_cast<std::size_t>(c)] =
+                            std::pow(static_cast<double>(
+                                         q[static_cast<std::size_t>(row * k + hop) * cap + c]),
+                                     ratio);
+                        z += retempered[static_cast<std::size_t>(c)];
+                    }
+                    expected = 0.0;
+                    for (int c = 0; c < cap; ++c) {
+                        expected += std::min(target[static_cast<std::size_t>(c)],
+                                             retempered[static_cast<std::size_t>(c)] / z);
+                    }
+                }
+                const double error = std::abs(static_cast<double>(value) - expected);
+                worst              = std::max(worst, std::isfinite(error) ? error : 1.0e30);
+                require(error <= 2.0e-4, "p-less proposal calibration row " + std::to_string(row) +
+                                             " hop " + std::to_string(hop) + " grid " +
+                                             std::to_string(g) + " got " + std::to_string(value) +
+                                             " expected " + std::to_string(expected));
+            }
+        }
+    }
+    std::cout << "p-less proposal calibration: max |error|=" << worst << '\n';
+}
+
 // P-less block verification law over a two-draft chain with fractional selector q. Drafts are
 // drawn on the host from two different 16-way q that leave real target mass uncovered. The first
 // two emitted tokens (the second drawn from the oracle when a round emits one) must follow
@@ -1796,6 +1982,7 @@ int main() {
             run_p_less_block_statistics(device, 64, 64, chained);
             run_p_less_block_statistics(device, kRealVocabulary, 248077, chained);
         }
+        run_p_less_proposal_calibration(device);
         for (int width = 2; width <= 16; ++width) {
             for (int batch = 1; batch <= static_cast<int>(ninfer::kMaximumConcurrency); ++batch) {
                 run_tree_case(device, 64, width, batch, true);

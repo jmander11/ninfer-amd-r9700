@@ -386,9 +386,10 @@ One propose block:
 4. Path selector (`dflash2_path_select`): unsorted top-16 of those logits, then the Markov score
    `score = unary + ⟨pred_code(prev) ⊙ W_h h_t , succ_code(cand)⟩`. Greedy chooses the maximum;
    ordinary truncated sampling draws from the temperature-scaled 16-way distribution and retains
-   that row as `q`. P-less draws from the same 16-way distribution at its separate draft
-   temperature (`--dflash-p-less-draft-temperature`, default 0.4; 0 is greedy with point-mass q);
-   its own temperature controls the target distribution.
+   that row as `q`. P-less draws from the same 16-way distribution at the row's separate draft
+   temperature (0 is greedy with point-mass q); its own temperature controls the target
+   distribution. `--dflash-p-less-draft-temperature` pins the draft temperature; unset, the
+   Program calibrates it online (below).
    Selector RNG is keyed by request seed, the round's first position, and the hop, independent of
    compact batch row. `--lm-head-draft` runs top-16 on the shortlist and gathers codebooks by token id.
 5. The 27B target verifies the chain in one causal forward of width `W=k+1`. Greedy accepts the
@@ -421,6 +422,28 @@ not change the target sampling law or imply a measured advantage over fixed K.
 DFlash may consume features from a Vision-conditioned target prefill. Target verification converts
 each lane's logical proposal positions to that lane's MRoPE positions using its position delta;
 draft cyclic state remains the checkpoint-specified BF16 local state.
+
+**P-less proposal calibration.** Unless `--dflash-p-less-draft-temperature` pins it, the Program
+chooses each p-less chain round's draft temperature `T_d` online (`p_less_draft_calibration.h`).
+A p-less row draws hop j from `q_j = softmax(score_j / T_d)` over its 16 selector candidates, so
+re-tempering the recorded `q_j` gives any other temperature's proposal without drafter work:
+`q'_j ∝ q_j^(T_d/T')`. The chain accept op scores the grid
+`T' ∈ {0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.25}` on every such round:
+`α_j(T') = Σ_c min(p'_j(c), q'_j(c))`, with `p'_j` the represented p-less target law of verify
+column j (typical exclusion at hop 0 only); the values reach the host in the round's egress.
+Per p-less target temperature (eight tracked, least recently observed replaced), the Program keeps
+discounted sums (memory 256 rounds) of the prefix acceptance `S_j(T') = Π_{i≤j} α_i(T')` over
+rounds that drafted hop j, predicts a k-draft chain's committed length `1 + Σ_{j<k} mean S_j(T')`,
+and drafts the next round at the grid temperature with the greatest prediction for that round's
+k. Every candidate is scored on the same verified content, so the choice needs no exploration and
+carries no selection bias; the prediction scores token verification of the drafted prefix, which
+block verification never shortens. Until a temperature has eight discounted rounds the 27B prior
+`clamp(0.8·(T−1), 0.2, 1.25)` applies (0.4 at the production T=1.5). Captured DFlash graphs
+contain the scoring kernel exactly when the Program reads it back. The calibration changes only
+which valid proposal is drawn; output remains the p-less target distribution. Like adaptive K, it
+makes a request's realized sample for a fixed seed depend on what the Engine verified before,
+including co-scheduled requests; pin the temperature where seed-level reproducibility across batch
+compositions matters.
 
 `GroupedDynamicCausalConv` is grouped size-16, kernel 2, left-padded (causal along the query
 block): `prepare` before the sublayer on the pre-norm hidden, `finish` on that sublayer's output.

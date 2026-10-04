@@ -86,6 +86,26 @@ harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
 
+## Online p-less draft-temperature calibration (2026-10-03)
+
+Upstream `24d527d1` scores eight candidate draft temperatures on every p-less chain round from
+the verified target law and the recorded selector proposal, and drafts the next round at the best
+predicted temperature for its K ([model §8](maintainer/qwen3.8-27b-model.md#8-dflash2-block-diffusion-draft-model)).
+Production shape: C1 CLI, DFlash K7 adaptive `--lm-head-draft`, p-less T1.5, thinking on, 1024
+tokens, 11 scenario prompts x 3 seeds, pinned 0.4 (the previous default) against calibrated, same
+binary, ABBA passes. Each configuration is deterministic per seed (the two passes are identical),
+so the comparison has 33 independent cases; per-case ratios scatter (0.81-1.20) because the
+sampled trajectories diverge:
+
+| calibrated / pinned 0.4 | mean (95% bootstrap) | median |
+|---|---:|---:|
+| acceptance (tokens per round) | 1.033 (1.004-1.061) | 1.040 |
+| decode tok/s | 1.024 (0.987-1.058) | 1.044 |
+| ms per round | 1.000 | |
+
+The scoring kernel does not change the round time (30.16 vs 30.18 ms). Evidence:
+`profiles/bench/r9700-pless-calibration-20261003/`.
+
 ## Parallel p-less tile choice and KV-tier sync check (2026-10-03)
 
 Upstream `91371f42` made the p-less tile choice block-cooperative: a wave32 chunk scan gives each

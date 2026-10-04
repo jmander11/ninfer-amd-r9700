@@ -106,6 +106,9 @@ struct DFlashBatchContext {
     Tensor& continuation_hidden_store;
     std::span<qwen3::PagedKVTransaction* const> text_kv_transactions{};
     qwen3::ToolMaskExchange* tool_masks = nullptr;
+    // This chain round scores the p-less proposal calibration grid into host_egress; the Program
+    // reads it back exactly when it sets this.
+    bool calibrate_p_less_drafts = false;
 };
 
 struct DFlashAppendContext {
@@ -143,6 +146,8 @@ struct TargetVerifyFrameView {
     Tensor fold_path;
     Tensor draft_selector_ids;
     Tensor draft_selector_q;
+    // Optional FP32 [G,k,B] chain proposal calibration output; requires the draft selectors.
+    Tensor proposal_calibration;
     bool tree_verify                       = false;
     const GdnReplayRecords* replay_records = nullptr;
     // DFlash chain verification: the device rows of the previous round's deferred fold.

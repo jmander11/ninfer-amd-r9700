@@ -3783,10 +3783,19 @@ void ProgramImplCore::prepare_graphs() {
                         {.status = status + row, .cursor = cursor + row}, table_rows + row));
                 }
 
+                // The captured round must score the calibration grid exactly when replays of
+                // this shape read it back (decode_dflash_batch).
                 schedule::DFlashBatchContext dflash_state{
-                    execution_core(),  decoder->text_kv,       *dflash,
-                    *io.dflash_decode, *dflash_host_ingress,   *dflash_host_egress,
-                    tail_hidden_store, transactions.binding(), tool_masks.get()};
+                    execution_core(),
+                    decoder->text_kv,
+                    *dflash,
+                    *io.dflash_decode,
+                    *dflash_host_ingress,
+                    *dflash_host_egress,
+                    tail_hidden_store,
+                    transactions.binding(),
+                    tool_masks.get(),
+                    calibrates_p_less_drafts() && !dflash_uses_tree_verify(fixed_k, fixed_w)};
                 const schedule::DFlashEnvelopes envelopes = dflash_envelopes(maximum_frontier);
                 if (definition != nullptr) {
                     schedule::capture_dflash_decode_batch(dflash_state,
@@ -3935,14 +3944,13 @@ void ProgramImplCore::bind_prefill_sampling(SequenceState& sequence, RequestCont
                              device.stream));
 }
 
-void ProgramImplCore::bind_tool_mask_batch(std::span<const std::uint32_t> lanes) {
+void ProgramImplCore::bind_tool_mask_batch(std::span<const std::uint32_t> lanes,
+                                           std::span<const ops::SamplingConfig> configs) {
     std::array<const qwen3::OutputSession*, kMaximumConcurrency> outputs{};
-    std::array<ops::SamplingConfig, kMaximumConcurrency> configs{};
     for (std::size_t row = 0; row < lanes.size(); ++row) {
         outputs[row] = requests[lanes[row]].output;
-        configs[row] = requests[lanes[row]].sampling_host;
     }
-    tool_masks->bind({outputs.data(), lanes.size()}, {configs.data(), lanes.size()});
+    tool_masks->bind({outputs.data(), lanes.size()}, configs.first(lanes.size()));
 }
 
 void ProgramImplCore::copy_tail(SequenceState& sequence, const Tensor& source) {
@@ -4507,7 +4515,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
                 {.status = status + row, .cursor = cursor + row}, table_rows + row));
         }
 
-        bind_tool_mask_batch(lanes);
+        bind_tool_mask_batch(lanes, ordinary_host_ingress->sampling);
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             ordinary_host_ingress->sampling[row] = tool_masks->root(row, device.stream);
         }
@@ -4755,7 +4763,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
                                                  mtp_transactions.binding(),
                                                  tool_masks.get()};
 
-        bind_tool_mask_batch(lanes);
+        bind_tool_mask_batch(lanes, mtp_host_ingress->sampling);
         const ToolMaskRoundGuard tool_mask_round(*tool_masks);
         mark_workspace_usage(workspace_plan.mtp_round);
         const auto started = Clock::now();
@@ -5042,6 +5050,9 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             executable = &install_graph_profile(dflash_graphs, profile, "DFlash batch");
         }
 
+        // Packed-tree rounds draw deterministic drafts and produce no calibration.
+        const bool calibrate_p_less =
+            calibrates_p_less_drafts() && !dflash_uses_tree_verify(batch_k, live_w);
         std::array<std::uint32_t, kMaximumConcurrency> text_target_columns{};
         std::uint32_t realized_extent = 0;
         for (std::size_t row = 0; row < lanes.size(); ++row) {
@@ -5075,6 +5086,12 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             dflash_host_ingress->lanes[row]       = static_cast<std::int32_t>(sequence.lane);
             dflash_host_ingress->rope_deltas[row] = sequence.rope_delta;
             dflash_host_ingress->sampling[row]    = request.sampling_host;
+            ops::SamplingConfig& row_sampling     = dflash_host_ingress->sampling[row];
+            if (calibrate_p_less && row_sampling.draft_temperature > 0.0f) {
+                row_sampling.draft_temperature = qwen3::p_less_calibrated_draft_temperature(
+                    p_less_calibration, row_sampling.temperature, batch_k,
+                    row_sampling.draft_temperature);
+            }
             materialize_sequence_kv(sequence, std::min(capacity, frontier + dflash_verify_width),
                                     DFlashConfig::full_layers > 0 ? frontier : 0U);
             realized_extent = std::max(realized_extent, extent);
@@ -5122,9 +5139,10 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             *dflash_host_egress,
             tail_hidden_store,
             text_transactions.binding(),
-            tool_masks.get()};
+            tool_masks.get(),
+            calibrate_p_less};
 
-        bind_tool_mask_batch(lanes);
+        bind_tool_mask_batch(lanes, dflash_host_ingress->sampling);
         const ToolMaskRoundGuard tool_mask_round(*tool_masks);
         mark_workspace_usage(prefill_lane ? workspace_plan.dflash_mixed
                                           : workspace_plan.dflash_round);
@@ -5182,6 +5200,23 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             static_cast<std::int32_t>(live_w), TextConfig::token_domain,
             dflash_uses_tree_verify(batch_k, live_w));
         tool_masks->finish_round();
+        if (calibrate_p_less) {
+            const std::size_t row_values =
+                static_cast<std::size_t>(ops::kPLessProposalCalibrationTemperatureCount) * batch_k;
+            for (std::size_t row = 0; row < lanes.size(); ++row) {
+                const ops::SamplingConfig& row_sampling = dflash_host_ingress->sampling[row];
+                if (row_sampling.p_less == 0 || !(row_sampling.temperature > 0.0f) ||
+                    !(row_sampling.draft_temperature > 0.0f)) {
+                    continue;
+                }
+                qwen3::p_less_calibration_observe(
+                    p_less_calibration, row_sampling.temperature,
+                    std::span<const float>(dflash_host_egress->proposal_calibration.data() +
+                                               row * row_values,
+                                           row_values),
+                    static_cast<std::uint32_t>(dflash_host_ingress->proposal_extents[row]));
+            }
+        }
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it, nor from
         // a mixed round whose time includes the owner's chunk.
         if (adaptive_draft && realized_extent > 0 && !prefill_lane) {

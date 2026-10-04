@@ -4,6 +4,7 @@
 #include "core/tensor.h"
 #include "ninfer/ops/gdn_replay.h"
 #include "ninfer/ops/sampling.h"
+#include "ninfer/ops/p_less_proposal_calibration.h"
 #include "ninfer/types.h"
 
 #include <array>
@@ -102,6 +103,11 @@ struct DFlashDecodeEgress {
     std::array<std::int32_t, kMaximumConcurrency> accepted_column{};
     std::array<std::int32_t, std::size_t{kMaximumConcurrency} * kDFlashDecodeMaximumWidth>
         fold_path{};
+    // Chain p-less proposal calibration [G,k,B] of the round
+    // (ops::speculative_accept_greedy_drafts), packed at the round's k and batch.
+    std::array<float, std::size_t{ops::kPLessProposalCalibrationTemperatureCount} *
+                          kDFlashDecodeMaximumDrafts * kMaximumConcurrency>
+        proposal_calibration{};
 };
 
 struct OrdinaryDecodeStateLayout {
@@ -304,6 +310,9 @@ struct DFlashDecodeState {
     Tensor cache_positions;
     Tensor accepted_column;
     Tensor fold_path;
+    // FP32 [G*kDFlashDecodeMaximumDrafts*B] egress storage; a round views its packed [G,k,B]
+    // prefix.
+    Tensor proposal_calibration;
     Tensor target_argmax;
     Tensor target_logits;
     Tensor target_hidden;

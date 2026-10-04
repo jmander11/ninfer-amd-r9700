@@ -92,10 +92,10 @@ struct SequencePlanningInputs {
     std::uint32_t max_concurrency = 1;
     std::uint32_t prefill_chunk   = 0;
     std::optional<std::uint32_t> mixed_forward;
-    std::uint32_t draft_window             = 0;
-    std::uint32_t dflash_verify_width      = 0;
-    bool adaptive_draft                    = false;
-    float p_less_draft_temperature         = 0.0f;
+    std::uint32_t draft_window        = 0;
+    std::uint32_t dflash_verify_width = 0;
+    bool adaptive_draft               = false;
+    std::optional<float> p_less_draft_temperature;
     SpeculativeBackend speculative_backend = SpeculativeBackend::None;
     ProposalHead proposal_head             = ProposalHead::Full;
     StartupFeatures features;
@@ -127,7 +127,7 @@ struct SequencePlanImpl<NINFER_QWEN3_VARIANT> {
     std::uint32_t draft_window        = 0;
     std::uint32_t dflash_verify_width = 0;
     bool adaptive_draft               = false;
-    float p_less_draft_temperature    = 0.0f;
+    std::optional<float> p_less_draft_temperature;
     std::vector<std::uint32_t> captured_ks;
     SpeculativeBackend speculative_backend = SpeculativeBackend::None;
     ProposalHead proposal_head             = ProposalHead::Full;

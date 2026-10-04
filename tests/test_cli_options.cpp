@@ -59,8 +59,8 @@ int main() {
               "CLI help omits --no-p-less-sampling");
 
     failures += check(defaults.sampling.p_less, "CLI did not enable p-less by default");
-    failures += check(defaults.speculative.dflash_p_less_draft_temperature == 0.4F,
-                      "CLI p-less draft temperature default is not 0.4");
+    failures += check(!defaults.speculative.dflash_p_less_draft_temperature.has_value(),
+                      "CLI p-less draft temperature is pinned by default");
     const ninfer::cli::Options greedy_drafts =
         parse({"ninfer", "model.ninfer", "--prompt", "hi", "--spec", "dflash", "--draft-tokens",
                "5", "--dflash-p-less-draft-temperature", "0"});

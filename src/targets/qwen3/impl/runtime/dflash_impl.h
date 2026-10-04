@@ -868,6 +868,12 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
             }
             verify_frame.draft_selector_ids = selector_ids;
             verify_frame.draft_selector_q   = selector_q;
+            if (state.calibrate_p_less_drafts) {
+                verify_frame.proposal_calibration =
+                    Tensor(frame.proposal_calibration.data, DType::FP32,
+                           {ops::kPLessProposalCalibrationTemperatureCount,
+                            static_cast<std::int32_t>(k), batch_size});
+            }
         }
         if (state.text_kv_transactions.size() != static_cast<std::size_t>(batch_size)) {
             throw std::logic_error("DFlash decode batch has incomplete Text KV authorities");

@@ -117,9 +117,10 @@ struct SpeculativeOptions {
     bool adaptive_draft = false;
     // DFlash2 draft temperature for p-less requests: drafts are drawn from the 16-candidate
     // path-select softmax at this temperature and verified against their true proposal q, which
-    // keeps the target distribution exact. <= 0 drafts greedily (argmax). 0.4 measured best at
-    // p-less T=1.5 on the R9700 (docs/cli.md).
-    float dflash_p_less_draft_temperature = 0.4f;
+    // keeps the target distribution exact. Unset, each chain round uses the temperature the online
+    // proposal calibration predicts is best for the request's p-less temperature and the round's
+    // draft length. A value pins it for every round; <= 0 drafts greedily (argmax).
+    std::optional<float> dflash_p_less_draft_temperature;
 };
 
 struct LoadProgress {

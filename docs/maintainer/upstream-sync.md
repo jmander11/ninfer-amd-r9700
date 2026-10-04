@@ -5,10 +5,10 @@ repository by custom AMD ports, not merged ancestry; `AGENTS.md` states the sync
 
 ## Baseline
 
-Reconciled through upstream `593c2d0c95ce2e34ef137af70c94d0417b37a890` (2026-10-03), advanced
-from `574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
+Reconciled through upstream `48eb0b013b053c932851f6fbb97946ba2e656236` (2026-10-03), advanced
+from `593c2d0c` (2026-10-03), `574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
 `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`,
-`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `593c2d0c`
+`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `48eb0b01`
 against current AMD behavior.
 
 ## Ported features (`c450798c..e04fad37`)
@@ -241,3 +241,28 @@ the `quality/clang-tidy-backlog` branch, so `4051ebf0..26ba4203` are not descend
   `synchronize_all_while_unwinding`. The disk-cache suite takes upstream's gate-held stall cases
   in place of timing windows, and the sleep-based payload stall hook is removed.
 - `593c2d0c` records a 5090 A/B; the R9700 serve check is in `docs/performance.md`.
+
+## `593c2d0c..48eb0b01` (4 upstream commits, reconciled 2026-10-03)
+
+- Ported: `24d527d1` online p-less draft-temperature calibration with `d2b40485`'s round
+  predicate. The accept Op's optional proposal-calibration output is a wave32 kernel after the
+  multi-block accept pipeline (qualified against an FP64 oracle in
+  `ninfer_r9700_speculative_round_qual`); `--dflash-p-less-draft-temperature` becomes an optional
+  pin, the 27B prior is `clamp(0.8(T-1), 0.2, 1.25)` (0.4 at T=1.5, the previous R9700 default),
+  and tool-mask batches bind the round's ingress configs. Fork delta: the graph-capture context
+  carries the calibration predicate, so captured DFlash graphs contain the scoring kernel exactly
+  when replays read it back; upstream captures without it, so its graph replays read calibration
+  egress that no kernel wrote. The per-k temperature scale it removes was never ported here.
+  R9700 production-shape A/B: acceptance +3.3%, decode +2.4% (`docs/performance.md`).
+- Already equivalent: `48eb0b01` producer-side A8 activations. The R9700 FP8LUT4 target already
+  encodes projection inputs in their producers (`fp8_quantize_normalized`,
+  `fp8_quantize_gated_rmsnorm`, `fp8_quantize_gated`), and at C1 the persistent decode kernel
+  hosts the remaining quantize phases; MLP-down keeps a standalone quantizer in both trees. Its
+  NVFP4 kernels are excluded.
+- Not ported (pending a product decision): `055b333c` best-first packed-tree arm, learned arm
+  picker, GDN tree-schedule record, and W<=16 verify aggregation. Upstream measured +10.3% C1
+  greedy but no gain under p-less with the retuned proposal temperature, the production sampler
+  here; the port needs the per-k hazard picker the fork declined (2026-10-02), a HIP tree-select
+  and tree-record kernel, and tree verify in the persistent C1 decode kernel. Its p-less default
+  0.8 is superseded by `24d527d1`, and the selector-lattice dump probe is offline tree-research
+  tooling.

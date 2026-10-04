@@ -6,6 +6,7 @@
 // full-vocabulary stochastic and p-less routes use the sampling partial/group
 // pipeline and caller-owned workspace, while greedy commit remains one thread.
 
+#include "ninfer/ops/speculative_round.h"
 #include "ops/r9700/sampling/sampling_device.h"
 
 #include <hip/hip_bfloat16.h>
@@ -1265,6 +1266,74 @@ __launch_bounds__(kSamplerBlock) __global__ void speculative_accept_tree_drafts_
         speculative_tree_sampling_commit(lic, path, width, row, lic_sh, path_sh, a_sh, tstar_sh,
                                          node_sh, licensed_counts, accepted, accepted_column,
                                          anchors, lengths, L_sh, cfg, token_domain);
+    }
+}
+
+// Counterfactual p-less proposal calibration. Grid (K,B), one wave32 per (hop j, row b); lane
+// c < C <= 32 holds selector candidate c of hop j, and the three per-temperature reductions are
+// full-wave xor shuffles (no LDS). It runs after the accept pipeline on the same stream and reads
+// that pipeline's published p-less moments and admitted mass for column j. The target law p' is
+// the p-less distribution of verify column j read on the candidates (typical exclusion at hop 0
+// only; a column with no admitted mass is a Dirac on the accept fallback token). The recorded
+// proposal q was drawn at the row's draft temperature T_d, so at grid temperature T' the same
+// candidates follow q^(T_d/T') renormalized; out[g,j,b] = sum_c min(p'(c), q_{T'}(c)), the
+// per-hop acceptance that temperature would have had. Rows that are not p-less, draw greedy
+// drafts, or did not draft hop j write -1. The early return is uniform per wave.
+__launch_bounds__(32) __global__ void speculative_p_less_proposal_calibration_kernel(
+    const hip_bfloat16* logits, const std::int32_t* current_extents, const SamplingConfig* configs,
+    std::int32_t token_domain, std::int32_t physical_rows, std::int32_t cols,
+    SamplingWorkspace workspace, std::size_t workspace_row_stride, const std::int32_t* selector_ids,
+    const float* selector_q, std::int32_t selector_k,
+    PLessProposalCalibrationGrid grid_temperatures, float* out) {
+    constexpr int grid = kPLessProposalCalibrationTemperatureCount;
+    const int hop      = static_cast<int>(blockIdx.x);
+    const int row      = static_cast<int>(blockIdx.y);
+    const int k        = cols - 1;
+    const int lane     = static_cast<int>(threadIdx.x);
+    float* row_out     = out + (static_cast<std::int64_t>(row) * k + hop) * grid;
+    SamplingConfig cfg = sampling_column_config(configs[row], hop);
+    if (hop > 0) { cfg.typical_exclude = -1; }
+    const int extent       = current_extents[row];
+    const float draft_temp = cfg.draft_temperature;
+    if (!sampling_p_less_active(cfg) || !(draft_temp > 0.0f) || hop >= extent) {
+        if (lane < grid) { row_out[lane] = -1.0f; }
+        return;
+    }
+    workspace = speculative_workspace_row(workspace, workspace_row_stride, row);
+    const SamplingPLessMoments moments = sampling_p_less_load_global(workspace, hop);
+    const SamplingPLessGate gate       = sampling_p_less_gate(moments, 1.0f / cfg.temperature);
+    const float admitted               = sampling_p_less_load_admitted(workspace, hop);
+    const bool candidate               = lane < selector_k;
+    float p                            = 0.0f;
+    float log_q                        = -INFINITY;
+    if (candidate) {
+        const std::int64_t sel = (static_cast<std::int64_t>(row) * k + hop) * selector_k + lane;
+        const int v            = selector_ids[sel];
+        const float q          = selector_q[sel];
+        log_q                  = q > 0.0f ? __logf(q) : -INFINITY;
+        if (!(admitted > 0.0f)) {
+            p = v == sampling_p_less_support_fallback(moments, cfg) ? 1.0f : 0.0f;
+        } else if (sampling_p_less_in_domain(v, token_domain, cfg)) {
+            const std::int64_t base = (static_cast<std::int64_t>(row) * cols + hop) * physical_rows;
+            p = sampling_p_less_draw_exp(v, static_cast<float>(logits[base + v]), gate, cfg) /
+                admitted;
+        }
+    }
+    for (int g = 0; g < grid; ++g) {
+        const float ratio = draft_temp / grid_temperatures.temperature[g];
+        const float x     = candidate ? log_q * ratio : -INFINITY;
+        float mx          = x;
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            mx = fmaxf(mx, __shfl_xor(mx, offset, 32));
+        }
+        const float e = (candidate && x > -INFINITY) ? __expf(x - mx) : 0.0f;
+        float sum     = e;
+        for (int offset = 16; offset > 0; offset >>= 1) { sum += __shfl_xor(sum, offset, 32); }
+        float overlap = sum > 0.0f ? fminf(p, e / sum) : 0.0f;
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            overlap += __shfl_xor(overlap, offset, 32);
+        }
+        if (lane == 0) { row_out[g] = overlap; }
     }
 }
 

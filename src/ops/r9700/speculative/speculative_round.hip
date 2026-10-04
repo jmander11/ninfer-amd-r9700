@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 
 namespace ninfer::ops::detail {
 
@@ -49,14 +50,12 @@ void speculative_prepare_verify_ids_launch(const Tensor& anchors, const Tensor& 
     HIP_CHECK(hipGetLastError());
 }
 
-void speculative_accept_greedy_drafts_launch(const Tensor& target_tokens, const Tensor& logits,
-                                             const Tensor& drafts, const Tensor& current_extents,
-                                             Tensor& lengths, Tensor& anchors,
-                                             Tensor& licensed_tokens, Tensor& licensed_counts,
-                                             Tensor& accepted, std::int32_t token_domain,
-                                             const SamplingConfig* configs, DeviceSpan workspace,
-                                             hipStream_t stream, const Tensor* selector_ids,
-                                             const Tensor* selector_q) {
+void speculative_accept_greedy_drafts_launch(
+    const Tensor& target_tokens, const Tensor& logits, const Tensor& drafts,
+    const Tensor& current_extents, Tensor& lengths, Tensor& anchors, Tensor& licensed_tokens,
+    Tensor& licensed_counts, Tensor& accepted, std::int32_t token_domain,
+    const SamplingConfig* configs, DeviceSpan workspace, hipStream_t stream,
+    const Tensor* selector_ids, const Tensor* selector_q, Tensor* proposal_calibration) {
     const std::int32_t physical_rows = logits.ne[0];
     const std::int32_t cols          = drafts.ne[0] + 1;
     const std::int32_t batch         = drafts.ne[1];
@@ -67,6 +66,10 @@ void speculative_accept_greedy_drafts_launch(const Tensor& target_tokens, const 
         selector_q != nullptr ? static_cast<const float*>(selector_q->data) : nullptr;
     const SamplingWorkspaceLayout layout = make_sampling_workspace_layout(token_domain, cols);
     if (!layout.multiblock) {
+        if (proposal_calibration != nullptr) {
+            throw std::invalid_argument("speculative_accept_greedy_drafts: proposal calibration "
+                                        "requires the multi-block sampler");
+        }
         speculative_accept_greedy_drafts_kernel<<<batch, kSamplerBlock, 0, stream>>>(
             static_cast<const std::int32_t*>(target_tokens.data),
             static_cast<const hip_bfloat16*>(logits.data),
@@ -118,6 +121,21 @@ void speculative_accept_greedy_drafts_launch(const Tensor& target_tokens, const 
         configs, token_domain, physical_rows, cols, partial_blocks, scratch, layout.bytes,
         selector_id_ptr, selector_q_ptr, selector_k, nullptr, nullptr, nullptr, nullptr, nullptr);
     HIP_CHECK(hipGetLastError());
+    if (proposal_calibration != nullptr) {
+        PLessProposalCalibrationGrid grid{};
+        for (int g = 0; g < kPLessProposalCalibrationTemperatureCount; ++g) {
+            grid.temperature[g] =
+                kPLessProposalCalibrationTemperatures[static_cast<std::size_t>(g)];
+        }
+        speculative_p_less_proposal_calibration_kernel<<<dim3(static_cast<unsigned int>(cols - 1),
+                                                              static_cast<unsigned int>(batch)),
+                                                         32, 0, stream>>>(
+            static_cast<const hip_bfloat16*>(logits.data),
+            static_cast<const std::int32_t*>(current_extents.data), configs, token_domain,
+            physical_rows, cols, scratch, layout.bytes, selector_id_ptr, selector_q_ptr, selector_k,
+            grid, static_cast<float*>(proposal_calibration->data));
+        HIP_CHECK(hipGetLastError());
+    }
 }
 
 void speculative_select_accepted_hidden_launch(const Tensor& hidden, const Tensor& selectors,
@@ -427,7 +445,8 @@ void speculative_accept_greedy_drafts(const Tensor& target_tokens, const Tensor&
                                       Tensor& licensed_counts, Tensor& accepted,
                                       std::int32_t token_domain, const SamplingConfig* configs,
                                       WorkspaceArena& workspace, hipStream_t stream,
-                                      const Tensor* selector_ids, const Tensor* selector_q) {
+                                      const Tensor* selector_ids, const Tensor* selector_q,
+                                      Tensor* proposal_calibration) {
     constexpr const char* op = "speculative_accept_greedy_drafts";
     require_stream(stream, op);
     const int drafts_per_row = drafts.ne[0];
@@ -507,14 +526,42 @@ void speculative_accept_greedy_drafts(const Tensor& target_tokens, const Tensor&
         }
     }
 
+    if (proposal_calibration != nullptr) {
+        if (selector_ids == nullptr || selector_count > 32) {
+            throw std::invalid_argument("speculative_accept_greedy_drafts: proposal calibration "
+                                        "requires selectors with C<=32");
+        }
+        if (proposal_calibration->dtype != DType::FP32 ||
+            proposal_calibration->ne[0] != kPLessProposalCalibrationTemperatureCount ||
+            proposal_calibration->ne[1] != drafts_per_row || proposal_calibration->ne[2] != batch ||
+            proposal_calibration->ne[3] != 1) {
+            throw std::invalid_argument(
+                "speculative_accept_greedy_drafts: proposal_calibration must be FP32 [G,K,B]");
+        }
+        require_contiguous_nonnull(*proposal_calibration, op, "proposal_calibration");
+        const ByteRange calibration_range = tensor_range(*proposal_calibration);
+        for (const Tensor* tensor : base_tensors) {
+            if (overlaps(tensor_range(*tensor), calibration_range)) {
+                throw std::invalid_argument(
+                    "speculative_accept_greedy_drafts: proposal_calibration overlaps an operand");
+            }
+        }
+        if (overlaps(tensor_range(*selector_ids), calibration_range) ||
+            overlaps(tensor_range(*selector_q), calibration_range) ||
+            overlaps(config_range, calibration_range)) {
+            throw std::invalid_argument(
+                "speculative_accept_greedy_drafts: proposal_calibration overlaps an operand");
+        }
+    }
+
     auto scope               = workspace.scope();
     const auto bytes         = make_sampling_workspace_layout(token_domain, columns).bytes *
                                static_cast<std::size_t>(batch);
     const DeviceSpan scratch = bytes == 0 ? DeviceSpan{} : workspace.alloc_bytes(bytes);
     detail::speculative_accept_greedy_drafts_launch(
         target_tokens, logits, drafts, current_extents, lengths, anchors, licensed_tokens,
-        licensed_counts, accepted, token_domain, configs, scratch, stream, selector_ids,
-        selector_q);
+        licensed_counts, accepted, token_domain, configs, scratch, stream, selector_ids, selector_q,
+        proposal_calibration);
 }
 
 void speculative_accept_tree_drafts(const Tensor& target_tokens, const Tensor& logits,

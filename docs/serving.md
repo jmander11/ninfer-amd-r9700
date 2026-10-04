@@ -788,7 +788,7 @@ curl http://127.0.0.1:8080/v1/models \
 | `--draft-tokens N` | MTP `1..5`, DFlash2 `1..7` | unset |
 | `--adaptive-draft` | pick live draft K in `{3..N}` (DFlash `--draft-tokens N>=5`; MTP `{3,4,5}`) by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
 | `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..8` | auto |
-| `--dflash-p-less-draft-temperature T` | DFlash2 draft temperature `0..2` for p-less requests: drafts are drawn from the 16-candidate path-select softmax at `T` and verified against that proposal, so output stays exactly the p-less target distribution. `0` drafts greedily. At p-less `T=1.5` on the R9700 (K7 adaptive, 6 prompts x 2 seeds), `0.4` gave +9.9% decode over greedy drafts (acceptance 3.32 -> 3.56 tok/round) | 0.4 |
+| `--dflash-p-less-draft-temperature T` | Pins the DFlash2 draft temperature `0..2` for p-less requests: drafts are drawn from the 16-candidate path-select softmax at `T` and verified against that proposal, so output stays exactly the p-less target distribution. `0` drafts greedily. Unset, the engine calibrates it online per p-less `--temperature` and draft length: every chain round scores eight candidate temperatures against the verified target distribution and the next round uses the best ([model §8](maintainer/qwen3.8-27b-model.md#8-dflash2-block-diffusion-draft-model)) | calibrated |
 | `--lm-head-draft` | optimized proposal head | off |
 | `--default-max-tokens N` | output limit when omitted by a request | `8192` |
 | `--vision` | enable media input and load Vision GPU allocations | off |
@@ -827,7 +827,7 @@ sampler resolution.
 p-less remains exact argmax. P-less membership is `p_v ≥ max(L·exp(-2ε/T), 1/M)` with
 `ε = 1/16` and `M = 1024`; L is the unperturbed collision probability, and an empty set
 falls back to the eligible mode. Under MTP or DFlash2, p-less applies at every hop (block verification over
-the chain with the recorded draft `q`; DFlash2 drafts are sampled at `--dflash-p-less-draft-temperature`)
+the chain with the recorded draft `q`; DFlash2 drafts are sampled at the calibrated or pinned `--dflash-p-less-draft-temperature`)
 and to the bonus. A thinking-cycle exclusion affects only the next token,
 not later hops in the same speculative round. There is
 no OpenAI or Anthropic schema field for this mode.
