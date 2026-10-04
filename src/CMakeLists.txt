@@ -454,6 +454,13 @@ set_target_properties(ninfer_r9700_grouped_dynamic_conv_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_grouped_dynamic_conv_qual PRIVATE ninfer_r9700_core hip::host)
 
+add_executable(ninfer_r9700_q4_activation_image_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/q4_activation_image_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_q4_activation_image_qual)
+set_target_properties(ninfer_r9700_q4_activation_image_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_q4_activation_image_qual PRIVATE ninfer_r9700_core hip::host)
+
 add_executable(ninfer_r9700_swa_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/swa_qual.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_swa_qual)

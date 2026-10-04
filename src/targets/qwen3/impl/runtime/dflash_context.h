@@ -43,6 +43,8 @@ struct DFlashPersistentState {
     Tensor prefill_features;
     Tensor prefill_positions;
     Tensor pending_features;
+    // Zero between launches (ops::Q4ActivationImageTarget::completion).
+    Tensor image_completion;
 
     DFlashPersistentState(DeviceSpan backing, const DFlashPersistentLayout& layout);
 

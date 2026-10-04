@@ -2,7 +2,6 @@
 #include "ninfer/ops/bidirectional_gqa_attention.h"
 #include "ninfer/ops/dflash2_path_select.h"
 #include "ninfer/ops/gated_delta_net.h"
-#include "ninfer/ops/grouped_dynamic_conv.h"
 #include "ninfer/ops/swa.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
@@ -55,7 +54,6 @@ void qualify_host_request_lane_cap() {
     constexpr auto q4        = ninfer::QType::Q4G64_F16S;
     constexpr auto profile   = Variant::WeightsProfile::R9700Q4G64DFlash2Q4Evaluation;
 
-    (void)ninfer::ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(q4, 1, 16, max_batch);
     (void)ninfer::ops::dflash2_path_select_workspace_capacity_bytes(q4, 1, 16, max_batch);
     (void)ninfer::ops::swa_workspace_capacity_bytes({0, 4096}, 1, 16, max_batch);
     (void)ninfer::ops::bidirectional_gqa_attention_workspace_capacity_bytes({0, 4096}, 1, 16,
@@ -66,12 +64,6 @@ void qualify_host_request_lane_cap() {
     (void)Variant::gdn_input_projection_record_workspace_capacity_bytes(
         profile, ninfer::targets::qwen3::TextPhase::Verify, max_batch, 2, 16);
 
-    require_invalid_argument(
-        [&] {
-            (void)ninfer::ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(q4, 1, 16,
-                                                                                     too_many);
-        },
-        "grouped dynamic convolution accepted an oversized request batch");
     require_invalid_argument(
         [&] {
             (void)ninfer::ops::dflash2_path_select_workspace_capacity_bytes(q4, 1, 16, too_many);

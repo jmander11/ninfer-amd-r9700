@@ -26,6 +26,7 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -168,22 +169,41 @@ void append_context_impl(Context& state, const Tensor& features, const Tensor& p
         static_assert(Config::head_dim == 128 && Config::query_heads == 32 &&
                           Config::kv_heads == 8 && Config::rope_theta == 1.0e7F,
                       "dflash_qkv_norm_rope serves the DFlash2 attention geometry");
+        const int layer_width   = local_width;
+        const int layer_columns = layer_width * batch;
+        Tensor layer_context =
+            replace_local_window ? context.slice(1, local_offset, local_width) : context;
+        Tensor layer_positions =
+            replace_local_window ? positions.slice(0, local_offset, local_width) : positions;
+        // Every layer projects the same context: with Q4 projections it is quantized once into the
+        // serialized activation region, which nothing else writes before the last projection.
+        const auto& layers      = state.execution.model.dflash.value().layers;
+        const DeviceSpan region = state.execution.linear_execution != nullptr
+                                      ? state.execution.linear_execution->activation_storage()
+                                      : DeviceSpan{};
+        bool shared_image =
+            region.data != nullptr &&
+            region.bytes >= ops::q4_activation_image_bytes(layer_columns, Config::hidden);
+        for (const auto& weight : layers) {
+            shared_image = shared_image && weight.query_key_value.qtype == QType::Q4G64_F16S;
+        }
+        if (shared_image) {
+            ops::quantize_q4_activation_image(layer_context, region, state.execution.device.stream);
+        }
         for (int layer = 0; layer < Config::layers; ++layer) {
-            auto layer_scope = state.execution.work.scope();
-            const auto& weight =
-                state.execution.model.dflash.value().layers.at(static_cast<std::size_t>(layer));
-            const int layer_width   = local_width;
-            const int layer_columns = layer_width * batch;
-            Tensor layer_context =
-                replace_local_window ? context.slice(1, local_offset, local_width) : context;
-            Tensor layer_positions =
-                replace_local_window ? positions.slice(0, local_offset, local_width) : positions;
+            auto layer_scope   = state.execution.work.scope();
+            const auto& weight = layers.at(static_cast<std::size_t>(layer));
             auto layer_roots =
                 workspace_recipe::dflash_context_layer<Config>(state.execution.work, layer_columns);
             Tensor value =
                 layer_roots.value.view({Config::head_dim, Config::kv_heads, layer_columns});
-            serialized_linear(state.execution, layer_context, weight.query_key_value,
-                              layer_roots.fused_qkv);
+            if (shared_image) {
+                ops::linear_q4_activation_image(weight.query_key_value, layer_roots.fused_qkv,
+                                                region, state.execution.device.stream);
+            } else {
+                serialized_linear(state.execution, layer_context, weight.query_key_value,
+                                  layer_roots.fused_qkv);
+            }
             Tensor key = layer_roots.key.view({Config::head_dim, Config::kv_heads, layer_columns});
             ops::dflash_qkv_norm_rope(layer_positions.view({layer_columns}), layer_roots.fused_qkv,
                                       weight.query_norm, weight.key_norm, Config::rms_epsilon,
@@ -274,10 +294,83 @@ void propose_batch_impl(DFlashBatchContext& state, qwen3::DFlashDecodeState& fra
                                   pos_full, state.execution.device.stream);
         Tensor residual_full =
             state.execution.work.alloc(DType::BF16, {Config::hidden, full_width * batch_size});
-        Tensor residual             = residual_full;
+        Tensor residual = residual_full;
+        // A producer feeding a Q4 projection publishes its activation image straight into the
+        // serialized activation region, so the projection reads it without its own quantization.
+        const DeviceSpan activation_region =
+            state.execution.linear_execution != nullptr
+                ? state.execution.linear_execution->activation_storage()
+                : DeviceSpan{};
+        const auto image_for = [&](const Weight& consumer,
+                                   std::int32_t input_rows) -> const DeviceSpan* {
+            if (consumer.qtype != QType::Q4G64_F16S || activation_region.data == nullptr ||
+                activation_region.bytes < ops::q4_activation_image_bytes(columns, input_rows)) {
+                return nullptr;
+            }
+            return &activation_region;
+        };
+        // Multi-block producers publish the image status word through the drafter's completion
+        // words instead of a reset launch.
+        const auto image_target =
+            [&](const DeviceSpan* image) -> std::optional<ops::Q4ActivationImageTarget> {
+            if (image == nullptr) return std::nullopt;
+            return ops::Q4ActivationImageTarget{
+                *image, static_cast<std::uint32_t*>(dflash_state(state).image_completion.data)};
+        };
+        const auto project = [&](const Tensor& input, const DeviceSpan* image, const Weight& weight,
+                                 Tensor& output) {
+            if (image != nullptr) {
+                ops::linear_q4_activation_image(weight, output, *image,
+                                                state.execution.device.stream);
+            } else {
+                serialized_linear(state.execution, input, weight, output);
+            }
+        };
         const auto run_embed_layers = [&] {
-            ops::embedding(ids.view({columns}), state.execution.model.token_embedding, residual,
+            auto layers_scope = state.execution.work.scope();
+            auto carry =
+                workspace_recipe::dflash_layer_carry<Config>(state.execution.work, columns);
+            // Every sublayer but the first publishes the finished residual out of place; with an
+            // odd count of those, the embedding starts in the partner buffer so the stream ends in
+            // `residual`.
+            constexpr bool kStartInPartner = (2 * Config::layers - 1) % 2 == 1;
+            Tensor current                 = kStartInPartner ? carry.residual_alt : residual;
+            Tensor partner                 = kStartInPartner ? residual : carry.residual_alt;
+            ops::embedding(ids.view({columns}), state.execution.model.token_embedding, current,
                            state.execution.device.stream);
+            const auto batched = [&](const Tensor& matrix) {
+                return matrix.view({matrix.ne[0], width, batch_size});
+            };
+            Tensor finish_dynamic =
+                carry.finish_dynamic.view({ops::kGroupedDynamicConvGroups, 2, width, batch_size});
+            // Finishes the previous sublayer (its conv applied to carry.delta) into the partner
+            // residual and normalizes it for the next one.
+            const auto finish_normalized = [&](const Tensor& previous_base, const Tensor& norm,
+                                               Tensor& normalized, const DeviceSpan* image) {
+                Tensor delta_batch      = batched(carry.delta);
+                Tensor current_batch    = batched(current);
+                Tensor partner_batch    = batched(partner);
+                Tensor normalized_batch = batched(normalized);
+                const auto target       = image_target(image);
+                ops::grouped_dynamic_conv_finish_normalized(
+                    delta_batch, previous_base, finish_dynamic, current_batch, partner_batch, norm,
+                    Config::rms_epsilon, normalized_batch, target ? &*target : nullptr,
+                    state.execution.device.stream);
+                std::swap(current, partner);
+            };
+            // The grouped dynamic conv of `hidden`, published as `prepared` or the image.
+            const auto conv_prepare = [&](const Tensor& hidden, const Weight& kernel_projection,
+                                          const Tensor& base_kernel, Tensor& projection,
+                                          const DeviceSpan* hidden_image, Tensor& prepared,
+                                          const DeviceSpan* prepared_image) {
+                project(hidden, hidden_image, kernel_projection, projection);
+                Tensor prepared_batch = batched(prepared);
+                const auto target     = image_target(prepared_image);
+                ops::grouped_dynamic_conv_prepare(
+                    batched(hidden), base_kernel, batched(projection),
+                    prepared_image != nullptr ? nullptr : &prepared_batch, finish_dynamic,
+                    target ? &*target : nullptr, state.execution.device.stream);
+            };
 
             [&](const auto& dflash) {
                 for (int layer = 0; layer < Config::layers; ++layer) {
@@ -286,20 +379,29 @@ void propose_batch_impl(DFlashBatchContext& state, qwen3::DFlashDecodeState& fra
                         auto attention_scope = state.execution.work.scope();
                         auto roots           = workspace_recipe::dflash_attention<Config>(
                             state.execution.work, columns);
-                        ops::rmsnorm(residual, weight.input_norm, Config::rms_epsilon, false,
-                                     roots.hidden, state.execution.device.stream);
-                        Tensor hidden_batch =
-                            roots.hidden.view({Config::hidden, width, batch_size});
-                        Tensor prepared_batch =
-                            roots.prepared.view({Config::hidden, width, batch_size});
-                        Tensor finish_dynamic = roots.finish_dynamic.view(
-                            {ops::kGroupedDynamicConvGroups, 2, width, batch_size});
-                        ops::grouped_dynamic_conv_prepare(
-                            hidden_batch, weight.attention_conv.base_kernel,
-                            weight.attention_conv.kernel_projection, prepared_batch, finish_dynamic,
-                            state.execution.work, state.execution.device.stream);
-                        serialized_linear(state.execution, roots.prepared, weight.query_key_value,
-                                          roots.fused_qkv);
+                        const DeviceSpan* hidden_image =
+                            image_for(weight.attention_conv.kernel_projection, Config::hidden);
+                        if (layer == 0) {
+                            if (hidden_image != nullptr) {
+                                ops::rmsnorm_q4_activation_image(
+                                    current, weight.input_norm, Config::rms_epsilon, false,
+                                    roots.hidden, *hidden_image, state.execution.device.stream);
+                            } else {
+                                ops::rmsnorm(current, weight.input_norm, Config::rms_epsilon, false,
+                                             roots.hidden, state.execution.device.stream);
+                            }
+                        } else {
+                            const auto& previous =
+                                dflash.layers.at(static_cast<std::size_t>(layer - 1));
+                            finish_normalized(previous.mlp_conv.base_kernel, weight.input_norm,
+                                              roots.hidden, hidden_image);
+                        }
+                        conv_prepare(roots.hidden, weight.attention_conv.kernel_projection,
+                                     weight.attention_conv.base_kernel, roots.projection,
+                                     hidden_image, roots.prepared,
+                                     image_for(weight.query_key_value, Config::hidden));
+                        project(roots.prepared, image_for(weight.query_key_value, Config::hidden),
+                                weight.query_key_value, roots.fused_qkv);
                         Tensor value =
                             roots.value.view({Config::head_dim, Config::kv_heads, columns});
                         Tensor query =
@@ -324,45 +426,48 @@ void propose_batch_impl(DFlashBatchContext& state, qwen3::DFlashDecodeState& fra
                                  state.execution.device.stream);
                         serialized_linear(state.execution,
                                           roots.attention.view({Config::query_size, columns}),
-                                          weight.attention_output, roots.delta);
-                        Tensor delta_batch = roots.delta.view({Config::hidden, width, batch_size});
-                        Tensor residual_batch = residual.view({Config::hidden, width, batch_size});
-                        ops::grouped_dynamic_conv_finish(
-                            delta_batch, weight.attention_conv.base_kernel, finish_dynamic,
-                            residual_batch, state.execution.device.stream);
+                                          weight.attention_output, carry.delta);
                     }
                     {
                         auto mlp_scope = state.execution.work.scope();
                         auto roots =
                             workspace_recipe::dflash_mlp<Config>(state.execution.work, columns);
-                        ops::rmsnorm(residual, weight.post_attention_norm, Config::rms_epsilon,
-                                     false, roots.hidden, state.execution.device.stream);
-                        Tensor hidden_batch =
-                            roots.hidden.view({Config::hidden, width, batch_size});
-                        Tensor prepared_batch =
-                            roots.delta.view({Config::hidden, width, batch_size});
-                        Tensor finish_dynamic = roots.finish_dynamic.view(
-                            {ops::kGroupedDynamicConvGroups, 2, width, batch_size});
-                        ops::grouped_dynamic_conv_prepare(
-                            hidden_batch, weight.mlp_conv.base_kernel,
-                            weight.mlp_conv.kernel_projection, prepared_batch, finish_dynamic,
-                            state.execution.work, state.execution.device.stream);
-                        serialized_linear(state.execution, roots.delta, weight.gate_up,
-                                          roots.gate_up);
-                        ops::silu_mul(
-                            roots.gate_up.slice(0, 0, Config::intermediate),
-                            roots.gate_up.slice(0, Config::intermediate, Config::intermediate),
-                            roots.intermediate, state.execution.device.stream);
-                        serialized_linear(state.execution, roots.intermediate, weight.down,
-                                          roots.delta);
-                        Tensor mlp_in = roots.delta.view({Config::hidden, width, batch_size});
-                        Tensor residual_batch = residual.view({Config::hidden, width, batch_size});
-                        ops::grouped_dynamic_conv_finish(mlp_in, weight.mlp_conv.base_kernel,
-                                                         finish_dynamic, residual_batch,
-                                                         state.execution.device.stream);
+                        const DeviceSpan* hidden_image =
+                            image_for(weight.mlp_conv.kernel_projection, Config::hidden);
+                        finish_normalized(weight.attention_conv.base_kernel,
+                                          weight.post_attention_norm, roots.hidden, hidden_image);
+                        const DeviceSpan* prepared_image =
+                            image_for(weight.gate_up, Config::hidden);
+                        conv_prepare(roots.hidden, weight.mlp_conv.kernel_projection,
+                                     weight.mlp_conv.base_kernel, roots.projection, hidden_image,
+                                     roots.prepared, prepared_image);
+                        project(roots.prepared, prepared_image, weight.gate_up, roots.gate_up);
+                        const DeviceSpan* intermediate_image =
+                            image_for(weight.down, Config::intermediate);
+                        if (intermediate_image != nullptr) {
+                            ops::silu_mul_q4_activation_image(roots.gate_up,
+                                                              *image_target(intermediate_image),
+                                                              state.execution.device.stream);
+                        } else {
+                            ops::silu_mul(
+                                roots.gate_up.slice(0, 0, Config::intermediate),
+                                roots.gate_up.slice(0, Config::intermediate, Config::intermediate),
+                                roots.intermediate, state.execution.device.stream);
+                        }
+                        project(roots.intermediate, intermediate_image, weight.down, carry.delta);
                     }
                 }
+                Tensor delta_batch    = batched(carry.delta);
+                Tensor residual_batch = batched(current);
+                ops::grouped_dynamic_conv_finish(
+                    delta_batch,
+                    dflash.layers.at(static_cast<std::size_t>(Config::layers - 1))
+                        .mlp_conv.base_kernel,
+                    finish_dynamic, residual_batch, state.execution.device.stream);
             }(*state.execution.model.dflash);
+            if (current.data != residual.data) {
+                throw std::logic_error("DFlash drafter residual ended outside its buffer");
+            }
         };
         if (two_block) {
             const std::int32_t split       = Config::two_block_first;

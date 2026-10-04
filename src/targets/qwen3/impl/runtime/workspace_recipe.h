@@ -252,6 +252,23 @@ DFlashProposalRoots dflash_proposal(Allocator& allocator, std::int32_t tokens) {
     };
 }
 
+// Live across sublayers: the out-of-place residual partner, and the delta / phase-1 dynamic
+// kernels a sublayer leaves for the next sublayer's fused finish.
+struct DFlashLayerCarry {
+    Tensor residual_alt;
+    Tensor delta;
+    Tensor finish_dynamic;
+};
+
+template <class Config, class Allocator>
+DFlashLayerCarry dflash_layer_carry(Allocator& allocator, std::int32_t tokens) {
+    return {
+        matrix(allocator, DType::BF16, Config::hidden, tokens),
+        matrix(allocator, DType::BF16, Config::hidden, tokens),
+        allocator.alloc(DType::BF16, {ops::kGroupedDynamicConvGroups, 2, tokens}),
+    };
+}
+
 struct DFlashAttentionRoots {
     Tensor hidden;
     Tensor value;
@@ -259,8 +276,7 @@ struct DFlashAttentionRoots {
     Tensor key;
     Tensor attention;
     Tensor fused_qkv;
-    Tensor finish_dynamic;
-    Tensor delta;
+    Tensor projection;
     Tensor prepared;
 };
 
@@ -273,8 +289,7 @@ DFlashAttentionRoots dflash_attention(Allocator& allocator, std::int32_t tokens)
         matrix(allocator, DType::BF16, Config::kv_size, tokens),
         matrix(allocator, DType::BF16, Config::query_size, tokens),
         matrix(allocator, DType::BF16, Config::query_size + 2 * Config::kv_size, tokens),
-        allocator.alloc(DType::BF16, {ops::kGroupedDynamicConvGroups, 2, tokens}),
-        matrix(allocator, DType::BF16, Config::hidden, tokens),
+        matrix(allocator, DType::BF16, ops::kGroupedDynamicConvProjRows, tokens),
         matrix(allocator, DType::BF16, Config::hidden, tokens),
     };
 }
@@ -283,8 +298,8 @@ struct DFlashMlpRoots {
     Tensor hidden;
     Tensor intermediate;
     Tensor gate_up;
-    Tensor finish_dynamic;
-    Tensor delta;
+    Tensor projection;
+    Tensor prepared;
 };
 
 template <class Config, class Allocator>
@@ -293,7 +308,7 @@ DFlashMlpRoots dflash_mlp(Allocator& allocator, std::int32_t tokens) {
         matrix(allocator, DType::BF16, Config::hidden, tokens),
         matrix(allocator, DType::BF16, Config::intermediate, tokens),
         matrix(allocator, DType::BF16, 2 * Config::intermediate, tokens),
-        allocator.alloc(DType::BF16, {ops::kGroupedDynamicConvGroups, 2, tokens}),
+        matrix(allocator, DType::BF16, ops::kGroupedDynamicConvProjRows, tokens),
         matrix(allocator, DType::BF16, Config::hidden, tokens),
     };
 }

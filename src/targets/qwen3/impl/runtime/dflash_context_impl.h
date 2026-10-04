@@ -1,5 +1,7 @@
 #include "targets/qwen3/impl/runtime/dflash_context.h"
 
+#include "core/device.h"
+
 #include <stdexcept>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS {
@@ -43,7 +45,9 @@ DFlashPersistentState::DFlashPersistentState(DeviceSpan backing,
     : local(backing, layout.local), staging_local(backing, layout.staging_local),
       prefill_features(layout.prefill_features.bind(backing)),
       prefill_positions(layout.prefill_positions.bind(backing)),
-      pending_features(layout.pending_features.bind(backing)) {
+      pending_features(layout.pending_features.bind(backing)),
+      image_completion(layout.image_completion.bind(backing)) {
+    HIP_CHECK(hipMemset(image_completion.data, 0, image_completion.bytes()));
     if (layout.full) { full.emplace(backing, *layout.full); }
     const bool local_ok = local.layer_count() == DFlashConfig::local_layers &&
                           staging_local.layer_count() == DFlashConfig::local_layers &&

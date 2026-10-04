@@ -1,36 +1,34 @@
 #include "core/arena.h"
 #include "core/device.h"
 #include "ninfer/ops/grouped_dynamic_conv.h"
+#include "ninfer/ops/linear.h"
+
+#include "a8g64_image_oracle.h"
 
 #include <hip/hip_bfloat16.h>
 
 #include <algorithm>
-#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
 
-using ninfer::DType;
 using ninfer::DeviceBuffer;
-using ninfer::QType;
-using ninfer::QuantLayout;
+using ninfer::DeviceSpan;
+using ninfer::DType;
 using ninfer::Tensor;
-using ninfer::Weight;
-using ninfer::WorkspaceArena;
+namespace image_oracle = ninfer::tools::a8g64_image;
 
 constexpr int kD          = ninfer::ops::kGroupedDynamicConvHidden;
 constexpr int kGroups     = ninfer::ops::kGroupedDynamicConvGroups;
 constexpr int kProjection = ninfer::ops::kGroupedDynamicConvProjRows;
-constexpr int kW8Group    = 32;
-constexpr int kQ4Group    = 64;
-
-enum class WeightKind : std::uint8_t { BF16, W8, Q4 };
+constexpr float kEps      = 1.0e-6F;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
@@ -41,434 +39,380 @@ DeviceBuffer upload(const std::vector<T>& values) {
     return result;
 }
 
+template <class T>
+std::vector<T> download(const DeviceBuffer& buffer) {
+    std::vector<T> values(buffer.size() / sizeof(T));
+    buffer.copy_to_host(values.data(), buffer.size());
+    return values;
+}
+
 float patterned(int first, int second, int modulus, float divisor) {
     const int centered = (first * 17 + second * 29) % modulus - modulus / 2;
     return static_cast<float>(centered) / divisor;
 }
 
-std::uint16_t half_bits(float value) {
-    return std::bit_cast<std::uint16_t>(static_cast<_Float16>(value));
+std::vector<hip_bfloat16> patterned_rows(int rows, int columns, int modulus, float divisor) {
+    std::vector<hip_bfloat16> values(static_cast<std::size_t>(rows) * columns);
+    for (int column = 0; column < columns; ++column)
+        for (int row = 0; row < rows; ++row)
+            values[static_cast<std::size_t>(column) * rows + row] =
+                hip_bfloat16(patterned(column, row, modulus, divisor));
+    return values;
 }
 
-float half_value(std::uint16_t bits) { return static_cast<float>(std::bit_cast<_Float16>(bits)); }
-
-struct ProjectionWeight {
-    std::vector<hip_bfloat16> bf16;
-    std::vector<std::int8_t> codes;
-    std::vector<std::uint8_t> q4_codes;
-    std::vector<std::uint8_t> q4_codes_row;
-    std::vector<std::uint16_t> scales;
-    std::vector<std::uint16_t> q4_scales_row;
-    DeviceBuffer d_primary;
-    DeviceBuffer d_scales;
-    Weight view;
-    WeightKind kind = WeightKind::BF16;
-};
-
-void set_nibble(std::vector<std::uint8_t>& packed, std::size_t index, int code) {
-    const unsigned shift = static_cast<unsigned>((index & 1U) * 4U);
-    packed[index >> 1U] |= static_cast<std::uint8_t>((code & 0x0f) << shift);
-}
-
-ProjectionWeight make_weight(WeightKind kind) {
-    ProjectionWeight result;
-    result.kind = kind;
-    if (kind == WeightKind::W8) {
-        result.codes.resize(static_cast<std::size_t>(kProjection) * kD);
-        result.scales.resize(static_cast<std::size_t>(kProjection) * (kD / kW8Group));
-        for (int row = 0; row < kProjection; ++row) {
-            for (int group = 0; group < kD / kW8Group; ++group) {
-                const float scale = static_cast<float>(1 + (row + 3 * group) % 5) / 2048.0F;
-                result.scales[static_cast<std::size_t>(row) * (kD / kW8Group) + group] =
-                    half_bits(scale);
-                for (int lane = 0; lane < kW8Group; ++lane) {
-                    const int code = (row * 13 + group * 7 + lane * 5) % 31 - 15;
-                    result.codes[static_cast<std::size_t>(row) * kD + group * kW8Group + lane] =
-                        static_cast<std::int8_t>(code);
-                }
-            }
-        }
-        result.d_primary          = upload(result.codes);
-        result.d_scales           = upload(result.scales);
-        result.view.payload       = result.d_primary.data();
-        result.view.payload_bytes = result.d_primary.size() + result.d_scales.size();
-        result.view.qtype         = QType::W8G32_F16S;
-        result.view.group_size    = kW8Group;
-        result.view.qdata         = result.d_primary.data();
-        result.view.qdata_bytes   = result.d_primary.size();
-        result.view.scales        = result.d_scales.data();
-        result.view.scale_bytes   = result.d_scales.size();
-        result.view.group         = kW8Group;
-        result.view.layout        = QuantLayout::RowSplit;
-        result.view.scale_dtype   = DType::FP16;
-        result.view.scale_ne[0]   = kD / kW8Group;
-        result.view.scale_ne[1]   = kProjection;
-        result.view.scale_nb[0]   = sizeof(std::uint16_t);
-        result.view.scale_nb[1]   = (kD / kW8Group) * sizeof(std::uint16_t);
-    } else if (kind == WeightKind::Q4) {
-        result.q4_codes.resize(static_cast<std::size_t>(kProjection) * kD / 2U);
-        result.q4_codes_row.resize(result.q4_codes.size());
-        result.scales.resize(static_cast<std::size_t>(kProjection) * (kD / kQ4Group));
-        result.q4_scales_row.resize(result.scales.size());
-        constexpr std::size_t groups = kD / kQ4Group;
-        for (int row = 0; row < kProjection; ++row) {
-            for (int group = 0; group < kD / kQ4Group; ++group) {
-                const float scale = static_cast<float>(1 + (row + 3 * group) % 5) / 1024.0F;
-                const std::size_t logical_scale = static_cast<std::size_t>(row) * groups + group;
-                const std::size_t n16_scale =
-                    ((static_cast<std::size_t>(row) >> 4U) * groups + group) * 16U +
-                    (static_cast<std::size_t>(row) & 15U);
-                result.q4_scales_row[logical_scale] = half_bits(scale);
-                result.scales[n16_scale]            = half_bits(scale);
-                for (int lane = 0; lane < kQ4Group; ++lane) {
-                    const int code = (row * 13 + group * 7 + lane * 5) % 15 - 7;
-                    const std::size_t logical =
-                        static_cast<std::size_t>(row) * kD + group * kQ4Group + lane;
-                    set_nibble(result.q4_codes_row, logical, code);
-                    const std::size_t pair   = static_cast<std::size_t>(lane) / 16U;
-                    const std::size_t within = static_cast<std::size_t>(lane) % 16U;
-                    const std::size_t word =
-                        (((static_cast<std::size_t>(row) >> 4U) * groups + group) * 4U + pair) *
-                            16U +
-                        (static_cast<std::size_t>(row) & 15U);
-                    set_nibble(result.q4_codes, word * 16U + within, code);
-                }
-            }
-        }
-        result.d_primary          = upload(result.q4_codes);
-        result.d_scales           = upload(result.scales);
-        result.view.payload       = result.d_primary.data();
-        result.view.payload_bytes = result.d_primary.size() + result.d_scales.size();
-        result.view.qtype         = QType::Q4G64_F16S;
-        result.view.group_size    = kQ4Group;
-        result.view.qdata         = result.d_primary.data();
-        result.view.qdata_bytes   = result.d_primary.size();
-        result.view.scales        = result.d_scales.data();
-        result.view.scale_bytes   = result.d_scales.size();
-        result.view.group         = kQ4Group;
-        result.view.layout        = QuantLayout::Q4N16K16;
-        result.view.scale_dtype   = DType::FP16;
-        result.view.scale_ne[0]   = kD / kQ4Group;
-        result.view.scale_ne[1]   = kProjection;
-        result.view.scale_nb[0]   = sizeof(std::uint16_t);
-        result.view.scale_nb[1]   = (kD / kQ4Group) * sizeof(std::uint16_t);
-    } else {
-        result.bf16.resize(static_cast<std::size_t>(kProjection) * kD);
-        for (int row = 0; row < kProjection; ++row) {
-            for (int column = 0; column < kD; ++column) {
-                result.bf16[static_cast<std::size_t>(row) * kD + column] =
-                    hip_bfloat16(patterned(row, column, 41, 512.0F));
-            }
-        }
-        result.d_primary          = upload(result.bf16);
-        result.view.payload       = result.d_primary.data();
-        result.view.payload_bytes = result.d_primary.size();
-        result.view.qtype         = QType::BF16_CTRL;
-        result.view.qdata         = result.d_primary.data();
-        result.view.qdata_bytes   = result.d_primary.size();
-        result.view.layout        = QuantLayout::Contiguous;
-    }
-    result.view.ndim            = 2;
-    result.view.n               = kProjection;
-    result.view.k               = kD;
-    result.view.shape[0]        = kProjection;
-    result.view.shape[1]        = kD;
-    result.view.padded_shape[0] = kProjection;
-    result.view.padded_shape[1] = kD;
-    return result;
-}
-
-double decode_weight(const ProjectionWeight& weight, int row, int column) {
-    if (weight.kind == WeightKind::BF16) {
-        return static_cast<float>(weight.bf16[static_cast<std::size_t>(row) * kD + column]);
-    }
-    if (weight.kind == WeightKind::Q4) {
-        const std::size_t index = static_cast<std::size_t>(row) * kD + column;
-        const unsigned nibble   = (weight.q4_codes_row[index >> 1U] >> ((index & 1U) * 4U)) & 0x0fU;
-        const int code = nibble >= 8U ? static_cast<int>(nibble) - 16 : static_cast<int>(nibble);
-        const std::uint16_t scale =
-            weight
-                .q4_scales_row[static_cast<std::size_t>(row) * (kD / kQ4Group) + column / kQ4Group];
-        return static_cast<double>(code) * half_value(scale);
-    }
-    const std::int8_t code = weight.codes[static_cast<std::size_t>(row) * kD + column];
-    const std::uint16_t scale =
-        weight.scales[static_cast<std::size_t>(row) * (kD / kW8Group) + column / kW8Group];
-    return static_cast<double>(code) * half_value(scale);
-}
-
-std::size_t hidden_index(int channel, int token, int batch, int tokens) {
-    return static_cast<std::size_t>(channel) +
-           static_cast<std::size_t>(kD) *
-               (static_cast<std::size_t>(token) + static_cast<std::size_t>(tokens) * batch);
-}
-
-std::size_t dynamic_index(int group, int offset, int token, int batch, int tokens) {
-    return static_cast<std::size_t>(group) +
-           static_cast<std::size_t>(kGroups) *
-               (static_cast<std::size_t>(offset) +
-                2U * (static_cast<std::size_t>(token) + static_cast<std::size_t>(tokens) * batch));
+double bf16_rne(double value) {
+    return static_cast<float>(hip_bfloat16(static_cast<float>(value)));
 }
 
 struct Error {
     double max_abs     = 0.0;
     double relative_l2 = 0.0;
-    float milliseconds = 0.0F;
 };
 
 Error compare(const std::vector<hip_bfloat16>& actual, const std::vector<double>& expected,
-              double absolute_limit, double relative_l2_limit, const char* label) {
-    if (actual.size() != expected.size()) fail(std::string(label) + ": extent mismatch");
-    double squared_error     = 0.0;
-    double squared_reference = 0.0;
+              double absolute_limit, double relative_l2_limit, const std::string& label) {
+    if (actual.size() != expected.size()) fail(label + ": extent mismatch");
+    double squared_error = 0.0, squared_reference = 0.0;
     Error result;
     for (std::size_t index = 0; index < actual.size(); ++index) {
         const double got   = static_cast<float>(actual[index]);
         const double error = got - expected[index];
-        if (!std::isfinite(got) || !std::isfinite(expected[index]) || !std::isfinite(error))
-            fail(std::string(label) + ": nonfinite oracle/output");
+        if (!std::isfinite(got) || !std::isfinite(expected[index]))
+            fail(label + ": nonfinite oracle/output");
         result.max_abs = std::max(result.max_abs, std::abs(error));
         squared_error += error * error;
         squared_reference += expected[index] * expected[index];
     }
     result.relative_l2 = std::sqrt(squared_error / std::max(1.0e-30, squared_reference));
-    if (result.max_abs > absolute_limit || result.relative_l2 > relative_l2_limit) {
-        fail(std::string(label) + ": FP64 oracle mismatch max_abs=" +
-             std::to_string(result.max_abs) + " rel_l2=" + std::to_string(result.relative_l2));
-    }
+    if (result.max_abs > absolute_limit || result.relative_l2 > relative_l2_limit)
+        fail(label + ": FP64 oracle mismatch max_abs=" + std::to_string(result.max_abs) +
+             " rel_l2=" + std::to_string(result.relative_l2));
     return result;
 }
 
-Error run_prepare(ninfer::DeviceContext& device, WeightKind kind, int tokens, int batch,
-                  bool qualify_graph = false) {
-    ProjectionWeight weight = make_weight(kind);
-    const int columns       = tokens * batch;
-    std::vector<hip_bfloat16> hidden(static_cast<std::size_t>(kD) * columns);
-    std::vector<hip_bfloat16> base(static_cast<std::size_t>(kD) * 4);
-    for (int column = 0; column < columns; ++column) {
+void merge(Error& total, const Error& error) {
+    total.max_abs     = std::max(total.max_abs, error.max_abs);
+    total.relative_l2 = std::max(total.relative_l2, error.relative_l2);
+}
+
+struct Case {
+    int tokens  = 1;
+    int batch   = 1;
+    int columns = 1;
+    std::vector<hip_bfloat16> hidden;     // [columns][kD]
+    std::vector<hip_bfloat16> base;       // [2 phases][2 offsets][kD]
+    std::vector<hip_bfloat16> projection; // [columns][1280]
+    std::vector<hip_bfloat16> dynamic;    // [columns][2][320] (finish stash)
+    std::vector<hip_bfloat16> residual;   // [columns][kD]
+    std::vector<hip_bfloat16> norm;       // [kD]
+};
+
+Case make_case(int tokens, int batch) {
+    Case value;
+    value.tokens     = tokens;
+    value.batch      = batch;
+    value.columns    = tokens * batch;
+    value.hidden     = patterned_rows(kD, value.columns, 37, 256.0F);
+    value.base       = patterned_rows(kD, 4, 23, 1024.0F);
+    value.projection = patterned_rows(kProjection, value.columns, 41, 128.0F);
+    value.dynamic    = patterned_rows(2 * kGroups, value.columns, 17, 256.0F);
+    value.residual   = patterned_rows(kD, value.columns, 23, 64.0F);
+    value.norm       = patterned_rows(kD, 1, 29, 32.0F);
+    for (auto& gain : value.norm) gain = hip_bfloat16(1.0F + static_cast<float>(gain));
+    return value;
+}
+
+float at(const std::vector<hip_bfloat16>& rows, int rows_per_column, int column, int row) {
+    return static_cast<float>(rows[static_cast<std::size_t>(column) * rows_per_column + row]);
+}
+
+// FP64 conv of phase `phase` with the given dynamic kernels per (column, offset, group).
+template <class Dynamic>
+std::vector<double> conv_oracle(const Case& value, int phase, Dynamic dynamic) {
+    std::vector<double> out(static_cast<std::size_t>(kD) * value.columns);
+    for (int column = 0; column < value.columns; ++column) {
+        const int token = column % value.tokens;
         for (int d = 0; d < kD; ++d) {
-            hidden[static_cast<std::size_t>(column) * kD + d] =
-                hip_bfloat16(patterned(column, d, 37, 256.0F));
+            const int group       = d / 16;
+            const double current  = at(value.hidden, kD, column, d);
+            const double previous = token == 0 ? 0.0 : at(value.hidden, kD, column - 1, d);
+            const double base0    = at(value.base, kD, phase * 2, d);
+            const double base1    = at(value.base, kD, phase * 2 + 1, d);
+            out[static_cast<std::size_t>(column) * kD + d] =
+                (base0 + dynamic(column, 0, group)) * current +
+                (base1 + dynamic(column, 1, group)) * previous;
         }
     }
-    for (int phase = 0; phase < 2; ++phase) {
-        for (int offset = 0; offset < 2; ++offset) {
-            for (int d = 0; d < kD; ++d) {
-                base[static_cast<std::size_t>(phase * 2 + offset) * kD + d] =
-                    hip_bfloat16(patterned(phase * 2 + offset, d, 23, 1024.0F));
-            }
-        }
-    }
+    return out;
+}
 
-    std::vector<double> projection(static_cast<std::size_t>(kProjection) * columns);
-    for (int column = 0; column < columns; ++column) {
-        for (int row = 0; row < kProjection; ++row) {
-            double sum = 0.0;
-            for (int d = 0; d < kD; ++d) {
-                sum = std::fma(static_cast<double>(static_cast<float>(
-                                   hidden[static_cast<std::size_t>(column) * kD + d])),
-                               decode_weight(weight, row, d), sum);
-            }
-            projection[static_cast<std::size_t>(column) * kProjection + row] = sum;
-        }
-    }
-    std::vector<double> expected(static_cast<std::size_t>(kD) * columns);
-    std::vector<double> expected_finish(static_cast<std::size_t>(kGroups) * 2 * columns);
-    for (int b = 0; b < batch; ++b) {
-        for (int token = 0; token < tokens; ++token) {
-            const int column = b * tokens + token;
-            for (int group = 0; group < kGroups; ++group) {
-                expected_finish[dynamic_index(group, 0, token, b, tokens)] =
-                    projection[static_cast<std::size_t>(column) * kProjection + 640 + group];
-                expected_finish[dynamic_index(group, 1, token, b, tokens)] =
-                    projection[static_cast<std::size_t>(column) * kProjection + 960 + group];
-            }
-            for (int d = 0; d < kD; ++d) {
-                const int group = d / 16;
-                const double current =
-                    static_cast<float>(hidden[hidden_index(d, token, b, tokens)]);
-                const double previous =
-                    token == 0 ? 0.0
-                               : static_cast<float>(hidden[hidden_index(d, token - 1, b, tokens)]);
-                const double base0 = static_cast<float>(base[d]);
-                const double base1 = static_cast<float>(base[kD + d]);
-                const double dynamic0 =
-                    projection[static_cast<std::size_t>(column) * kProjection + group];
-                const double dynamic1 =
-                    projection[static_cast<std::size_t>(column) * kProjection + kGroups + group];
-                expected[hidden_index(d, token, b, tokens)] =
-                    (base0 + dynamic0) * current + (base1 + dynamic1) * previous;
-            }
-        }
-    }
+DeviceBuffer image_buffer(int columns) {
+    DeviceBuffer buffer(ninfer::ops::q4_activation_image_bytes(columns, kD));
+    buffer.fill(0);
+    return buffer;
+}
 
-    auto d_hidden = upload(hidden);
-    auto d_base   = upload(base);
-    DeviceBuffer d_prepared(hidden.size() * sizeof(hip_bfloat16));
-    DeviceBuffer d_finish(expected_finish.size() * sizeof(hip_bfloat16));
-    const std::size_t workspace_bytes =
-        ninfer::ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(weight.view.qtype,
-                                                                           tokens, tokens, batch);
-    WorkspaceArena workspace(workspace_bytes);
-    Tensor hidden_tensor(d_hidden.data(), DType::BF16, {kD, tokens, batch});
-    Tensor base_tensor(d_base.data(), DType::BF16, {kD, 2, 2});
-    Tensor prepared_tensor(d_prepared.data(), DType::BF16, {kD, tokens, batch});
-    Tensor finish_tensor(d_finish.data(), DType::BF16, {kGroups, 2, tokens, batch});
-    if (kind == WeightKind::Q4) {
-        Weight retired = weight.view;
-        retired.layout = QuantLayout::RowSplit;
-        try {
-            ninfer::ops::grouped_dynamic_conv_prepare(hidden_tensor, base_tensor, retired,
-                                                      prepared_tensor, finish_tensor, workspace,
-                                                      device.stream);
-            fail("grouped_dynamic_conv accepted the retired Q4 RowSplit layout");
-            // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
-        } catch (const std::invalid_argument&) {}
+DeviceSpan span(const DeviceBuffer& buffer) { return {buffer.data(), buffer.size()}; }
+
+// An image target with its own zeroed completion words.
+struct Target {
+    DeviceBuffer image;
+    DeviceBuffer completion{2 * sizeof(std::uint32_t)};
+    ninfer::ops::Q4ActivationImageTarget view;
+
+    explicit Target(int columns) : image(image_buffer(columns)) {
+        completion.fill(0);
+        view = {span(image), static_cast<std::uint32_t*>(completion.data())};
     }
-    ninfer::ops::grouped_dynamic_conv_prepare(hidden_tensor, base_tensor, weight.view,
-                                              prepared_tensor, finish_tensor, workspace,
-                                              device.stream);
+};
+
+// Every launch must return the completion words to zero.
+void require_completion_idle(const Target& target, const std::string& label) {
+    const auto words = download<std::uint32_t>(target.completion);
+    if (words[0] != 0U || words[1] != 0U) fail(label + ": completion words not returned to zero");
+}
+
+Error run_prepare(ninfer::DeviceContext& device, int tokens, int batch, bool graph) {
+    const Case value  = make_case(tokens, batch);
+    const int columns = value.columns;
+    auto d_hidden     = upload(value.hidden);
+    auto d_base       = upload(value.base);
+    auto d_projection = upload(value.projection);
+    DeviceBuffer d_prepared(value.hidden.size() * sizeof(hip_bfloat16));
+    DeviceBuffer d_finish(static_cast<std::size_t>(2) * kGroups * columns * sizeof(hip_bfloat16));
+    Target target(columns);
+    DeviceBuffer& d_image = target.image;
+    Tensor hidden(d_hidden.data(), DType::BF16, {kD, tokens, batch});
+    Tensor base(d_base.data(), DType::BF16, {kD, 2, 2});
+    Tensor projection(d_projection.data(), DType::BF16, {kProjection, tokens, batch});
+    Tensor prepared(d_prepared.data(), DType::BF16, {kD, tokens, batch});
+    Tensor finish(d_finish.data(), DType::BF16, {kGroups, 2, tokens, batch});
+    const DeviceSpan image = span(d_image);
+
+    const std::vector<double> expected =
+        conv_oracle(value, 0, [&](int column, int offset, int group) {
+            return static_cast<double>(
+                at(value.projection, kProjection, column, offset * kGroups + group));
+        });
+    std::vector<double> expected_finish(static_cast<std::size_t>(2) * kGroups * columns);
+    for (int column = 0; column < columns; ++column)
+        for (int index = 0; index < 2 * kGroups; ++index)
+            expected_finish[static_cast<std::size_t>(column) * 2 * kGroups + index] =
+                at(value.projection, kProjection, column, 2 * kGroups + index);
+
+    const auto check = [&](const std::string& label) {
+        const auto actual = download<hip_bfloat16>(d_prepared);
+        Error error       = compare(actual, expected, 0.02, 0.005, label + " prepared");
+        merge(error, compare(download<hip_bfloat16>(d_finish), expected_finish, 0.0, 0.0,
+                             label + " finish_dynamic"));
+        image_oracle::require_image(
+            image_oracle::read(image, static_cast<std::uint32_t>(columns), kD),
+            image_oracle::encode(image_oracle::represented(actual),
+                                 static_cast<std::uint32_t>(columns), kD),
+            label);
+        require_completion_idle(target, label);
+        return error;
+    };
+    image_oracle::poison_status(image, columns, kD, device.stream);
+    ninfer::ops::grouped_dynamic_conv_prepare(hidden, base, projection, &prepared, finish,
+                                              &target.view, device.stream);
     device.synchronize();
-    if (workspace.used() != 0 || workspace.peak_used() != workspace_bytes) {
-        fail("grouped_dynamic_conv workspace ownership mismatch");
-    }
-    std::vector<hip_bfloat16> actual(hidden.size());
-    std::vector<hip_bfloat16> actual_finish(expected_finish.size());
-    d_prepared.copy_to_host(actual.data(), d_prepared.size());
-    d_finish.copy_to_host(actual_finish.data(), d_finish.size());
-    Error result = compare(actual, expected, 0.04, 0.02, "prepare");
-    (void)compare(actual_finish, expected_finish, 0.04, 0.02, "finish_dynamic");
-    if (qualify_graph) {
-        hipGraph_t graph{};
+    Error result = check("prepare T" + std::to_string(tokens) + "/B" + std::to_string(batch));
+    // Image only: the same image without a BF16 publication.
+    const auto published = image_oracle::read(image, columns, kD);
+    d_image.fill(0);
+    ninfer::ops::grouped_dynamic_conv_prepare(hidden, base, projection, nullptr, finish,
+                                              &target.view, device.stream);
+    device.synchronize();
+    image_oracle::require_image(image_oracle::read(image, columns, kD), published,
+                                "prepare image-only");
+    if (graph) {
+        hipGraph_t captured{};
         hipGraphExec_t executable{};
         HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeThreadLocal));
-        ninfer::ops::grouped_dynamic_conv_prepare(hidden_tensor, base_tensor, weight.view,
-                                                  prepared_tensor, finish_tensor, workspace,
-                                                  device.stream);
-        HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
-        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        ninfer::ops::grouped_dynamic_conv_prepare(hidden, base, projection, &prepared, finish,
+                                                  &target.view, device.stream);
+        HIP_CHECK(hipStreamEndCapture(device.stream, &captured));
+        HIP_CHECK(hipGraphInstantiate(&executable, captured, nullptr, nullptr, 0));
         for (int replay = 0; replay < 2; ++replay) {
-            HIP_CHECK(hipMemsetAsync(workspace.base(), 0xff, workspace.capacity(), device.stream));
             d_prepared.fill_async(0xff, device.stream);
             d_finish.fill_async(0xff, device.stream);
+            HIP_CHECK(hipMemsetAsync(d_image.data(), 0xff, d_image.size(), device.stream));
             HIP_CHECK(hipGraphLaunch(executable, device.stream));
             device.synchronize();
-            d_prepared.copy_to_host(actual.data(), d_prepared.size());
-            d_finish.copy_to_host(actual_finish.data(), d_finish.size());
-            const Error replay_error = compare(actual, expected, 0.04, 0.02, "prepare graph");
-            (void)compare(actual_finish, expected_finish, 0.04, 0.02, "finish_dynamic graph");
-            result.max_abs     = std::max(result.max_abs, replay_error.max_abs);
-            result.relative_l2 = std::max(result.relative_l2, replay_error.relative_l2);
-            if (workspace.used() != 0 || workspace.peak_used() != workspace_bytes)
-                fail("grouped_dynamic_conv graph workspace ownership mismatch");
+            merge(result, check("prepare graph"));
         }
         HIP_CHECK(hipGraphExecDestroy(executable));
-        HIP_CHECK(hipGraphDestroy(graph));
-        std::cout << "dflash-companion-conv: PASS W=" << tokens << " C=" << batch
-                  << " graph_replays=2 full_FP64_projection_and_conv_oracle"
-                  << " max_abs=" << result.max_abs << " relative_l2=" << result.relative_l2
-                  << " workspace_bytes=" << workspace_bytes << '\n';
-        return result;
+        HIP_CHECK(hipGraphDestroy(captured));
     }
-    constexpr int iterations = 10;
-    ninfer::DeviceEventTimer timer(device);
-    timer.start();
-    for (int iteration = 0; iteration < iterations; ++iteration) {
-        ninfer::ops::grouped_dynamic_conv_prepare(hidden_tensor, base_tensor, weight.view,
-                                                  prepared_tensor, finish_tensor, workspace,
-                                                  device.stream);
-    }
-    result.milliseconds = timer.stop_ms() / iterations;
+    // A nonfinite activation sets the status word in both status modes.
+    std::vector<hip_bfloat16> poisoned = value.hidden;
+    poisoned[static_cast<std::size_t>(columns - 1) * kD + 77] =
+        hip_bfloat16(std::numeric_limits<float>::quiet_NaN());
+    d_hidden.copy_from_host(poisoned.data(), d_hidden.size());
+    ninfer::ops::grouped_dynamic_conv_prepare(hidden, base, projection, nullptr, finish,
+                                              &target.view, device.stream);
+    device.synchronize();
+    if ((image_oracle::read(image, columns, kD).status & 1U) == 0U)
+        fail("prepare: a nonfinite value left the status word clear");
     return result;
 }
 
 Error run_finish(ninfer::DeviceContext& device) {
-    constexpr int tokens = 4;
-    constexpr int batch  = 2;
-    const int columns    = tokens * batch;
-    std::vector<hip_bfloat16> hidden(static_cast<std::size_t>(kD) * columns);
-    std::vector<hip_bfloat16> base(static_cast<std::size_t>(kD) * 4);
-    std::vector<hip_bfloat16> dynamic(static_cast<std::size_t>(kGroups) * 2 * columns);
-    std::vector<hip_bfloat16> residual(hidden.size());
-    for (std::size_t i = 0; i < residual.size(); ++i)
-        residual[i] =
-            hip_bfloat16(patterned(static_cast<int>(i / kD), static_cast<int>(i % kD), 23, 64.0F));
-    for (std::size_t i = 0; i < hidden.size(); ++i)
-        hidden[i] =
-            hip_bfloat16(patterned(static_cast<int>(i / kD), static_cast<int>(i % kD), 31, 256.0F));
-    for (std::size_t i = 0; i < base.size(); ++i)
-        base[i] =
-            hip_bfloat16(patterned(static_cast<int>(i / kD), static_cast<int>(i % kD), 19, 512.0F));
-    for (std::size_t i = 0; i < dynamic.size(); ++i)
-        dynamic[i] = hip_bfloat16(
-            patterned(static_cast<int>(i / kGroups), static_cast<int>(i % kGroups), 17, 256.0F));
-    std::vector<double> expected(hidden.size());
-    for (int b = 0; b < batch; ++b) {
-        for (int token = 0; token < tokens; ++token) {
-            for (int d = 0; d < kD; ++d) {
-                const int group = d / 16;
-                const double x0 = static_cast<float>(hidden[hidden_index(d, token, b, tokens)]);
-                const double x1 =
-                    token == 0 ? 0.0
-                               : static_cast<float>(hidden[hidden_index(d, token - 1, b, tokens)]);
-                // Finish adds the convolution to the residual stream.
-                expected[hidden_index(d, token, b, tokens)] =
-                    static_cast<float>(residual[hidden_index(d, token, b, tokens)]) +
-                    (static_cast<float>(base[2 * kD + d]) +
-                     static_cast<float>(dynamic[dynamic_index(group, 0, token, b, tokens)])) *
-                        x0 +
-                    (static_cast<float>(base[3 * kD + d]) +
-                     static_cast<float>(dynamic[dynamic_index(group, 1, token, b, tokens)])) *
-                        x1;
-            }
+    const Case value             = make_case(4, 2);
+    std::vector<double> expected = conv_oracle(value, 1, [&](int column, int offset, int group) {
+        return static_cast<double>(
+            at(value.dynamic, 2 * kGroups, column, offset * kGroups + group));
+    });
+    for (std::size_t index = 0; index < expected.size(); ++index)
+        expected[index] += static_cast<float>(value.residual[index]);
+    auto d_hidden  = upload(value.hidden);
+    auto d_base    = upload(value.base);
+    auto d_dynamic = upload(value.dynamic);
+    auto d_output  = upload(value.residual);
+    Tensor hidden(d_hidden.data(), DType::BF16, {kD, 4, 2});
+    Tensor base(d_base.data(), DType::BF16, {kD, 2, 2});
+    Tensor dynamic(d_dynamic.data(), DType::BF16, {kGroups, 2, 4, 2});
+    Tensor output(d_output.data(), DType::BF16, {kD, 4, 2});
+    ninfer::ops::grouped_dynamic_conv_finish(hidden, base, dynamic, output, device.stream);
+    device.synchronize();
+    return compare(download<hip_bfloat16>(d_output), expected, 0.02, 0.005, "finish");
+}
+
+Error run_finish_normalized(ninfer::DeviceContext& device, int tokens, int batch, bool graph) {
+    const Case value  = make_case(tokens, batch);
+    const int columns = value.columns;
+    // r = BF16(residual + BF16(conv)), the represented finished residual (FP64 conv).
+    const std::vector<double> conv = conv_oracle(value, 1, [&](int column, int offset, int group) {
+        return static_cast<double>(
+            at(value.dynamic, 2 * kGroups, column, offset * kGroups + group));
+    });
+    std::vector<double> expected_residual(conv.size());
+    for (std::size_t index = 0; index < conv.size(); ++index)
+        expected_residual[index] =
+            bf16_rne(static_cast<float>(value.residual[index]) + bf16_rne(conv[index]));
+    std::vector<double> expected_normalized(conv.size());
+    for (int column = 0; column < columns; ++column) {
+        double sumsq = 0.0;
+        for (int d = 0; d < kD; ++d) {
+            const double r = expected_residual[static_cast<std::size_t>(column) * kD + d];
+            sumsq += r * r;
+        }
+        const double inverse = 1.0 / std::sqrt(sumsq / kD + kEps);
+        for (int d = 0; d < kD; ++d) {
+            const std::size_t index = static_cast<std::size_t>(column) * kD + d;
+            expected_normalized[index] =
+                expected_residual[index] * inverse * static_cast<float>(value.norm[d]);
         }
     }
-    auto d_hidden  = upload(hidden);
-    auto d_base    = upload(base);
-    auto d_dynamic = upload(dynamic);
-    auto d_output  = upload(residual);
-    Tensor hidden_tensor(d_hidden.data(), DType::BF16, {kD, tokens, batch});
-    Tensor base_tensor(d_base.data(), DType::BF16, {kD, 2, 2});
-    Tensor dynamic_tensor(d_dynamic.data(), DType::BF16, {kGroups, 2, tokens, batch});
-    Tensor output_tensor(d_output.data(), DType::BF16, {kD, tokens, batch});
-    ninfer::ops::grouped_dynamic_conv_finish(hidden_tensor, base_tensor, dynamic_tensor,
-                                             output_tensor, device.stream);
+    auto d_hidden   = upload(value.hidden);
+    auto d_base     = upload(value.base);
+    auto d_dynamic  = upload(value.dynamic);
+    auto d_residual = upload(value.residual);
+    auto d_norm     = upload(value.norm);
+    DeviceBuffer d_out(value.residual.size() * sizeof(hip_bfloat16));
+    DeviceBuffer d_normalized(value.residual.size() * sizeof(hip_bfloat16));
+    Target target(columns);
+    DeviceBuffer& d_image = target.image;
+    Tensor hidden(d_hidden.data(), DType::BF16, {kD, tokens, batch});
+    Tensor base(d_base.data(), DType::BF16, {kD, 2, 2});
+    Tensor dynamic(d_dynamic.data(), DType::BF16, {kGroups, 2, tokens, batch});
+    Tensor residual(d_residual.data(), DType::BF16, {kD, tokens, batch});
+    Tensor residual_out(d_out.data(), DType::BF16, {kD, tokens, batch});
+    Tensor norm(d_norm.data(), DType::BF16, {kD});
+    Tensor normalized(d_normalized.data(), DType::BF16, {kD, tokens, batch});
+    const DeviceSpan image = span(d_image);
+    const std::string label =
+        "finish_normalized T" + std::to_string(tokens) + "/B" + std::to_string(batch);
+    const auto check = [&](const std::string& suffix) {
+        Error error       = compare(download<hip_bfloat16>(d_out), expected_residual, 0.02, 0.005,
+                                    label + suffix + " residual");
+        const auto actual = download<hip_bfloat16>(d_normalized);
+        merge(error,
+              compare(actual, expected_normalized, 0.06, 0.005, label + suffix + " normalized"));
+        image_oracle::require_image(
+            image_oracle::read(image, static_cast<std::uint32_t>(columns), kD),
+            image_oracle::encode(image_oracle::represented(actual),
+                                 static_cast<std::uint32_t>(columns), kD),
+            label + suffix);
+        if (download<hip_bfloat16>(d_residual) != value.residual)
+            fail(label + suffix + ": residual input changed");
+        require_completion_idle(target, label + suffix);
+        return error;
+    };
+    image_oracle::poison_status(image, columns, kD, device.stream);
+    ninfer::ops::grouped_dynamic_conv_finish_normalized(hidden, base, dynamic, residual,
+                                                        residual_out, norm, kEps, normalized,
+                                                        &target.view, device.stream);
     device.synchronize();
-    std::vector<hip_bfloat16> actual(hidden.size());
-    d_output.copy_to_host(actual.data(), d_output.size());
-    return compare(actual, expected, 0.001, 0.005, "finish");
+    Error result = check("");
+    // Without an image the BF16 outputs are unchanged.
+    const auto published_residual   = download<hip_bfloat16>(d_out);
+    const auto published_normalized = download<hip_bfloat16>(d_normalized);
+    d_out.fill(0);
+    d_normalized.fill(0);
+    ninfer::ops::grouped_dynamic_conv_finish_normalized(hidden, base, dynamic, residual,
+                                                        residual_out, norm, kEps, normalized,
+                                                        nullptr, device.stream);
+    device.synchronize();
+    if (download<hip_bfloat16>(d_out) != published_residual ||
+        download<hip_bfloat16>(d_normalized) != published_normalized)
+        fail(label + ": BF16 outputs depend on the image request");
+    if (graph) {
+        hipGraph_t captured{};
+        hipGraphExec_t executable{};
+        HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeThreadLocal));
+        ninfer::ops::grouped_dynamic_conv_finish_normalized(hidden, base, dynamic, residual,
+                                                            residual_out, norm, kEps, normalized,
+                                                            &target.view, device.stream);
+        HIP_CHECK(hipStreamEndCapture(device.stream, &captured));
+        HIP_CHECK(hipGraphInstantiate(&executable, captured, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) {
+            d_out.fill_async(0xff, device.stream);
+            d_normalized.fill_async(0xff, device.stream);
+            HIP_CHECK(hipMemsetAsync(d_image.data(), 0xff, d_image.size(), device.stream));
+            HIP_CHECK(hipGraphLaunch(executable, device.stream));
+            device.synchronize();
+            merge(result, check(" graph"));
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(captured));
+    }
+    std::vector<hip_bfloat16> poisoned = value.residual;
+    poisoned[static_cast<std::size_t>(columns - 1) * kD + 4099] =
+        hip_bfloat16(std::numeric_limits<float>::infinity());
+    d_residual.copy_from_host(poisoned.data(), d_residual.size());
+    ninfer::ops::grouped_dynamic_conv_finish_normalized(hidden, base, dynamic, residual,
+                                                        residual_out, norm, kEps, normalized,
+                                                        &target.view, device.stream);
+    device.synchronize();
+    if ((image_oracle::read(image, columns, kD).status & 1U) == 0U)
+        fail(label + ": a nonfinite residual left the status word clear");
+    return result;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     try {
-        const bool companion = argc == 4 && std::string(argv[1]) == "--dflash-companion";
-        int tokens = 0, batch = 0;
-        if (companion) {
-            tokens = std::stoi(argv[2]);
-            batch  = std::stoi(argv[3]);
-            if ((tokens != 5 && tokens != 6) || batch < 1 || batch > 4)
-                fail("expected W=5/6 and C=1..4");
-        } else if (argc != 1) {
-            fail("usage: grouped_dynamic_conv_qual [--dflash-companion W C]");
-        }
+        if (argc != 1) fail("usage: grouped_dynamic_conv_qual");
+        (void)argv;
         ninfer::DeviceContext device;
-        if (companion) {
-            (void)run_prepare(device, WeightKind::W8, tokens, batch, true);
-            return 0;
-        }
-        const Error bf16   = run_prepare(device, WeightKind::BF16, 1, 1);
-        const Error w8     = run_prepare(device, WeightKind::W8, 2, 2);
-        const Error q4     = run_prepare(device, WeightKind::Q4, 2, 2);
-        const Error finish = run_finish(device);
-        std::cout << "grouped_dynamic_conv: PASS gfx1201 D5120/G320 BF16+W8+Q4 T1/B1 "
-                     "T2/B2 caller-owned-arena max_abs="
-                  << std::max({bf16.max_abs, w8.max_abs, q4.max_abs, finish.max_abs}) << " rel_l2="
-                  << std::max(
-                         {bf16.relative_l2, w8.relative_l2, q4.relative_l2, finish.relative_l2})
-                  << " ms_bf16_t1=" << bf16.milliseconds << " ms_w8_t2b2=" << w8.milliseconds
-                  << " ms_q4_t2b2=" << q4.milliseconds << '\n';
+        Error total;
+        // Up to the batched 32-column width; graph replays start from a stale status word.
+        merge(total, run_prepare(device, 1, 1, false));
+        merge(total, run_prepare(device, 8, 1, true));
+        merge(total, run_prepare(device, 4, 2, false));
+        merge(total, run_prepare(device, 16, 2, true));
+        merge(total, run_finish(device));
+        merge(total, run_finish_normalized(device, 8, 1, true));
+        merge(total, run_finish_normalized(device, 3, 4, false));
+        merge(total, run_finish_normalized(device, 16, 2, true));
+        std::cout << "grouped_dynamic_conv: PASS gfx1201 D5120/G320 prepare T1/B1 T8/B1 T4/B2 "
+                     "T16/B2, finish T4/B2, finish_normalized T8/B1 T3/B4 T16/B2; exact A8G64 "
+                     "images, last-block status with idle completion words, graph replay, "
+                     "nonfinite status"
+                  << " max_abs=" << total.max_abs << " rel_l2=" << total.relative_l2 << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "grouped_dynamic_conv: FAIL: " << error.what() << '\n';

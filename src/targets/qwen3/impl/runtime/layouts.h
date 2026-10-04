@@ -43,6 +43,8 @@ struct DFlashPersistentLayout {
     TensorLayout prefill_features;
     TensorLayout prefill_positions;
     TensorLayout pending_features;
+    // The completion words of the drafter's fused Q4 activation-image producers.
+    TensorLayout image_completion;
 
     [[nodiscard]] std::size_t kv_payload_bytes() const noexcept {
         return local.payload_bytes() + staging_local.payload_bytes() +

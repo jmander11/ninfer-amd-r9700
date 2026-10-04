@@ -75,6 +75,29 @@ W8PayloadExtents validate_w8_weight(const Weight& weight, std::uint32_t rows, st
     return {code_bytes, scale_bytes};
 }
 
+struct Q4PayloadExtents {
+    std::uint64_t code_bytes;
+    std::uint64_t scale_bytes;
+};
+
+Q4PayloadExtents validate_q4_weight(const Weight& weight, std::uint32_t rows,
+                                    std::uint32_t padded) {
+    const std::uint64_t code_bytes =
+        checked_mul(checked_mul(rows, padded, "Q4 code plane"), 1U, "Q4 code plane") / 2U;
+    const std::uint64_t scale_bytes = checked_mul(checked_mul(rows, padded / 64U, "Q4 scale plane"),
+                                                  sizeof(std::uint16_t), "Q4 scale plane");
+    if (weight.qtype != QType::Q4G64_F16S || weight.layout != QuantLayout::Q4N16K16 ||
+        rows % 16U != 0U || weight.group != 64 || weight.group_size != 64 ||
+        weight.scale_dtype != DType::FP16 || weight.qdata == nullptr || weight.scales == nullptr ||
+        weight.qhigh != nullptr || weight.high_plane_bytes != 0 ||
+        weight.qdata_bytes != code_bytes || weight.scale_bytes != scale_bytes ||
+        weight.padded_shape[0] != weight.shape[0] ||
+        weight.padded_shape[1] != static_cast<std::int32_t>(padded)) {
+        throw std::invalid_argument("linear: malformed Q4G64_F16S Q4N16K16 weight");
+    }
+    return {code_bytes, scale_bytes};
+}
+
 struct ByteRange {
     std::uintptr_t first;
     std::uintptr_t last;
@@ -246,19 +269,8 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
         !x.is_contiguous() || !output.is_contiguous()) {
         throw std::invalid_argument("linear: shape or contiguous-layout mismatch");
     }
-    const std::uint32_t padded = padded_columns(columns);
-    const std::uint64_t code_bytes =
-        checked_mul(checked_mul(rows, padded, "Q4 code plane"), 1U, "Q4 code plane") / 2U;
-    const std::uint64_t scale_bytes = checked_mul(checked_mul(rows, padded / 64U, "Q4 scale plane"),
-                                                  sizeof(std::uint16_t), "Q4 scale plane");
-    if (weight.layout != QuantLayout::Q4N16K16 || rows % 16U != 0U || weight.group != 64 ||
-        weight.group_size != 64 || weight.scale_dtype != DType::FP16 || weight.qdata == nullptr ||
-        weight.scales == nullptr || weight.qhigh != nullptr || weight.high_plane_bytes != 0 ||
-        weight.qdata_bytes != code_bytes || weight.scale_bytes != scale_bytes ||
-        weight.padded_shape[0] != weight.shape[0] ||
-        weight.padded_shape[1] != static_cast<std::int32_t>(padded)) {
-        throw std::invalid_argument("linear: malformed Q4G64_F16S Q4N16K16 weight");
-    }
+    const std::uint32_t padded           = padded_columns(columns);
+    const auto [code_bytes, scale_bytes] = validate_q4_weight(weight, rows, padded);
     const std::uint64_t input_bytes =
         checked_mul(checked_mul(columns, tokens, "input"), sizeof(hip_bfloat16), "input");
     const std::uint64_t output_bytes =
@@ -588,6 +600,107 @@ void linear(const Tensor& x, const Weight& w, Tensor& out, hipStream_t stream) {
                       .columns        = columns,
                       .padded_columns = padded},
                      stream));
+}
+
+namespace {
+
+// The image of (tokens, columns) at the base of `image`, which must hold it.
+r9700::linear::A8G64ActivationWorkspace bind_q4_image(const DeviceSpan& image, std::uint32_t tokens,
+                                                      std::uint32_t columns) {
+    const std::size_t bytes =
+        r9700::linear::a8q4g64_activation_workspace_capacity_bytes(tokens, columns);
+    if (bytes == 0U) throw std::overflow_error("linear: Q4 activation image overflows");
+    if (image.data == nullptr || image.bytes < bytes) {
+        throw std::invalid_argument("linear: Q4 activation image span is too small");
+    }
+    r9700::linear::A8G64ActivationWorkspace workspace{};
+    if (r9700::linear::a8q4g64_bind_activation_workspace(image.data, bytes, tokens, columns,
+                                                         &workspace) != hipSuccess) {
+        throw std::invalid_argument("linear: Q4 activation image span is misaligned");
+    }
+    return workspace;
+}
+
+void require_rows(const Tensor& tensor, std::int32_t rows, const char* label) {
+    if (tensor.dtype != DType::BF16 || tensor.ne[0] != rows || tensor.ne[1] <= 0 ||
+        tensor.ne[2] != 1 || tensor.ne[3] != 1 || !tensor.is_contiguous() ||
+        tensor.data == nullptr) {
+        throw std::invalid_argument(std::string("linear: ") + label + " must be BF16 [" +
+                                    std::to_string(rows) + ",T]");
+    }
+}
+
+} // namespace
+
+std::size_t q4_activation_image_bytes(std::int32_t tokens, std::int32_t columns) {
+    const std::size_t bytes = r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
+        checked_extent(tokens, "T"), checked_extent(columns, "K"));
+    if (bytes == 0U) throw std::overflow_error("linear: Q4 activation image overflows");
+    return bytes;
+}
+
+void quantize_q4_activation_image(const Tensor& x, const DeviceSpan& image, hipStream_t stream) {
+    require_rows(x, x.ne[0], "image input");
+    const std::uint32_t columns = checked_extent(x.ne[0], "K");
+    const std::uint32_t tokens  = checked_extent(x.ne[1], "T");
+    HIP_CHECK(r9700::linear::a8g64_quantize_activation(
+        {static_cast<const hip_bfloat16*>(x.data), bind_q4_image(image, tokens, columns)}, stream));
+}
+
+void linear_q4_activation_image(const Weight& w, Tensor& out, const DeviceSpan& image,
+                                hipStream_t stream) {
+    if (out.dtype != DType::BF16 || out.ne[2] != 1 || out.ne[3] != 1 || !out.is_contiguous() ||
+        w.ndim != 2 || w.n != out.ne[0] || w.shape[0] != out.ne[0] || w.shape[1] != w.k) {
+        throw std::invalid_argument("linear: Q4 image projection expects output BF16 [N,T]");
+    }
+    const std::uint32_t rows             = checked_extent(out.ne[0], "N");
+    const std::uint32_t tokens           = checked_extent(out.ne[1], "T");
+    const std::uint32_t columns          = checked_extent(w.k, "K");
+    const std::uint32_t padded           = padded_columns(columns);
+    const auto [code_bytes, scale_bytes] = validate_q4_weight(w, rows, padded);
+    (void)bind_q4_image(image, tokens, columns);
+    HIP_CHECK(r9700::linear::a8q4g64_linear_prepared(
+        {.input                      = nullptr,
+         .weight_codes               = static_cast<const std::uint8_t*>(w.qdata),
+         .weight_code_bytes          = static_cast<std::size_t>(code_bytes),
+         .weight_scales              = static_cast<const std::uint16_t*>(w.scales),
+         .weight_scale_bytes         = static_cast<std::size_t>(scale_bytes),
+         .activation_workspace       = image.data,
+         .activation_workspace_bytes = image.bytes,
+         .output                     = static_cast<hip_bfloat16*>(out.data),
+         .tokens                     = tokens,
+         .rows                       = rows,
+         .columns                    = columns,
+         .padded_columns             = padded},
+        stream));
+}
+
+void rmsnorm_q4_activation_image(const Tensor& x, const Tensor& norm, float eps, bool unit_offset,
+                                 Tensor& normalized, const DeviceSpan& image, hipStream_t stream) {
+    constexpr std::int32_t kColumns = 5120;
+    require_rows(x, kColumns, "normalized image input");
+    require_rows(normalized, kColumns, "normalized image output");
+    if (normalized.ne[1] != x.ne[1] || norm.dtype != DType::BF16 || norm.ne[0] != kColumns ||
+        norm.ne[1] != 1 || !norm.is_contiguous() || norm.data == nullptr) {
+        throw std::invalid_argument("linear: normalized image expects norm BF16 [5120]");
+    }
+    HIP_CHECK(r9700::linear::a8g64_normalized_prepare(
+        static_cast<const hip_bfloat16*>(x.data), static_cast<const hip_bfloat16*>(norm.data), eps,
+        unit_offset, bind_q4_image(image, checked_extent(x.ne[1], "T"), kColumns),
+        static_cast<hip_bfloat16*>(normalized.data), stream));
+}
+
+void silu_mul_q4_activation_image(const Tensor& gate_up, const Q4ActivationImageTarget& target,
+                                  hipStream_t stream) {
+    constexpr std::int32_t kColumns = 17408;
+    require_rows(gate_up, 2 * kColumns, "SiLU image gate/up");
+    if (target.completion == nullptr) {
+        throw std::invalid_argument("linear: SiLU image target has no completion words");
+    }
+    HIP_CHECK(r9700::linear::fused_silu_a8g64_prepare(
+        static_cast<const hip_bfloat16*>(gate_up.data),
+        bind_q4_image(target.image, checked_extent(gate_up.ne[1], "T"), kColumns), stream,
+        target.completion));
 }
 
 } // namespace ninfer::ops

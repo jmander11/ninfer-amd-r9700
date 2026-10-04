@@ -1769,18 +1769,19 @@ transient workspace; LLVM reports 31 VGPR, 42 SGPR, no LDS/private scratch or sp
 run the `ninfer_r9700_bidirectional_gqa_qual` target in the R9700 CMake tree.
 
 `grouped_dynamic_conv_qual` reaches the public DFlash2 grouped-convolution boundary at its exact
-D5120/G320/kernel-2 geometry. It independently evaluates the complete projection and convolution
-formula in FP64 from represented BF16 activations and represented BF16, exact signed W8G32, or
-exact signed Q4G64 weights with their stored FP16 scales. The physical cases cover BF16 T1/B1,
-W8 T2/B2, adaptive-A8 Q4 T2/B2, both preparation phases, the zero-padded block boundary, and a
-separate T4/B2 finish. The
-selected implementation delegates the large `[1280,5120]` projection directly to the qualified
-native Linear Op, materializes only the caller-owned BF16 projection, and fuses phase-0 convolution
-with phase-1 stash extraction in one gfx1201 kernel. ROCm-event measurements were 0.0615 ms for
-BF16 T1/B1, 0.0939 ms for W8 T2/B2, and 0.0741 ms for Q4 T2/B2; maximum absolute oracle error was
-1.59e-5. Build and run the
-`ninfer_r9700_grouped_dynamic_conv_qual` target in the R9700 CMake tree. The prepare/finish kernels
-use 13/10 VGPR, no LDS, and no private scratch.
+D5120/G320/kernel-2 geometry. Its FP64 oracle evaluates prepare (from a supplied represented
+projection, both phases, the zero-padded block boundary), the in-place finish, and the fused
+finish + RMSNorm (represented BF16 residual seam) at T1/B1, T8/B1, T4/B2, T3/B4 and T16/B2. Every
+requested Q4 activation image must equal the independent host A8G64 oracle
+(`a8g64_image_oracle.h`) of the published BF16 values bit for bit, including a status word that
+starts stale in graph replays; a NaN or infinity must set it, and the completion words must return
+to zero after every launch. Build and run `ninfer_r9700_grouped_dynamic_conv_qual`.
+
+`q4_activation_image_qual` qualifies the Q4 activation image boundary (`ninfer/ops/linear.h`):
+quantized, RMSNorm and SiLU images against the host oracle (status CTA, reset and last-block
+status routes, NaN status), and every projection from an image bit-identical to the ordinary
+Linear on the same input for N1280/6144/34816 x K5120 and N5120 x K4096/17408 at T1/8/12/16/384.
+Build and run `ninfer_r9700_q4_activation_image_qual`.
 
 `swa_qual` qualifies the DFlash2 symmetric cyclic SWA boundary at D128/Hq32/Hkv8 for both admitted
 W2048 and W4096 windows. Its represented-BF16/FP64 oracle covers wraparound, the exact distance

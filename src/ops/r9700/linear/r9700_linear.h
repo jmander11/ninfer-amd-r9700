@@ -590,6 +590,20 @@ a8q4g64_linear_prefill_cta_m128n128_qualification(const A8Q4G64LinearArgs& args,
                                                   hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
                                                   hipStream_t stream) noexcept;
+// The same projection of activation planes and status word a producer Op already wrote, with the
+// exact A8G64 codec, into the image a8q4g64_bind_activation_workspace binds for (tokens, columns)
+// at activation_workspace (whose extent may exceed the image); args.input must be null.
+[[nodiscard]] hipError_t a8q4g64_linear_prepared(const A8Q4G64CandidateArgs& args,
+                                                 hipStream_t stream) noexcept;
+// The normalized prepare of a8q4g64_normalized_shared_activation_linear alone: RMSNorm
+// BF16(x * rsqrt(mean(x^2) + eps) * (norm + unit_offset)) of input [T,5120] published to
+// `normalized` [T,5120] and encoded into workspace (K5120). T <= 12 publishes the status word from
+// a status CTA (no reset launch); wider T resets it first. input, norm and normalized are 16-byte
+// aligned and pairwise disjoint from each other and the workspace.
+[[nodiscard]] hipError_t
+a8g64_normalized_prepare(const hip_bfloat16* input, const hip_bfloat16* norm, float eps,
+                         bool unit_offset, const A8G64ActivationWorkspace& workspace,
+                         hip_bfloat16* normalized, hipStream_t stream) noexcept;
 // Projected-residual boundary for T >= 2: the signed-A8G64 codec of represented BF16 input
 // [T,K], the A8Q4 projection against the Q4N16K16 weight, BF16 rounding of the projection, then
 // BF16(residual + projection) published in place into output [T,N]. Served by the small-batch
@@ -604,9 +618,12 @@ a8q4g64_linear_prefill_cta_m128n128_qualification(const A8Q4G64LinearArgs& args,
 // place, at every width a8q4g64_projected_residual_supported admits.
 [[nodiscard]] hipError_t fused_silu_a8q4g64_down(const FusedSiluA8Q4G64DownArgs& args,
                                                  hipStream_t stream) noexcept;
+// The fused preparation alone into workspace (K17408). Without completion words the status word
+// is reset first; with them the last block publishes it (codec::a8g64_complete_status).
 [[nodiscard]] hipError_t fused_silu_a8g64_prepare(const hip_bfloat16* gate_up,
                                                   const A8G64ActivationWorkspace& workspace,
-                                                  hipStream_t stream) noexcept;
+                                                  hipStream_t stream,
+                                                  std::uint32_t* completion = nullptr) noexcept;
 [[nodiscard]] hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept;
 
 [[nodiscard]] hipError_t bf16_linear(const Bf16LinearArgs& args, hipStream_t stream) noexcept;

@@ -532,8 +532,12 @@ __global__ __launch_bounds__(kWaveSize) void a8g64_quantize_activation_kernel(
 }
 
 using codec::a8g64_element_overflows;
+using codec::a8g64_encode_represented;
 using codec::a8g64_encode_vector;
 using codec::a8g64_group_maximum;
+using codec::a8g64_accumulate_status;
+using codec::a8g64_complete_status;
+using codec::a8g64_value_status;
 using codec::bf16_word_element;
 
 // Small-T form of the same codec: 512-thread CTAs with one 16-byte vector per thread, plus one
@@ -1064,60 +1068,45 @@ __global__ __launch_bounds__(kGatedSmallThreads) void a8g64_gated_normalized_pre
     if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
 }
 
-__global__ __launch_bounds__(kWaveSize) void fused_silu_a8g64_quantize_kernel(
+// The fused SiLU codec: one 16-byte slot of eight features per thread over T x 2176 slots, eight
+// adjacent lanes per G64 group. With completion words the last block publishes the status word;
+// otherwise every thread accumulates into a status word reset beforehand (by the launcher or an
+// earlier stage of the same Op).
+constexpr std::uint32_t kSiluColumns  = 17408U;
+constexpr std::uint32_t kSiluRowSlots = kSiluColumns / 8U;
+static_assert(kSiluRowSlots % 8U == 0U && kSmallQuantizeThreads % 8U == 0U);
+
+__global__ __launch_bounds__(kSmallQuantizeThreads) void fused_silu_a8g64_quantize_kernel(
     const hip_bfloat16* gate_up, std::uint8_t* low_codes, std::uint8_t* high_codes,
-    std::uint16_t* scale_words, std::uint32_t* status) {
-    constexpr std::uint32_t columns       = 17408U;
-    constexpr std::uint32_t packed_stride = 2U * columns;
-    const std::uint32_t group             = blockIdx.x;
-    const std::uint32_t token             = blockIdx.y;
-    const std::uint32_t lane              = threadIdx.x;
-    const std::uint32_t column0           = group * kQ4Group + lane * 2U;
-    const std::uint32_t column1           = column0 + 1U;
-    const std::size_t token_base          = static_cast<std::size_t>(token) * packed_stride;
-    auto rounded_activation               = [&](std::uint32_t column) {
-        const float gate = static_cast<float>(gate_up[token_base + column]);
-        const float up   = static_cast<float>(gate_up[token_base + columns + column]);
-        const hip_bfloat16 represented((gate / (1.0F + expf(-gate))) * up);
-        float value = static_cast<float>(represented);
-        if (!isfinite(value)) {
-            atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
-            value = 0.0F;
-        }
-        return value;
-    };
-    const float value0 = rounded_activation(column0);
-    const float value1 = rounded_activation(column1);
-    float maximum      = fmaxf(fabsf(value0), fabsf(value1));
+    std::uint16_t* scale_words, std::uint32_t* status, std::uint32_t* completion,
+    std::uint32_t tokens) {
+    const std::uint32_t vector = blockIdx.x * kSmallQuantizeThreads + threadIdx.x;
+    bool nonfinite = false, overflow = false;
+    if (vector < tokens * kSiluRowSlots) { // whole G64 groups (eight slots) share validity
+        const std::uint32_t token = vector / kSiluRowSlots, slot = vector % kSiluRowSlots;
+        const hip_bfloat16* row = gate_up + static_cast<std::size_t>(token) * 2U * kSiluColumns;
+        const uint4 gate_words  = reinterpret_cast<const uint4*>(row)[slot];
+        const uint4 up_words    = reinterpret_cast<const uint4*>(row + kSiluColumns)[slot];
+        const std::uint32_t gate_packed[4]{gate_words.x, gate_words.y, gate_words.z, gate_words.w};
+        const std::uint32_t up_packed[4]{up_words.x, up_words.y, up_words.z, up_words.w};
+        float value[8];
 #pragma unroll
-    for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U) {
-        maximum = fmaxf(maximum, __shfl_down(maximum, width, kWaveSize));
-    }
-    std::uint16_t represented_scale_bits = 0U;
-    if (lane == 0U) {
-        if (maximum != 0.0F) {
-            represented_scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
-            if (represented_scale_bits == 0U) represented_scale_bits = 1U;
-            if (!isfinite(__half2float(__ushort_as_half(represented_scale_bits)))) {
-                atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
-                represented_scale_bits = 0U;
-            }
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            const float gate = bf16_word_element(gate_packed, element);
+            value[element]   = static_cast<float>(hip_bfloat16(
+                (gate / (1.0F + expf(-gate))) * bf16_word_element(up_packed, element)));
         }
-        scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + group] =
-            represented_scale_bits;
+        a8g64_value_status(value, nonfinite, overflow);
+        a8g64_encode_represented(value, threadIdx.x, vector,
+                                 static_cast<std::size_t>(token) * (kSiluColumns / kQ4Group) +
+                                     slot / 8U,
+                                 low_codes, high_codes, scale_words);
     }
-    represented_scale_bits = static_cast<std::uint16_t>(
-        __shfl(static_cast<unsigned>(represented_scale_bits), 0, kWaveSize));
-    const float scale = __half2float(__ushort_as_half(represented_scale_bits));
-    const int code0   = scale != 0.0F ? max(-127, min(127, __float2int_rn(value0 / scale))) : 0;
-    const int code1   = scale != 0.0F ? max(-127, min(127, __float2int_rn(value1 / scale))) : 0;
-    const int low0    = code0 & 0x0f;
-    const int low1    = code1 & 0x0f;
-    const int high0   = (code0 - low0) / 16;
-    const int high1   = (code1 - low1) / 16;
-    const std::size_t packed = (static_cast<std::size_t>(token) * columns + column0) / 2U;
-    low_codes[packed]        = static_cast<std::uint8_t>(low0 | (low1 << 4));
-    high_codes[packed]       = static_cast<std::uint8_t>((high0 & 0x0f) | ((high1 & 0x0f) << 4));
+    if (completion != nullptr) {
+        a8g64_complete_status(nonfinite, overflow, status, completion);
+    } else {
+        a8g64_accumulate_status(nonfinite, overflow, status);
+    }
 }
 
 __global__ __launch_bounds__(kWaveSize) void a8g32_quantize_activation_kernel(
@@ -4007,6 +3996,35 @@ hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat
 #endif
 }
 
+hipError_t a8g64_normalized_prepare(const hip_bfloat16* input, const hip_bfloat16* norm, float eps,
+                                    bool unit_offset, const A8G64ActivationWorkspace& workspace,
+                                    hip_bfloat16* normalized, hipStream_t stream) noexcept {
+    const std::uint32_t tokens = workspace.tokens;
+    std::size_t row_bytes      = 0;
+    if (input == nullptr || norm == nullptr || normalized == nullptr || !(eps > 0.0F) ||
+        eps > std::numeric_limits<float>::max() || !valid_a8_workspace(workspace) ||
+        workspace.columns != kNormalizedPrefillColumns ||
+        workspace.padded_columns != kNormalizedPrefillColumns ||
+        !checked_mul(static_cast<std::size_t>(tokens) * kNormalizedPrefillColumns,
+                     sizeof(hip_bfloat16), &row_bytes) ||
+        reinterpret_cast<std::uintptr_t>(input) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(norm) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(normalized) % 16U != 0U ||
+        ranges_overlap(input, row_bytes, normalized, row_bytes))
+        return hipErrorInvalidValue;
+    const void* planes[]{workspace.low_codes, workspace.high_codes, workspace.scales,
+                         workspace.status};
+    const std::size_t plane_bytes[]{workspace.low_code_bytes, workspace.high_code_bytes,
+                                    workspace.scale_bytes, sizeof(std::uint32_t)};
+    for (std::size_t index = 0U; index < 4U; ++index) {
+        if (ranges_overlap(input, row_bytes, planes[index], plane_bytes[index]) ||
+            ranges_overlap(normalized, row_bytes, planes[index], plane_bytes[index]))
+            return hipErrorInvalidValue;
+    }
+    return launch_normalized_prepare(input, norm, eps, unit_offset, tokens, workspace, normalized,
+                                     stream);
+}
+
 bool a8q4g64_normalized_linear_batched_supported(std::uint32_t tokens) noexcept {
     return tokens >= 1U && scalar_base_offsets_fit(tokens, 34816U, 5120U);
 }
@@ -4642,6 +4660,46 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args, hipStream_
     return run_a8q4_projection(linear_args, stream);
 }
 
+hipError_t a8q4g64_linear_prepared(const A8Q4G64CandidateArgs& args, hipStream_t stream) noexcept {
+    std::size_t output_elements = 0, output_bytes = 0;
+    const std::size_t image_bytes =
+        a8q4g64_activation_workspace_capacity_bytes(args.tokens, args.columns);
+    if (args.input != nullptr || image_bytes == 0U ||
+        args.activation_workspace_bytes < image_bytes ||
+        !checked_mul(args.tokens, args.rows, &output_elements) ||
+        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes) ||
+        ranges_overlap(args.activation_workspace, image_bytes, args.output, output_bytes) ||
+        ranges_overlap(args.activation_workspace, image_bytes, args.weight_codes,
+                       args.weight_code_bytes) ||
+        ranges_overlap(args.activation_workspace, image_bytes, args.weight_scales,
+                       args.weight_scale_bytes)) {
+        return hipErrorInvalidValue;
+    }
+    A8G64ActivationWorkspace workspace{};
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace, image_bytes, args.tokens,
+                                          args.columns, &workspace) != hipSuccess ||
+        workspace.padded_columns != args.padded_columns)
+        return hipErrorInvalidValue;
+    const A8Q4G64LinearArgs linear_args{workspace.low_codes,
+                                        workspace.low_code_bytes,
+                                        workspace.high_codes,
+                                        workspace.high_code_bytes,
+                                        workspace.scales,
+                                        workspace.scale_bytes,
+                                        workspace.status,
+                                        args.weight_codes,
+                                        args.weight_code_bytes,
+                                        args.weight_scales,
+                                        args.weight_scale_bytes,
+                                        args.output,
+                                        args.tokens,
+                                        args.rows,
+                                        args.columns,
+                                        args.padded_columns};
+    if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
+    return run_a8q4_projection(linear_args, stream);
+}
+
 bool a8q4g64_projected_residual_supported(std::uint32_t tokens, std::uint32_t rows,
                                           std::uint32_t columns) noexcept {
     const bool small_batch = rows == 5U * 1024U && detail::use_a8q4_small_batch_projection(
@@ -4702,7 +4760,8 @@ hipError_t a8q4g64_projected_residual(const A8Q4G64CandidateArgs& args,
 namespace {
 hipError_t launch_fused_silu_quantize(const hip_bfloat16* gate_up,
                                       const A8G64ActivationWorkspace& workspace, bool reset,
-                                      hipStream_t stream) noexcept;
+                                      hipStream_t stream,
+                                      std::uint32_t* completion = nullptr) noexcept;
 
 hipError_t fused_silu_down(const FusedSiluA8Q4G64DownArgs& args, bool status_cleared,
                            hipStream_t stream) noexcept {
@@ -4713,7 +4772,8 @@ hipError_t fused_silu_down(const FusedSiluA8Q4G64DownArgs& args, bool status_cle
     std::size_t output_elements = 0, output_bytes = 0;
     if (!a8q4g64_projected_residual_supported(tokens, rows, columns) || args.rows != rows ||
         args.columns != columns || args.padded_columns != columns || args.gate_up == nullptr ||
-        args.residual == nullptr || !checked_mul(tokens, 2U * columns, &gate_up_elements) ||
+        reinterpret_cast<std::uintptr_t>(args.gate_up) % 16U != 0U || args.residual == nullptr ||
+        !checked_mul(tokens, 2U * columns, &gate_up_elements) ||
         !checked_mul(gate_up_elements, sizeof(hip_bfloat16), &gate_up_bytes) ||
         !checked_mul(tokens, rows, &output_elements) ||
         !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes) ||
@@ -4797,12 +4857,13 @@ hipError_t a8q4g64_normalized_mlp(const A8Q4G64CandidateArgs& gate_up, const hip
 }
 
 hipError_t fused_silu_a8g64_prepare(const hip_bfloat16* gate_up,
-                                    const A8G64ActivationWorkspace& workspace,
-                                    hipStream_t stream) noexcept {
+                                    const A8G64ActivationWorkspace& workspace, hipStream_t stream,
+                                    std::uint32_t* completion) noexcept {
     const std::uint32_t tokens      = workspace.tokens;
     constexpr std::uint32_t columns = 17408U;
     if (gate_up == nullptr || !valid_a8_workspace(workspace) || tokens == 0U ||
-        workspace.columns != columns || workspace.padded_columns != columns) {
+        workspace.columns != columns || workspace.padded_columns != columns ||
+        reinterpret_cast<std::uintptr_t>(gate_up) % 16U != 0U) {
         return hipErrorInvalidValue;
     }
     std::size_t gate_up_elements = 0, gate_up_bytes = 0;
@@ -4814,21 +4875,38 @@ hipError_t fused_silu_a8g64_prepare(const hip_bfloat16* gate_up,
         ranges_overlap(gate_up, gate_up_bytes, workspace.status, sizeof(std::uint32_t))) {
         return hipErrorInvalidValue;
     }
-    return launch_fused_silu_quantize(gate_up, workspace, true, stream);
+    if (completion != nullptr) {
+        constexpr std::size_t kCompletionBytes = 2U * sizeof(std::uint32_t);
+        const void* planes[]{gate_up, workspace.low_codes, workspace.high_codes, workspace.scales,
+                             workspace.status};
+        const std::size_t extents[]{gate_up_bytes, workspace.low_code_bytes,
+                                    workspace.high_code_bytes, workspace.scale_bytes,
+                                    sizeof(std::uint32_t)};
+        if (reinterpret_cast<std::uintptr_t>(completion) % alignof(std::uint32_t) != 0U)
+            return hipErrorInvalidValue;
+        for (std::size_t index = 0U; index < 5U; ++index) {
+            if (ranges_overlap(completion, kCompletionBytes, planes[index], extents[index]))
+                return hipErrorInvalidValue;
+        }
+    }
+    return launch_fused_silu_quantize(gate_up, workspace, true, stream, completion);
 }
 
 namespace {
 hipError_t launch_fused_silu_quantize(const hip_bfloat16* gate_up,
                                       const A8G64ActivationWorkspace& workspace, bool reset,
-                                      hipStream_t stream) noexcept {
-    if (reset) {
+                                      hipStream_t stream, std::uint32_t* completion) noexcept {
+    if (reset && completion == nullptr) {
         const hipError_t result =
             hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
         if (result != hipSuccess) return result;
     }
-    hipLaunchKernelGGL(fused_silu_a8g64_quantize_kernel, dim3(17408U / kQ4Group, workspace.tokens),
-                       dim3(kWaveSize), 0, stream, gate_up, workspace.low_codes,
-                       workspace.high_codes, workspace.scales, workspace.status);
+    const std::uint32_t vectors = workspace.tokens * kSiluRowSlots;
+    hipLaunchKernelGGL(fused_silu_a8g64_quantize_kernel,
+                       dim3((vectors + kSmallQuantizeThreads - 1U) / kSmallQuantizeThreads),
+                       dim3(kSmallQuantizeThreads), 0, stream, gate_up, workspace.low_codes,
+                       workspace.high_codes, workspace.scales, workspace.status, completion,
+                       workspace.tokens);
     return hipGetLastError();
 }
 } // namespace

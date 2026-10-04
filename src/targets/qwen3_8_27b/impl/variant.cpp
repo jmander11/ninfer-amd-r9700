@@ -423,6 +423,10 @@ void Variant::ExecutionState::linear(const Tensor& input, const Weight& weight, 
     ops::linear(input, weight, output, DeviceSpan{impl_->activation.data, required}, stream);
 }
 
+DeviceSpan Variant::ExecutionState::activation_storage() const noexcept {
+    return impl_ == nullptr ? DeviceSpan{} : impl_->activation;
+}
+
 bool Variant::ExecutionState::fp8lut4_targets_supported(
     std::uint32_t tokens, std::uint32_t columns,
     std::span<const Fp8Lut4Target> targets) const noexcept {

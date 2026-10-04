@@ -80,6 +80,9 @@ struct Variant {
                                       hipStream_t stream);
         void linear(const Tensor& input, const Weight& weight, Tensor& output,
                     WorkspaceArena& fallback_workspace, hipStream_t stream);
+        // The serialized activation region every projection of this state binds at its base; a
+        // producer may publish a Q4 activation image there for the next projection.
+        [[nodiscard]] DeviceSpan activation_storage() const noexcept;
 
         // One FP8LUT4 projection target: rows [0, leading rows) publish to `leading`, the rest to
         // `trailing` (nullptr: every row to `leading`); `accumulate` publishes

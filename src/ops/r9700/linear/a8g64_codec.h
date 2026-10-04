@@ -4,6 +4,8 @@
 // adjacent lanes own one G64 group (one 16-byte BF16 vector each), codes are the rounded quotient
 // by the represented FP16 scale max/127, split into signed low/high nibble planes.
 
+#include "ops/r9700/linear/r9700_linear.h"
+
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 
@@ -59,6 +61,63 @@ a8g64_encode_vector(const float (&value)[8], float maximum, std::uint32_t lane, 
     }
     reinterpret_cast<std::uint32_t*>(low_codes)[vector]  = low_word;
     reinterpret_cast<std::uint32_t*>(high_codes)[vector] = high_word;
+}
+
+// Codec status conditions of eight represented values: a nonfinite value, or a finite value
+// whose group scale overflows FP16.
+__device__ __forceinline__ void a8g64_value_status(const float (&value)[8], bool& nonfinite,
+                                                   bool& overflow) {
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        nonfinite |= !isfinite(value[element]);
+        overflow |= isfinite(value[element]) && a8g64_element_overflows(value[element]);
+    }
+}
+
+// Encodes the eight represented values of one vector (nonfinite values encode as zero, the
+// status word reports them); every lane of the group must call it.
+__device__ __forceinline__ void
+a8g64_encode_represented(const float (&represented)[8], std::uint32_t lane, std::size_t vector,
+                         std::size_t scale_index, std::uint8_t* low_codes, std::uint8_t* high_codes,
+                         std::uint16_t* scale_words) {
+    float value[8];
+    float maximum = 0.0F;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        value[element] = isfinite(represented[element]) ? represented[element] : 0.0F;
+        maximum        = fmaxf(maximum, fabsf(value[element]));
+    }
+    a8g64_encode_vector(value, a8g64_group_maximum(maximum), lane, vector, scale_index, low_codes,
+                        high_codes, scale_words);
+}
+
+// Publishes the status word of a launch without a reset launch: each block ORs its conditions into
+// completion[0] and counts itself in completion[1]; the last block to finish stores the combined
+// status word and returns both completion words to zero for the next launch. The words must be zero
+// before the first launch and serve one launch at a time. Every thread of every block calls it.
+__device__ __forceinline__ void a8g64_complete_status(bool nonfinite, bool overflow,
+                                                      std::uint32_t* status,
+                                                      std::uint32_t* completion) {
+    const bool any_nonfinite = __syncthreads_or(nonfinite);
+    const bool any_overflow  = __syncthreads_or(overflow);
+    if (threadIdx.x != 0U || threadIdx.y != 0U || threadIdx.z != 0U) return;
+    const std::uint32_t flags =
+        (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
+        (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow) : 0U);
+    if (flags != 0U) atomicOr(&completion[0], flags);
+    __threadfence();
+    const std::uint32_t blocks = gridDim.x * gridDim.y * gridDim.z;
+    if (atomicAdd(&completion[1], 1U) != blocks - 1U) return;
+    __threadfence();
+    *status = atomicExch(&completion[0], 0U);
+    atomicExch(&completion[1], 0U);
+}
+
+// Accumulates this thread's conditions into a status word the launcher reset beforehand.
+__device__ __forceinline__ void a8g64_accumulate_status(bool nonfinite, bool overflow,
+                                                        std::uint32_t* status) {
+    if (nonfinite) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
+    if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
 }
 
 } // namespace ninfer::ops::r9700::linear::codec

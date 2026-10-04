@@ -103,10 +103,27 @@ outside the bandwidth-bound projections were examined:
   byte saving would be about 0.5% / 1% of the round, so a shorter head loses; the full shortlist
   stays. Evidence: `profiles/bench/r9700-head-rows-20261003/`, `r9700-selector-proj-20261003/`.
 
-Remaining drafter glue: 36 standalone A8G64 quantize launches and 5 status memsets per round
-(114 us of kernels plus launch gaps, about 0.55% of the round; context append quantizes one
-input five times and the final hidden twice), the path-select chain (29 us) and column top-k
-(43 us).
+Remaining drafter glue after this study: the standalone A8G64 quantize launches (removed
+below), the path-select chain (29 us) and column top-k (43 us).
+
+## Drafter Q4 activation images (2026-10-04)
+
+The drafter's Q4 projections each quantized their BF16 input in a separate launch. Duplicating
+those launches cost 0.21 ms per 29.1 ms C1 round (about 4.8 us per launch including its gap),
+which bounds what removing them can save. Producers now publish the exact A8G64 image straight
+into the serialized activation region and the projections read it
+(`ops::linear_q4_activation_image`): RMSNorm of layer 0, the grouped-conv prepare, a fused
+conv-finish + next RMSNorm (out-of-place residual), and the SiLU, plus one shared quantization
+of the context for the five context-append QKV projections. Launches per round fell 255 -> 212
+at C1.
+
+A first version published each image's status word from one extra status CTA that re-evaluated
+every value; it was 1.1% slower (status CTAs of 18-70 us; the SWA reduce variant also lost its
+parallel grid). The selected version lets the last finishing block publish the status word through
+two persistent completion words, and leaves SWA unchanged. Production shape (`-pg 512,512`, DFlash
+K7 `--lm-head-draft`, 3 ABAB passes x 3 reps): C1 127.21 -> 127.88 tok/s (+0.52%, 29.17 -> 29.01 ms
+per round, every pass); C4 277.15 -> 278.84 tok/s (+0.6%). Rounds and acceptance are identical to
+the previous build at both concurrencies. Evidence: `profiles/bench/r9700-drafter-image-20261004/`.
 
 ## Online p-less draft-temperature calibration (2026-10-03)
 

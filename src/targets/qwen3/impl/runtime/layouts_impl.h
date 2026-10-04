@@ -15,6 +15,7 @@
 #include "ninfer/ops/swa.h"
 #include "ninfer/ops/grouped_dynamic_conv.h"
 #include "ninfer/ops/dflash2_path_select.h"
+#include "ninfer/ops/linear.h"
 
 #include <algorithm>
 #include <initializer_list>
@@ -253,6 +254,8 @@ PersistentLayout persistent_layout(const SequencePlanImpl& plan) {
                 {DFlashConfig::feature_rows, static_cast<std::int32_t>(plan.dflash_verify_width),
                  static_cast<std::int32_t>(plan.max_concurrency)},
                 "DFlash pending target features");
+            dflash.image_completion =
+                add_tensor(builder, DType::I32, {2}, "DFlash activation image completion");
         }
     }
 
@@ -637,7 +640,16 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         if constexpr (!Variant::supports_dflash) {
             throw std::logic_error("unsupported target reached DFlash scratch planning");
         } else {
-            const QType dflash_matrix_qtype    = Variant::dflash_matrix_qtype(plan.weights_profile);
+            const QType dflash_matrix_qtype = Variant::dflash_matrix_qtype(plan.weights_profile);
+            // A projection without the serialized execution state quantizes into the arena.
+            const auto dflash_linear_workspace = [&](std::int32_t tokens) {
+                return std::max({ops::linear_workspace_capacity_bytes(dflash_matrix_qtype, tokens,
+                                                                      DFlashConfig::hidden),
+                                 ops::linear_workspace_capacity_bytes(dflash_matrix_qtype, tokens,
+                                                                      DFlashConfig::query_size),
+                                 ops::linear_workspace_capacity_bytes(dflash_matrix_qtype, tokens,
+                                                                      DFlashConfig::intermediate)});
+            };
             const auto dflash_context_capacity = [&](std::int32_t tokens, bool compact_input) {
                 WorkspaceLayoutBuilder layout;
                 if (compact_input) {
@@ -660,20 +672,23 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                 matrix(layout, DType::I32, width, batch);
                 matrix(layout, DType::I32, std::max(width - 1, 1), batch);
                 matrix(layout, DType::BF16, DFlashConfig::hidden, tokens);
-                {
-                    auto attention = layout.scope();
-                    (void)workspace_recipe::dflash_attention<DFlashConfig>(layout, tokens);
-                    scratch(layout,
-                            ops::swa_workspace_capacity_bytes({0, plan.capacity}, 1, width, batch));
-                    scratch(layout, ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(
-                                        dflash_matrix_qtype, width, width, batch));
-                }
-                {
-                    auto mlp = layout.scope();
-                    (void)workspace_recipe::dflash_mlp<DFlashConfig>(layout, tokens);
-                    scratch(layout, ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(
-                                        dflash_matrix_qtype, width, width, batch));
-                }
+                const auto drafter_layers = [&] {
+                    auto layers = layout.scope();
+                    (void)workspace_recipe::dflash_layer_carry<DFlashConfig>(layout, tokens);
+                    {
+                        auto attention = layout.scope();
+                        (void)workspace_recipe::dflash_attention<DFlashConfig>(layout, tokens);
+                        scratch(layout, ops::swa_workspace_capacity_bytes({0, plan.capacity}, 1,
+                                                                          width, batch));
+                        scratch(layout, dflash_linear_workspace(tokens));
+                    }
+                    {
+                        auto mlp = layout.scope();
+                        (void)workspace_recipe::dflash_mlp<DFlashConfig>(layout, tokens);
+                        scratch(layout, dflash_linear_workspace(tokens));
+                    }
+                };
+                drafter_layers();
                 matrix(layout, DType::BF16, DFlashConfig::hidden, drafts * batch);
                 matrix(layout, DType::BF16, DFlashConfig::hidden, drafts * batch);
                 if (plan.proposal_head == ProposalHead::Optimized) {
@@ -687,22 +702,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                                     static_cast<std::size_t>(drafts) *
                                     static_cast<std::size_t>(batch) *
                                     (sizeof(std::int32_t) + sizeof(float)));
-                if constexpr (DFlashConfig::two_block_first > 0) {
-                    {
-                        auto attention = layout.scope();
-                        (void)workspace_recipe::dflash_attention<DFlashConfig>(layout, tokens);
-                        scratch(layout, ops::swa_workspace_capacity_bytes({0, plan.capacity}, 1,
-                                                                          width, batch));
-                        scratch(layout, ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(
-                                            dflash_matrix_qtype, width, width, batch));
-                    }
-                    {
-                        auto mlp = layout.scope();
-                        (void)workspace_recipe::dflash_mlp<DFlashConfig>(layout, tokens);
-                        scratch(layout, ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(
-                                            dflash_matrix_qtype, width, width, batch));
-                    }
-                }
+                if constexpr (DFlashConfig::two_block_first > 0) { drafter_layers(); }
                 return finish(layout);
             };
 

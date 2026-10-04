@@ -1,7 +1,6 @@
 #include "artifact/binder.h"
 #include "artifact/reader.h"
 #include "ninfer/ops/dflash2_path_select.h"
-#include "ninfer/ops/grouped_dynamic_conv.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
 #include "targets/qwen3_8_27b/impl/load/bindings.h"
 #include "targets/qwen3_8_27b/impl/load/fp8_hybrid_selection.h"
@@ -251,13 +250,6 @@ ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
                 "DFlash2 layer matrix binding is not uniformly Q4G64");
     }
     constexpr std::int32_t kTokens = 2;
-    constexpr std::int32_t kBatch  = 2;
-    constexpr std::size_t kProjectionBytes =
-        static_cast<std::size_t>(ninfer::ops::kGroupedDynamicConvProjRows) * kTokens * kBatch *
-        sizeof(std::uint16_t);
-    require(ninfer::ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(
-                QType::Q4G64_F16S, kTokens, kTokens, kBatch) > kProjectionBytes,
-            "DFlash2 grouped-convolution workspace omitted Q4 Linear scratch");
     // Selector projection runs one request at a time and reuses scratch with
     // top-k. At B2 top-k dominates both formats; B1 exposes Q4's Linear peak.
     require(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(QType::Q4G64_F16S, kTokens,

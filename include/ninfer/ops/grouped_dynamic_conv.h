@@ -2,6 +2,7 @@
 
 #include "core/arena.h"
 #include "core/tensor.h"
+#include "ninfer/ops/linear.h"
 #include "ninfer/types.h"
 
 #include <hip/hip_runtime_api.h>
@@ -22,67 +23,69 @@ inline constexpr std::int32_t kGroupedDynamicConvMaxBatch =
 inline constexpr std::int32_t kGroupedDynamicConvMaxWidthWhenBatched = 16;
 
 /**
- * Op: grouped_dynamic_conv_prepare / grouped_dynamic_conv_finish
+ * Op: grouped_dynamic_conv_prepare / grouped_dynamic_conv_finish /
+ *     grouped_dynamic_conv_finish_normalized
  *
  * Math / indexing:
- *   Let D=5120, G=320, group_size=16, kernel=2. For each column (t,b) the projection is
+ *   Let D=5120, G=320, group_size=16, kernel=2. For each column (t,b) the caller supplies the
+ *   dynamic-kernel projection
  *
- *     proj[n,t,b] = sum_{k=0}^{D-1} W[n,k] * hidden[k,t,b],   n in [0,1280).
+ *     proj[n,t,b] = sum_{k=0}^{D-1} W[n,k] * hidden[k,t,b],   n in [0,1280),
  *
- *   Split n = phase * 640 + offset * 320 + group with phase,offset in {0,1} and group in [0,G).
- *   Prepare uses phase 0 and stashes phase 1; finish uses the stashed phase-1 values. The causal
- *   grouped convolution at phase p is
+ *   evaluated by the Linear Op from the same hidden. Split n = phase * 640 + offset * 320 + group
+ *   with phase,offset in {0,1} and group in [0,G). Prepare uses phase 0 and stashes phase 1;
+ *   finish uses the stashed phase-1 values. The causal grouped convolution at phase p is
  *
  *     values[d,t,b,0] = hidden[d,t,b]
  *     values[d,t,b,1] = hidden[d,t-1,b] if t>=1 else 0
  *     out[d,t,b]      = sum_{j=0,1}
  *                         (base[d,j,p] + dynamic[group(d),j,t,b]) * values[d,t,b,j]
  *
- *   with group(d)=floor(d/16). Prepare writes out into `prepared` with p=0 and writes
+ *   with group(d)=floor(d/16). Prepare publishes BF16(out) with p=0 to `prepared` and/or the Q4
+ *   activation image of those values (ninfer/ops/linear.h), and writes
  *   dynamic[g,j,t,b] = proj[640 + j*320 + g, t, b] into `finish_dynamic`. Finish reads that stash,
  *   applies p=1 and adds the rounded result to the residual stream in place:
- *   residual[d,t,b] = BF16(residual[d,t,b] + BF16(out[d,t,b])). There is no persistent conv state;
- * padding is zeros at the start of the supplied block.
+ *   residual[d,t,b] = BF16(residual[d,t,b] + BF16(out[d,t,b])). finish_normalized instead
+ *   publishes that sum to residual_out (residual is unchanged) and also the next sublayer's
+ *   RMSNorm normalized[d,t,b] = BF16(r[d,t,b] * rsqrt(mean_d(r[d,t,b]^2) + eps) * norm[d]) of the
+ *   represented sum r (the BF16 seam ops::rmsnorm publishes), plus, when requested, the Q4
+ *   activation image of normalized. There is no persistent conv state; padding is zeros at the
+ *   start of the supplied block.
  *
  * Logical shapes:
- *   hidden/prepared/residual are contiguous BF16 [D,T] or [D,T,B]. finish_dynamic is contiguous
- * BF16 [G,2,T] or [G,2,T,B]. base_kernel is contiguous BF16 [D,2,2] stored D-fastest, then kernel
- *   offset, then phase (physical layout of a PyTorch [2,2,D] parameter). kernel_projection is a
- *   logical [1280,D] matrix. T is any positive value at B=1; B=2..8 admits T=1..16.
- *
- * Supported domain:
- *   Activations and base_kernel are BF16. kernel_projection is BF16_CTRL Contiguous [1280,D], or
- *   canonical W8G32_F16S RowSplit or Q4G64_F16S Q4N16K16 of the same logical shape. Every
- *   projection route is owned by the native gfx1201 Linear Op and consumes artifact storage
- *   directly.
+ *   hidden/prepared/residual/residual_out/normalized are contiguous BF16 [D,T] or [D,T,B].
+ *   projection is contiguous BF16 [1280,T] or [1280,T,B]. finish_dynamic is contiguous BF16
+ *   [G,2,T] or [G,2,T,B]. base_kernel is contiguous BF16 [D,2,2] stored D-fastest, then kernel
+ *   offset, then phase (physical layout of a PyTorch [2,2,D] parameter). norm is BF16 [D]. T is any
+ *   positive value at B=1; B=2..8 admits T=1..16. An image is bound for (T*B, 5120).
  *
  * Numeric:
  *   The oracle evaluates the complete formula in FP64 from the represented BF16 activations and
- *   the logical FP32 dequantized projection matrix. BF16 outputs are promoted and compared
- *   directly with that result. Output storage rounding, GEMM association, and kernel staging are
- *   implementation-defined.
+ *   the represented projection. BF16 outputs are promoted and compared directly with that result;
+ *   an image decodes exactly to the A8G64 codec of the published BF16 values. Output storage
+ *   rounding and kernel staging are implementation-defined.
  *
  * Effects:
- *   Prepare writes all of prepared and finish_dynamic. Finish updates all of residual. Inputs
- *   other than those outputs are unchanged. prepared/residual must not alias hidden, base_kernel,
- *   finish_dynamic, or any projection-weight plane. finish_dynamic must not alias hidden or
- * base_kernel.
- *
- * Workspace:
- *   Prepare uses caller-owned transient storage sized by
- *   grouped_dynamic_conv_prepare_workspace_capacity_bytes() for the [1280,T*B] BF16 projection
- *   and any caller-owned Linear activation image. Finish uses no workspace.
+ *   Prepare writes all of finish_dynamic and every requested output (at least one of prepared and
+ *   image). Finish updates all of residual. finish_normalized writes all of residual_out,
+ *   normalized, and the requested image. Outputs alias no input and no other output; the image
+ *   span overlaps no tensor operand. An image's status word is published by the launch's last
+ *   finishing block through the target's completion words (ninfer/ops/linear.h).
  */
-[[nodiscard]] std::size_t grouped_dynamic_conv_prepare_workspace_capacity_bytes(
-    QType qtype, std::int32_t min_tokens, std::int32_t max_tokens, std::int32_t batch = 1);
-
 void grouped_dynamic_conv_prepare(const Tensor& hidden, const Tensor& base_kernel,
-                                  const Weight& kernel_projection, Tensor& prepared,
-                                  Tensor& finish_dynamic, WorkspaceArena& workspace,
+                                  const Tensor& projection, Tensor* prepared,
+                                  Tensor& finish_dynamic, const Q4ActivationImageTarget* image,
                                   hipStream_t stream);
 
 void grouped_dynamic_conv_finish(const Tensor& hidden, const Tensor& base_kernel,
                                  const Tensor& finish_dynamic, Tensor& residual,
                                  hipStream_t stream);
+
+void grouped_dynamic_conv_finish_normalized(const Tensor& hidden, const Tensor& base_kernel,
+                                            const Tensor& finish_dynamic, const Tensor& residual,
+                                            Tensor& residual_out, const Tensor& norm, float eps,
+                                            Tensor& normalized,
+                                            const Q4ActivationImageTarget* image,
+                                            hipStream_t stream);
 
 } // namespace ninfer::ops
