@@ -150,8 +150,6 @@ void project_hidden(const Tensor& hidden, const Weight& weight, Tensor& projecte
     }
 }
 
-constexpr int kTopkSplits = 32;
-
 std::size_t align_workspace(std::size_t bytes) {
     constexpr std::size_t kAlign = 256;
     return (bytes + kAlign - 1) & ~(kAlign - 1);
@@ -159,31 +157,20 @@ std::size_t align_workspace(std::size_t bytes) {
 
 std::size_t topk_scratch_bytes(std::int32_t tokens, std::int32_t batch) {
     const std::size_t columns = static_cast<std::size_t>(tokens) * static_cast<std::size_t>(batch);
-    const std::size_t split =
-        columns * static_cast<std::size_t>(kTopkSplits) * kDflash2PathSelectTopK;
-    const std::size_t merged = columns * kDflash2PathSelectTopK;
-    return (split + merged) * (sizeof(float) + sizeof(std::int32_t));
+    return columns * kDflash2PathSelectTopK * (sizeof(float) + sizeof(std::int32_t));
 }
 
 struct TopkScratch {
-    float* split_val;
-    int* split_idx;
     float* cand_val;
     int* cand_idx;
 };
 
 TopkScratch alloc_topk_scratch(WorkspaceArena& workspace, std::int32_t tokens, std::int32_t batch) {
-    const std::size_t columns = static_cast<std::size_t>(tokens) * static_cast<std::size_t>(batch);
-    const std::size_t split =
-        columns * static_cast<std::size_t>(kTopkSplits) * kDflash2PathSelectTopK;
-    const std::size_t merged = columns * kDflash2PathSelectTopK;
+    const std::size_t merged =
+        static_cast<std::size_t>(tokens) * static_cast<std::size_t>(batch) * kDflash2PathSelectTopK;
     auto* bytes =
         static_cast<std::byte*>(workspace.alloc_bytes(topk_scratch_bytes(tokens, batch)).data);
     TopkScratch out{};
-    out.split_val = reinterpret_cast<float*>(bytes);
-    bytes += split * sizeof(float);
-    out.split_idx = reinterpret_cast<int*>(bytes);
-    bytes += split * sizeof(std::int32_t);
     out.cand_val = reinterpret_cast<float*>(bytes);
     bytes += merged * sizeof(float);
     out.cand_idx = reinterpret_cast<int*>(bytes);
@@ -257,8 +244,8 @@ void dflash2_path_select(const Tensor& logits, const Tensor& hidden,
     Tensor hidden_proj(proj_span.data, DType::BF16, {kDflash2PathSelectRank, tokens * batch});
     project_hidden(hidden, hidden_projection, hidden_proj, tokens, batch, workspace, stream);
     const TopkScratch topk = alloc_topk_scratch(workspace, tokens, batch);
-    detail::dflash2_column_topk_launch(logits, topk.split_val, topk.split_idx, topk.cand_val,
-                                       topk.cand_idx, logit_token_ids, stream);
+    detail::dflash2_column_topk_launch(logits, topk.cand_val, topk.cand_idx, logit_token_ids,
+                                       stream);
     detail::dflash2_path_select_launch(topk.cand_val, topk.cand_idx, hidden_proj, pred_code,
                                        succ_code, anchors, logical_positions, path, tokens, batch,
                                        configs, stream, selector_ids, selector_q, seed_xor,
@@ -322,8 +309,8 @@ void dflash2_tree_select(const Tensor& logits, const Tensor& hidden,
     Tensor hidden_proj(proj_span.data, DType::BF16, {kDflash2PathSelectRank, tokens * batch});
     project_hidden(hidden, hidden_projection, hidden_proj, tokens, batch, workspace, stream);
     const TopkScratch topk = alloc_topk_scratch(workspace, tokens, batch);
-    detail::dflash2_column_topk_launch(logits, topk.split_val, topk.split_idx, topk.cand_val,
-                                       topk.cand_idx, logit_token_ids, stream);
+    detail::dflash2_column_topk_launch(logits, topk.cand_val, topk.cand_idx, logit_token_ids,
+                                       stream);
     detail::dflash2_tree_select_launch(topk.cand_val, topk.cand_idx, hidden_proj, pred_code,
                                        succ_code, anchors, frontiers, verify_ids, parent_index,
                                        cache_positions, rope_positions, ancestor_mask,

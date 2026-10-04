@@ -103,8 +103,8 @@ outside the bandwidth-bound projections were examined:
   byte saving would be about 0.5% / 1% of the round, so a shorter head loses; the full shortlist
   stays. Evidence: `profiles/bench/r9700-head-rows-20261003/`, `r9700-selector-proj-20261003/`.
 
-Remaining drafter glue after this study: the standalone A8G64 quantize launches (removed
-below), the path-select chain (29 us) and column top-k (43 us).
+Remaining drafter glue after this study: the standalone A8G64 quantize launches and the column
+top-k (both removed below), and the path-select chain (29 us).
 
 ## Drafter Q4 activation images (2026-10-04)
 
@@ -124,6 +124,13 @@ two persistent completion words, and leaves SWA unchanged. Production shape (`-p
 K7 `--lm-head-draft`, 3 ABAB passes x 3 reps): C1 127.21 -> 127.88 tok/s (+0.52%, 29.17 -> 29.01 ms
 per round, every pass); C4 277.15 -> 278.84 tok/s (+0.6%). Rounds and acceptance are identical to
 the previous build at both concurrencies. Evidence: `profiles/bench/r9700-drafter-image-20261004/`.
+
+The DFlash2 column top-16 then ran as a 32-way split (33 us: every thread insertion-sorted its 16
+logits) plus a merge launch (10 us). One 1024-thread CTA per column now takes the 16th best of
+its 32 wave maxima as a threshold that at least 16 logits meet, re-reads the column for the few
+logits at least that good, and ranks them exactly (an exclusion fallback covers more than 2048
+ties); results are identical. C1 production shape: 29.027 -> 28.985 ms per round (+0.16%,
+127.82 -> 128.00 tok/s, identical rounds and acceptance).
 
 ## Online p-less draft-temperature calibration (2026-10-03)
 

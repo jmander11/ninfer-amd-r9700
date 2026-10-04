@@ -8,23 +8,16 @@
 
 namespace ninfer::ops::detail {
 
-void dflash2_column_topk_launch(const Tensor& logits, float* split_val, int* split_idx,
-                                float* cand_val, int* cand_idx, const Tensor* logit_token_ids,
-                                hipStream_t stream) {
-    const std::int32_t vocab  = logits.ne[0];
-    const std::int32_t tokens = logits.ne[1];
-    const std::int32_t batch  = logits.ne[2];
-    const dim3 split_grid(static_cast<unsigned int>(kDflash2PathSelectTopkSplits),
-                          static_cast<unsigned int>(tokens), static_cast<unsigned int>(batch));
-    dflash2_column_topk_split_kernel<<<split_grid, kDflash2PathSelectBlock, 0, stream>>>(
-        static_cast<const hip_bfloat16*>(logits.data), split_val, split_idx, vocab, tokens, batch);
-    HIP_CHECK(hipGetLastError());
-    const dim3 merge_grid(static_cast<unsigned int>(tokens), static_cast<unsigned int>(batch));
-    dflash2_column_topk_merge_kernel<<<merge_grid, kDflash2PathSelectBlock, 0, stream>>>(
-        split_val, split_idx, cand_val, cand_idx,
+void dflash2_column_topk_launch(const Tensor& logits, float* cand_val, int* cand_idx,
+                                const Tensor* logit_token_ids, hipStream_t stream) {
+    const std::int32_t vocab   = logits.ne[0];
+    const std::int32_t columns = logits.ne[1] * logits.ne[2];
+    dflash2_column_topk_kernel<<<static_cast<unsigned int>(columns), kDflash2ColumnTopkThreads, 0,
+                                 stream>>>(
+        static_cast<const hip_bfloat16*>(logits.data), cand_val, cand_idx,
         logit_token_ids != nullptr ? static_cast<const std::int32_t*>(logit_token_ids->data)
                                    : nullptr,
-        vocab, tokens, batch);
+        vocab, columns);
     HIP_CHECK(hipGetLastError());
 }
 

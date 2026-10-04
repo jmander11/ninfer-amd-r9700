@@ -9,9 +9,8 @@
 
 namespace ninfer::ops::detail {
 
-void dflash2_column_topk_launch(const Tensor& logits, float* split_val, int* split_idx,
-                                float* cand_val, int* cand_idx, const Tensor* logit_token_ids,
-                                hipStream_t stream);
+void dflash2_column_topk_launch(const Tensor& logits, float* cand_val, int* cand_idx,
+                                const Tensor* logit_token_ids, hipStream_t stream);
 void dflash2_path_select_launch(const float* cand_val, const int* cand_idx,
                                 const Tensor& hidden_proj, const Tensor& pred_bf16,
                                 const Tensor& succ_bf16, const Tensor& anchors,

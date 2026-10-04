@@ -2,6 +2,7 @@
 #include "core/device.h"
 #include "ninfer/ops/dflash2_path_select.h"
 #include "ninfer/ops/linear.h"
+#include "ops/r9700/dflash/dflash2_path_select_launch.h"
 
 #include <hip/hip_bfloat16.h>
 
@@ -13,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -490,9 +492,7 @@ void require_equal(const std::vector<T>& actual, const std::vector<T>& expected,
 void require_workspace_peak(const ninfer::WorkspaceArena& workspace, ninfer::QType qtype,
                             const char* label) {
     const std::size_t columns    = static_cast<std::size_t>(kT * kB);
-    const std::size_t split      = columns * 32U * kTop;
-    const std::size_t merged     = columns * kTop;
-    const std::size_t topk_bytes = (split + merged) * (sizeof(float) + sizeof(std::int32_t));
+    const std::size_t topk_bytes = columns * kTop * (sizeof(float) + sizeof(std::int32_t));
     const std::size_t expected =
         static_cast<std::size_t>(kR) * kT * kB * sizeof(std::uint16_t) +
         std::max(topk_bytes, ninfer::ops::linear_workspace_capacity_bytes(qtype, kT, kH));
@@ -860,6 +860,81 @@ void run_malformed_planes(ninfer::DeviceContext& device, const ProjectionFixture
     expect_invalid([&] { invoke_q4(retired_q4_layout); }, "retired Q4 RowSplit layout");
 }
 
+// The column top-K launch alone against an exact host oracle: finite logits only, (value desc,
+// lower row) order, empty slot c padded as (c, -inf), then the optional token-id map. Columns
+// cover random logits, an all-tied column (more candidates than the LDS buffer: exclusion
+// fallback), an all-NaN column, a column with ten finite logits, and boundary ties; vocabularies
+// cover the unaligned scalar route and both proposal heads.
+void run_topk_stress(ninfer::DeviceContext& device, int vocab, bool mapped) {
+    constexpr int kColumns = 6;
+    std::mt19937 generator(static_cast<unsigned>(vocab));
+    std::normal_distribution<float> normal(0.0F, 3.0F);
+    std::vector<hip_bfloat16> logits(static_cast<std::size_t>(kColumns) * vocab);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    for (int column = 0; column < kColumns; ++column) {
+        for (int row = 0; row < vocab; ++row) {
+            float value = normal(generator);
+            if (column == 1) value = 1.0F;
+            if (column == 2) value = nan;
+            if (column == 3)
+                value = row % (vocab / 10 + 1) == 0 && row / (vocab / 10 + 1) < 10
+                            ? static_cast<float>(row % 7)
+                            : -inf;
+            if (column == 4) value = row % 97 == 0 ? 9.0F : (row % 5 == 0 ? inf : value);
+            if (column == 5 && row % 3 == 0) value = nan;
+            logits[static_cast<std::size_t>(column) * vocab + row] = hip_bfloat16(value);
+        }
+    }
+    std::vector<std::int32_t> ids(static_cast<std::size_t>(vocab));
+    for (int row = 0; row < vocab; ++row)
+        ids[static_cast<std::size_t>(row)] = (row * 7919) % 250000;
+    ninfer::DeviceBuffer d_logits(logits.size() * sizeof(hip_bfloat16));
+    d_logits.copy_from_host(logits.data(), d_logits.size());
+    ninfer::DeviceBuffer d_ids(ids.size() * sizeof(std::int32_t));
+    d_ids.copy_from_host(ids.data(), d_ids.size());
+    ninfer::DeviceBuffer d_val(static_cast<std::size_t>(kColumns) * kTop * sizeof(float));
+    ninfer::DeviceBuffer d_idx(static_cast<std::size_t>(kColumns) * kTop * sizeof(std::int32_t));
+    ninfer::Tensor logit_tensor(d_logits.data(), ninfer::DType::BF16, {vocab, kColumns, 1});
+    ninfer::Tensor id_tensor(d_ids.data(), ninfer::DType::I32, {vocab});
+    ninfer::ops::detail::dflash2_column_topk_launch(logit_tensor, static_cast<float*>(d_val.data()),
+                                                    static_cast<int*>(d_idx.data()),
+                                                    mapped ? &id_tensor : nullptr, device.stream);
+    device.synchronize();
+    std::vector<float> values(static_cast<std::size_t>(kColumns) * kTop);
+    std::vector<std::int32_t> indices(values.size());
+    d_val.copy_to_host(values.data(), d_val.size());
+    d_idx.copy_to_host(indices.data(), d_idx.size());
+    for (int column = 0; column < kColumns; ++column) {
+        std::vector<std::pair<float, int>> finite;
+        for (int row = 0; row < vocab; ++row) {
+            const float value =
+                static_cast<float>(logits[static_cast<std::size_t>(column) * vocab + row]);
+            if (std::isfinite(value)) finite.emplace_back(value, row);
+        }
+        const auto better = [](const auto& lhs, const auto& rhs) {
+            return lhs.first > rhs.first || (lhs.first == rhs.first && lhs.second < rhs.second);
+        };
+        const std::size_t kept = std::min<std::size_t>(kTop, finite.size());
+        std::partial_sort(finite.begin(), finite.begin() + static_cast<std::ptrdiff_t>(kept),
+                          finite.end(), better);
+        for (int slot = 0; slot < kTop; ++slot) {
+            float value = -inf;
+            int row     = slot < vocab ? slot : 0;
+            if (static_cast<std::size_t>(slot) < kept) {
+                value = finite[static_cast<std::size_t>(slot)].first;
+                row   = finite[static_cast<std::size_t>(slot)].second;
+            }
+            const int expected_index = mapped ? ids[static_cast<std::size_t>(row)] : row;
+            const std::size_t at     = static_cast<std::size_t>(column) * kTop + slot;
+            if (std::bit_cast<std::uint32_t>(values[at]) != std::bit_cast<std::uint32_t>(value) ||
+                indices[at] != expected_index) {
+                fail("column top-k V=" + std::to_string(vocab) + " column " +
+                     std::to_string(column) + " slot " + std::to_string(slot) + " differs");
+            }
+        }
+    }
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -896,7 +971,12 @@ int main(int argc, char** argv) {
         run_tree(device, corpus, projection, data, ProjectionKind::W8);
         run_tree(device, corpus, projection, data, ProjectionKind::Q4);
         run_malformed_planes(device, projection, data);
-        std::cout << "dflash2_select: PASS gfx1201 BF16+W8G32+Q4G64 T=2 B=2 "
+        for (const int vocab : {1001, 131072, 248320}) {
+            run_topk_stress(device, vocab, false);
+            run_topk_stress(device, vocab, true);
+        }
+        std::cout << "dflash2_select: PASS column-top-k stress V1001/131072/248320; gfx1201 "
+                     "BF16+W8G32+Q4G64 T=2 B=2 "
                      "independent-FP64 identity/mapped top-k/ties chain+tree "
                      "caller-owned-arena malformed-planes\n";
         return 0;
