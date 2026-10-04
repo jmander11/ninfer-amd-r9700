@@ -123,6 +123,21 @@ passes; the baseline is the same tree with only the three sampling headers rever
 Every prompt/seed pair runs the same number of rounds in both builds (same sampled
 trajectories), and the new build's run-to-run spread is much narrower.
 
+Concurrent serve, same two builds: one server at `--max-concurrency 8`, DFlash K7
+`--lm-head-draft` (fixed K, so seeded p-less trajectories pair across builds), T1.5, 512-token
+streaming requests over 8 rotating prompts, 4 waves per C in each of 2 ABBA passes. Aggregate
+decode = generated tokens / (last finish - first token):
+
+| C | before (tok/s) | after (tok/s) | paired median | wins |
+|---:|---:|---:|---:|---:|
+| 1 | 91.8 | 99.5 | +8.4% | 8/8 |
+| 2 | 157.5 | 168.7 | +8.1% | 8/8 |
+| 4 | 242.5 | 260.3 | +8.0% | 7/8 |
+| 8 | 376.5 | 397.6 | +6.2% | 8/8 |
+
+With `--adaptive-draft` the live K follows round time, trajectories diverge, and two passes per
+build were too noisy to resolve C1 (C2/C4/C8 +14/+7/+6%).
+
 The `4bf04efd` KV-tier port (RAM claims no longer wait for a spill of the same entry, startup
 checkpoint slab, two-phase disk eviction, request-local restore failures) was checked with the
 2026-10-01 churn harness (C3 serve, Compose tiers, DFlash K7 adaptive, six ~12K-token
@@ -131,7 +146,10 @@ pre-sync build. All 18 greedy replies match in both builds and the 2026-10-01 ru
 is about 4.0 s, RAM loads 125-507 ms, and the largest decode gap 0.89/1.51 s (sync) against
 2.36/0.91 s (pre-sync), each one outlier. The pre-sync build already carried the fork's stall fixes that upstream
 ported in the same commit, so this run is a no-regression check, not a speedup claim. A first sync run during a concurrent 8-job host build showed 5-7 s cold
-TTFT and one 5.6 s RAM restore; neither recurred on a quiet host.
+TTFT and one 5.6 s RAM restore; neither recurred on a quiet host, nor in ABBA reruns of both
+builds under 8 CPU-spinning processes or a looping clean `-j 8` build (largest decode gap
+0.34-0.37 s sync, 0.36-0.55 s pre-sync; RAM loads 122-274 ms; cold TTFT about 4.0 s; identical
+replies). The cause of that single event is not established.
 
 ## Adaptive draft picker and p-less draft temperature per K (2026-10-02)
 
