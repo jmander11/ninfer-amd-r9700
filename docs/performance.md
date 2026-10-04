@@ -86,6 +86,28 @@ harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
 
+## Drafter leftovers after the persistent decode kernel (2026-10-03)
+
+A whole-round C1 kernel trace (DFlash K7 `--lm-head-draft`) puts the drafter and selection at
+about 2.8 ms of the ~29.4 ms round, with every drafter projection at 620-640 GB/s. Two items
+outside the bandwidth-bound projections were examined:
+
+- The DFlash2 selector's N256/K5120 hidden projection ran on the generic wmma32 route (16
+  single-wave CTAs walking K serially): 79 us per round for 0.7 MB. The small-batch route with a
+  16-wave K split takes 3.8 us (`cb6c7cf7`).
+- The 131072-row draft head streams about 356 MB per round (about 600 us). Its rows are stored in
+  corpus-frequency order with the 21 forced special tokens last, so a shorter head was emulated by
+  masking rows [R, 131040) before top-16 (production shape, 11 prompts x 3 p-less T1.5 seeds,
+  calibrated draft temperature, 1024 tokens). Acceptance against the full head: R=98304 0.905
+  (95% bootstrap 0.866-0.943, median 0.964), R=65536 0.821 (0.755-0.886, median 0.892). The
+  byte saving would be about 0.5% / 1% of the round, so a shorter head loses; the full shortlist
+  stays. Evidence: `profiles/bench/r9700-head-rows-20261003/`, `r9700-selector-proj-20261003/`.
+
+Remaining drafter glue: 36 standalone A8G64 quantize launches and 5 status memsets per round
+(114 us of kernels plus launch gaps, about 0.55% of the round; context append quantizes one
+input five times and the final hidden twice), the path-select chain (29 us) and column top-k
+(43 us).
+
 ## Online p-less draft-temperature calibration (2026-10-03)
 
 Upstream `24d527d1` scores eight candidate draft temperatures on every p-less chain round from
