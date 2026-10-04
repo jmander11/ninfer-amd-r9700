@@ -104,7 +104,7 @@ outside the bandwidth-bound projections were examined:
   stays. Evidence: `profiles/bench/r9700-head-rows-20261003/`, `r9700-selector-proj-20261003/`.
 
 Remaining drafter glue after this study: the standalone A8G64 quantize launches and the column
-top-k (both removed below), and the path-select chain (29 us).
+top-k (both removed below), and the path-select chain (29 us, kept; see below).
 
 ## Drafter Q4 activation images (2026-10-04)
 
@@ -131,6 +131,12 @@ its 32 wave maxima as a threshold that at least 16 logits meet, re-reads the col
 logits at least that good, and ranks them exactly (an exclusion fallback covers more than 2048
 ties); results are identical. C1 production shape: 29.027 -> 28.985 ms per round (+0.16%,
 127.82 -> 128.00 tok/s, identical rounds and acceptance).
+
+The path-select chain (29 us, one CTA serially staging rows and scoring each hop) was rewritten to
+score every hop's 16 x 16 predecessor/candidate transitions in parallel (bit-identical choices) and
+walk the chain over them; the global row gathers did not overlap and the kernel took 43 us, so the
+serial kernel stays. Its ceiling was about 20 us (0.07% of the round). The one-launch top-k measures
+18 us (two passes over each 256 KiB column on one CU), not the ~5 us bandwidth floor.
 
 ## Online p-less draft-temperature calibration (2026-10-03)
 
