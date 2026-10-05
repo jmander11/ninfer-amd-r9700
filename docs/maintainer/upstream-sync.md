@@ -5,10 +5,11 @@ repository by custom AMD ports, not merged ancestry; `AGENTS.md` states the sync
 
 ## Baseline
 
-Reconciled through upstream `945515eafdbccdf3f80f19bce40c70f1ccf2a282` (2026-10-04), advanced
-from `48eb0b01` (2026-10-03), `593c2d0c` (2026-10-03), `574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
+Reconciled through upstream `f0d3922e8a4dfedf57cd7011bc0eb72e0e1c8236` (2026-10-04), advanced
+from `945515ea` (2026-10-04), `48eb0b01` (2026-10-03), `593c2d0c` (2026-10-03),
+`574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
 `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`,
-`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `945515ea`
+`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `f0d3922e`
 against current AMD behavior.
 
 ## Ported features (`c450798c..e04fad37`)
@@ -297,3 +298,41 @@ the `quality/clang-tidy-backlog` branch, so `4051ebf0..26ba4203` are not descend
 
 Verification and R9700 timing scope are recorded in `docs/performance.md`; upstream's 5090
 numbers are not AMD evidence. This reconciliation changes no ancestry and creates no merge.
+
+## `945515ea..f0d3922e` (1 upstream commit, reconciled 2026-10-04)
+
+Source commit: `f0d3922e8a4dfedf57cd7011bc0eb72e0e1c8236` (`perf: optimize nvfp4 prefill
+and dflash gdn commits`). All changes are explicitly dispositioned; this sync changes no runtime.
+
+- Excluded: the signed G16 A4 activation representation, RMSNorm/sigmoid/SwiGLU A4 producers,
+  NVFP4 attention-input and residual consumers, NVFP4 tiled SwiGLU changes, and their target
+  dispatch/workspace changes. These are CUDA/NVFP4 routes outside the fixed R9700 FP8LUT4
+  weight and activation profiles. AMD's qualified producer-side A8 handoffs remain authoritative.
+- Excluded: 64-row short Exact attention prefill tiles. The changed launcher dispatch and kernel
+  operate on upstream's U8 NVFP4 cache, with CUDA dynamic shared memory and NVIDIA matrix
+  instructions; they do not implement the AMD FP8-K/INT4-V/FP16-scale cache. Existing native
+  short-append routes remain authoritative; the upstream tile threshold is not an AMD tuning result.
+- Applicable optimization, not adopted: DFlash capacity-four accepted GDN history. Upstream
+  retains FP32 normalized keys, decay and parent-derived innovations beside a dense checkpoint,
+  appends short accepted paths, and materializes when retained plus accepted length is at least four. R9700
+  retains its qualified raw-record Fold and fused deferred-chain schedule. The upstream route
+  requires history-aware verification and materialization/reset at dense consumers, snapshots,
+  restores, retention and prefill. Its derived records must come from the same invocation's actual
+  parent and commit an ancestor-complete path, unlike the raw-record Fold interface. A native
+  replacement must qualify those ownership/provenance boundaries and AMD arithmetic, including
+  persistent and mixed verification, before promotion. No such qualified gfx1201 replacement or
+  R9700 performance evidence is established by this sync. Sequential history reconstruction can
+  preserve the incumbent FP32 transition; this disposition claims neither numerical incompatibility
+  nor an AMD slowdown.
+- Excluded with the corresponding routes: A4/history layout and Op tests, the history-specific
+  short-terminal resident/RAM continuation test, and updated CUDA attention fixtures. Upstream
+  performance numbers, phase-seven research records and documentation describe those NVIDIA
+  implementations; they are not imported as AMD behavior or evidence. The native raw-record and
+  cache recovery qualifications remain unchanged.
+
+Verification: accounted for all 66 changed files and checked the source commit's ancestry from
+`945515ea`; two independent subagent reviews checked the GDN arithmetic, provenance and state
+lifecycle disposition. Only this record and `AGENTS.md` changed, their baseline identifiers agree,
+and `git diff --check` passes. No build or GPU experiment is needed for this documentation-only
+reconciliation; no new correctness or performance claim is made. Future syncs review changes after
+`f0d3922e` against the retained AMD behavior, including the explicit non-adoption above.
