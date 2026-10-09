@@ -26,7 +26,7 @@ scripts/master-gates.sh /ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4
 | 1. Whole-tree pre-commit | All pinned formatters, linters, spelling and hygiene pass; no rewrites |
 | 2. Release build | Tests, apps and benchmarks enabled, warnings as errors, no host sanitizers |
 | 3. Whole-tree clang-tidy | Zero diagnostics, including HIP translation units |
-| 4. All non-real CTest and retained Python contracts | Every host and physical qualifier passes; no slow-test exclusion |
+| 4. All non-real CTest and retained Python contracts | Every host and physical qualifier and Python codec check passes; no skips or slow-test exclusion |
 | 5. Real-artifact Engine integration | Every real CTest runs, plus cache/cancellation and MTP/DFlash recovery qualifiers |
 | 6. Device memcheck | Every registered gpucheck qualifier passes guarded device allocations |
 | 7. Device racecheck | Every registered gpucheck qualifier passes native gfx1201 LDS instrumentation |

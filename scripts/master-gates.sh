@@ -57,29 +57,34 @@ ctest_gate() {
   shift 2
   gate "$name" flock --exclusive "$gpu_lock" ctest --test-dir "$tree" \
     --output-on-failure --no-tests=error --output-junit "$report_dir/$name.xml" "$@"
-  "$python" - "$report_dir/$name.xml" <<'PY'
+  require_no_skips "$report_dir/$name.xml"
+}
+require_no_skips() {
+  "$python" - "$1" <<'PYXML'
 import sys
 import xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 cases = list(root.iter("testcase"))
 if not cases or any(case.find("skipped") is not None for case in cases):
     raise SystemExit("Gate did not execute every selected test; promotion is blocked")
-PY
+PYXML
 }
 : > "$report_dir/results.txt"
 gate 01-hygiene pre-commit run --all-files
 [[ -z "$(git status --porcelain)" ]] || { echo 'A hook rewrote files; commit fixes and restart.' >&2; exit 1; }
 gate 02-configure cmake -S "$repo_root" -B "$build_dir" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++ \
-  -DBUILD_TESTING=ON -DNINFER_BUILD_APPS=ON -DNINFER_BUILD_BENCHMARKS=ON \
+  "-DPython3_EXECUTABLE=$python" -DBUILD_TESTING=ON -DNINFER_BUILD_APPS=ON -DNINFER_BUILD_BENCHMARKS=ON \
   -DNINFER_WARNINGS_AS_ERRORS=ON -DNINFER_SANITIZE=
 gate 02-build cmake --build "$build_dir" --parallel "$jobs"
 gate 03-clang-tidy "$python" scripts/run-clang-tidy.py --build-dir "$build_dir"
 ctest_gate 04-unit "$build_dir" -LE real
-gate 04-python env NINFER_RUN_R9700_CODEC_TESTS=0 "$python" -m pytest \
+gate 04-python flock --exclusive "$gpu_lock" env NINFER_RUN_R9700_CODEC_TESTS=1 "$python" -m pytest \
+  "--junitxml=$report_dir/04-python.xml" \
   tests/artifact tests/test_bench_matrix.py tests/test_serve_corpus.py \
   tools/convert/qwen3_8_27b_r9700/test_codec.py \
   tools/convert/qwen3_8_27b_r9700/test_vectorized_codec.py
+require_no_skips "$report_dir/04-python.xml"
 ctest_gate 05-real "$build_dir" -L real
 gate 05-cache-cancel flock --exclusive "$gpu_lock" \
   "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
@@ -92,7 +97,7 @@ gate 07-racecheck bash scripts/gpu-check.sh racecheck
 gate 08-initcheck bash scripts/gpu-check.sh initcheck
 gate 09-asan-configure cmake -S "$repo_root" -B "$asan_dir" -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++ \
-  -DBUILD_TESTING=ON -DNINFER_BUILD_APPS=ON -DNINFER_BUILD_BENCHMARKS=ON \
+  "-DPython3_EXECUTABLE=$python" -DBUILD_TESTING=ON -DNINFER_BUILD_APPS=ON -DNINFER_BUILD_BENCHMARKS=ON \
   -DNINFER_SANITIZE=address,undefined
 gate 09-asan-build cmake --build "$asan_dir" --parallel "$jobs"
 export ASAN_OPTIONS=protect_shadow_gap=0
