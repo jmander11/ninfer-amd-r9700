@@ -128,6 +128,11 @@ Executables that link HIP code are linked by ROCm clang, whose ASan runtime lack
 
 ## Current state
 
+The 2026-10-09 master-promotion run found duplicate cross-wave LDS scale stores in the wide
+A8Q4 token-tile staging kernel. Excess staging threads still perform safe duplicate reads, but
+activation, weight and scale stores now have exactly one unit owner. The existing DFlash context
+projection oracle and native racecheck qualify the fix; no checker suppression was added.
+
 The tools landed with the 2026-10-02 upstream sync, and on the same day the tree was brought clean
 under every gate: one tree-wide clang-format/ruff format commit (listed in
 [`.git-blame-ignore-revs`](../../.git-blame-ignore-revs); run

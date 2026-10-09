@@ -74,9 +74,9 @@ struct TokenTileLoad {
     std::uint32_t scales[S::ScaleLoads], scale_shift[S::ScaleLoads];
 };
 
-// Branch-free per-thread staging plan. A thread whose unit index exceeds a unit count stages unit
-// (index mod count) again: it loads and stores the same bytes to the same LDS word as that unit's
-// owner. Byte offsets are from the uniform plane bases (every plane is below 4 GiB); a scale unit
+// Branch-free per-thread load plan. Excess threads load unit (index mod count),
+// Staging stores are restricted to the unit owner to avoid cross-wave LDS races.
+// Byte offsets are from uniform plane bases (every plane is below 4 GiB); a scale unit
 // reads the token or the row scale plane with that plane's per-group stride. Both scale planes
 // are 4-byte aligned with an even scale count per token or row tile-group, so the aligned word
 // holding a scale lies inside its plane.
@@ -159,13 +159,14 @@ __device__ __forceinline__ std::uint64_t token_tile_u64(std::uint32_t low, std::
 }
 
 template <class S>
-__device__ __forceinline__ void token_tile_store(TokenTileStage<S::Rows>& stage,
-                                                 const TokenTileLoad<S>& loaded,
-                                                 const TokenTilePlan<S>& plan) {
+__device__ __forceinline__ void
+token_tile_store(TokenTileStage<S::Rows>& stage, const TokenTileLoad<S>& loaded,
+                 const TokenTilePlan<S>& plan, unsigned slice_thread) {
     // A unit's second K16 pair is odd: 64 rows up with the token swizzled by 16 (activations), or
     // the next row of the same pair (weights: the unit holds two adjacent rows of one pair).
 #pragma unroll
     for (unsigned i = 0; i < S::ActivationLoads; ++i) {
+        if (slice_thread + i * S::SliceThreads >= S::ActivationUnits) continue;
         const unsigned first = plan.activation_lds[i], second = (first + 64U) ^ 16U;
         const auto& lo                = loaded.activation_low[i];
         const auto& hi                = loaded.activation_high[i];
@@ -176,14 +177,17 @@ __device__ __forceinline__ void token_tile_store(TokenTileStage<S::Rows>& stage,
     }
 #pragma unroll
     for (unsigned i = 0; i < S::WeightLoads; ++i) {
+        if (slice_thread + i * S::SliceThreads >= S::WeightUnits) continue;
         const auto& w                          = loaded.weights[i];
         stage.weights[plan.weight_lds[i]]      = token_tile_u64(w.x, w.y);
         stage.weights[plan.weight_lds[i] + 1U] = token_tile_u64(w.z, w.w);
     }
 #pragma unroll
-    for (unsigned i = 0; i < S::ScaleLoads; ++i)
+    for (unsigned i = 0; i < S::ScaleLoads; ++i) {
+        if (slice_thread + i * S::SliceThreads >= S::ScaleUnits) continue;
         stage.scales[plan.scale_lds[i]] = __half2float(__ushort_as_half(
             static_cast<std::uint16_t>(loaded.scales[i] >> loaded.scale_shift[i])));
+    }
 }
 
 __device__ __forceinline__ TokenTileI2 token_tile_fragment(std::uint64_t value) {
@@ -320,7 +324,7 @@ __global__ __launch_bounds__(S::Threads) void a8q4_token_tile_kernel(
         token_tile_group<S>(stage[bank], wave_token, wave_row, axis, lane_group, high_origin,
                             totals);
     };
-    token_tile_store<S>(stage[0], load(0U), plan);
+    token_tile_store<S>(stage[0], load(0U), plan, slice_thread);
     if constexpr (Pd == 1U) {
         token_tile_barrier();
         for (unsigned group = 0; group + 1U < slice_groups; ++group) {
@@ -328,7 +332,7 @@ __global__ __launch_bounds__(S::Threads) void a8q4_token_tile_kernel(
             __builtin_amdgcn_sched_barrier(0);
             compute(group & 1U);
             __builtin_amdgcn_sched_barrier(0);
-            token_tile_store<S>(stage[(group + 1U) & 1U], next, plan);
+            token_tile_store<S>(stage[(group + 1U) & 1U], next, plan, slice_thread);
             token_tile_barrier();
         }
         compute((slice_groups - 1U) & 1U);
@@ -341,17 +345,17 @@ __global__ __launch_bounds__(S::Threads) void a8q4_token_tile_kernel(
             __builtin_amdgcn_sched_barrier(0);
             compute(0U);
             __builtin_amdgcn_sched_barrier(0);
-            token_tile_store<S>(stage[1], pending, plan);
+            token_tile_store<S>(stage[1], pending, plan, slice_thread);
             token_tile_barrier();
             pending = load(group + 3U);
             __builtin_amdgcn_sched_barrier(0);
             compute(1U);
             __builtin_amdgcn_sched_barrier(0);
-            token_tile_store<S>(stage[0], even, plan);
+            token_tile_store<S>(stage[0], even, plan, slice_thread);
             token_tile_barrier();
         }
         compute(0U);
-        token_tile_store<S>(stage[1], pending, plan);
+        token_tile_store<S>(stage[1], pending, plan, slice_thread);
         token_tile_barrier();
         compute(1U);
     }
