@@ -6,10 +6,13 @@ DFlash2 speculative decoding, fixed concurrency of 1–8 requests, prefix cachin
 Device Graphs and perplexity scoring. This is a target-specific AMD engine, not
 a general multi-model or multi-GPU framework.
 
-Serving includes constrained JSON/schema output, required or named tool calls,
+Serving includes constrained JSON/schema and EBNF output, required or named tool calls,
 optional restart-persistent Responses history, and candidate scoring through
 `POST /v1/score`. `GET /metrics` (Prometheus) and `GET /metrics.json` expose the process
 snapshot. Protocols, options, scoring semantics and metrics are in `docs/serving.md`.
+
+OpenAI Chat Completions and Responses support per-token logprobs with up to 20 ranked
+alternatives from the target model, including speculative decoding; see `docs/serving.md`.
 
 ## Performance
 

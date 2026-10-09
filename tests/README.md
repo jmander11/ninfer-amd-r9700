@@ -43,6 +43,15 @@ Run only the physical qualification set with:
 ctest --test-dir build-r9700 -L r9700 --output-on-failure
 ```
 
+The token-logprob real-model check uses the explicit production artifact:
+
+```bash
+flock --exclusive /ssdpool2nvme/local_llm/.ninfer-coordination/gpu.lock \
+  env NINFER_R9700_WEIGHTS=/absolute/path/to/r9700-fp8lut4.ninfer \
+  ctest --test-dir build-r9700 -R '^ninfer_r9700_(token_logprobs_qual|engine_logprobs_real_test)$' \
+    --output-on-failure
+```
+
 Run the retained Python container and report-consumer contracts with an explicitly selected Python
 interpreter that provides pytest, Torch, and safetensors. Fail the dependency check before starting
 the suite rather than falling back to the unqualified system interpreter:
@@ -68,3 +77,17 @@ artifact framing, converter transforms, numerical operator output, state publica
 request behavior, or an external protocol. Source-shape scans, compatibility spellings, deleted
 formats, and performance thresholds do not belong in the permanent suite. Performance evidence is
 recorded by the benchmark and profiler workflow at the level of the claim.
+
+## Constrained-output Engine integration
+
+`ninfer_r9700_output_constraint_real_test` exercises JSON Schema, exact EBNF and an unconstrained
+request together at C3, with the fixed production cache, Device Graphs, ordinary decode, MTP and
+DFlash chain verification. It checks schema values, exact text, EOS, streaming/logprob attribution
+and a second cached-compilation pass. The frontend suite checks represented byte/escape syntax,
+Unicode lengths, special-token literals, reasoning transitions and speculative rollback.
+
+```bash
+flock --exclusive /ssdpool2nvme/local_llm/.ninfer-coordination/gpu.lock \
+  env NINFER_R9700_WEIGHTS=/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/qwen3.8-27b-r9700-fp8lut4.ninfer \
+  ctest --test-dir build-r9700 -R '^ninfer_r9700_output_constraint_real_test$' --output-on-failure
+```

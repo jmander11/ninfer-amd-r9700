@@ -28,12 +28,12 @@ namespace ninfer::targets::qwen3 {
 // Every executed speculative round is bracketed by arm() and, after the round synchronized,
 // finish_round(). If no reply arrives within two seconds the round proceeds unmasked and
 // finish_round() throws.
-class ToolMaskExchange {
+class TokenMaskExchange {
 public:
-    ToolMaskExchange(Tensor masks, Tensor sampling);
-    ~ToolMaskExchange();
-    ToolMaskExchange(const ToolMaskExchange&)            = delete;
-    ToolMaskExchange& operator=(const ToolMaskExchange&) = delete;
+    TokenMaskExchange(Tensor masks, Tensor sampling);
+    ~TokenMaskExchange();
+    TokenMaskExchange(const TokenMaskExchange&)            = delete;
+    TokenMaskExchange& operator=(const TokenMaskExchange&) = delete;
 
     void bind(std::span<const OutputSession* const> outputs,
               std::span<const ops::SamplingConfig> sampling);

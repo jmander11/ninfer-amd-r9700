@@ -125,13 +125,14 @@ routing map, not a mandatory reading list:
   performance-evidence rules;
 - `docs/maintainer/kernel-iteration.md`: Layer 0-3 R9700 speed procedure (bound hypothesis,
   gfx1201 legality, qualified Op sweep, physical profiling, production path);
+- `docs/maintainer/merging-to-master.md`: full promotion gates and experimental-to-master workflow;
 - `docs/maintainer/code-quality.md`: compiler-warning, clang-tidy, formatter, and lint gates, and
   the gfx1201 device checks (memcheck, initcheck, racecheck) that replace compute-sanitizer;
 - `include/ninfer/engine.h` and `include/ninfer/types.h`: in-tree C++ product interface.
 
 ## Upstream synchronization
 
-Upstream `experimental` is reconciled through `f0d3922e8a4dfedf57cd7011bc0eb72e0e1c8236`
+Upstream `experimental` is reconciled through `d5c38cda2e875aad37f49889c1f03eda1540bf20`
 via custom AMD ports, not merged ancestry.
 Unsupported NVIDIA paths were excluded; decisions are in `docs/maintainer/upstream-sync.md`.
 For future syncs, review upstream changes after this baseline against current AMD behavior,

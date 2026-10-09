@@ -438,6 +438,82 @@ void parse_sampling(const Json& body, GenerationRequest& out) {
     }
 }
 
+// OpenAI: `logprobs` enables the report and `top_logprobs` (0..20) requires it.
+void parse_logprobs(const Json& body, GenerationRequest& out) {
+    const bool enabled                    = get_bool(body, "logprobs", false);
+    const std::optional<int> alternatives = get_int(body, "top_logprobs");
+    if (alternatives && (*alternatives < 0 || *alternatives > 20)) {
+        bad_request("top_logprobs must be between 0 and 20", "top_logprobs");
+    }
+    if (alternatives && !enabled) {
+        bad_request("top_logprobs requires logprobs to be true", "top_logprobs");
+    }
+    if (enabled) { out.top_logprobs = alternatives.value_or(0); }
+}
+
+// Valid UTF-8 for a JSON string: each maximal ill-formed subpart of `bytes` becomes U+FFFD
+// (Unicode 3.9, Table 3-7 well-formed byte sequences).
+std::string utf8_lossy(std::string_view bytes) {
+    std::string out;
+    out.reserve(bytes.size());
+    std::size_t at = 0;
+    while (at < bytes.size()) {
+        const auto lead = static_cast<unsigned char>(bytes[at]);
+        if (lead < 0x80) {
+            out.push_back(static_cast<char>(lead));
+            ++at;
+            continue;
+        }
+        std::size_t continuation = 0;
+        unsigned char low        = 0x80;
+        unsigned char high       = 0xBF;
+        if (lead >= 0xC2 && lead <= 0xDF) {
+            continuation = 1;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            continuation = 2;
+            if (lead == 0xE0) { low = 0xA0; }
+            if (lead == 0xED) { high = 0x9F; }
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            continuation = 3;
+            if (lead == 0xF0) { low = 0x90; }
+            if (lead == 0xF4) { high = 0x8F; }
+        }
+        std::size_t length = 1;
+        bool well_formed   = continuation != 0;
+        for (std::size_t k = 0; well_formed && k < continuation; ++k) {
+            if (at + length >= bytes.size()) {
+                well_formed = false;
+                break;
+            }
+            const auto next = static_cast<unsigned char>(bytes[at + length]);
+            if (next < low || next > high) {
+                well_formed = false;
+                break;
+            }
+            ++length;
+            low  = 0x80;
+            high = 0xBF;
+        }
+        if (well_formed) {
+            out.append(bytes.substr(at, length));
+        } else {
+            out.append("\xEF\xBF\xBD");
+        }
+        at += length;
+    }
+    return out;
+}
+
+Json token_bytes_json(std::string_view bytes) {
+    Json out = Json::array();
+    for (const char byte : bytes) { out.push_back(static_cast<unsigned char>(byte)); }
+    return out;
+}
+
+Json choice_logprobs_json(std::span<const TokenLogprobEntry> entries) {
+    return Json{{"content", token_logprobs_json(entries)}, {"refusal", nullptr}};
+}
+
 void reject_unsupported_features(const Json& body) {
     for (const char* key : {"functions", "function_call"}) {
         if (body.contains(key) && !body.at(key).is_null()) {
@@ -634,6 +710,58 @@ Json usage_to_json(const CompletionUsage& usage, const CompletionTimings* timing
 
 } // namespace
 
+std::optional<ninfer::OutputConstraint> parse_output_format(const Json& format, bool nested_schema,
+                                                            std::string_view param) {
+    const auto invalid = [&](const std::string& message) {
+        bad_request(message, std::string(param), "invalid_output_constraint");
+    };
+    if (!format.is_object() || !format.contains("type") || !format.at("type").is_string()) {
+        invalid("output format requires a string type");
+    }
+    const auto type = format.at("type").get<std::string>();
+    if (type == "text" || type == "json_object") {
+        if (format.size() != 1) { invalid("output format only accepts type for " + type); }
+        if (type == "text") { return std::nullopt; }
+        return ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonObject, {}};
+    }
+    if (type != "json_schema") { invalid("unsupported output format type: " + type); }
+    if (nested_schema && (!format.contains("json_schema") ||
+                          !format.at("json_schema").is_object() || format.size() != 2)) {
+        invalid("json_schema output format requires a json_schema object");
+    }
+    const Json& schema = nested_schema ? format.at("json_schema") : format;
+    for (auto it = schema.begin(); it != schema.end(); ++it) {
+        if (it.key() != "name" && it.key() != "schema" && it.key() != "strict" &&
+            it.key() != "description" && !(it.key() == "type" && !nested_schema)) {
+            invalid("unsupported json_schema option: " + it.key());
+        }
+    }
+    if (!schema.contains("name") || !schema.at("name").is_string()) {
+        invalid("json_schema requires a name");
+    }
+    const auto name = schema.at("name").get<std::string>();
+    if (name.empty() || name.size() > 64 ||
+        !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                   c == '_' || c == '-';
+        })) {
+        invalid("json_schema name must contain 1 to 64 letters, digits, underscores or hyphens");
+    }
+    if (schema.contains("strict") && !schema.at("strict").is_null() &&
+        !schema.at("strict").is_boolean()) {
+        invalid("json_schema strict must be a boolean or null");
+    }
+    if (schema.contains("description") && !schema.at("description").is_string()) {
+        invalid("json_schema description must be a string");
+    }
+    if (!schema.contains("schema") ||
+        (!schema.at("schema").is_object() && !schema.at("schema").is_boolean())) {
+        invalid("json_schema requires an object or boolean schema");
+    }
+    return ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonSchema,
+                                    schema.at("schema").dump()};
+}
+
 CompletionTimings make_completion_timings(int prompt_tokens, int completion_tokens,
                                           double prefill_seconds, double decode_seconds,
                                           int draft_n, int draft_n_accepted,
@@ -768,61 +896,6 @@ void apply_ninfer_object(const Json& ninfer, GenerationRequest& out) {
     out.capture_context_checkpoint = ninfer.at("capture_context_checkpoint").get<bool>();
 }
 
-std::optional<std::string> parse_output_format(const Json& format, bool responses,
-                                               const std::string& param) {
-    if (format.is_null()) { return std::nullopt; }
-    if (!format.is_object() || !format.contains("type") || !format["type"].is_string()) {
-        bad_request("output format must contain a string type", param, "invalid_output_format");
-    }
-    const auto type = format["type"].get<std::string>();
-    if (type == "text" || type == "json_object") {
-        if (format.size() != 1) {
-            bad_request("unexpected output format field", param, "invalid_output_format");
-        }
-        return type == "text" ? std::nullopt : std::optional<std::string>(R"({"type":"object"})");
-    }
-    if (type != "json_schema") {
-        bad_request("unsupported output format type", param, "invalid_output_format");
-    }
-    if (!responses && (!format.contains("json_schema") || format.size() != 2)) {
-        bad_request("json_schema format requires a json_schema object", param,
-                    "invalid_output_format");
-    }
-    const auto& definition = responses ? format : format["json_schema"];
-    if (!definition.is_object() || !definition.contains("name") ||
-        !definition["name"].is_string() || definition["name"].get<std::string>().empty() ||
-        !definition.contains("schema") ||
-        (!definition["schema"].is_object() && !definition["schema"].is_boolean())) {
-        bad_request("json_schema requires a name and an object or boolean schema", param,
-                    "invalid_output_format");
-    }
-    const auto name = definition["name"].get<std::string>();
-    if (name.size() > 64 || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
-            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-                   c == '_' || c == '-';
-        })) {
-        bad_request("schema name must be 1..64 letters, digits, underscores or hyphens", param,
-                    "invalid_output_format");
-    }
-    for (auto it = definition.begin(); it != definition.end(); ++it) {
-        if (it.key() == "name" || it.key() == "schema" || (responses && it.key() == "type")) {
-            continue;
-        }
-        if (it.key() == "description" && it.value().is_string()) { continue; }
-        if (it.key() == "strict" && (it.value().is_boolean() || it.value().is_null())) { continue; }
-        bad_request("invalid json_schema field: " + it.key(), param, "invalid_output_format");
-    }
-    return definition["schema"].dump();
-}
-
-void validate_output_format_combination(const GenerationRequest& request,
-                                        const std::string& param) {
-    if (request.output_json_schema && (request.uses_tools() || !request.stop_strings.empty())) {
-        bad_request("structured output cannot be combined with active tools or custom stop strings",
-                    param, "invalid_output_format");
-    }
-}
-
 GenerationRequest parse_chat_completion_request(const Json& body, const RequestLimits& limits) {
     require_object(body);
     reject_unsupported_features(body);
@@ -836,15 +909,34 @@ GenerationRequest parse_chat_completion_request(const Json& body, const RequestL
 
     parse_tools(body, out);
     parse_tool_choice(body, out);
+    if (body.contains("response_format") && !body.at("response_format").is_null()) {
+        out.output_constraint =
+            parse_output_format(body.at("response_format"), true, "response_format");
+    }
+    if (body.contains("structured_outputs") && !body.at("structured_outputs").is_null()) {
+        const auto& structured = body.at("structured_outputs");
+        if (out.output_constraint) {
+            bad_request("structured_outputs conflicts with response_format", "structured_outputs",
+                        "invalid_output_constraint");
+        }
+        if (!structured.is_object() || structured.size() != 1 || !structured.contains("grammar") ||
+            !structured.at("grammar").is_string() ||
+            structured.at("grammar").get<std::string>().empty()) {
+            bad_request("structured_outputs requires one nonempty EBNF grammar string",
+                        "structured_outputs", "invalid_output_constraint");
+        }
+        out.output_constraint = ninfer::OutputConstraint{
+            ninfer::OutputConstraintKind::Grammar, structured.at("grammar").get<std::string>()};
+        out.output_constraint_param = "structured_outputs";
+    }
+    if (out.output_constraint && !out.tools.empty()) {
+        bad_request("output constraints cannot be combined with tools", out.output_constraint_param,
+                    "invalid_output_constraint");
+    }
     parse_messages(body, out);
     parse_stop(body, out);
     parse_sampling(body, out);
-    if (body.contains("response_format")) {
-        out.output_json_schema =
-            parse_output_format(body["response_format"], false, "response_format");
-    }
-    validate_output_format_combination(out, "response_format");
-
+    parse_logprobs(body, out);
     out.stream = get_bool(body, "stream", false);
     if (body.contains("stream_options") && body.at("stream_options").is_object()) {
         out.include_usage = get_bool(body.at("stream_options"), "include_usage", false);
@@ -869,20 +961,38 @@ GenerationRequest parse_chat_completion_request(const Json& body, const RequestL
     return out;
 }
 
+Json token_logprobs_json(std::span<const TokenLogprobEntry> entries) {
+    Json out = Json::array();
+    for (const TokenLogprobEntry& entry : entries) {
+        Json alternatives = Json::array();
+        for (const TokenLogprobAlternative& alternative : entry.top) {
+            alternatives.push_back(Json{{"token", utf8_lossy(alternative.bytes)},
+                                        {"logprob", alternative.logprob},
+                                        {"bytes", token_bytes_json(alternative.bytes)}});
+        }
+        out.push_back(Json{{"token", utf8_lossy(entry.bytes)},
+                           {"logprob", entry.logprob},
+                           {"bytes", token_bytes_json(entry.bytes)},
+                           {"top_logprobs", std::move(alternatives)}});
+    }
+    return out;
+}
+
 std::string make_chat_completion_response(const std::string& id, const std::string& model,
                                           std::int64_t created, const std::string& content,
                                           const std::string& reasoning, const char* finish_reason,
                                           const CompletionUsage& usage,
-                                          const CompletionTimings* timings) {
+                                          const CompletionTimings* timings,
+                                          const std::vector<TokenLogprobEntry>* logprobs) {
     Json message = {{"role", "assistant"}, {"content", content}};
     if (!reasoning.empty()) { message["reasoning_content"] = reasoning; }
+    Json choice = {{"index", 0}, {"message", std::move(message)}, {"finish_reason", finish_reason}};
+    if (logprobs != nullptr) { choice["logprobs"] = choice_logprobs_json(*logprobs); }
     Json payload = {{"id", id},
                     {"object", "chat.completion"},
                     {"created", created},
                     {"model", model},
-                    {"choices", Json::array({Json{{"index", 0},
-                                                  {"message", std::move(message)},
-                                                  {"finish_reason", finish_reason}}})},
+                    {"choices", Json::array({std::move(choice)})},
                     {"usage", usage_to_json(usage, timings)}};
     return payload.dump();
 }
@@ -892,18 +1002,19 @@ std::string make_chat_completion_tool_response(const std::string& id, const std:
                                                const std::string& reasoning,
                                                const std::vector<ToolCall>& tool_calls,
                                                const CompletionUsage& usage,
-                                               const CompletionTimings* timings) {
+                                               const CompletionTimings* timings,
+                                               const std::vector<TokenLogprobEntry>* logprobs) {
     Json message = {{"role", "assistant"},
                     {"content", content.empty() ? Json(nullptr) : Json(content)},
                     {"tool_calls", tool_calls_json(tool_calls, false)}};
     if (!reasoning.empty()) { message["reasoning_content"] = reasoning; }
+    Json choice = {{"index", 0}, {"message", std::move(message)}, {"finish_reason", "tool_calls"}};
+    if (logprobs != nullptr) { choice["logprobs"] = choice_logprobs_json(*logprobs); }
     Json payload = {{"id", id},
                     {"object", "chat.completion"},
                     {"created", created},
                     {"model", model},
-                    {"choices", Json::array({Json{{"index", 0},
-                                                  {"message", std::move(message)},
-                                                  {"finish_reason", "tool_calls"}}})},
+                    {"choices", Json::array({std::move(choice)})},
                     {"usage", usage_to_json(usage, timings)}};
     return payload.dump();
 }
@@ -928,6 +1039,19 @@ std::string make_chat_chunk_content(const std::string& id, const std::string& mo
                                     std::int64_t created, const std::string& delta_text,
                                     bool include_usage) {
     return make_delta_chunk(id, model, created, "content", delta_text, include_usage);
+}
+
+std::string make_chat_chunk_content_logprobs(const std::string& id, const std::string& model,
+                                             std::int64_t created, const std::string& delta_text,
+                                             std::span<const TokenLogprobEntry> logprobs,
+                                             bool include_usage) {
+    Json payload       = base_chunk(id, model, created);
+    payload["choices"] = Json::array({Json{{"index", 0},
+                                           {"delta", Json{{"content", delta_text}}},
+                                           {"logprobs", choice_logprobs_json(logprobs)},
+                                           {"finish_reason", nullptr}}});
+    if (include_usage) { payload["usage"] = nullptr; }
+    return sse_event(payload);
 }
 
 std::string make_chat_chunk_tool_calls(const std::string& id, const std::string& model,

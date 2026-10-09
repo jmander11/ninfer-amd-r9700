@@ -4,7 +4,7 @@
 
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
 #include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
-#include "targets/qwen3/impl/runtime/tool_masks.h"
+#include "targets/qwen3/impl/runtime/token_masks.h"
 
 #include "core/arena.h"
 #include "core/device.h"
@@ -183,7 +183,7 @@ public:
     // `exchange`, when set, supplies `config` as a speculative tool-mask reply that the stream
     // acquires before its first read of the configs.
     void set_sampling(const ops::SamplingConfig* config,
-                      qwen3::ToolMaskExchange* exchange = nullptr) noexcept {
+                      qwen3::TokenMaskExchange* exchange = nullptr) noexcept {
         sampling_config_   = config;
         sampling_exchange_ = exchange;
     }
@@ -407,17 +407,17 @@ private:
     const ops::GdnDeferredFoldRows* deferred_gdn_fold_    = nullptr;
     std::int64_t prefill_rewrite_checkpoint_frontier_     = -1;
     std::span<const std::uint32_t> prefill_split_frontiers_{};
-    Tensor* rewrite_checkpoint_hidden_output_   = nullptr;
-    std::uint32_t mtp_proposal_extent_          = 0;
-    const Weight* embed_                        = nullptr;
-    PromptEmbeddingStaging* prompt_embedding_   = nullptr;
-    const Tensor* final_norm_                   = nullptr;
-    const Weight* lm_head_                      = nullptr;
-    const Weight* proposal_head_                = nullptr;
-    const std::int32_t* proposal_head_ids_      = nullptr;
-    int proposal_head_n_                        = 0;
-    const ops::SamplingConfig* sampling_config_ = nullptr;
-    qwen3::ToolMaskExchange* sampling_exchange_ = nullptr;
+    Tensor* rewrite_checkpoint_hidden_output_    = nullptr;
+    std::uint32_t mtp_proposal_extent_           = 0;
+    const Weight* embed_                         = nullptr;
+    PromptEmbeddingStaging* prompt_embedding_    = nullptr;
+    const Tensor* final_norm_                    = nullptr;
+    const Weight* lm_head_                       = nullptr;
+    const Weight* proposal_head_                 = nullptr;
+    const std::int32_t* proposal_head_ids_       = nullptr;
+    int proposal_head_n_                         = 0;
+    const ops::SamplingConfig* sampling_config_  = nullptr;
+    qwen3::TokenMaskExchange* sampling_exchange_ = nullptr;
     MtpW mtp_;
     std::array<FullLayerW, TextConfig::full_attention_layers()> full_{};
     std::array<GdnLayerW, TextConfig::gdn_layers()> gdn_{};

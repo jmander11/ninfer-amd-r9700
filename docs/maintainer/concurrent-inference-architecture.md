@@ -1273,6 +1273,18 @@ Per-request KV/context、recurrent state、sampling state 和 output ownership �
 
 ### 8.7 Result resolution and commit
 
+Token logprobs follow the same rule. A request that set `OutputOptions::top_logprobs` raises its
+row's `logprob_rows` flag in the round's control frame. Every decode schedule (ordinary, MTP, and
+DFlash, captured or eager) ends its token decision with `ops::token_logprobs`, which scores each
+produced token against the logits column that decided it (column `i` for the supported chain
+verification) and writes a fixed-size record per token slot into the result
+frame: the token's log-probability and the 20 highest-ranked ids with theirs. The launch is part
+of every definition, so no graph variant or post-replay launch exists; a row whose flag is clear
+returns from the kernel before reading logits and its record slots are not written. The
+prefill-sampled first token uses the same Op on the scalar step logits, before the MTP bridge
+reuses them. The Engine turns the records of the committed token prefix into `TokenLogprob`
+values per output channel; tokens that publish to no channel are dropped there.
+
 Graph replay 后只回传 compact per-row result，例如 ordinary sampled token，不能回传 logits 或逐层状态。
 GPU Executor 等待一次 whole-round completion，然后通过 frozen `RoundMembership` 对每行独立 resolve：
 
@@ -1850,9 +1862,19 @@ serializes this host submission section with `score_many` admission, so maintena
 alone cannot make an otherwise idle Engine report overloaded. Scoring releases that
 mutex after reserving execution ownership; normal decode never takes it.
 
-### Speculative grammar exchange
+### Constrained output and grammar exchange
 
-`ToolMaskExchange` owns a fine-grained coherent host mailbox and a matcher thread; the round's
+The Qwen frontend owns immutable compiled tool/response schemas and EBNF constraints, and
+transactional matcher state. `PromptOptions::output_constraint` constrains answer content without
+injecting schema text into the prompt. Response schemas enforce assertions with JSON Schema
+defaults and fixed property order; unsupported assertions fail preparation. Reasoning remains
+unconstrained until `</think>`. Constrained content preserves literal special-token bytes and EBNF
+whitespace, while model stops keep ordinary publication policy. Tool declarations and response
+constraints cannot be combined; tool-call parsing is enabled only for tool grammars. The existing
+HIP `TokenMaskExchange` supplies ordinary root and speculative chain masks, and only committed
+publication advances matcher state. Caller stops and limits can truncate a valid prefix.
+
+`TokenMaskExchange` owns a fine-grained coherent host mailbox and a matcher thread; the round's
 Device Graph contains no host node. Once the verification IDs exist, a publish kernel on the
 compute stream copies IDs, parents and valid-column counts into the mailbox and raises its
 request number with a system-scope release. The matcher, armed from before the round's launch

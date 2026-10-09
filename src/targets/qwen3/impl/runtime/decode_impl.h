@@ -54,6 +54,10 @@ auto ordinary_batch_body(OrdinaryBatchContext& state, std::int32_t batch_size) {
         ops::scatter(hidden, lanes, state.continuation_hidden_store, state.execution.device.stream);
         ops::sample(logits, sampled, TextConfig::token_domain, ordinary.sampling, cache_positions,
                     ops::kSamplePurposeDecode, state.execution.work, state.execution.device.stream);
+        qwen3::record_round_logprobs(
+            ordinary.logprobs, Tensor(logits.data, DType::BF16, {logits.ne[0], 1, batch_size}),
+            Tensor(sampled.data, DType::I32, {1, batch_size}), nullptr, nullptr,
+            TextConfig::token_domain, state.execution.device.stream);
         HIP_CHECK(hipMemcpyAsync(&state.host_egress, ordinary.egress.data,
                                  sizeof(qwen3::OrdinaryDecodeEgress), hipMemcpyDeviceToHost,
                                  state.execution.device.stream));

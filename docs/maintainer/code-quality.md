@@ -5,6 +5,9 @@ gate catches, where its configuration and version pin live, how to run it, and h
 be suppressed. Every tool is open source and version-pinned or part of the selected ROCm
 toolchain, so a finding is a property of the code, not of the contributor's machine.
 
+Promotion into master runs every gate on the candidate, as specified in
+[merging-to-master.md](merging-to-master.md). `scripts/master-gates.sh` executes the native workflow.
+
 ## Gates
 
 | Gate | Catches | Configuration and pin | Run |
@@ -73,8 +76,8 @@ few seconds to recover, so rerun the next test rather than chaining after a faul
 catches unwritten device memory only through the oracle's verdict; it does not name the reading
 kernel.
 
-The `gpucheck` label is the set these gates run: every registered R9700 qualifier (31). On
-2026-10-02 the set took about 6 minutes under memcheck or initcheck and 11 minutes under racecheck
+The `gpucheck` label is the set these gates run: every registered R9700 qualifier. On
+2026-10-02 the then-31-qualifier set took about 6 minutes under memcheck or initcheck and 11 minutes under racecheck
 (speculative round 407 s against 172 s plain), all passing after the fixes recorded in
 [upstream-sync.md](upstream-sync.md). The race-check tree sets `NINFER_R9700_QUALIFIER_TIMEOUT` to
 3600 s. A kernel without LDS (for example bidirectional DFlash attention) reports zero checked

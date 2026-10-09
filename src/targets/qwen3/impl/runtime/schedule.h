@@ -13,7 +13,7 @@
 #include <ninfer/targets/qwen3/prepared_prompt.h>
 #include <ninfer/targets/qwen3/decoder_state.h>
 #include "targets/qwen3/impl/runtime/text_context.h"
-#include "targets/qwen3/impl/runtime/tool_masks.h"
+#include "targets/qwen3/impl/runtime/token_masks.h"
 #include "targets/qwen3/impl/runtime/dflash_context.h"
 #include "targets/qwen3/impl/runtime/vision_context.h"
 #include "targets/qwen3/impl/runtime/vision_prefill.h"
@@ -93,7 +93,7 @@ struct MtpBatchContext {
     // One round-scoped segmented authority per compact row. The same fixed-address transaction
     // spans alignment and every AR append and is resolved by Program once after execution.
     std::span<qwen3::PagedKVTransaction* const> mtp_kv_transactions{};
-    qwen3::ToolMaskExchange* tool_masks = nullptr;
+    qwen3::TokenMaskExchange* token_masks = nullptr;
 };
 
 struct DFlashBatchContext {
@@ -105,9 +105,11 @@ struct DFlashBatchContext {
     qwen3::DFlashDecodeEgress& host_egress;
     Tensor& continuation_hidden_store;
     std::span<qwen3::PagedKVTransaction* const> text_kv_transactions{};
-    qwen3::ToolMaskExchange* tool_masks = nullptr;
-    // This chain round scores the p-less proposal calibration grid into host_egress; the Program
-    // reads it back exactly when it sets this.
+    qwen3::TokenMaskExchange* token_masks = nullptr;
+    // DFlash2 chain rounds score the p-less proposal calibration grid into host_egress. A
+    // captured graph fixes whether the scoring kernel exists, so this is the Program's startup
+    // property (calibrates_p_less_drafts()) at warm-up, capture, and every round alike, never a
+    // per-round choice. Packed-tree rounds do not score, and the Program does not read them.
     bool calibrate_p_less_drafts = false;
 };
 
@@ -154,7 +156,7 @@ struct TargetVerifyFrameView {
     const ops::GdnDeferredFoldRows* gdn_fold = nullptr;
     const ops::SamplingConfig* sampling      = nullptr;
     DFlashFeatureSink* feature_sink          = nullptr;
-    qwen3::ToolMaskExchange* tool_masks      = nullptr;
+    qwen3::TokenMaskExchange* token_masks    = nullptr;
 };
 
 // The prefill owner's DFlash context append addresses the last ingress slot (max_concurrency - 1):

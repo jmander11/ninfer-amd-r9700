@@ -45,6 +45,8 @@ int main() {
             builder.add_tensor(ninfer::DType::I32, {1}, 256, "DFlash prefill positions");
         layout.pending_features = builder.add_tensor(
             ninfer::DType::BF16, {Config::feature_rows, 1, 2}, 256, "DFlash pending features");
+        layout.image_completion =
+            builder.add_tensor(ninfer::DType::I32, {2}, 256, "DFlash image completion");
 
         require(!layout.full.has_value(),
                 "Qwen3.8 DFlash2 unexpectedly planned a growing Full cache");

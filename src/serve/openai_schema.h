@@ -10,7 +10,9 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace ninfer::serve {
 
@@ -18,16 +20,13 @@ namespace ninfer::serve {
 // independent request/error types; they live in request.h and are shared by the
 // OpenAI and Anthropic schema layers.
 
-// Parse an already-decoded JSON body into a GenerationRequest. Throws ApiException
-// on malformed or unsupported requests (n>1, tools, non-text response_format, ...).
-// Parse the two OpenAI structured-format envelopes into one owning schema.
-std::optional<std::string> parse_output_format(const nlohmann::json& format, bool responses,
-                                               const std::string& param);
-void validate_output_format_combination(const GenerationRequest& request, const std::string& param);
+// Parse the OpenAI structured format envelope into one owning output constraint.
+std::optional<ninfer::OutputConstraint>
+parse_output_format(const nlohmann::json& format, bool nested_schema, std::string_view param);
 
+// Parse a decoded JSON request; malformed or unsupported fields throw ApiException.
 GenerationRequest parse_chat_completion_request(const nlohmann::json& body,
                                                 const RequestLimits& limits);
-
 void apply_ninfer_object(const nlohmann::json& ninfer, GenerationRequest& out);
 
 std::optional<bool> parse_openai_preserve_thinking(const nlohmann::json& body);
@@ -40,6 +39,12 @@ make_completion_timings(int prompt_tokens, int completion_tokens, double prefill
                         int prompt_reused                               = 0,
                         const ninfer::GenerationRecoveryStats& recovery = {});
 
+// The OpenAI token-logprob array shared by Chat Completions (`choices[].logprobs.content`) and
+// Responses (`output_text.logprobs`): one {token, logprob, bytes, top_logprobs} object per entry.
+// `token` is the entry's bytes as UTF-8 with each ill-formed sequence replaced by U+FFFD; `bytes`
+// is the exact byte list.
+[[nodiscard]] nlohmann::json token_logprobs_json(std::span<const TokenLogprobEntry> entries);
+
 // Non-streaming chat completion response body (JSON string). When `reasoning` is
 // non-empty it is attached as `message.reasoning_content` (the DeepSeek/vLLM-style
 // convention consumed by Chatbox, Open WebUI, etc.), leaving `content` = answer.
@@ -47,17 +52,19 @@ make_completion_timings(int prompt_tokens, int completion_tokens, double prefill
 // engine stats under the `ninfer` namespace in `prompt_tokens_details` (prefill /
 // decode rates, KV-RAM tier stats, context checkpoint), and reasoning / speculative-decoding token
 // counts in `completion_tokens_details`. Each stat is stored exactly once.
+// A non-null `logprobs` adds `choices[0].logprobs` with one entry per content token.
 std::string make_chat_completion_response(const std::string& id, const std::string& model,
                                           std::int64_t created, const std::string& content,
                                           const std::string& reasoning, const char* finish_reason,
                                           const CompletionUsage& usage,
-                                          const CompletionTimings* timings = nullptr);
-std::string make_chat_completion_tool_response(const std::string& id, const std::string& model,
-                                               std::int64_t created, const std::string& content,
-                                               const std::string& reasoning,
-                                               const std::vector<ToolCall>& tool_calls,
-                                               const CompletionUsage& usage,
-                                               const CompletionTimings* timings = nullptr);
+                                          const CompletionTimings* timings               = nullptr,
+                                          const std::vector<TokenLogprobEntry>* logprobs = nullptr);
+std::string make_chat_completion_tool_response(
+    const std::string& id, const std::string& model, std::int64_t created,
+    const std::string& content, const std::string& reasoning,
+    const std::vector<ToolCall>& tool_calls, const CompletionUsage& usage,
+    const CompletionTimings* timings               = nullptr,
+    const std::vector<TokenLogprobEntry>* logprobs = nullptr);
 
 // Streaming SSE event strings ("data: {...}\n\n"). The first chunk carries the
 // assistant role; reasoning chunks carry `reasoning_content` deltas (the <think>
@@ -74,6 +81,12 @@ std::string make_chat_chunk_reasoning(const std::string& id, const std::string& 
 std::string make_chat_chunk_content(const std::string& id, const std::string& model,
                                     std::int64_t created, const std::string& delta_text,
                                     bool include_usage);
+// Content chunk of a request that asked for logprobs: `choices[0].logprobs.content` carries the
+// tokens committed with this delta, which may be empty.
+std::string make_chat_chunk_content_logprobs(const std::string& id, const std::string& model,
+                                             std::int64_t created, const std::string& delta_text,
+                                             std::span<const TokenLogprobEntry> logprobs,
+                                             bool include_usage);
 std::string make_chat_chunk_tool_calls(const std::string& id, const std::string& model,
                                        std::int64_t created,
                                        const std::vector<ToolCall>& tool_calls, bool include_usage);

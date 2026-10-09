@@ -120,6 +120,16 @@ struct SegmentedKvTransactionBatch {
     }
 };
 
+// The host view of a frame's logprob records, or empty spans when no row of the round asked.
+template <std::size_t Slots>
+runtime::RoundLogprobs round_logprob_spans(const qwen3::RoundLogprobRecords<Slots>& records,
+                                           bool requested) {
+    if (!requested) { return {}; }
+    return runtime::RoundLogprobs{.token_logprobs = records.token_logprobs,
+                                  .top_ids        = records.top_ids,
+                                  .top_logprobs   = records.top_logprobs};
+}
+
 // Wall time of in-flight compute after host ingress is already filled. Graph
 // select, host packing, and KV materialize stay outside decode.ms so tok_s
 // matches the GPU round the engine log times, not the CPU setup around it.
@@ -309,16 +319,16 @@ void update_graph_profile(DecodeGraphFamily& family, DecodeGraphTopology& topolo
 }
 
 // Keeps the tool-mask matcher armed exactly while one speculative round can execute.
-struct ToolMaskRoundGuard {
-    explicit ToolMaskRoundGuard(qwen3::ToolMaskExchange& exchange) : exchange(exchange) {
+struct TokenMaskRoundGuard {
+    explicit TokenMaskRoundGuard(qwen3::TokenMaskExchange& exchange) : exchange(exchange) {
         exchange.arm();
     }
 
-    ~ToolMaskRoundGuard() { exchange.disarm(); }
+    ~TokenMaskRoundGuard() { exchange.disarm(); }
 
-    ToolMaskRoundGuard(const ToolMaskRoundGuard&)            = delete;
-    ToolMaskRoundGuard& operator=(const ToolMaskRoundGuard&) = delete;
-    qwen3::ToolMaskExchange& exchange;
+    TokenMaskRoundGuard(const TokenMaskRoundGuard&)            = delete;
+    TokenMaskRoundGuard& operator=(const TokenMaskRoundGuard&) = delete;
+    qwen3::TokenMaskExchange& exchange;
 };
 
 DecodeGraphExecutable& install_graph_profile(DecodeGraphFamily& family, DecodeGraphProfile& profile,
@@ -415,7 +425,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
       graph_allowance_bytes(plan.graph_allowance_bytes), workspace_plan(plan.workspace),
       persistent(plan.persistent.bytes), workspace_storage(plan.workspace.capacity),
       work(DeviceSpan{workspace_storage.base(), workspace_storage.capacity()}),
-      round_host(sizeof(TokenId)),
+      round_host(sizeof(PrefillRoundHost)),
       kv_resolution_host(4U * kMaximumConcurrency * sizeof(std::uint32_t)),
       ordinary_host(
           plan.speculative_backend == SpeculativeBackend::None
@@ -482,9 +492,9 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
     prefill_hidden  = plan.persistent.prefill_hidden.bind(backing);
     token_counts    = plan.persistent.token_counts.bind(backing);
     sampling_config = plan.persistent.sampling_config.bind(backing);
-    tool_masks      = std::make_unique<qwen3::ToolMaskExchange>(
-        plan.persistent.tool_token_masks.bind(backing),
-        plan.persistent.tool_sampling_config.bind(backing));
+    token_masks     = std::make_unique<qwen3::TokenMaskExchange>(
+        plan.persistent.grammar_masks.bind(backing),
+        plan.persistent.grammar_sampling_config.bind(backing));
     tail_hidden_store               = plan.persistent.tail_hidden.bind(backing);
     rewrite_checkpoint_hidden_store = plan.persistent.rewrite_checkpoint_hidden.bind(backing);
     if (plan.persistent.staging_hidden) {
@@ -550,7 +560,11 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
     set_device_i32(io.text_kv_table_row, 0);
     set_device_i32(io.backend_kv_table_row, 0);
 
-    host_tokens = static_cast<TokenId*>(round_host.data());
+    static_assert(std::is_standard_layout_v<PrefillRoundHost>);
+    auto* prefill_round_host = static_cast<PrefillRoundHost*>(round_host.data());
+    *prefill_round_host      = {};
+    host_tokens              = &prefill_round_host->token;
+    host_prefill_logprobs    = &prefill_round_host->logprobs;
     if (ordinary_host) {
         ordinary_host_ingress = static_cast<qwen3::OrdinaryDecodeIngress*>(ordinary_host->data());
         ordinary_host_egress  = reinterpret_cast<qwen3::OrdinaryDecodeEgress*>(
@@ -586,6 +600,15 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
     HIP_CHECK(hipMemsetAsync(sampling_config.data, 0, sampling_config.bytes(), device.stream));
     device.synchronize();
     prepare_graphs();
+    if (calibrates_p_less_drafts()) {
+        // Poison the calibration egress with NaN. Every chain round's scoring launch rewrites
+        // the entries the host reads, so a NaN reaching p_less_calibration_observe proves a round
+        // ran without the scoring kernel, and that fails loudly instead of calibrating on stale
+        // values.
+        Tensor& calibration = io.dflash_decode.value().proposal_calibration;
+        HIP_CHECK(hipMemsetAsync(calibration.data, 0xFF, calibration.bytes(), device.stream));
+        device.synchronize();
+    }
     work.reset();
     work.reset_peak();
     workspace_logical_peak_bytes = 0;
@@ -1056,7 +1079,9 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(
                 ? prompt_tokens
                 : 0U;
         materialize_sequence_kv(sequence, prompt_tokens, backend_materialized);
-        request.output = output;
+        request.output         = output;
+        request.token_logprobs = request_plan.token_logprobs;
+        set_device_i32(io.prefill_logprobs.row_enabled, request.token_logprobs ? 1 : 0);
         install_sampling(sequence, request, request_plan.sampling);
         sequence.rope_delta = prompt.rope_delta;
         set_device_i32(io.rope_delta, sequence.rope_delta);
@@ -3725,7 +3750,7 @@ void ProgramImplCore::prepare_graphs() {
                     *decoder->mtp_cache(),      *io.mtp_decode,
                     *mtp_host_ingress,          *mtp_host_egress,
                     tail_hidden_store,          text_transactions.binding(),
-                    mtp_transactions.binding(), tool_masks.get()};
+                    mtp_transactions.binding(), token_masks.get()};
                 if (definition != nullptr) {
                     schedule::capture_mtp_decode_batch(
                         mtp_state, static_cast<std::int32_t>(batch_size), k, *definition);
@@ -3733,13 +3758,13 @@ void ProgramImplCore::prepare_graphs() {
                     mtp_transactions.close_captured();
                     return;
                 }
-                const ToolMaskRoundGuard tool_mask_round(*tool_masks);
+                const TokenMaskRoundGuard token_mask_round(*token_masks);
                 schedule::mtp_decode_batch(mtp_state, static_cast<std::int32_t>(batch_size), k,
                                            nullptr);
                 text_transactions.enqueue_resolution();
                 mtp_transactions.enqueue_resolution();
                 device.synchronize();
-                tool_masks->finish_round();
+                token_masks->finish_round();
                 text_transactions.finish_resolution({text_transactions.cursor, batch_size});
                 mtp_transactions.finish_resolution({mtp_transactions.cursor, batch_size});
             };
@@ -3807,16 +3832,10 @@ void ProgramImplCore::prepare_graphs() {
                 // The captured round must score the calibration grid exactly when replays of
                 // this shape read it back (decode_dflash_batch).
                 schedule::DFlashBatchContext dflash_state{
-                    execution_core(),
-                    decoder->text_kv,
-                    *dflash,
-                    *io.dflash_decode,
-                    *dflash_host_ingress,
-                    *dflash_host_egress,
-                    tail_hidden_store,
-                    transactions.binding(),
-                    tool_masks.get(),
-                    calibrates_p_less_drafts() && !dflash_uses_tree_verify(fixed_k, fixed_w)};
+                    execution_core(),          decoder->text_kv,       *dflash,
+                    *io.dflash_decode,         *dflash_host_ingress,   *dflash_host_egress,
+                    tail_hidden_store,         transactions.binding(), token_masks.get(),
+                    calibrates_p_less_drafts()};
                 const schedule::DFlashEnvelopes envelopes = dflash_envelopes(maximum_frontier);
                 if (definition != nullptr) {
                     schedule::capture_dflash_decode_batch(dflash_state,
@@ -3825,12 +3844,12 @@ void ProgramImplCore::prepare_graphs() {
                     transactions.close_captured();
                     return;
                 }
-                const ToolMaskRoundGuard tool_mask_round(*tool_masks);
+                const TokenMaskRoundGuard token_mask_round(*token_masks);
                 schedule::dflash_decode_batch(dflash_state, static_cast<std::int32_t>(batch_size),
                                               fixed_k, fixed_w, envelopes, nullptr);
                 transactions.enqueue_resolution();
                 device.synchronize();
-                tool_masks->finish_round();
+                token_masks->finish_round();
                 transactions.finish_resolution({transactions.cursor, batch_size});
             };
 
@@ -3958,20 +3977,25 @@ void ProgramImplCore::bind_prefill_sampling(SequenceState& sequence, RequestCont
     // The root mask row is shared by every prefilling request; request sampling itself keeps
     // no compact-row pointer.
     request.prefill_sampling_host =
-        tool_masks->prefill_root(request.output, request.sampling_host, device.stream);
+        token_masks->prefill_root(request.output, request.sampling_host, device.stream);
     Tensor config_lane = sampling_config.slice(1, static_cast<std::int32_t>(sequence.lane), 1);
     HIP_CHECK(hipMemcpyAsync(config_lane.data, &request.prefill_sampling_host,
                              sizeof(request.prefill_sampling_host), hipMemcpyHostToDevice,
                              device.stream));
 }
 
-void ProgramImplCore::bind_tool_mask_batch(std::span<const std::uint32_t> lanes,
-                                           std::span<const ops::SamplingConfig> configs) {
+bool ProgramImplCore::any_token_logprobs(std::span<const std::uint32_t> lanes) const {
+    return std::any_of(lanes.begin(), lanes.end(),
+                       [&](std::uint32_t lane) { return requests[lane].token_logprobs; });
+}
+
+void ProgramImplCore::bind_token_mask_batch(std::span<const std::uint32_t> lanes,
+                                            std::span<const ops::SamplingConfig> configs) {
     std::array<const qwen3::OutputSession*, kMaximumConcurrency> outputs{};
     for (std::size_t row = 0; row < lanes.size(); ++row) {
         outputs[row] = requests[lanes[row]].output;
     }
-    tool_masks->bind({outputs.data(), lanes.size()}, configs.first(lanes.size()));
+    token_masks->bind({outputs.data(), lanes.size()}, configs.first(lanes.size()));
 }
 
 void ProgramImplCore::copy_tail(SequenceState& sequence, const Tensor& source) {
@@ -3986,6 +4010,13 @@ void ProgramImplCore::copy_tail(SequenceState& sequence, const Tensor& source) {
 void ProgramImplCore::copy_round_token() {
     HIP_CHECK(hipMemcpyAsync(host_tokens, io.token.data, sizeof(TokenId), hipMemcpyDeviceToHost,
                              device.stream));
+}
+
+void ProgramImplCore::copy_prefill_logprobs() {
+    HIP_CHECK(hipMemcpyAsync(host_prefill_logprobs,
+                             static_cast<const unsigned char*>(io.prefill_logprob_frame.data) +
+                                 offsetof(qwen3::PrefillLogprobFrame, records),
+                             sizeof(*host_prefill_logprobs), hipMemcpyDeviceToHost, device.stream));
 }
 
 void ProgramImplCore::mark_workspace_usage(std::size_t phase_bytes) noexcept {
@@ -4210,7 +4241,7 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
                                  : schedule::select_prefill_chunk(remaining, step_tokens);
             const bool final_candidate = staged.cursor + nominal == staged.prompt_tokens;
             if (final_candidate && request.output != nullptr &&
-                request.output->has_tool_grammar()) {
+                request.output->has_token_grammar()) {
                 // Another prefilling request may have written the shared root row since this
                 // request's admission. A mixed round's matcher answers only after the runner
                 // publishes, so this host fill does not overlap it.
@@ -4348,6 +4379,8 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
         }
 
         copy_round_token();
+        const bool token_logprobs = request.token_logprobs;
+        if (token_logprobs) { copy_prefill_logprobs(); }
         std::array<TokenId, qwen3::kMtpDecodeMaximumDrafts> initial_drafts{};
         if (staged.prepare_mtp && staged.initial_mtp_extent != 0) {
             HIP_CHECK(hipMemcpyAsync(initial_drafts.data(), io.mtp.value().draft_tokens.data,
@@ -4444,7 +4477,9 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
         request.lifecycle = Lifecycle::Pending;
         return runtime::PrefillStepResult{
             .summary = summary,
-            .round   = runtime::GeneratedRound{.tokens = std::span<const TokenId>(host_tokens, 1)},
+            .round = runtime::GeneratedRound{.tokens   = std::span<const TokenId>(host_tokens, 1),
+                                             .logprobs = round_logprob_spans(*host_prefill_logprobs,
+                                                                             token_logprobs)},
             .processed_prompt_tokens = processed_prompt_tokens,
             .complete                = true,
             .host_input_consumed     = host_input_consumed,
@@ -4516,8 +4551,9 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
             ordinary_host_ingress->rope_positions[row] =
                 checked_i32(frontier, "ordinary batch RoPE position") + sequence.rope_delta;
             ordinary_host_ingress->text_kv_table_rows[row] = sequence.kv->text.bound_row();
-            ordinary_host_ingress->lanes[row]    = static_cast<std::int32_t>(sequence.lane);
-            ordinary_host_ingress->sampling[row] = request.sampling_host;
+            ordinary_host_ingress->lanes[row]        = static_cast<std::int32_t>(sequence.lane);
+            ordinary_host_ingress->logprob_rows[row] = request.token_logprobs ? 1 : 0;
+            ordinary_host_ingress->sampling[row]     = request.sampling_host;
             materialize_sequence_kv(sequence, frontier + 1, 0);
         }
 
@@ -4536,9 +4572,9 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
                 {.status = status + row, .cursor = cursor + row}, table_rows + row));
         }
 
-        bind_tool_mask_batch(lanes, ordinary_host_ingress->sampling);
+        bind_token_mask_batch(lanes, ordinary_host_ingress->sampling);
         for (std::size_t row = 0; row < lanes.size(); ++row) {
-            ordinary_host_ingress->sampling[row] = tool_masks->root(row, device.stream);
+            ordinary_host_ingress->sampling[row] = token_masks->root(row, device.stream);
         }
         schedule::OrdinaryBatchContext schedule_state{
             {device, model, linear_execution.get(), work, decoder->linear_attention,
@@ -4593,6 +4629,8 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
         return runtime::BatchedGeneratedRound{
             .tokens =
                 std::span<const TokenId>(ordinary_host_egress->sampled_tokens.data(), lanes.size()),
+            .logprobs =
+                round_logprob_spans(ordinary_host_egress->logprobs, any_token_logprobs(lanes)),
             .cycle_exclusions = cycle_exclusions};
     } catch (...) {
         synchronize_all_while_unwinding(device);
@@ -4734,6 +4772,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
             mtp_host_ingress->mtp_kv_table_rows[row]  = kv.backend.value().bound_row();
             mtp_host_ingress->lanes[row]              = static_cast<std::int32_t>(sequence.lane);
             mtp_host_ingress->rope_deltas[row]        = sequence.rope_delta;
+            mtp_host_ingress->logprob_rows[row]       = request.token_logprobs ? 1 : 0;
             mtp_host_ingress->sampling[row]           = request.sampling_host;
             materialize_sequence_kv(sequence, frontier + extent + 1,
                                     std::min(capacity, frontier + extent + draft_window));
@@ -4782,10 +4821,10 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
                                                  tail_hidden_store,
                                                  text_transactions.binding(),
                                                  mtp_transactions.binding(),
-                                                 tool_masks.get()};
+                                                 token_masks.get()};
 
-        bind_tool_mask_batch(lanes, mtp_host_ingress->sampling);
-        const ToolMaskRoundGuard tool_mask_round(*tool_masks);
+        bind_token_mask_batch(lanes, mtp_host_ingress->sampling);
+        const TokenMaskRoundGuard token_mask_round(*token_masks);
         mark_workspace_usage(workspace_plan.mtp_round);
         const auto started = Clock::now();
         if (executable != nullptr) {
@@ -4811,7 +4850,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         }
         text_transactions.finish_resolution({text_retained_frontiers.data(), lanes.size()});
         mtp_transactions.finish_resolution({mtp_retained_frontiers.data(), lanes.size()});
-        tool_masks->finish_round();
+        token_masks->finish_round();
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it.
         if (adaptive_draft && realized_extent > 0) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,
@@ -4932,6 +4971,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         return runtime::BatchedGeneratedRound{
             .tokens     = std::span<const TokenId>(mtp_host_egress->licensed_tokens.data(),
                                                    lanes.size() * width),
+            .logprobs   = round_logprob_spans(mtp_host_egress->logprobs, any_token_logprobs(lanes)),
             .row_counts = std::span<const std::int32_t>(mtp_host_egress->licensed_counts.data(),
                                                         lanes.size()),
             .row_stride = width,
@@ -5072,8 +5112,8 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
         }
 
         // Packed-tree rounds draw deterministic drafts and produce no calibration.
-        const bool calibrate_p_less =
-            calibrates_p_less_drafts() && !dflash_uses_tree_verify(batch_k, live_w);
+        const bool chain_round      = !dflash_uses_tree_verify(batch_k, live_w);
+        const bool calibrate_p_less = calibrates_p_less_drafts() && chain_round;
         std::array<std::uint32_t, kMaximumConcurrency> text_target_columns{};
         std::uint32_t realized_extent = 0;
         for (std::size_t row = 0; row < lanes.size(); ++row) {
@@ -5104,14 +5144,19 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             dflash_host_ingress->text_kv_table_rows[row] = sequence.kv->text.bound_row();
             dflash_host_ingress->dflash_kv_table_rows[row] =
                 sequence.kv->backend ? sequence.kv->backend->bound_row() : 0;
-            dflash_host_ingress->lanes[row]       = static_cast<std::int32_t>(sequence.lane);
-            dflash_host_ingress->rope_deltas[row] = sequence.rope_delta;
-            dflash_host_ingress->sampling[row]    = request.sampling_host;
-            ops::SamplingConfig& row_sampling     = dflash_host_ingress->sampling[row];
+            dflash_host_ingress->lanes[row]        = static_cast<std::int32_t>(sequence.lane);
+            dflash_host_ingress->rope_deltas[row]  = sequence.rope_delta;
+            dflash_host_ingress->logprob_rows[row] = request.token_logprobs ? 1 : 0;
+            dflash_host_ingress->sampling[row]     = request.sampling_host;
+            ops::SamplingConfig& row_sampling      = dflash_host_ingress->sampling[row];
             if (calibrate_p_less && row_sampling.draft_temperature > 0.0f) {
                 row_sampling.draft_temperature = qwen3::p_less_calibrated_draft_temperature(
                     p_less_calibration, row_sampling.temperature, batch_k,
                     row_sampling.draft_temperature);
+            }
+            if (chain_round && row_sampling.p_less != 0 && row_sampling.temperature > 0.0f &&
+                extent > 0) {
+                request.speculative_stats.p_less_draft_temperature = row_sampling.draft_temperature;
             }
             materialize_sequence_kv(sequence, std::min(capacity, frontier + dflash_verify_width),
                                     DFlashConfig::full_layers > 0 ? frontier : 0U);
@@ -5160,11 +5205,11 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             *dflash_host_egress,
             tail_hidden_store,
             text_transactions.binding(),
-            tool_masks.get(),
-            calibrate_p_less};
+            token_masks.get(),
+            calibrates_p_less_drafts()};
 
-        bind_tool_mask_batch(lanes, dflash_host_ingress->sampling);
-        const ToolMaskRoundGuard tool_mask_round(*tool_masks);
+        bind_token_mask_batch(lanes, dflash_host_ingress->sampling);
+        const TokenMaskRoundGuard token_mask_round(*token_masks);
         mark_workspace_usage(prefill_lane ? workspace_plan.dflash_mixed
                                           : workspace_plan.dflash_round);
         const auto started = Clock::now();
@@ -5220,7 +5265,7 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             static_cast<std::int32_t>(lanes.size()), static_cast<std::int32_t>(width),
             static_cast<std::int32_t>(live_w), TextConfig::token_domain,
             dflash_uses_tree_verify(batch_k, live_w));
-        tool_masks->finish_round();
+        token_masks->finish_round();
         if (calibrate_p_less) {
             const std::size_t row_values =
                 static_cast<std::size_t>(ops::kPLessProposalCalibrationTemperatureCount) * batch_k;
@@ -5330,8 +5375,10 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             request.timings.decode_seconds += seconds;
         }
         return runtime::BatchedGeneratedRound{
-            .tokens     = std::span<const TokenId>(dflash_host_egress->licensed_tokens.data(),
-                                                   lanes.size() * width),
+            .tokens = std::span<const TokenId>(dflash_host_egress->licensed_tokens.data(),
+                                               lanes.size() * width),
+            .logprobs =
+                round_logprob_spans(dflash_host_egress->logprobs, any_token_logprobs(lanes)),
             .row_counts = std::span<const std::int32_t>(dflash_host_egress->licensed_counts.data(),
                                                         lanes.size()),
             .row_stride = width,

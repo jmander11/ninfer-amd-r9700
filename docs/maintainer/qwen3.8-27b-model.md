@@ -448,7 +448,10 @@ k. Every candidate is scored on the same verified content, so the choice needs n
 carries no selection bias; the prediction scores token verification of the drafted prefix, which
 block verification never shortens. Until a temperature has eight discounted rounds the 27B prior
 `clamp(0.8·(T−1), 0.2, 1.25)` applies (0.4 at the production T=1.5). Captured DFlash graphs
-contain the scoring kernel exactly when the Program reads it back. The calibration changes only
+contain the scoring kernel as a startup property. Tied predictions choose the grid temperature
+nearest the prior in log temperature. The device egress starts poisoned with NaNs; an unwritten
+overlap fails calibration. `SpeculativeStats::p_less_draft_temperature` reports the last p-less
+chain round’s temperature (zero when none ran). The calibration changes only
 which valid proposal is drawn; output remains the p-less target distribution. Like adaptive K, it
 makes a request's realized sample for a fixed seed depend on what the Engine verified before,
 including co-scheduled requests; pin the temperature where seed-level reproducibility across batch

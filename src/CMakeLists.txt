@@ -40,6 +40,8 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/gdn_recurrence/gdn_prefill_chunked.hip
   ops/r9700/gdn_recurrence/gdn_replay_fold.cpp
   ops/r9700/gdn_recurrence/gdn_replay_fold.hip
+  ops/r9700/sampling/token_logprobs.cpp
+  ops/r9700/sampling/token_logprobs.hip
   ops/r9700/sampling/sampling.hip
   ops/r9700/rope/rope.hip
   ops/r9700/persistent/persistent_decode.hip
@@ -182,12 +184,12 @@ add_library(ninfer_r9700_qwen3_8_27b_runtime STATIC
   targets/qwen3/impl/frontend/encoded_history_cache.cpp
   targets/qwen3/impl/frontend/frontend.cpp
   targets/qwen3/impl/frontend/generation_recovery.cpp
-  targets/qwen3/impl/frontend/tool_grammar.cpp
+  targets/qwen3/impl/frontend/token_grammar.cpp
   targets/qwen3/impl/frontend/processor.cpp
   targets/qwen3/impl/frontend/tokenizer.cpp
   targets/qwen3/impl/state/round_state.cpp
   targets/qwen3/impl/runtime/visual_scatter.cpp
-  targets/qwen3/impl/runtime/tool_masks.hip
+  targets/qwen3/impl/runtime/token_masks.hip
   targets/qwen3/impl/runtime/prompt_embedding_staging.cpp
   targets/qwen3/impl/vision/control.cpp)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
@@ -200,7 +202,7 @@ ninfer_r9700_internal_includes(ninfer_r9700_qwen3_8_27b_runtime)
 set_target_properties(ninfer_r9700_qwen3_8_27b_runtime PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_qwen3_8_27b_runtime PUBLIC
-  ninfer_tool_grammar
+  ninfer_token_grammar
   ninfer_r9700_target_bindings
   ninfer_r9700_core
   ninfer_r9700_text
@@ -831,3 +833,9 @@ target_compile_definitions(ninfer_r9700_dflash_context_kv_qual PRIVATE
   NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_compile_options(ninfer_r9700_dflash_context_kv_qual PRIVATE -Wno-unused-function)
 target_link_libraries(ninfer_r9700_dflash_context_kv_qual PRIVATE ninfer_r9700_core hip::host)
+
+add_executable(ninfer_r9700_token_logprobs_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/token_logprobs_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_token_logprobs_qual)
+set_target_properties(ninfer_r9700_token_logprobs_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_token_logprobs_qual PRIVATE ninfer_r9700_core hip::host)

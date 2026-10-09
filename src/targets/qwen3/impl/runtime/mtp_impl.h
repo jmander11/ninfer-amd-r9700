@@ -333,9 +333,12 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
                                  .selected_hidden = selected_hidden,
                                  .replay_records  = state.execution.replay_records,
                                  .sampling        = frame.sampling,
-                                 .tool_masks      = state.tool_masks,
+                                 .token_masks     = state.token_masks,
                              },
                              !compact);
+        qwen3::record_round_logprobs(frame.logprobs, target_logits, licensed_tokens,
+                                     &licensed_counts, nullptr, TextConfig::token_domain,
+                                     state.execution.device.stream);
         end_transaction_segments(state.text_kv_transactions, state.execution.device.stream);
         if (compact) {
             Tensor licensed_frame =

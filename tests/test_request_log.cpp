@@ -2,6 +2,7 @@
 #include "serve/request_log.h"
 #include "product/context_checkpoint_format.h"
 
+#include <cmath>
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
@@ -310,26 +311,30 @@ int main() {
               "human preparation rejection log is incomplete");
 
     GenerationOutcome outcome;
-    outcome.prompt_tokens                       = 401;
-    outcome.completion_tokens                   = 1024;
-    outcome.finish_reason                       = ninfer::FinishReason::OutputLimit;
-    outcome.metrics.prepare_seconds             = 0.1234567890123;
-    outcome.metrics.ttft_seconds                = 0.3580246791357;
-    outcome.metrics.vision_seconds              = 0.0;
-    outcome.metrics.prefill_seconds             = 0.2345678901234;
-    outcome.metrics.decode_seconds              = 5.3456789012345;
-    outcome.metrics.total_seconds               = 5.7037035803702;
-    outcome.metrics.prefix_cache_hit_tokens     = 101;
-    outcome.metrics.prefix_reuse_path           = ninfer::PrefixReusePath::RestoreTurnCheckpoint;
-    outcome.metrics.speculative_backend         = ninfer::SpeculativeBackend::Mtp;
-    outcome.metrics.speculative_draft_window    = 3;
-    outcome.metrics.speculative_rounds          = 300;
-    outcome.metrics.speculative_draft_tokens    = 900;
-    outcome.metrics.speculative_accepted_tokens = 720;
-    outcome.metrics.speculative_fallback_steps  = 2;
-    outcome.metrics.speculative_accepted_per_position = {290, 240, 190};
+    outcome.prompt_tokens                    = 401;
+    outcome.completion_tokens                = 1024;
+    outcome.finish_reason                    = ninfer::FinishReason::OutputLimit;
+    outcome.metrics.prepare_seconds          = 0.1234567890123;
+    outcome.metrics.ttft_seconds             = 0.3580246791357;
+    outcome.metrics.vision_seconds           = 0.0;
+    outcome.metrics.prefill_seconds          = 0.2345678901234;
+    outcome.metrics.decode_seconds           = 5.3456789012345;
+    outcome.metrics.total_seconds            = 5.7037035803702;
+    outcome.metrics.prefix_cache_hit_tokens  = 101;
+    outcome.metrics.prefix_reuse_path        = ninfer::PrefixReusePath::RestoreTurnCheckpoint;
+    outcome.metrics.speculative_backend      = ninfer::SpeculativeBackend::Mtp;
+    outcome.metrics.speculative_draft_window = 3;
+    outcome.metrics.speculative_rounds       = 300;
+    outcome.metrics.speculative_p_less_draft_temperature = 0.8F;
+    outcome.metrics.speculative_draft_tokens             = 900;
+    outcome.metrics.speculative_accepted_tokens          = 720;
+    outcome.metrics.speculative_fallback_steps           = 2;
+    outcome.metrics.speculative_accepted_per_position    = {290, 240, 190};
 
     const Json done = Json::parse(format_request_done_json("serve-test", 3000, context, outcome));
+    failures += check(std::abs(done.at("speculative").at("p_less_draft_temperature").get<float>() -
+                               0.8F) < 1.0e-6F,
+                      "speculative draft temperature missing");
     failures +=
         check(done.at("result").at("finish_reason") == "output_limit", "finish reason missing");
     failures += check(done.at("result").at("prompt_tokens") == 401, "prompt tokens missing");

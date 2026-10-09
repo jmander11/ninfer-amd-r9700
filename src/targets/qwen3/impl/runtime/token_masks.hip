@@ -1,4 +1,4 @@
-#include "targets/qwen3/impl/runtime/tool_masks.h"
+#include "targets/qwen3/impl/runtime/token_masks.h"
 #include "core/device.h"
 #include "core/roctx.h"
 
@@ -15,7 +15,7 @@ namespace ninfer::targets::qwen3 {
 
 // Header of the fine-grained host mailbox. The device writes request/tree/batch/timed_out, the
 // matcher thread writes reply; both sides use system-scope atomics for the two sequence words.
-struct ToolMaskExchange::Mailbox {
+struct TokenMaskExchange::Mailbox {
     std::uint32_t request;
     std::uint32_t reply;
     std::uint32_t timed_out;
@@ -35,10 +35,10 @@ std::size_t align_up(std::size_t value) { return (value + 255U) & ~std::size_t{2
 
 // Copies the verification ids, optional parents and node counts into the mailbox at its fixed
 // row pitch, then raises the request number once every store is visible to the host.
-__global__ __launch_bounds__(kPublishThreads) void tool_mask_publish_kernel(
+__global__ __launch_bounds__(kPublishThreads) void token_mask_publish_kernel(
     const std::int32_t* ids, std::size_t ids_pitch, const std::int32_t* parents,
     std::size_t parents_pitch, const std::int32_t* valid_columns, std::uint32_t batch,
-    std::uint32_t width, std::uint32_t mailbox_width, ToolMaskExchange::Mailbox* mailbox,
+    std::uint32_t width, std::uint32_t mailbox_width, TokenMaskExchange::Mailbox* mailbox,
     std::int32_t* mail_ids, std::int32_t* mail_parents, std::int32_t* mail_counts) {
     for (std::uint32_t i = threadIdx.x; i < batch * width; i += blockDim.x) {
         const std::uint32_t row = i / width, node = i % width;
@@ -64,8 +64,8 @@ __global__ __launch_bounds__(kPublishThreads) void tool_mask_publish_kernel(
 // restricted mask rows into device storage; a restricted row's columns past its node count are
 // all-permitted, as the unrestricted sampler would see them. Without a reply in time the bound
 // unmasked configs are copied, and every CTA that timed out records it for finish_round().
-__global__ __launch_bounds__(kAcquireThreads) void tool_mask_acquire_kernel(
-    ToolMaskExchange::Mailbox* mailbox, const ops::SamplingConfig* reply_configs,
+__global__ __launch_bounds__(kAcquireThreads) void token_mask_acquire_kernel(
+    TokenMaskExchange::Mailbox* mailbox, const ops::SamplingConfig* reply_configs,
     const ops::SamplingConfig* fallback_configs, const std::uint32_t* mask_words,
     const std::uint32_t* host_masks, ops::SamplingConfig* device_configs,
     std::uint32_t* device_masks, std::size_t row_words, std::uint64_t timeout_ticks) {
@@ -132,13 +132,13 @@ bool all_permitted(const std::uint32_t* words, std::size_t nodes) {
 }
 } // namespace
 
-ToolMaskExchange::ToolMaskExchange(Tensor masks, Tensor sampling)
+TokenMaskExchange::TokenMaskExchange(Tensor masks, Tensor sampling)
     : masks_(masks), sampling_(sampling), width_(masks.ne[1]), capacity_(masks.ne[2]),
       root_masks_(capacity_ * kWords * sizeof(std::uint32_t)) {
     if (masks.dtype != DType::I32 || masks.ne[0] != kWords || !masks.is_contiguous() ||
         width_ == 0 || capacity_ == 0 ||
         sampling.bytes() < capacity_ * sizeof(ops::SamplingConfig)) {
-        throw std::invalid_argument("invalid tool mask exchange storage");
+        throw std::invalid_argument("invalid token mask exchange storage");
     }
     outputs_.resize(capacity_, nullptr);
     configs_.resize(capacity_);
@@ -176,7 +176,7 @@ ToolMaskExchange::ToolMaskExchange(Tensor masks, Tensor sampling)
     matcher_ = std::thread([this] { serve(); });
 }
 
-ToolMaskExchange::~ToolMaskExchange() {
+TokenMaskExchange::~TokenMaskExchange() {
     {
         std::lock_guard lock(mutex_);
         stopping_ = true;
@@ -186,10 +186,10 @@ ToolMaskExchange::~ToolMaskExchange() {
     (void)hipHostFree(mailbox_allocation_);
 }
 
-void ToolMaskExchange::bind(std::span<const OutputSession* const> outputs,
-                            std::span<const ops::SamplingConfig> sampling) {
+void TokenMaskExchange::bind(std::span<const OutputSession* const> outputs,
+                             std::span<const ops::SamplingConfig> sampling) {
     if (outputs.empty() || outputs.size() > capacity_ || outputs.size() != sampling.size()) {
-        throw std::invalid_argument("invalid tool mask batch bindings");
+        throw std::invalid_argument("invalid token mask batch bindings");
     }
     std::lock_guard lock(mutex_);
     outputs_.assign(outputs.begin(), outputs.end());
@@ -197,36 +197,37 @@ void ToolMaskExchange::bind(std::span<const OutputSession* const> outputs,
     error_ = {};
 }
 
-std::uint32_t* ToolMaskExchange::host_mask(std::size_t row) const {
+std::uint32_t* TokenMaskExchange::host_mask(std::size_t row) const {
     return mail_masks_ + row * width_ * kWords;
 }
 
-std::uint32_t* ToolMaskExchange::root_mask(std::size_t row) const {
+std::uint32_t* TokenMaskExchange::root_mask(std::size_t row) const {
     return static_cast<std::uint32_t*>(root_masks_.data()) + row * kWords;
 }
 
-const std::uint32_t* ToolMaskExchange::device_mask(std::size_t row) const {
+const std::uint32_t* TokenMaskExchange::device_mask(std::size_t row) const {
     return static_cast<const std::uint32_t*>(masks_.data) + row * width_ * kWords;
 }
 
-ops::SamplingConfig ToolMaskExchange::root(std::size_t row, hipStream_t stream) {
+ops::SamplingConfig TokenMaskExchange::root(std::size_t row, hipStream_t stream) {
     return root_into(outputs_.at(row), configs_.at(row), row, stream);
 }
 
-ops::SamplingConfig ToolMaskExchange::prefill_root(const OutputSession* output,
-                                                   ops::SamplingConfig config, hipStream_t stream) {
+ops::SamplingConfig TokenMaskExchange::prefill_root(const OutputSession* output,
+                                                    ops::SamplingConfig config,
+                                                    hipStream_t stream) {
     return root_into(output, config, capacity_ - 1U, stream);
 }
 
-ops::SamplingConfig ToolMaskExchange::root_into(const OutputSession* output,
-                                                ops::SamplingConfig config, std::size_t row,
-                                                hipStream_t stream) {
+ops::SamplingConfig TokenMaskExchange::root_into(const OutputSession* output,
+                                                 ops::SamplingConfig config, std::size_t row,
+                                                 hipStream_t stream) {
     config.allowed_token_words         = nullptr;
     config.allowed_token_column_stride = 0;
-    if (output && output->has_tool_grammar()) {
+    if (output && output->has_token_grammar()) {
         const std::array<TokenId, 1> token{0};
         const std::array<std::int32_t, 1> parent{-1};
-        output->fill_tool_masks(token, parent, {root_mask(row), kWords});
+        output->fill_token_masks(token, parent, {root_mask(row), kWords});
         HIP_CHECK(hipMemcpyAsync(const_cast<std::uint32_t*>(device_mask(row)), root_mask(row),
                                  kWords * sizeof(std::uint32_t), hipMemcpyHostToDevice, stream));
         config.allowed_token_words = device_mask(row);
@@ -234,18 +235,18 @@ ops::SamplingConfig ToolMaskExchange::root_into(const OutputSession* output,
     return config;
 }
 
-const ops::SamplingConfig* ToolMaskExchange::publish(const Tensor& ids, const Tensor* parents,
-                                                     const Tensor& valid_columns,
-                                                     hipStream_t stream) {
+const ops::SamplingConfig* TokenMaskExchange::publish(const Tensor& ids, const Tensor* parents,
+                                                      const Tensor& valid_columns,
+                                                      hipStream_t stream) {
     const auto batch = static_cast<std::size_t>(ids.ne[1]);
     const auto width = static_cast<std::size_t>(ids.ne[0]);
     if (width > width_ || batch > capacity_ || ids.dtype != DType::I32 ||
         valid_columns.dtype != DType::I32 || valid_columns.ne[0] != ids.ne[1] ||
         (parents != nullptr && (parents->dtype != DType::I32 || parents->ne[0] != ids.ne[0] ||
                                 parents->ne[1] != ids.ne[1]))) {
-        throw std::invalid_argument("invalid speculative tool mask inputs");
+        throw std::invalid_argument("invalid speculative token mask inputs");
     }
-    hipLaunchKernelGGL(tool_mask_publish_kernel, dim3(1), dim3(kPublishThreads), 0, stream,
+    hipLaunchKernelGGL(token_mask_publish_kernel, dim3(1), dim3(kPublishThreads), 0, stream,
                        static_cast<const std::int32_t*>(ids.data), ids.nb[1] / sizeof(std::int32_t),
                        parents ? static_cast<const std::int32_t*>(parents->data) : nullptr,
                        parents ? parents->nb[1] / sizeof(std::int32_t) : std::size_t{0},
@@ -257,8 +258,8 @@ const ops::SamplingConfig* ToolMaskExchange::publish(const Tensor& ids, const Te
     return static_cast<const ops::SamplingConfig*>(sampling_.data);
 }
 
-void ToolMaskExchange::acquire(hipStream_t stream) {
-    hipLaunchKernelGGL(tool_mask_acquire_kernel, dim3(kAcquireBlocks), dim3(kAcquireThreads), 0,
+void TokenMaskExchange::acquire(hipStream_t stream) {
+    hipLaunchKernelGGL(token_mask_acquire_kernel, dim3(kAcquireBlocks), dim3(kAcquireThreads), 0,
                        stream, mailbox_, mail_configs_, mail_fallback_, mail_mask_words_,
                        mail_masks_, static_cast<ops::SamplingConfig*>(sampling_.data),
                        static_cast<std::uint32_t*>(masks_.data), width_ * kWords,
@@ -266,7 +267,7 @@ void ToolMaskExchange::acquire(hipStream_t stream) {
     HIP_CHECK(hipGetLastError());
 }
 
-void ToolMaskExchange::arm() {
+void TokenMaskExchange::arm() {
     {
         std::lock_guard lock(mutex_);
         for (std::size_t row = 0; row < capacity_; ++row) {
@@ -280,26 +281,26 @@ void ToolMaskExchange::arm() {
     armed_changed_.notify_all();
 }
 
-void ToolMaskExchange::disarm() noexcept {
+void TokenMaskExchange::disarm() noexcept {
     std::lock_guard lock(mutex_);
     armed_ = false;
 }
 
-void ToolMaskExchange::finish_round() {
+void TokenMaskExchange::finish_round() {
     std::lock_guard lock(mutex_);
     armed_ = false;
     // The round synchronized, so its last request is final: one it timed out on is never
     // answered later against another round's bindings.
     answered_ = std::atomic_ref(mailbox_->request).load(std::memory_order_acquire);
     if (std::atomic_ref(mailbox_->timed_out).exchange(0U, std::memory_order_relaxed) != 0U) {
-        throw std::runtime_error("tool grammar mask exchange received no host reply");
+        throw std::runtime_error("token grammar mask exchange received no host reply");
     }
     if (error_) { std::rethrow_exception(std::exchange(error_, nullptr)); }
 }
 
 // Matcher thread. The mutex is held while answering, so bind/arm/finish at round boundaries
 // never overlap a reply; it is released while waiting between polls.
-void ToolMaskExchange::serve() noexcept {
+void TokenMaskExchange::serve() noexcept {
     std::unique_lock lock(mutex_);
     for (;;) {
         armed_changed_.wait(lock, [this] { return stopping_ || armed_; });
@@ -315,8 +316,9 @@ void ToolMaskExchange::serve() noexcept {
     }
 }
 
-void ToolMaskExchange::answer(std::uint32_t request) noexcept {
-    roctx::ScopedRange range(roctx::Name::ToolMaskMatch, roctx::Category::Control, configs_.size());
+void TokenMaskExchange::answer(std::uint32_t request) noexcept {
+    roctx::ScopedRange range(roctx::Name::TokenMaskMatch, roctx::Category::Control,
+                             configs_.size());
     try {
         fill(std::atomic_ref(mailbox_->tree).load(std::memory_order_relaxed) != 0U);
     } catch (...) {
@@ -331,7 +333,7 @@ void ToolMaskExchange::answer(std::uint32_t request) noexcept {
     std::atomic_ref(mailbox_->reply).store(request, std::memory_order_release);
 }
 
-void ToolMaskExchange::fill(bool tree) {
+void TokenMaskExchange::fill(bool tree) {
     // Rows past the bindings (representative warm rounds) carry no grammar.
     const std::size_t batch = std::min<std::size_t>(
         std::atomic_ref(mailbox_->batch).load(std::memory_order_relaxed), capacity_);
@@ -341,12 +343,12 @@ void ToolMaskExchange::fill(bool tree) {
         config.allowed_token_words = nullptr;
         config.allowed_token_column_stride = 0;
         mail_mask_words_[row]              = 0U;
-        if (row >= outputs_.size() || !outputs_[row] || !outputs_[row]->has_tool_grammar()) {
+        if (row >= outputs_.size() || !outputs_[row] || !outputs_[row]->has_token_grammar()) {
             continue;
         }
         const std::int32_t count_value = mail_counts_[row];
         if (count_value < 1 || static_cast<std::size_t>(count_value) > width_) {
-            throw std::logic_error("invalid tool grammar verification node count");
+            throw std::logic_error("invalid token grammar verification node count");
         }
         const auto count      = static_cast<std::size_t>(count_value);
         std::int32_t* parents = mail_parents_ + row * width_;
@@ -357,8 +359,8 @@ void ToolMaskExchange::fill(bool tree) {
         }
         std::uint32_t* words = host_mask(row);
         std::fill_n(words, count * kWords, ~std::uint32_t{0});
-        outputs_[row]->fill_tool_masks({mail_ids_ + row * width_, count}, {parents, count},
-                                       {words, count * kWords});
+        outputs_[row]->fill_token_masks({mail_ids_ + row * width_, count}, {parents, count},
+                                        {words, count * kWords});
         if (all_permitted(words, count)) { continue; }
         // Nodes in one grammar state (free text) share a mask: publish it once, broadcast.
         bool shared = true;

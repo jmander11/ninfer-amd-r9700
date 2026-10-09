@@ -24,11 +24,11 @@ TargetVerifyFrameView target_verify_prepare(ExecutionCore& execution, TextContex
     }
     card.set_gdn_state_action(GdnStateAction::RecordForReplay, frame.replay_records,
                               frame.gdn_fold);
-    if (frame.tool_masks) {
-        frame.sampling = frame.tool_masks->publish(frame.ids, tree ? &frame.parent_index : nullptr,
-                                                   frame.valid_columns, execution.device.stream);
+    if (frame.token_masks) {
+        frame.sampling = frame.token_masks->publish(frame.ids, tree ? &frame.parent_index : nullptr,
+                                                    frame.valid_columns, execution.device.stream);
     }
-    card.set_sampling(frame.sampling, frame.tool_masks);
+    card.set_sampling(frame.sampling, frame.token_masks);
     if (tree) {
         card.set_tree_verify(&frame.parent_index, &frame.ancestor_mask, &frame.prefix_lengths);
     }

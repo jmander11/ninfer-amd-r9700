@@ -5,11 +5,11 @@ repository by custom AMD ports, not merged ancestry; `AGENTS.md` states the sync
 
 ## Baseline
 
-Reconciled through upstream `f0d3922e8a4dfedf57cd7011bc0eb72e0e1c8236` (2026-10-04), advanced
-from `945515ea` (2026-10-04), `48eb0b01` (2026-10-03), `593c2d0c` (2026-10-03),
+Reconciled through upstream `d5c38cda2e875aad37f49889c1f03eda1540bf20` (2026-10-09), advanced
+from `6e5b576e` (2026-10-06), `f0d3922e` (2026-10-04), `945515ea` (2026-10-04), `48eb0b01` (2026-10-03), `593c2d0c` (2026-10-03),
 `574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
 `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`,
-`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `f0d3922e`
+`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `d5c38cda`
 against current AMD behavior.
 
 ## Ported features (`c450798c..e04fad37`)
@@ -205,8 +205,9 @@ the `quality/clang-tidy-backlog` branch, so `4051ebf0..26ba4203` are not descend
   name and the FP8 hybrid converter a stray expression.
 - Not ported: the clang-tidy backlog fixes `9ff23c4c`, `d40226e0`, `196cc237`, `9b9b9b47`,
   `341822ba`, `1bd8f518` (style or hardening of upstream code; their defect hunks are covered
-  above), `ce01f249`'s `--fast` tier, `kernel` label, and master merge gates (the fork's test
-  runner is host-only by default and it has no master merge flow), and `f8ea8cf9`'s
+  above), `ce01f249`'s `--fast` tier and `kernel` label (the fork's test runner is host-only by
+  default). Its master-merge process was subsequently adapted on 2026-10-09 in
+  `merging-to-master.md` and `scripts/master-gates.sh`, and `f8ea8cf9`'s
   `--sanitizer` reduced cases (the R9700 qualifiers complete under racecheck at full scope).
   Absent here: `c1a37a5a` sparse-MoE scan race, `d5d01c3c` q5 epilogue and kdev guard, the
   `8dba51cc` small-T reduce kernel (the split-KV merges here use separate scalars and barriers),
@@ -336,3 +337,70 @@ lifecycle disposition. Only this record and `AGENTS.md` changed, their baseline 
 and `git diff --check` passes. No build or GPU experiment is needed for this documentation-only
 reconciliation; no new correctness or performance claim is made. Future syncs review changes after
 `f0d3922e` against the retained AMD behavior, including the explicit non-adoption above.
+
+## `f0d3922e..6e5b576e` (2 upstream commits, reconciled 2026-10-06)
+
+- `63179e946f54b1f19a16fdfef961b5acc310987d`: ported token logprobs through a native
+  gfx1201 Op, Engine request plans and round frames, committed output-channel records, exact
+  token bytes, and OpenAI Chat Completions/Responses JSON and SSE. Each published token is
+  scored against its target logits at temperature 1 over the token domain; sampling masks,
+  penalties and draft distributions do not participate. Ranked alternatives use lower-id tie
+  breaking. Disabled rows return before reading logits and leave their records untouched.
+  Native integration preserves compact/adaptive panels, mixed prefill/decode and paged-KV
+  transaction ownership. The shifted log-normalizer avoids FP32 cancellation for large equal
+  logits; this additional represented-input case passes the independent FP64 oracle. Native
+  qualification replaces the CUDA Op fixtures and benchmark. NVIDIA throughput claims and
+  benches are excluded; the AMD test runner already routes qualifiers through CTest labels.
+  Real packed-tree inference fixtures are excluded because this target requires chain width
+  K+1; explicit column selection remains qualified at the Op boundary.
+- `6e5b576e15d21de5470c3728d9fcc3cdc4e59f2a`: the capture defect was already fixed in AMD
+  (`593c2d0c..48eb0b01` above). Ported the tied-prediction choice nearest the prior in log
+  temperature, startup NaN egress poisoning/validation, and the last p-less chain draft
+  temperature in SpeculativeStats, CLI and request log. The scoring launch is consistently
+  the Program's startup property in capture and eager execution; tree bodies still omit it.
+  Upstream CUDA performance results are excluded. Native captured calibration reports 0.8
+  at target p-less T=2 in the real-artifact check.
+
+Verification: Release build with warnings as errors; native logprob FP64/exact oracle at
+248320 physical rows / 248077 tokens, signed-zero/equal-logit ties, large equal logits,
+strided and skipped outputs, explicit columns, widths through 16 and batches through 8;
+real r9700-fp8lut4 Engine checks for ordinary, MTP, DFlash chain/adaptive/eager/calibrated
+Device Graphs, C8 reporting/quiet rows, streaming channel parity and reporting-on/off
+unchanged greedy tokens. Teacher-forced ordinary decode agrees within 0.000004 nats; the
+prefill comparison changes geometry by including its target token and is checked behaviorally
+separately. Speculative and batched routes use behavioral NLL criteria for their qualified
+activation profiles, with greedy tokens additionally equal to rank zero of their own logits.
+Nine affected host tests pass; changed-line clang-tidy and final Op/test checks report no
+remaining diagnostics, and git diff --check passes. Evidence:
+`profiles/bench/r9700-upstream-sync-20261006/`. No throughput benefit is claimed, no unsupported
+inference route is enabled, and no ancestry merge, commit or deployment was created.
+
+## `6e5b576e..d5c38cda` (2 upstream commits, reconciled 2026-10-09)
+
+- `c7199023365cca8a4ca277e27e289219f12f49bc`: ported unified owning output constraints
+  (JSON object, JSON Schema, XGrammar EBNF), CLI file options, Chat response_format and
+  structured_outputs.grammar, and Responses text.format. Replaces AMD's schema-only option;
+  required/named tool-call behavior remains supported. Response assertions are enforced and
+  unsupported assertions fail admission; tools retain their documented relaxation policy.
+  Native HIP TokenMaskExchange keeps the coherent mailbox/matcher thread, caller-owned
+  planner storage, ordinary prefill roots and speculative chain columns. NVIDIA callback,
+  CUDA graph and profiler paths are not imported. Renamed grammar/mask ownership to token
+  grammar consistently. Ported the pinned build-copy compiler patches for JSON assertions,
+  Unicode scalar lengths/escapes and canonical additional keys. Content preserves EBNF
+  whitespace and literal special bytes, reasoning remains unconstrained, and caller stops
+  can truncate a valid prefix with the existing finish reason. The FFmpeg current-buffer
+  release was already equivalent on AMD. CUDA/NVFP4-only fixture identities are replaced
+  by the production R9700 real-artifact C3 check; unsupported packed-tree inference remains
+  excluded.
+- `d5c38cda2e875aad37f49889c1f03eda1540bf20`: NVIDIA MTP RAM-reseed fixture assertion
+  correction, explicitly excluded. The modified NVFP4 test and its seeded-k=4 assertion do
+  not exist in AMD; no production behavior changes in this commit. AMD's adaptive MTP seed
+  policy and native checks remain unchanged.
+
+Verification: warnings-as-errors Release build; affected grammar/frontend, CLI, OpenAI/Responses,
+Anthropic, recovery, metrics and public-interface host checks. The real production artifact passes
+mixed constrained/unconstrained C3 generation with ordinary decode, MTP and captured DFlash chain,
+including exact EBNF, schema values, EOS, cached compilation, streaming/result and token-logprob
+attribution. Changed-line clang-tidy and git diff --check pass. Evidence:
+`profiles/bench/r9700-upstream-sync-20261009/`. No performance improvement is claimed; no commit,
+ancestry merge or deployment is created.

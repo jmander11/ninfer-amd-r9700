@@ -942,7 +942,7 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
             .gdn_fold        = use_tree ? nullptr : frame.gdn_fold,
             .sampling        = frame.sampling,
             .feature_sink    = &sink,
-            .tool_masks      = state.tool_masks,
+            .token_masks     = state.token_masks,
         };
         if (use_tree) {
             verify_frame.parent_index    = parent_index;
@@ -1001,6 +1001,10 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
             target_verify_accept(state.execution, state.continuation_hidden_store, card,
                                  verify_frame, !compact);
         }
+        // Tree output slot i belongs to target column fold_path[i]; chain slots use column i.
+        qwen3::record_round_logprobs(frame.logprobs, target_logits, licensed_tokens,
+                                     &licensed_counts, use_tree ? &fold_path : nullptr,
+                                     TextConfig::token_domain, state.execution.device.stream);
         for (qwen3::PagedKVTransaction* transaction : state.text_kv_transactions) {
             transaction->end_device_segment(state.execution.device.stream);
         }

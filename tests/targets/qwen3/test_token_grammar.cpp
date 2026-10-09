@@ -1,4 +1,4 @@
-#include "targets/qwen3/impl/frontend/tool_grammar.h"
+#include "targets/qwen3/impl/frontend/token_grammar.h"
 #include "ninfer/targets/qwen3/frontend.h"
 
 #include <iostream>
@@ -42,7 +42,7 @@ int real_tokenizer_probe(const char* directory, const char* fixture_path) {
     const auto generation_json = read(root + "/generation_config.json");
     auto tokenizer             = std::make_shared<const fi::Tokenizer>(
         fi::TokenizerResources{tokenizer_json, config_json, generation_json});
-    fi::ToolGrammarCompiler compiler(tokenizer);
+    fi::TokenGrammarCompiler compiler(tokenizer);
     const auto fixture = Json::parse(read(fixture_path));
     std::vector<std::string> tools;
     for (const auto& tool : fixture.at("tools")) { tools.push_back(tool.dump()); }
@@ -97,7 +97,7 @@ int real_tokenizer_probe(const char* directory, const char* fixture_path) {
     const std::string unordered_prefix = "Think.</think>\n<tool_call>\n<function=read>\n"
                                          "<parameter=limit>\n64\n</parameter>\n";
     {
-        fi::ToolGrammarState state(grammar);
+        fi::TokenGrammarState state(grammar);
         state.preview(tokenizer->encode(unordered_prefix));
         state.commit_preview();
         const std::string valid_suffix = "<parameter=filePath>\n/tmp/example.cpp\n</parameter>\n"
@@ -116,12 +116,12 @@ int real_tokenizer_probe(const char* directory, const char* fixture_path) {
             }
             branches.emplace_back(start, tree.size());
         }
-        std::vector<std::uint32_t> tree_mask(tree.size() * fi::ToolGrammarState::mask_words);
+        std::vector<std::uint32_t> tree_mask(tree.size() * fi::TokenGrammarState::mask_words);
         state.fill_masks(tree, parents, tree_mask);
         for (std::size_t branch = 0; branch < branches.size(); ++branch) {
             bool branch_rejected = false;
             for (auto node = branches[branch].first; node < branches[branch].second; ++node) {
-                if (!(tree_mask[parents[node] * fi::ToolGrammarState::mask_words +
+                if (!(tree_mask[parents[node] * fi::TokenGrammarState::mask_words +
                                 tree[node] / 32] &
                       (1u << (tree[node] % 32)))) {
                     branch_rejected = true;
@@ -145,7 +145,7 @@ int real_tokenizer_probe(const char* directory, const char* fixture_path) {
         state.commit_preview();
         state.fill_masks(
             std::vector<ninfer::TokenId>{0}, std::vector<std::int32_t>{-1},
-            std::span<std::uint32_t>(repeated_mask).first(fi::ToolGrammarState::mask_words));
+            std::span<std::uint32_t>(repeated_mask).first(fi::TokenGrammarState::mask_words));
         for (int stop : tokenizer->default_stop_token_ids()) {
             if (!(repeated_mask[stop / 32] & (1u << (stop % 32)))) {
                 std::cerr << "committed unordered call cannot stop\n";
@@ -257,7 +257,7 @@ int main(int argc, char** argv) {
                                           "abc",
                                           "</parameter>\n</parameter>",
                                           "Reasoning about a call.",
-                                          "</think>\n\n",
+                                          "</think>",
                                           "</function>",
                                           "</invoke>",
                                           "</function",
@@ -293,7 +293,7 @@ int main(int argc, char** argv) {
     const auto config_json = Json{{"added_tokens_decoder", decoder}}.dump();
     auto tokenizer         = std::make_shared<const fi::Tokenizer>(
         fi::TokenizerResources{tokenizer_json, config_json, R"({"eos_token_id":[7]})"});
-    fi::ToolGrammarCompiler compiler(tokenizer);
+    fi::TokenGrammarCompiler compiler(tokenizer);
     const std::vector<std::string> tools{
         R"({"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"filePath":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":64}},"required":["filePath","limit"],"additionalProperties":false}}})"};
     int failures = 0;
@@ -306,8 +306,10 @@ int main(int argc, char** argv) {
     for (bool reasoning : {false, true}) {
         const auto grammar = compiler.compile(
             {}, reasoning, false,
-            R"({"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false})");
-        const std::string prefix = reasoning ? "Reasoning about a call.</think>\n\n" : "";
+            ninfer::OutputConstraint{
+                ninfer::OutputConstraintKind::JsonSchema,
+                R"({"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false})"});
+        const std::string prefix = reasoning ? "Reasoning about a call.</think>" : "";
         xgrammar::GrammarMatcher good(grammar->compiled);
         check(good.AcceptString(prefix + R"({"ok":true})") && good.AcceptToken(7),
               "schema accepts complete JSON after optional reasoning");
@@ -319,8 +321,11 @@ int main(int argc, char** argv) {
               "schema forbids content after the JSON value");
         xgrammar::GrammarMatcher bad(grammar->compiled);
         check(!bad.AcceptString(prefix + R"({"wrong":true})"), "schema rejects wrong key");
-        const auto scalar = compiler.compile({}, reasoning, false, R"({"type":"boolean"})");
-        fi::ToolGrammarState state(scalar);
+        const auto scalar =
+            compiler.compile({}, reasoning, false,
+                             ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonSchema,
+                                                      R"({"type":"boolean"})"});
+        fi::TokenGrammarState state(scalar);
         if (reasoning) {
             const std::array<ninfer::TokenId, 2> reasoning_tokens{10, 11};
             state.preview(reasoning_tokens);
@@ -336,10 +341,12 @@ int main(int argc, char** argv) {
         state.commit_preview();
     }
     try {
-        (void)compiler.compile({}, false, false, R"({"type":"integer","multipleOf":2})");
+        (void)compiler.compile({}, false, false,
+                               ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonSchema,
+                                                        R"({"type":"integer","multipleOf":2})"});
         check(false, "unsupported schema assertion admitted");
     } catch (const ninfer::RequestError& error) {
-        check(error.kind() == ninfer::RequestErrorKind::InvalidOutputSchema,
+        check(error.kind() == ninfer::RequestErrorKind::InvalidOutputConstraint,
               "schema failure classified as output schema");
     }
     for (bool reasoning : {false, true}) {
@@ -358,13 +365,13 @@ int main(int argc, char** argv) {
         xgrammar::GrammarMatcher valid(required->compiled);
         check(valid.AcceptString(concat(prefix, call, "Done.", call)) && valid.AcceptToken(7),
               "required call rejected valid call, subsequent prose/call, or stop");
-        fi::ToolGrammarState state(required);
+        fi::TokenGrammarState state(required);
         std::vector<ninfer::TokenId> tokens;
         if (reasoning) { tokens = {10, 11}; }
         tokens.insert(tokens.end(), {1, 2, 3, 4, 5, 6});
         const std::vector<ninfer::TokenId> root{0};
         const std::vector<std::int32_t> parents{-1};
-        std::vector<std::uint32_t> masks(fi::ToolGrammarState::mask_words);
+        std::vector<std::uint32_t> masks(fi::TokenGrammarState::mask_words);
         const auto can_stop = [&] {
             state.fill_masks(root, parents, masks);
             return (masks[7 / 32] & (1u << (7 % 32))) != 0;
@@ -504,9 +511,8 @@ int main(int argc, char** argv) {
                  false);
     accepts_call(containers,
                  {{"array", R"([{"y":2,"x":1}])"}, {"object", R"({"y":1,"x":2,"y":2})"}}, false);
-    // Upstream's additional JSON key rule admits escaped aliases. They must
-    // never become executable calls after canonical decoding, even when the
-    // overwritten value alone would satisfy the named property's schema.
+    // Canonical additional keys exclude escaped aliases; final validation also
+    // rejects aliases that could overwrite a named property's constrained value.
     auto escaped                                     = containers;
     escaped["$defs"]["pair"]["additionalProperties"] = numeric;
     auto escaped_grammar                             = schema_grammar(escaped);
@@ -595,17 +601,17 @@ int main(int argc, char** argv) {
             xgrammar::GrammarMatcher reasoning_exit(grammar->compiled);
             check(reasoning_exit.AcceptString("Let me use the tool.</think>\n" + raw),
                   "reasoning cannot exit into a legitimate tool call");
-            fi::ToolGrammarState thinking_state(grammar);
-            std::vector<std::uint32_t> thinking_words(2 * fi::ToolGrammarState::mask_words);
+            fi::TokenGrammarState thinking_state(grammar);
+            std::vector<std::uint32_t> thinking_words(2 * fi::TokenGrammarState::mask_words);
             thinking_state.fill_masks(std::vector<ninfer::TokenId>{0, 1},
                                       std::vector<std::int32_t>{-1, 0}, thinking_words);
-            check((thinking_words[fi::ToolGrammarState::mask_words] & (1u << 2)) == 0,
+            check((thinking_words[fi::TokenGrammarState::mask_words] & (1u << 2)) == 0,
                   "speculative child can complete a tool opener inside reasoning");
             thinking_state.preview(std::vector<ninfer::TokenId>{1});
             thinking_state.commit_preview();
             thinking_state.fill_masks(
                 std::vector<ninfer::TokenId>{0}, std::vector<std::int32_t>{-1},
-                std::span<std::uint32_t>(thinking_words).first(fi::ToolGrammarState::mask_words));
+                std::span<std::uint32_t>(thinking_words).first(fi::TokenGrammarState::mask_words));
             check((thinking_words[0] & (1u << 2)) == 0,
                   "next committed round can complete a tool opener inside reasoning");
         }
@@ -664,7 +670,7 @@ int main(int argc, char** argv) {
         matcher.Rollback(1);
         check(allows(7), "grammar rollback failed to restore terminal choice");
 
-        fi::ToolGrammarState state(grammar);
+        fi::TokenGrammarState state(grammar);
         std::vector<ninfer::TokenId> prefix;
         if (reasoning) { prefix = {10, 11}; }
         prefix.insert(prefix.end(), {1, 2, 3, 4});
@@ -674,9 +680,9 @@ int main(int argc, char** argv) {
         // column adjacency, determines which grammar state licenses sampling.
         const std::vector<ninfer::TokenId> draft{0, 8, 5, 9, 6};
         const std::vector<std::int32_t> parents{-1, 0, 0, 2, 2};
-        std::vector<std::uint32_t> tree_words(draft.size() * fi::ToolGrammarState::mask_words);
+        std::vector<std::uint32_t> tree_words(draft.size() * fi::TokenGrammarState::mask_words);
         auto tree_allows = [&](int node, int token) {
-            return (tree_words[node * fi::ToolGrammarState::mask_words + token / 32] &
+            return (tree_words[node * fi::TokenGrammarState::mask_words + token / 32] &
                     (1u << (token % 32))) != 0;
         };
         state.fill_masks(draft, parents, tree_words);
@@ -702,7 +708,7 @@ int main(int argc, char** argv) {
         check(bad_preview, "invalid preview was accepted");
         state.preview(suffix);
         state.commit_preview();
-        std::vector<std::uint32_t> root_words(fi::ToolGrammarState::mask_words);
+        std::vector<std::uint32_t> root_words(fi::TokenGrammarState::mask_words);
         state.fill_masks(std::vector<ninfer::TokenId>{0}, std::vector<std::int32_t>{-1},
                          root_words);
         check((root_words[0] & (1u << 7)) != 0, "committed tool cannot terminate");
@@ -717,17 +723,17 @@ int main(int argc, char** argv) {
         check((root_words[0] & ((1u << 19) | (1u << 20))) == 0,
               "split orphan prefix can be completed or escaped next round");
         // Use a fresh completed-call state for the following EOS controls.
-        state = fi::ToolGrammarState(grammar);
+        state = fi::TokenGrammarState(grammar);
         state.preview(prefix);
         state.commit_preview();
         state.preview(suffix);
         state.commit_preview();
-        std::vector<std::uint32_t> stopped_words(3 * fi::ToolGrammarState::mask_words);
+        std::vector<std::uint32_t> stopped_words(3 * fi::TokenGrammarState::mask_words);
         state.fill_masks(std::vector<ninfer::TokenId>{0, 7, 8}, std::vector<std::int32_t>{-1, 0, 1},
                          stopped_words);
-        check((stopped_words[fi::ToolGrammarState::mask_words] & (1u << 8)) != 0,
+        check((stopped_words[fi::TokenGrammarState::mask_words] & (1u << 8)) != 0,
               "post-EOS speculative column tried to continue a terminated matcher");
-        fi::ToolGrammarState ignored_stop(grammar, {7});
+        fi::TokenGrammarState ignored_stop(grammar, {7});
         ignored_stop.preview(prefix);
         ignored_stop.commit_preview();
         bool partial_stop = false;
@@ -739,7 +745,7 @@ int main(int argc, char** argv) {
         ignored_stop.commit_preview();
         ignored_stop.fill_masks(std::vector<ninfer::TokenId>{0, 7, 1},
                                 std::vector<std::int32_t>{-1, 0, 1}, stopped_words);
-        check((stopped_words[fi::ToolGrammarState::mask_words] & (1u << 1)) != 0,
+        check((stopped_words[fi::TokenGrammarState::mask_words] & (1u << 1)) != 0,
               "disabled EOS prevented a subsequent tool call");
         ignored_stop.preview(std::vector<ninfer::TokenId>{1, 2, 3, 4, 5, 6, 7});
         ignored_stop.commit_preview();

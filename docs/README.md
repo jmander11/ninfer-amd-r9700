@@ -40,6 +40,7 @@ Artifact and target ownership:
 
 - `../plans/r9700-autonomous-todos.md`: live work ledger.
 - `maintainer/upstream-sync.md`: upstream baseline and port dispositions.
+- `maintainer/merging-to-master.md`: full AMD promotion gates for experimental-to-master merges.
 - `maintainer/code-quality.md`: static gates and the gfx1201 device checks (memcheck, initcheck,
   racecheck).
 - `../tools/bench/README.md`: physical matrix commands, DFlash selection, safe embedded-code

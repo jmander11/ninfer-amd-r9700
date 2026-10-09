@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -261,9 +262,15 @@ struct ExecutionOptions {
     bool capture_context_checkpoint       = false;
 };
 
+// Largest number of ranked alternatives a TokenLogprob carries.
+inline constexpr std::uint32_t kMaximumTopLogprobs = 20;
+
 struct OutputOptions {
     bool raw                     = false;
     bool preserve_special_tokens = false;
+    // Set to report a TokenLogprob for every token published to a channel, each carrying this many
+    // ranked alternatives, in [0, kMaximumTopLogprobs]. Unset reports none.
+    std::optional<std::uint32_t> top_logprobs;
 };
 
 struct RequestOptions {
@@ -372,6 +379,21 @@ struct PromptCapabilities {
     ReasoningEffortCapabilities reasoning_effort;
 };
 
+enum class OutputConstraintKind : std::uint8_t {
+    JsonObject,
+    JsonSchema,
+    Grammar,
+};
+
+// Owns the schema JSON or XGrammar EBNF source (root rule: root). Constraints apply to answer
+// content after reasoning. A generation prompt is required, and tool declarations are forbidden.
+// Unsupported schemas/grammars fail preparation with InvalidOutputConstraint. Caller stops and
+// output/context limits can truncate a valid prefix before the grammar completes.
+struct OutputConstraint {
+    OutputConstraintKind kind = OutputConstraintKind::JsonObject;
+    std::string source;
+};
+
 struct PromptOptions {
     bool add_generation_prompt = true;
     bool enable_thinking       = true;
@@ -381,8 +403,8 @@ struct PromptOptions {
     std::vector<std::string> tool_jsons;
     // Require a schema-valid call before the content phase may finish.
     bool require_tool_call = false;
-    // JSON Schema for the content phase; reasoning remains a separate channel.
-    std::optional<std::string> output_json_schema;
+    // Answer constraint; reasoning remains a separate channel.
+    std::optional<OutputConstraint> output_constraint;
 };
 
 struct PromptInput {
@@ -392,7 +414,7 @@ struct PromptInput {
 
 enum class RequestErrorKind : std::uint8_t {
     InvalidToolSchema,
-    InvalidOutputSchema,
+    InvalidOutputConstraint,
     ContextLengthExceeded,
     MediaBudgetExceeded,
     Overloaded,
@@ -417,9 +439,38 @@ enum class FinishReason : std::uint8_t {
     Cancelled,
 };
 
+struct TokenAlternative {
+    TokenId token = 0;
+    float logprob = 0.0F;
+};
+
+// One generated token under the model's next-token distribution: the log-softmax of the
+// target model's logits at temperature 1 over the whole vocabulary, at the position that produced
+// the token. Sampling temperature, truncation, penalties, and tool-grammar masks do not
+// participate, so a token the sampler was steered to can carry a low logprob. With speculative
+// decoding the distribution is the target model's, never the draft's.
+struct TokenLogprob {
+    TokenId token = 0;
+    float logprob = 0.0F;
+    // The first top_count entries are the most likely tokens, most likely first, with the lower
+    // token id first among equal logits.
+    std::array<TokenAlternative, kMaximumTopLogprobs> top{};
+    std::uint32_t top_count = 0;
+
+    [[nodiscard]] std::span<const TokenAlternative> alternatives() const noexcept {
+        return std::span<const TokenAlternative>(top.data(), top_count);
+    }
+};
+
 struct OutputDelta {
     OutputChannel channel = OutputChannel::Content;
     std::string text;
+    // With OutputOptions::top_logprobs: the tokens committed to this channel by the round that
+    // produced the delta. Records are token-aligned rather than text-aligned: text held back for a
+    // stop-string or UTF-8 boundary arrives in a later delta, so text may be empty here, and a
+    // token trimmed by a stop string still has its record. Tokens that publish to no channel
+    // (reasoning markers, tool-call markup, stop tokens) have no record.
+    std::vector<TokenLogprob> logprobs;
 };
 
 enum class OutputDelivery : std::uint8_t {
@@ -499,7 +550,10 @@ struct SpeculativeStats {
     std::uint64_t accepted_tokens = 0;
     std::uint64_t fallback_steps  = 0;
     std::vector<std::uint64_t> accepted_per_position;
-    std::uint32_t live_draft_tokens = 0;         // last live K used this request
+    std::uint32_t live_draft_tokens = 0; // last live K used this request
+    // DFlash2 draft temperature of the request's last p-less chain round, calibrated or pinned;
+    // 0 when the request ran none (greedy drafts, packed-tree rounds, or another backend).
+    float p_less_draft_temperature = 0.0F;
     std::vector<std::uint64_t> rounds_per_draft; // index = K, size N+1
 };
 
@@ -555,6 +609,10 @@ struct GenerationResult {
     std::vector<TokenId> generated_token_ids;
     std::string content;
     std::string reasoning;
+    // Every OutputDelta::logprobs record of the request per channel, in generation order; empty
+    // without OutputOptions::top_logprobs.
+    std::vector<TokenLogprob> content_logprobs;
+    std::vector<TokenLogprob> reasoning_logprobs;
     // Complete, schema-validated calls. Tool markup is not streamed as content.
     std::vector<ToolCall> tool_calls;
     // Diagnostic names only when tools were not declared; never executable.

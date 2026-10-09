@@ -77,6 +77,8 @@ The endpoint supports:
 - `temperature`, `top_p`, `top_k`, presence/frequency penalties, and a nonnegative `seed`
   (top-p/top-k/penalties are ignored by default p-less; `--no-p-less-sampling` opts out);
 - one stop string or an array of stop strings;
+- `logprobs` and `top_logprobs` (0 to 20, which requires `logprobs: true`); see
+  [Token log probabilities](#token-log-probabilities);
 - non-streaming responses and server-sent event streams;
 - `stream_options.include_usage`;
 - function tools, tool choices, assistant tool-call history, and tool-result messages.
@@ -193,6 +195,38 @@ request's HIP D2H/H2D `save_ms` / `load_ms` and/or `kv_disk` with its `save_ms`,
 that tier. Process occupancy and lifetime capture/restore/eviction/drop counters are on
 [`GET /metrics`](#metrics), not on the per-request usage object.
 
+### Token log probabilities
+
+`logprobs: true` adds `choices[0].logprobs` to the response, and `top_logprobs: N` adds the `N`
+most likely alternatives at each position:
+
+```json
+{"content": [{"token": "42", "logprob": -0.0021, "bytes": [52, 50],
+              "top_logprobs": [{"token": "42", "logprob": -0.0021, "bytes": [52, 50]},
+                               {"token": "41", "logprob": -6.83, "bytes": [52, 49]}]}],
+ "refusal": null}
+```
+
+- **Distribution.** Each value is the log-softmax of the target model's logits at temperature 1
+  over the whole vocabulary, at the position that produced the token. Sampling temperature,
+  p-less truncation, penalties, and tool-grammar masks do not participate, so the values are
+  comparable across requests and a token the sampler was steered to can have a low logprob.
+  Speculative decoding does not change them: every emitted token is scored by the target model's
+  verification of that position, never by the draft. Ranked alternatives are ordered by logit,
+  lower token id first among equal logits.
+- **Which tokens.** `content` lists the tokens of the answer text. Reasoning tokens, reasoning
+  markers, tool-call markup of a tool-enabled request, and stop tokens are not listed.
+- **Token alignment.** Entries follow tokens, not released text. In a stream each content chunk
+  carries the tokens committed with it; a chunk may carry tokens with `content: ""` while their
+  text is held for a stop-string or UTF-8 boundary, and text released later arrives with an empty
+  list. A token trimmed from `content` by a stop string keeps its entry.
+- **`token` and `bytes`.** `bytes` is the token's exact byte string. `token` is the same bytes as
+  UTF-8 with each ill-formed sequence replaced by U+FFFD, because one token can hold part of a
+  multi-byte character.
+
+A request that asks for logprobs adds one scoring pass per decode round, shared by the
+requests batched in that round. With reporting disabled, the kernel exits before reading logits.
+
 ### Multimodal request
 
 Start the server with `--vision` before sending media:
@@ -284,15 +318,15 @@ wire response contains typed `output` Items.
 | `reasoning.effort` | `none` disables thinking; `low`, `medium`, or `xhigh` selects an effort exposed by the loaded chat template; `minimal`, `high`, and `max` return `reasoning_effort_not_supported` for the registered templates |
 | `chat_template_kwargs.preserve_thinking` | optional boolean controlling whether closed-turn reasoning remains in reconstructed prompts |
 | `preserve_thinking` | top-level alias for the same option; conflicting values are rejected |
-| `text.format` | text, JSON object, or named JSON schema; see structured output below |
+| `text.format` | text, JSON object, or named JSON schema; see constrained output below |
 | `tools` | flat Responses function definitions; see below |
 | `tool_choice` | `auto`, `none`, `required`, or `{"type":"function","name":"..."}` |
 | `parallel_tool_calls` | omitted or `true` |
 | `truncation` | omitted or `disabled`; overlong input fails instead of silently dropping Items |
-| `top_logprobs` | omitted or `0` |
+| `top_logprobs` | integer in `[0,20]`; a positive value enables token logprobs |
 | `service_tier` | omitted, `auto`, or `default`; the response reports `default` |
 | `background` | omitted or `false` |
-| `include` | omitted or an empty array |
+| `include` | omitted, empty, or `["message.output_text.logprobs"]` to enable token logprobs |
 | `stream_options` | omitted or `{"include_obfuscation":false}` |
 
 Unknown top-level fields fail with `unknown_parameter`. Recognized but unsupported features fail
@@ -391,9 +425,9 @@ JSON objects use the same order-independent rules, including through local
 references and supported alternatives. Completed-call validation rejects duplicate
 keys (including in nested JSON values); arbitrary additional key names are checked
 for duplication during this final validation, not by the finite named-key grammar.
-In nested JSON, an escaped alias of a declared key can also pass the library's
-additional-key grammar; final validation decodes the key before checking its
-value and uniqueness, and never publishes a call that fails those checks.
+Nested JSON additional keys alongside named properties use canonical printable ASCII without
+quotes, backslashes, or escapes, preventing aliases of declared keys. Final validation rejects
+repeated arbitrary keys and never publishes calls that fail value or uniqueness checks.
 These rules apply on ordinary and every speculative target position, with grammar
 state committed only for published tokens. They do not shorten reasoning, force an
 end-of-turn after a call, or change sampling/recovery settings.
@@ -506,6 +540,11 @@ A terminal wire response has `object: "response"`, one of `completed`, `incomple
 - an assistant `message` containing an `output_text` part;
 - one or more `function_call` Items.
 
+When the request enables the logprob report, the `output_text` part carries `logprobs`: one
+`{token, logprob, bytes, top_logprobs}` object per output-text token, with the semantics of the
+Chat Completions [token log probabilities](#token-log-probabilities). The response echoes the
+request's `top_logprobs`.
+
 Ordinary model/string stops produce `completed`. Output-token or context-capacity exhaustion
 produces `incomplete` with `incomplete_details.reason: "max_output_tokens"`. Errors accepted after
 an SSE response has started produce `response.failed`; validation and preparation errors remain
@@ -547,6 +586,10 @@ The normal lifecycle is:
 3. zero or more `response.reasoning_text.delta` or `response.output_text.delta` events;
 4. matching `*.done`, `response.content_part.done`, and `response.output_item.done` events;
 5. exactly one `response.completed`, `response.incomplete`, or `response.failed` terminal event.
+
+With the logprob report enabled, each `response.output_text.delta` carries the `logprobs` of the
+tokens committed with it (a delta may carry tokens and an empty `delta` while their text is
+held), and `response.output_text.done` carries the complete list.
 
 Function arguments use `response.function_call_arguments.delta` and `.done`. IDs, output indices,
 and content indices remain stable, and concatenated deltas equal the terminal Item. Responses SSE
@@ -660,33 +703,79 @@ curl http://127.0.0.1:8080/v1/responses/input_tokens \
 
 Unsupported Create fields include Conversations, prompt templates, context management, hosted
 moderation, prompt-cache controls, safety/user identifiers,
-non-empty `include`, background execution, compaction, files/audio, and OpenAI-hosted/MCP/custom
+any `include` other than `message.output_text.logprobs`, background execution, compaction, files/audio, and OpenAI-hosted/MCP/custom
 tools. These are compatibility boundaries, not silently accepted placeholders.
 
-## Structured JSON output
+## Constrained output
 
-Chat Completions accepts `response_format:{"type":"json_object"}` or
-`response_format:{"type":"json_schema","json_schema":{"name":"result","schema":{...},"strict":true}}`.
-Responses accepts the equivalent `text.format`, with `name`, `schema`, optional `description`
-and optional `strict` directly alongside `type:"json_schema"`. Omitted/null formats and
-`{"type":"text"}` retain normal text output. Schema names use 1–64 letters, digits, underscores
-or hyphens. Responses echoes the requested format in created and terminal objects.
+Chat Completions accepts the standard OpenAI `response_format`:
 
-JSON object mode enforces an object; schema mode enforces the supported schema on one JSON value.
-The same schema subset and unsupported-assertion checks described for tools apply. `strict` is
-accepted as a boolean/null; supported assertions are enforced regardless of its value. Unsupported
-schemas fail with HTTP400 `invalid_output_schema`, rather than being silently weakened. Format
-shape/combination errors use `invalid_output_format`. The error parameter is `response_format`
-for Chat or `text.format` for Responses.
+```json
+{
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "result",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+        "additionalProperties": false
+      }
+    }
+  }
+}
+```
 
-Optional reasoning remains a separate unconstrained channel before the JSON content. Ordinary,
-MTP and DFlash sampling use the same grammar preview/commit and tree-mask machinery; JSON does
-not force target-only decoding. Active tools and custom stops cannot be combined with JSON output;
-tool history remains valid input. Literal tool markup inside JSON strings remains data.
-Content streams incrementally and may be incomplete on output/context limits or cancellation;
-only normal model-stop completion guarantees the completed constrained value. No tools execute.
-The public Engine uses `PromptOptions.output_json_schema` and requires its default model stops
-and parsed output for this mode.
+Use `{"type":"json_object"}` for arbitrary JSON objects, or `{"type":"text"}` for
+unconstrained content. Responses accepts the same modes through `text.format`; its schema
+format is flattened: `{"type":"json_schema","name":"result","strict":true,"schema":{...}}`.
+The terminal Response echoes this format. Schema names contain 1–64 letters, digits,
+underscores, or hyphens. `strict` accepts boolean or null; every admitted schema assertion is
+enforced regardless of this flag.
+
+The shared JSON triggers match the official
+[llama.cpp grammar guide](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md),
+[vLLM structured-output contract](https://docs.vllm.ai/en/latest/features/structured_outputs/), and
+[SGLang structured-output contract](https://docs.sglang.io/docs/advanced_features/structured_outputs).
+Their raw grammar fields differ: llama.cpp uses `grammar` with GBNF, vLLM uses
+`structured_outputs.grammar`, and SGLang uses `ebnf`. NInfer selects the vLLM EBNF interface.
+
+For an explicit EBNF grammar, Chat Completions accepts the vLLM-style extension
+`"structured_outputs":{"grammar":"root ::= \"yes\" | \"no\""}`. The start rule is `root`;
+syntax follows XGrammar EBNF. This extension cannot be combined with a constrained
+`response_format`. llama.cpp GBNF and SGLang's `ebnf` request field are separate interfaces.
+
+Constraints apply to content after the reasoning close; thinking remains free text. Include
+instructions for the desired response in the prompt: the schema is not injected into messages.
+Streaming uses the usual content deltas. Caller stop strings/tokens, cancellation, and token or
+context limits can leave incomplete constrained output; inspect the finish reason and validate
+truncated output before consuming it. Tool declarations and output constraints cannot be combined.
+
+The supported JSON Schema subset includes objects, arrays, primitive types and type unions,
+`properties`, `required`, `additionalProperties`, `items`, `prefixItems`, size and length bounds,
+numeric bounds, `enum`, `const`, `anyOf`, and local JSON-pointer `$ref`/`$defs`/`definitions`.
+Type-specific assertions require an explicit `type`; count bounds are nonnegative 32-bit integers.
+Regex `pattern` assertions, anchor references, assertion siblings of `$ref`/`anyOf`/`enum`/`const` (except checked typed literals),
+and unsupported assertions such as `uniqueItems`, `oneOf`, `allOf`, or conditionals fail
+admission with HTTP 400 `invalid_output_constraint`; they are never silently relaxed.
+JSON is generated compactly, without optional formatting whitespace, and properties follow schema order to avoid an exponential unordered-property
+state space. Additional keys alongside named properties use printable ASCII without escapes,
+quotes, or backslashes to prevent aliases overwriting named values. A positive `minProperties`
+above one with additional keys requires at least that many distinct required properties;
+otherwise admission rejects the combination because arbitrary repeated keys cannot establish a
+distinct-property count. Bounded-number emission uses up to six fractional digits and inward-rounded
+bounds; intervals with no representable value fail admission. Integer bounds must fit the
+compiler's signed 64-bit representation. Omitted `additionalProperties` and `items` retain JSON Schema's permissive defaults.
+
+The resident frontend shares a bounded compiled-grammar/tokenizer cache. Each request owns its
+matcher, and the existing packed GPU token mask constrains target sampling, including MTP and
+DFlash verification. Speculative matcher forks only advance on committed output, and mask
+construction overlaps target GPU execution. Unconstrained requests retain the mask-free route.
+
+The public Engine uses `PromptOptions.output_constraint`. Tool history remains valid input;
+literal tool markup in constrained content remains data.
 
 The real-engine smoke client is `python3.11 -m tools.smoke.serve_features --model MODEL
 --base-url BASE --concurrency 1` (use concurrency4 for a C4 server). Run it against each
@@ -961,7 +1050,8 @@ MTP KV or DFlash cyclic state, and GDN images in the same copy span). They are n
 Live-lane context-checkpoint freeze D2H and a
 VRAM-resident restore that unpacks already-pinned lane GDN are not included. Throughput events repeat
 those two keys as interval sums. Its `speculative` object contains `backend`, `draft_window`, `rounds`,
-`drafted_tokens`, `accepted_tokens`, `fallback_steps`, and `accepted_per_position`. Rates can be
+`drafted_tokens`, `accepted_tokens`, `fallback_steps`, `accepted_per_position`, and `p_less_draft_temperature` (the last p-less
+chain round’s draft temperature, or zero when no such round ran). Rates can be
 derived downstream from raw token counts and seconds instead of rounded stderr strings.
 When a stop cuts a licensed speculative round short, accepted-token counters include only the
 committed drafts; rounds and drafted-token counters still include the work performed.
