@@ -243,7 +243,6 @@ void speculative_accept_tree_drafts_launch(
 
 #include "ninfer/types.h"
 #include <limits>
-#include <stdexcept>
 #include <string>
 
 namespace ninfer::ops {

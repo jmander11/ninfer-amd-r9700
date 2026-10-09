@@ -4504,6 +4504,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
     decision_trace::require_eager(use_device_graph);
     layer_boundary_trace::require_eager(use_device_graph);
 
+    auto& ordinary_frame           = io.ordinary.value();
     std::uint32_t maximum_frontier = 0;
     for (std::size_t row = 0; row < lanes.size(); ++row) {
         const std::uint32_t lane = lanes[row];
@@ -4516,7 +4517,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
         const RequestControl& request = requests[lane];
         if (request.lifecycle != Lifecycle::Active ||
             budgets[row].generated_tokens_remaining == 0 || !sequence.kv ||
-            sequence.kv->text.bound_row() < 0 || sequence.execution_frontier >= capacity ||
+            sequence.kv.value().text.bound_row() < 0 || sequence.execution_frontier >= capacity ||
             sequence.text_kv_publication.valid_frontier != sequence.execution_frontier ||
             sequence.ledger_frontier != sequence.execution_frontier + 1 ||
             sequence.ledger.size() != sequence.ledger_frontier ||
@@ -4550,7 +4551,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
                 checked_i32(frontier, "ordinary batch position");
             ordinary_host_ingress->rope_positions[row] =
                 checked_i32(frontier, "ordinary batch RoPE position") + sequence.rope_delta;
-            ordinary_host_ingress->text_kv_table_rows[row] = sequence.kv->text.bound_row();
+            ordinary_host_ingress->text_kv_table_rows[row] = sequence.kv.value().text.bound_row();
             ordinary_host_ingress->lanes[row]        = static_cast<std::int32_t>(sequence.lane);
             ordinary_host_ingress->logprob_rows[row] = request.token_logprobs ? 1 : 0;
             ordinary_host_ingress->sampling[row]     = request.sampling_host;
@@ -4558,16 +4559,17 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
         }
 
         SegmentedKvTransactionBatch text_transactions(lanes.size(), kv_resolution_words(false));
-        const auto* positions = static_cast<const std::int32_t*>(io.ordinary->cache_positions.data);
+        const auto* positions =
+            static_cast<const std::int32_t*>(ordinary_frame.cache_positions.data);
         const auto* table_rows =
-            static_cast<const std::int32_t*>(io.ordinary->text_kv_table_rows.data);
+            static_cast<const std::int32_t*>(ordinary_frame.text_kv_table_rows.data);
         auto* status                      = static_cast<std::uint32_t*>(io.text_kv_status.data);
         auto* cursor                      = static_cast<std::uint32_t*>(io.text_kv_cursor.data);
         const std::uint32_t visible_limit = transaction_maximum_frontier + 1U;
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             SequenceState& sequence = sequences[lanes[row]];
             text_transactions.append(decoder->text_kv.begin_device_segmented_append(
-                sequence.kv->text, sequence.text_kv_publication, positions + row, 0U,
+                sequence.kv.value().text, sequence.text_kv_publication, positions + row, 0U,
                 transaction_maximum_frontier, visible_limit,
                 {.status = status + row, .cursor = cursor + row}, table_rows + row));
         }
@@ -4581,7 +4583,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
              replay_records ? &*replay_records : nullptr, io, prefill_hidden, prefill_chunk,
              proposal_head},
             decoder->text_kv,
-            *io.ordinary,
+            ordinary_frame,
             *ordinary_host_ingress,
             *ordinary_host_egress,
             tail_hidden_store,
@@ -4602,7 +4604,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
         }
         text_transactions.finish_resolution({retained_frontiers.data(), lanes.size()});
         decision_trace::record_ordinary(
-            io.ordinary->logits, *ordinary_host_ingress, *ordinary_host_egress,
+            ordinary_frame.logits, *ordinary_host_ingress, *ordinary_host_egress,
             static_cast<std::int32_t>(lanes.size()), TextConfig::token_domain);
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             SequenceState& sequence    = sequences[lanes[row]];
