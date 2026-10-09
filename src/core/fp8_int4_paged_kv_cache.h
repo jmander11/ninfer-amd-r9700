@@ -17,12 +17,11 @@ enum class Fp8KInt4VPlaneLayout : std::uint8_t {
 };
 
 struct Fp8KInt4VPlaneLayouts {
-    Fp8KInt4VPlaneLayout key = Fp8KInt4VPlaneLayout::FeatureFastestPageMajor;
-    Fp8KInt4VPlaneLayout value = Fp8KInt4VPlaneLayout::FeatureFastestPageMajor;
+    Fp8KInt4VPlaneLayout key         = Fp8KInt4VPlaneLayout::FeatureFastestPageMajor;
+    Fp8KInt4VPlaneLayout value       = Fp8KInt4VPlaneLayout::FeatureFastestPageMajor;
     Fp8KInt4VPlaneLayout value_scale = Fp8KInt4VPlaneLayout::FeatureFastestPageMajor;
 
-    friend bool operator==(const Fp8KInt4VPlaneLayouts&,
-                           const Fp8KInt4VPlaneLayouts&) = default;
+    friend bool operator==(const Fp8KInt4VPlaneLayouts&, const Fp8KInt4VPlaneLayouts&) = default;
 };
 
 struct Fp8KInt4VPagedKVSpec {
@@ -45,14 +44,14 @@ struct Fp8KInt4VPagedKVPoolLayout {
 // alone cannot distinguish a future codec revision with the same storage widths.
 struct Fp8KInt4VSemanticFingerprint {
     static constexpr std::uint32_t kFormatVersion = 1;
-    std::uint32_t format_version = kFormatVersion;
-    std::uint32_t page_size = kPagedKVPageSize;
-    std::uint32_t page_group_count = 0;
-    std::uint32_t logical_page_capacity = 0;
-    std::int32_t layer_count = 0;
-    std::int32_t head_dim = 0;
-    std::int32_t num_kv_heads = 0;
-    std::int32_t value_group = 0;
+    std::uint32_t format_version                  = kFormatVersion;
+    std::uint32_t page_size                       = kPagedKVPageSize;
+    std::uint32_t page_group_count                = 0;
+    std::uint32_t logical_page_capacity           = 0;
+    std::int32_t layer_count                      = 0;
+    std::int32_t head_dim                         = 0;
+    std::int32_t num_kv_heads                     = 0;
+    std::int32_t value_group                      = 0;
     Fp8KInt4VPlaneLayouts plane_layouts;
 
     friend bool operator==(const Fp8KInt4VSemanticFingerprint&,
@@ -61,9 +60,8 @@ struct Fp8KInt4VSemanticFingerprint {
 
 [[nodiscard]] Fp8KInt4VSemanticFingerprint
 fp8_k_int4_v_semantic_fingerprint(const Fp8KInt4VPagedKVSpec& spec) noexcept;
-void require_fp8_k_int4_v_semantic_fingerprint(
-    const Fp8KInt4VSemanticFingerprint& stored,
-    const Fp8KInt4VSemanticFingerprint& expected);
+void require_fp8_k_int4_v_semantic_fingerprint(const Fp8KInt4VSemanticFingerprint& stored,
+                                               const Fp8KInt4VSemanticFingerprint& expected);
 
 // A semantic view for one Qwen text or MTP layer. Every field is a required persistent plane;
 // append status and position uniqueness are transaction inputs owned by the calling Op, not

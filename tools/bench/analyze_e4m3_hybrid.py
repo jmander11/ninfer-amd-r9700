@@ -9,12 +9,11 @@ import hashlib
 import itertools
 import json
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from tools.artifact.layouts import encoded_size
 from tools.convert.qwen3_8_27b_r9700 import e4m3_inventory, q4_inventory
-
 
 SCHEMA = "ninfer.r9700.e4m3-q4-hybrid-selection.v1"
 FP8_ARCHITECTURAL_CEILING_TFLOPS = 400.835
@@ -100,9 +99,12 @@ def measured_q4_calls(kernel_trace: Path, marker_trace: Path) -> list[dict[str, 
 
     calls = []
     for ordinal, ((name, shape), quantize, linear) in enumerate(
-        ((item[0], item[1][0], item[1][1]) for item in zip(expected, pairs))
+        (item[0], item[1][0], item[1][1]) for item in zip(expected, pairs, strict=True)
     ):
-        if "quantize" not in quantize["Kernel_Name"] or "linear_prefill" not in linear["Kernel_Name"]:
+        if (
+            "quantize" not in quantize["Kernel_Name"]
+            or "linear_prefill" not in linear["Kernel_Name"]
+        ):
             raise ValueError(f"Q4 call {ordinal} is not a quantize/linear pair")
         rows, columns = shape
         observed_columns = int(quantize["Grid_Size_X"]) * 2
@@ -170,7 +172,9 @@ def role_candidates(calls: Sequence[Mapping[str, object]]) -> list[dict[str, obj
                 "q4_measured_service_ns": sum(
                     int(item["q4_measured_service_ns"]) for item in objects
                 ),
-                "fp8_compute_floor_ns": sum(float(item["fp8_compute_floor_ns"]) for item in objects),
+                "fp8_compute_floor_ns": sum(
+                    float(item["fp8_compute_floor_ns"]) for item in objects
+                ),
                 "projected_saving_ns": saving,
                 "projected_saving_ns_per_added_byte": saving / added,
             }
@@ -203,9 +207,12 @@ def select_roles(candidates: Sequence[Mapping[str, object]], budget: int) -> dic
 
 
 def assemble_report(
-    *, capacity: Mapping[str, object], calls: Sequence[Mapping[str, object]],
-    baseline_prefill_seconds: float, baseline_total_seconds: float,
-    provenance: Mapping[str, object]
+    *,
+    capacity: Mapping[str, object],
+    calls: Sequence[Mapping[str, object]],
+    baseline_prefill_seconds: float,
+    baseline_total_seconds: float,
+    provenance: Mapping[str, object],
 ) -> dict[str, object]:
     enriched = enrich_calls(calls)
     candidates = role_candidates(enriched)
@@ -259,7 +266,9 @@ def assemble_report(
         scenarios.append(
             {
                 "prefill_chunk": scenario["workspace"]["prefill_chunk"],
-                "projected_workspace_bytes": scenario["workspace"]["projected_planner_workspace_bytes"],
+                "projected_workspace_bytes": scenario["workspace"][
+                    "projected_planner_workspace_bytes"
+                ],
                 "cells": rows,
             }
         )
@@ -271,7 +280,9 @@ def assemble_report(
             "baseline_prefill_seconds": baseline_prefill_seconds,
             "baseline_total_seconds": baseline_total_seconds,
             "q4_projection_calls": len(enriched),
-            "q4_projection_service_ns": sum(int(item["q4_measured_service_ns"]) for item in enriched),
+            "q4_projection_service_ns": sum(
+                int(item["q4_measured_service_ns"]) for item in enriched
+            ),
             "fp8_architectural_ceiling_tflops": FP8_ARCHITECTURAL_CEILING_TFLOPS,
             "projection_note": (
                 "FP8 time uses the architectural compute floor; activation quantization, "

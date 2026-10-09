@@ -16,9 +16,7 @@ namespace targets {
 
 [[nodiscard]] constexpr std::optional<std::string_view>
 registered_target_key(std::string_view model_id) noexcept {
-    if (model_id == qwen3_8_27b::Package::model_id) {
-        return qwen3_8_27b::Package::target_key;
-    }
+    if (model_id == qwen3_8_27b::Package::model_id) { return qwen3_8_27b::Package::target_key; }
     return std::nullopt;
 }
 
@@ -26,8 +24,7 @@ struct LoadedQwen3_8_27B {
     std::unique_ptr<qwen3_8_27b::Package::LoadedModel> model;
     qwen3_8_27b::Package::Frontend frontend;
 
-    explicit LoadedQwen3_8_27B(
-        std::unique_ptr<qwen3_8_27b::Package::LoadedModel> stable_model);
+    explicit LoadedQwen3_8_27B(std::unique_ptr<qwen3_8_27b::Package::LoadedModel> stable_model);
     ~LoadedQwen3_8_27B();
 
     LoadedQwen3_8_27B(const LoadedQwen3_8_27B&)            = delete;

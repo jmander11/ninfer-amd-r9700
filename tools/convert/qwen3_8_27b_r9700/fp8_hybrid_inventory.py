@@ -19,7 +19,6 @@ from tools.convert.qwen3.common.inventory import (
 from . import fp8_hybrid_decision, q4_inventory
 from .e4m3_inventory import F8E4M3_ROW_F32S, ROW_SCALED_LAYOUT
 
-
 MODEL_ID = q4_inventory.MODEL_ID
 TARGET_KEY = q4_inventory.TARGET_KEY
 WEIGHTS_ID = fp8_hybrid_decision.DECISION.weights_id
@@ -79,15 +78,13 @@ def validate_inventory() -> None:
     ):
         raise ValueError("FP8/Q4 hybrid inventory differs from the all-Q4 object plan")
     q4_names = {spec.name for spec in q4_inventory.TENSOR_SPECS if spec.format == Q4}
-    if not SELECTED_MATRIX_NAMES <= q4_names:
+    if not q4_names >= SELECTED_MATRIX_NAMES:
         raise ValueError("FP8/Q4 hybrid selection contains a non-Q4 source object")
-    represented_selected = {
-        spec.name for spec in TENSOR_SPECS if spec.format == F8E4M3_ROW_F32S
-    }
+    represented_selected = {spec.name for spec in TENSOR_SPECS if spec.format == F8E4M3_ROW_F32S}
     if represented_selected != SELECTED_MATRIX_NAMES:
         raise ValueError("FP8/Q4 hybrid inventory differs from its decision-owned selection")
     expected_counts = {BF16: 582, FP32: 96, I32: 1, Q4: 295, F8E4M3_ROW_F32S: 144}
-    if FORMAT_COUNTS != expected_counts:
+    if expected_counts != FORMAT_COUNTS:
         raise ValueError(
             f"FP8/Q4 hybrid format counts differ: expected {expected_counts}, got {FORMAT_COUNTS}"
         )
@@ -98,7 +95,7 @@ def validate_inventory() -> None:
         Q4: 7_881_166_272,
         F8E4M3_ROW_F32S: 13_600_161_792,
     }
-    if FORMAT_ENCODED_BYTES != dict(sorted(expected_bytes.items())):
+    if dict(sorted(expected_bytes.items())) != FORMAT_ENCODED_BYTES:
         raise ValueError("FP8/Q4 hybrid encoded byte totals differ from the fixed plan")
     if TENSOR_ENCODED_BYTES != 21_540_517_792:
         raise ValueError("FP8/Q4 hybrid tensor payload byte total differs")
@@ -121,12 +118,12 @@ __all__ = [
     "RECIPE_ID",
     "RESOURCE_SPECS",
     "ROW_SCALED_LAYOUT",
-    "SELECTION_SHA256",
     "SELECTED_MATRIX_NAMES",
+    "SELECTION_SHA256",
     "TARGET_KEY",
     "TENSOR_ENCODED_BYTES",
     "TENSOR_SPECS",
-    "TensorSpec",
     "WEIGHTS_ID",
+    "TensorSpec",
     "validate_inventory",
 ]

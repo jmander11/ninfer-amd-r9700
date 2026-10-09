@@ -14,34 +14,48 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from pathlib import Path
 import struct
 import sys
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.convert.qwen3_8_27b_r9700 import mse_quantize
-from tools.convert.qwen3_8_27b_r9700 import source_inventory
-from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
+    mse_quantize,
+    source_inventory,
+)
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (  # noqa: E402  after sys.path setup
     MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2,
-    Q4G128_DIAGNOSTIC,
     _mse_q4g128_decode,
-    _validate_provenance as validate_screen_provenance,
     selective_specs,
+)
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (  # noqa: E402  after sys.path setup
+    _validate_provenance as validate_screen_provenance,
+)
+from tools.convert.qwen3_8_27b_r9700.screen_selective_q4g128_mse_quality import (  # noqa: E402  after sys.path setup
     validate_report as validate_screen_report,
 )
-from tools.ppl.compare_q4_group_source import _against, _load_bf16, _source_key
-from tools.ppl.fp8_hybrid_source_diagnostic import _source_rows
-from tools.ppl.q4_group_source_diagnostic import (
-    MAXIMUM_MEAN_NLL_DELTA, MAXIMUM_NEW_SEVERE_RATE, ROW_CHUNK, TERRIBLE_NLL,
-    _source_identity, _write_score, quantize_decode_q4, sha256_file,
+from tools.ppl.compare_q4_group_source import (  # noqa: E402  after sys.path setup
+    _against,
+    _load_bf16,
+    _source_key,
+)
+from tools.ppl.fp8_hybrid_source_diagnostic import _source_rows  # noqa: E402  after sys.path setup
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
+    MAXIMUM_MEAN_NLL_DELTA,
+    MAXIMUM_NEW_SEVERE_RATE,
+    ROW_CHUNK,
+    TERRIBLE_NLL,
+    _source_identity,
+    _write_score,
+    quantize_decode_q4,
+    sha256_file,
     validate_source_metadata,
 )
-from tools.reference.qwen3_8_27b_bf16 import protocol
-
+from tools.reference.qwen3_8_27b_bf16 import protocol  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_selective_q4g128_source_diagnostic"
 SCHEMA_VERSION = 1
@@ -64,10 +78,13 @@ def _expected_source_rows() -> dict[str, tuple[tuple[int, int], ...]]:
             rows[prefix + "linear_attn.out_proj.weight"] = ((0, 5120),)
     return rows
 
-if (len(SELECTED_SOURCE_ROWS) != SELECTED_RAW_SOURCE_TENSORS
-        or sum(end - begin for spans in SELECTED_SOURCE_ROWS.values()
-               for begin, end in spans) != SELECTED_RAW_SOURCE_ROWS
-        or SELECTED_SOURCE_ROWS != _expected_source_rows()):
+
+if (
+    len(SELECTED_SOURCE_ROWS) != SELECTED_RAW_SOURCE_TENSORS
+    or sum(end - begin for spans in SELECTED_SOURCE_ROWS.values() for begin, end in spans)
+    != SELECTED_RAW_SOURCE_ROWS
+    or _expected_source_rows() != SELECTED_SOURCE_ROWS
+):
     raise ValueError("selective Q4G128 raw-source row inventory differs")
 
 
@@ -107,9 +124,14 @@ class SelectiveQ4Checkpoint:
             return tensor
         if max(end for _, end in spans) > tensor.shape[0]:
             raise ValueError(f"{name}: selected Q4G128 row is outside the source tensor")
+
         def encode(rows):
-            return (quantize_decode_q4(rows, 64) if self.codec == "q4g64-absmax"
-                    else _mse_q4g128_bf16(rows))
+            return (
+                quantize_decode_q4(rows, 64)
+                if self.codec == "q4g64-absmax"
+                else _mse_q4g128_bf16(rows)
+            )
+
         if spans == ((0, tensor.shape[0]),):
             return encode(tensor)
         result = tensor.clone()
@@ -185,15 +207,15 @@ def _quantization(codec: str) -> dict[str, object]:
     return {
         "selected": (
             "signed-q4g64-rne-clamp-minus8-plus7-fp16-absmax-scale-decoded-to-bfloat16"
-            if codec == "q4g64-absmax" else
-            "signed-q4g128-eight-step-source-mse-rne-clamp-minus8-plus7-"
+            if codec == "q4g64-absmax"
+            else "signed-q4g128-eight-step-source-mse-rne-clamp-minus8-plus7-"
             "fp16-scale-decoded-to-bfloat16"
         ),
         "remaining_text_weights": "unchanged-bfloat16-source",
         "scale_selection": (
             "canonical FP16(absmax/7)"
-            if codec == "q4g64-absmax" else
-            "earliest minimum decoded-weight SSE over canonical plus eight ALS steps"
+            if codec == "q4g64-absmax"
+            else "earliest minimum decoded-weight SSE over canonical plus eight ALS steps"
         ),
         "activation_dtype": "bfloat16-not-product-a8",
         "matrix_arithmetic": "unchanged-bf16-reference",
@@ -208,28 +230,37 @@ def _load_screen(path: Path, weights: Path) -> dict:
     validate_screen_report(report)
     validate_screen_provenance(report, weights)
     decision = report["decision"]
-    if (decision.get("sampled_source_gate_pass") is not True
-            or decision.get("maximum_candidate_over_control_relative_l2")
-            != MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2):
+    if (
+        decision.get("sampled_source_gate_pass") is not True
+        or decision.get("maximum_candidate_over_control_relative_l2")
+        != MAX_CANDIDATE_OVER_CONTROL_RELATIVE_L2
+    ):
         raise ValueError("selective Q4G128 sampled source gate did not pass exactly")
     return report
 
 
 def _load_bf16_authority(args: argparse.Namespace, source: Mapping[str, object]):
     bf16, bf16_nll, bf16_argmax = _load_bf16(args.bf16)
-    bf16_key = _source_key({"source": {
-        "config_sha256": bf16["source_config_sha256"],
-        "index_sha256": bf16["source_index_sha256"],
-        "shards_sha256": bf16["source_shards_sha256"],
-        "corpus_ids_sha256": bf16["corpus_ids_sha256"],
-    }})
+    bf16_key = _source_key(
+        {
+            "source": {
+                "config_sha256": bf16["source_config_sha256"],
+                "index_sha256": bf16["source_index_sha256"],
+                "shards_sha256": bf16["source_shards_sha256"],
+                "corpus_ids_sha256": bf16["corpus_ids_sha256"],
+            }
+        }
+    )
     # Runtime source identity retains shard pairs as tuples; normalize through
     # its exact JSON representation before using the report-oriented join.
     normalized_source = json.loads(json.dumps(dict(source), allow_nan=False))
     if bf16_key != _source_key({"source": normalized_source}):
         raise ValueError("BF16 authority source/corpus differs")
-    if (bf16.get("prompt_tokens") != TOKENS or bf16.get("skip_tokens") != TOKENS // 2
-            or bf16.get("tokens_scored") != TOKENS // 2 - 1):
+    if (
+        bf16.get("prompt_tokens") != TOKENS
+        or bf16.get("skip_tokens") != TOKENS // 2
+        or bf16.get("tokens_scored") != TOKENS // 2 - 1
+    ):
         raise ValueError("BF16 authority is not the exact 8K/half cell")
     return bf16, bf16_nll, bf16_argmax
 
@@ -255,8 +286,9 @@ def _float32(values) -> tuple[float, ...]:
     return tuple(struct.unpack("<f", struct.pack("<f", float(value)))[0] for value in values)
 
 
-def preflight_payload(args: argparse.Namespace, weight_map: dict[str, str],
-                      source: Mapping[str, object]) -> dict[str, object]:
+def preflight_payload(
+    args: argparse.Namespace, weight_map: dict[str, str], source: Mapping[str, object]
+) -> dict[str, object]:
     validate_source_metadata(args.weights, weight_map)
     screen = _load_screen(args.source_screen, args.weights)
     _load_bf16_authority(args, source)
@@ -273,10 +305,16 @@ def preflight_payload(args: argparse.Namespace, weight_map: dict[str, str],
             ],
         },
         "bf16_authority": {
-            "path": str(args.bf16.resolve()), "sha256": sha256_file(args.bf16),
+            "path": str(args.bf16.resolve()),
+            "sha256": sha256_file(args.bf16),
         },
-        "workload": {"tokens": TOKENS, "skip": "half", "prefill_chunk": 4096,
-                     "schedule": "prefill", "device": args.device},
+        "workload": {
+            "tokens": TOKENS,
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": args.device,
+        },
         "matrix_scope": _scope(),
         "implementation_sha256": _implementation(),
         "limitations": [
@@ -296,9 +334,10 @@ def run(args: argparse.Namespace) -> int:
     weight_map = protocol.validate_checkpoint_files(args.weights)
     source = _source_identity(args.weights, weight_map, ids)
     _load_screen(args.source_screen, args.weights)
-    bf16, bf16_nll, bf16_argmax = _load_bf16_authority(args, source)
+    _bf16, bf16_nll, bf16_argmax = _load_bf16_authority(args, source)
     if args.preflight_only:
         from tools.ppl.q4_group_source_diagnostic import _atomic_new
+
         payload = preflight_payload(args, weight_map, source)
         _atomic_new(args.out, (json.dumps(payload, indent=2, allow_nan=False) + "\n").encode())
         return 0
@@ -310,8 +349,12 @@ def run(args: argparse.Namespace) -> int:
     checkpoint = SelectiveQ4Checkpoint(SourceCheckpoint(args.weights, weight_map), args.codec)
     checkpoint.validate_metadata()
     scorer = LayerMajorTextScorer(
-        checkpoint, device_index=args.device, prefill_chunk=4096, schedule="prefill",
-        skip_text="half", kv_value_group=None,
+        checkpoint,
+        device_index=args.device,
+        prefill_chunk=4096,
+        schedule="prefill",
+        skip_text="half",
+        kv_value_group=None,
     )
     vectors = scorer.score(ids)
     retained_nlls = _float32(vectors.nlls)
@@ -333,18 +376,27 @@ def run(args: argparse.Namespace) -> int:
             "sha256": sha256_file(args.source_screen),
         },
         "bf16_authority": {
-            "path": str(args.bf16.resolve()), "sha256": sha256_file(args.bf16),
+            "path": str(args.bf16.resolve()),
+            "sha256": sha256_file(args.bf16),
         },
         "execution": protocol.execution_provenance(torch, args.device, stage_trace_enabled=False),
         "implementation_sha256": _implementation(),
-        "workload": {"tokens": TOKENS, "skip": "half", "prefill_chunk": 4096,
-                     "schedule": "prefill", "device": args.device},
+        "workload": {
+            "tokens": TOKENS,
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": args.device,
+        },
         "result": {
-            "tokens_scored": len(retained_nlls), "argmax_tokens": len(retained_argmax),
+            "tokens_scored": len(retained_nlls),
+            "argmax_tokens": len(retained_argmax),
             "non_finite": 0,
             "terrible_tokens": sum(value >= TERRIBLE_NLL for value in finite),
-            "sum_nll": sum(finite), "mean_nll": sum(finite) / len(finite),
-            "max_nll": max(finite), "ppl": math.exp(sum(finite) / len(finite)),
+            "sum_nll": sum(finite),
+            "mean_nll": sum(finite) / len(finite),
+            "max_nll": max(finite),
+            "ppl": math.exp(sum(finite) / len(finite)),
             "score_seconds": vectors.score_seconds,
         },
         "quality_gate": gate,

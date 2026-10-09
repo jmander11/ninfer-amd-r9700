@@ -21,12 +21,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.run_ninfer_bench_matrix import (
+from tools.bench.prefill_chunk_authority import (  # noqa: E402  after sys.path setup
+    validate_prefill_chunk_authority,
+)
+from tools.bench.run_ninfer_bench_matrix import (  # noqa: E402  after sys.path setup
     MATRIX_SCHEMA_VERSION,
-    PRODUCTION_PREFILL_CHUNKS,
     PRODUCT_CONCURRENCIES,
-    R9700_POWER_PROFILE,
+    PRODUCTION_PREFILL_CHUNKS,
     R9700_KV_PLANE_LAYOUTS,
+    R9700_POWER_PROFILE,
     build_cases,
     file_sha256,
     load_bench_report,
@@ -34,18 +37,22 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_automatic_feasibility,
     validate_hybrid_shared_workspace_authority,
 )
-from tools.bench.select_prefill_chunk import (
+from tools.bench.select_prefill_chunk import (  # noqa: E402  after sys.path setup
     ARTIFACT_TYPE as PREFILL_CHUNK_ARTIFACT_TYPE,
+)
+from tools.bench.select_prefill_chunk import (  # noqa: E402  after sys.path setup
     RULE as PREFILL_CHUNK_SELECTION_RULE,
+)
+from tools.bench.select_prefill_chunk import (  # noqa: E402  after sys.path setup
     SCHEMA_VERSION as PREFILL_CHUNK_SCHEMA_VERSION,
 )
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
-from tools.ppl import run as ppl_run
-
+from tools.ppl import run as ppl_run  # noqa: E402  after sys.path setup
 
 HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 TERMINAL_RECIPE_IDS = {
-    "r9700-q4g64-n16k16-eval", "r9700-q4-w8-mse-n16k16-eval", HYBRID_WEIGHTS_ID,
+    "r9700-q4g64-n16k16-eval",
+    "r9700-q4-w8-mse-n16k16-eval",
+    HYBRID_WEIGHTS_ID,
 }
 
 _MINIMUM_RUNTIME_ADMISSION = re.compile(
@@ -69,9 +76,11 @@ def _quality_migration_receipt(artifact: dict[str, Any], weights_id: str) -> dic
     if not isinstance(raw_path, str) or not raw_path:
         raise ValueError("historical N16 quality artifact lacks a joinable path")
     inspected = ppl_run.inspect_candidate_artifact(Path(raw_path), digest=artifact.get("sha256"))
-    if (inspected.get("weights_id") != weights_id
-            or inspected.get("sha256") != artifact.get("sha256")
-            or inspected.get("bytes") != artifact.get("bytes")):
+    if (
+        inspected.get("weights_id") != weights_id
+        or inspected.get("sha256") != artifact.get("sha256")
+        or inspected.get("bytes") != artifact.get("bytes")
+    ):
         raise ValueError("historical N16 quality artifact differs from current migration authority")
     return ppl_run.validate_n16_receipt_summary(inspected.get("conversion_receipt"), weights_id)
 
@@ -109,8 +118,12 @@ def _manifest(root: Path, preset: str) -> dict[str, Any]:
 
 
 def _reports(
-    root: Path, manifest: dict[str, Any], preset: str, prefill_chunk: int,
-    *, allow_missing: bool = False,
+    root: Path,
+    manifest: dict[str, Any],
+    preset: str,
+    prefill_chunk: int,
+    *,
+    allow_missing: bool = False,
 ) -> dict[int, list[dict[str, Any]]]:
     campaign_root = root.resolve(strict=True)
     cases = {
@@ -122,9 +135,7 @@ def _reports(
     if not isinstance(records, list) or len(records) != len(expected) * len(cases):
         raise ValueError(f"{root} does not retain every {preset} matrix point")
     expected_points = {
-        (suite, case, concurrency)
-        for suite, case in cases
-        for concurrency in expected
+        (suite, case, concurrency) for suite, case in cases for concurrency in expected
     }
     actual_points = {
         (record.get("suite"), record.get("case"), record.get("concurrency"))
@@ -162,7 +173,7 @@ def _reports(
             manifest["expected_kv_value_group"],
             manifest["expected_q4_activation_bits"],
             manifest["expected_w8_activation_bits"],
-            manifest["expected_fp8_qk_wmma_enabled"],
+            manifest["expected_split512_enabled"],
             concurrency,
             manifest["artifact"],
             record["command"],
@@ -190,9 +201,7 @@ def _manifest_prefill_chunk(manifest: dict[str, Any], preset: str) -> int:
         try:
             chunk = int(command[index + 1])
         except (TypeError, ValueError) as error:
-            raise ValueError(
-                f"{preset} command has a malformed selected prefill chunk"
-            ) from error
+            raise ValueError(f"{preset} command has a malformed selected prefill chunk") from error
         if chunk not in PRODUCTION_PREFILL_CHUNKS:
             raise ValueError(f"{preset} command uses an unsupported selected prefill chunk")
         chunks.add(chunk)
@@ -207,10 +216,16 @@ def _manifest_prefill_chunk(manifest: dict[str, Any], preset: str) -> int:
 
 
 def _bind_prefill_chunk_authority(
-    manifest: dict[str, Any], preset: str, authority: dict[str, Any],
+    manifest: dict[str, Any],
+    preset: str,
+    authority: dict[str, Any],
 ) -> None:
     expected_keys = {
-        "path", "sha256", "artifact_type", "schema_version", "base_chunk_profile",
+        "path",
+        "sha256",
+        "artifact_type",
+        "schema_version",
+        "base_chunk_profile",
         "selected_prefill_chunk",
     }
     if (
@@ -244,11 +259,25 @@ def _one_command_option(command: list[Any], option: str) -> str:
 
 
 def _structured_memory_admission_failure(
-    record: dict[str, Any], failure: dict[str, Any], stdout_text: str, stderr_text: str,
+    record: dict[str, Any],
+    failure: dict[str, Any],
+    stdout_text: str,
+    stderr_text: str,
 ) -> dict[str, int | str]:
-    if set(failure) != {
-        "suite", "case", "concurrency", "returncode", "stdout", "stderr", "command",
-    } or type(failure.get("returncode")) is not int or failure["returncode"] != 1:
+    if (
+        set(failure)
+        != {
+            "suite",
+            "case",
+            "concurrency",
+            "returncode",
+            "stdout",
+            "stderr",
+            "command",
+        }
+        or type(failure.get("returncode")) is not int
+        or failure["returncode"] != 1
+    ):
         raise ValueError("missing capacity report is not an exact process failure record")
     if stdout_text:
         raise ValueError("memory-admission failure unexpectedly wrote stdout")
@@ -269,7 +298,9 @@ def _structured_memory_admission_failure(
         or "--lm-head-draft" in command
         or "--no-device-graph" in command
     ):
-        raise ValueError("capacity failure command is not the exact automatic ordinary admission case")
+        raise ValueError(
+            "capacity failure command is not the exact automatic ordinary admission case"
+        )
     lines = stderr_text.splitlines()
     loading = (
         f"[ninfer_bench] loading {weights} (max_context=262144, "
@@ -304,7 +335,8 @@ def _structured_memory_admission_failure(
 
 
 def _validate_ordinary_whole_report(
-    reports: list[dict[str, Any]], concurrency: int,
+    reports: list[dict[str, Any]],
+    concurrency: int,
 ) -> dict[str, Any]:
     """Return the sole non-speculative report used by base selection."""
 
@@ -312,7 +344,9 @@ def _validate_ordinary_whole_report(
         raise ValueError(f"C{concurrency} pareto-whole requires one ordinary ranking row")
     report = reports[0]
     if not prefill_timing_eligible(report, concurrency):
-        raise ValueError(f"C{concurrency} prefill objective requires corrected schema-v21 phase timing")
+        raise ValueError(
+            f"C{concurrency} prefill objective requires corrected schema-v21 phase timing"
+        )
     config = report.get("config", {})
     if (
         config.get("spec") != "none"
@@ -338,16 +372,24 @@ def _validate_ordinary_whole_report(
         if not isinstance(reps, list) or len(reps) != 3:
             raise ValueError(f"C{concurrency} {label} lacks exactly three repetitions")
         timings: dict[str, list[float]] = {
-            name: [] for name in ("prepare_seconds", "prefill_seconds", "decode_seconds", "total_seconds")
+            name: []
+            for name in ("prepare_seconds", "prefill_seconds", "decode_seconds", "total_seconds")
         }
         throughput = {
-            "prefill_tok_s": [], "decode_output_tok_s": [],
-            "decode_engine_tok_s": [], "whole_output_tok_s": [],
+            "prefill_tok_s": [],
+            "decode_output_tok_s": [],
+            "decode_engine_tok_s": [],
+            "whole_output_tok_s": [],
         }
         ordinary_speculative = {
-            "enabled": False, "draft_window": 0, "rounds": 0,
-            "drafted_tokens": 0, "accepted_tokens": 0, "fallback_steps": 0,
-            "acceptance_rate": None, "acceptance_length": None,
+            "enabled": False,
+            "draft_window": 0,
+            "rounds": 0,
+            "drafted_tokens": 0,
+            "accepted_tokens": 0,
+            "fallback_steps": 0,
+            "acceptance_rate": None,
+            "acceptance_length": None,
             "accepted_per_position": [],
         }
         if test.get("speculative") != ordinary_speculative:
@@ -363,15 +405,20 @@ def _validate_ordinary_whole_report(
                 or timing.get("vision_seconds") != 0
                 or any(
                     type(timing.get(name)) not in (int, float)
-                    or not math.isfinite(timing[name]) or timing[name] <= 0
+                    or not math.isfinite(timing[name])
+                    or timing[name] <= 0
                     for name in timings
                 )
-                or timing["total_seconds"] < max(
-                    timing["prepare_seconds"], timing["prefill_seconds"],
+                or timing["total_seconds"]
+                < max(
+                    timing["prepare_seconds"],
+                    timing["prefill_seconds"],
                     timing["decode_seconds"],
                 )
             ):
-                raise ValueError(f"C{concurrency} {label} repetition {repetition} has invalid timing")
+                raise ValueError(
+                    f"C{concurrency} {label} repetition {repetition} has invalid timing"
+                )
             for name in timings:
                 timings[name].append(float(timing[name]))
             throughput["prefill_tok_s"].append(prompt * concurrency / timing["prefill_seconds"])
@@ -385,7 +432,8 @@ def _validate_ordinary_whole_report(
             ):
                 actual = test.get(f"{name}_{suffix}")
                 if (
-                    type(actual) not in (int, float) or not math.isfinite(actual)
+                    type(actual) not in (int, float)
+                    or not math.isfinite(actual)
                     or not math.isclose(float(actual), expected, rel_tol=2e-6, abs_tol=1e-9)
                 ):
                     raise ValueError(
@@ -415,12 +463,12 @@ def _missing_capacity_provenance(root: Path, manifest: dict[str, Any]) -> list[d
         stderr_path = root / "logs" / f"{stem}.stderr.txt"
         stdout_path = root / "logs" / f"{stem}.stdout.txt"
         if (
-            not stderr_path.is_file() or stderr_path.is_symlink()
-            or not stdout_path.is_file() or stdout_path.is_symlink()
+            not stderr_path.is_file()
+            or stderr_path.is_symlink()
+            or not stdout_path.is_file()
+            or stdout_path.is_symlink()
         ):
-            raise ValueError(
-                f"missing capacity report has no owned stdout/stderr: {report_path}"
-            )
+            raise ValueError(f"missing capacity report has no owned stdout/stderr: {report_path}")
         matches = [
             (index, failure)
             for index, failure in enumerate(campaign_failures)
@@ -433,7 +481,9 @@ def _missing_capacity_provenance(root: Path, manifest: dict[str, Any]) -> list[d
             and failure.get("stdout") == str(stdout_path)
         ]
         if len(matches) != 1:
-            raise ValueError(f"missing capacity report has no unique campaign failure: {report_path}")
+            raise ValueError(
+                f"missing capacity report has no unique campaign failure: {report_path}"
+            )
         failure_index, campaign_failure = matches[0]
         matched_failure_indexes.add(failure_index)
         stderr_text = stderr_path.read_text(encoding="utf-8")
@@ -441,27 +491,33 @@ def _missing_capacity_provenance(root: Path, manifest: dict[str, Any]) -> list[d
         memory_admission = _structured_memory_admission_failure(
             record, campaign_failure, stdout_text, stderr_text
         )
-        retained.append({
-            "status": "memory_admission_ineligible",
-            "concurrency": record["concurrency"],
-            "command": record["command"],
-            "missing_report": str(report_path),
-            "memory_admission": memory_admission,
-            "campaign_failure": campaign_failure,
-            "failures_file": failure_identity,
-            "stderr": {
-                "path": str(stderr_path), "sha256": file_sha256(stderr_path),
-                "text": stderr_text,
-            },
-            "stdout": {"path": str(stdout_path), "sha256": file_sha256(stdout_path)},
-        })
+        retained.append(
+            {
+                "status": "memory_admission_ineligible",
+                "concurrency": record["concurrency"],
+                "command": record["command"],
+                "missing_report": str(report_path),
+                "memory_admission": memory_admission,
+                "campaign_failure": campaign_failure,
+                "failures_file": failure_identity,
+                "stderr": {
+                    "path": str(stderr_path),
+                    "sha256": file_sha256(stderr_path),
+                    "text": stderr_text,
+                },
+                "stdout": {"path": str(stdout_path), "sha256": file_sha256(stdout_path)},
+            }
+        )
     if matched_failure_indexes != set(range(len(campaign_failures))):
         raise ValueError(f"{root} has capacity campaign failures unrelated to missing reports")
     return retained
 
 
 def _quality_candidate(
-    quality: dict[str, Any], weights_id: str, group: int, prefill_chunk: int | None = None,
+    quality: dict[str, Any],
+    weights_id: str,
+    group: int,
+    prefill_chunk: int | None = None,
 ) -> tuple[dict, dict]:
     if (
         quality.get("artifact_type") == "ninfer_r9700_ppl_campaign"
@@ -473,13 +529,14 @@ def _quality_candidate(
         quality.get("schema") != "ninfer-r9700-q4-a8-final-quality-v2"
         or representation.get("q4_activation_bits") != 8
         or representation.get("w8_activation_bits") != 8
-        or representation.get("fp8_qk_wmma_profile")
-        != "t1-ge64-t2-ge320-t3plus-stream-v1"
+        or representation.get("decode_attention_profile") != "packed-t1to6-split512-t4tree-v1"
         or representation.get("xattention_profile") not in ("dense", "b128-s16-tau900")
         or representation.get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
     ):
         raise ValueError("quality evidence has an unsupported identity or execution profile")
-    artifacts = [item for item in quality.get("artifacts", []) if item.get("weights_id") == weights_id]
+    artifacts = [
+        item for item in quality.get("artifacts", []) if item.get("weights_id") == weights_id
+    ]
     if len(artifacts) != 1:
         raise ValueError(f"quality evidence has no unique artifact {weights_id}")
     artifact = artifacts[0]
@@ -494,17 +551,17 @@ def _quality_candidate(
     sources: dict[str, Any] = {}
     for tokens, label in ((8192, "8k"), (32768, "32k")):
         matches = [
-            row for row in quality.get("results", [])
+            row
+            for row in quality.get("results", [])
             if row.get("artifact_weights_id") == weights_id
-            and row.get("kv_value_group") == group and row.get("prompt_tokens") == tokens
+            and row.get("kv_value_group") == group
+            and row.get("prompt_tokens") == tokens
         ]
         if len(matches) != 1:
             raise ValueError(f"quality evidence lacks unique {weights_id}/G{group}/{label}")
         row = matches[0]
         if row.get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS:
-            raise ValueError(
-                f"quality {weights_id}/G{group}/{label} has the wrong plane layouts"
-            )
+            raise ValueError(f"quality {weights_id}/G{group}/{label} has the wrong plane layouts")
         cell_path = Path(row["cell"])
         if not cell_path.is_absolute():
             cell_path = REPO_ROOT / cell_path
@@ -541,9 +598,16 @@ def _replay_campaign_quality(campaign: dict, weights_id: str) -> None:
     tier = "accuracy" if weights_id == "r9700-q4-w8-mse-n16k16-eval" else "capacity-speed"
     limits = ppl_run.QUALITY_TIERS[tier]
     gates = campaign.get("gates")
-    if (not isinstance(gates, dict) or set(gates) != {"r9700-g16", "r9700-g32"}
-            or any(type(value) not in (int, float) or not math.isfinite(value)
-                   or value > limits["maximum_mean_nll_delta"] for value in gates.values())):
+    if (
+        not isinstance(gates, dict)
+        or set(gates) != {"r9700-g16", "r9700-g32"}
+        or any(
+            type(value) not in (int, float)
+            or not math.isfinite(value)
+            or value > limits["maximum_mean_nll_delta"]
+            for value in gates.values()
+        )
+    ):
         raise ValueError("PPL campaign loosens the fixed recipe quality gates")
     contract = campaign.get("quality_gate_contract", {})
     expected_contract = {
@@ -555,14 +619,20 @@ def _replay_campaign_quality(campaign: dict, weights_id: str) -> None:
         "maximum_new_severe_rate": limits["maximum_new_severe_rate"],
         "minimum_new_severe_budget": limits["minimum_new_severe_budget"],
     }
-    if (campaign.get("quality_tier") != tier
-            or not isinstance(contract, dict)
-            or any(contract.get(key) != value for key, value in expected_contract.items())):
+    if (
+        campaign.get("quality_tier") != tier
+        or not isinstance(contract, dict)
+        or any(contract.get(key) != value for key, value in expected_contract.items())
+    ):
         raise ValueError("PPL campaign differs from the fixed recipe quality gates")
     reused = campaign.get("reused_bf16_campaign")
     repeat = campaign.get("bf16_repeat_comparison")
-    if (not isinstance(reused, dict) or not isinstance(reused.get("path"), str)
-            or not isinstance(repeat, dict) or not isinstance(repeat.get("path"), str)):
+    if (
+        not isinstance(reused, dict)
+        or not isinstance(reused.get("path"), str)
+        or not isinstance(repeat, dict)
+        or not isinstance(repeat.get("path"), str)
+    ):
         raise ValueError("PPL campaign lacks its aligned BF16 authority and repeat")
     reference_path = Path(reused["path"])
     if file_sha256(reference_path) != reused.get("sha256"):
@@ -573,26 +643,42 @@ def _replay_campaign_quality(campaign: dict, weights_id: str) -> None:
             raise ValueError("PPL BF16 repeat authority changed")
     except SystemExit as error:
         raise ValueError(f"PPL BF16 authority is invalid: {error}") from error
-    for key in ("model_id", "reference_weights_id", "reference_source", "reference_execution",
-                "corpus", "lengths", "skip", "prefill_chunk", "schedules", "spec",
-                "draft_tokens", "terrible_nll"):
+    for key in (
+        "model_id",
+        "reference_weights_id",
+        "reference_source",
+        "reference_execution",
+        "corpus",
+        "lengths",
+        "skip",
+        "prefill_chunk",
+        "schedules",
+        "spec",
+        "draft_tokens",
+        "terrible_nll",
+    ):
         if key not in campaign or campaign[key] != reference.get(key):
             raise ValueError(f"PPL campaign differs from BF16 {key}")
     if campaign.get("scorers", {}).get(ppl_run.BASELINE) != reference["scorers"][ppl_run.BASELINE]:
         raise ValueError("PPL campaign BF16 scorer differs from its authority")
     cells = campaign.get("cells")
-    expected = {(scheme, tokens) for scheme in (ppl_run.BASELINE, *gates)
-                for tokens in (8192, 32768)}
-    if (not isinstance(cells, list) or len(cells) != len(expected)
-            or any(not isinstance(cell, dict) for cell in cells)
-            or {(cell.get("scheme"), cell.get("prompt_tokens")) for cell in cells} != expected):
+    expected = {
+        (scheme, tokens) for scheme in (ppl_run.BASELINE, *gates) for tokens in (8192, 32768)
+    }
+    if (
+        not isinstance(cells, list)
+        or len(cells) != len(expected)
+        or any(not isinstance(cell, dict) for cell in cells)
+        or {(cell.get("scheme"), cell.get("prompt_tokens")) for cell in cells} != expected
+    ):
         raise ValueError("PPL campaign lacks the complete BF16/G16/G32 cell inventory")
     for cell in cells:
         baseline, baseline_path = reference_cells[cell["prompt_tokens"]]
         if cell["scheme"] == ppl_run.BASELINE:
-            if (cell.get("pass") is not True
-                    or any(key not in cell or cell[key] != baseline.get(key)
-                           for key in ppl_run.BF16_SCORER_REPORT_FIELDS)):
+            if cell.get("pass") is not True or any(
+                key not in cell or cell[key] != baseline.get(key)
+                for key in ppl_run.BF16_SCORER_REPORT_FIELDS
+            ):
                 raise ValueError("PPL campaign BF16 cell differs from authority")
             continue
         command = cell.get("command")
@@ -601,12 +687,17 @@ def _replay_campaign_quality(campaign: dict, weights_id: str) -> None:
         index = command.index("--out-json")
         if index + 1 >= len(command) or not isinstance(command[index + 1], str):
             raise ValueError("PPL quality cell has a malformed raw report command")
-        for flag, value in (("--ids", campaign["corpus"]["path"]),
-                            ("--tokens", str(cell["prompt_tokens"])),
-                            ("--skip", campaign["skip"]),
-                            ("--prefill-chunk", str(campaign["prefill_chunk"]))):
-            if (command.count(flag) != 1 or command.index(flag) + 1 >= len(command)
-                    or command[command.index(flag) + 1] != value):
+        for flag, value in (
+            ("--ids", campaign["corpus"]["path"]),
+            ("--tokens", str(cell["prompt_tokens"])),
+            ("--skip", campaign["skip"]),
+            ("--prefill-chunk", str(campaign["prefill_chunk"])),
+        ):
+            if (
+                command.count(flag) != 1
+                or command.index(flag) + 1 >= len(command)
+                or command[command.index(flag) + 1] != value
+            ):
                 raise ValueError("PPL quality command differs from aligned corpus geometry")
         path = Path(command[index + 1])
         if not path.is_absolute():
@@ -619,35 +710,57 @@ def _replay_campaign_quality(campaign: dict, weights_id: str) -> None:
                 raise ValueError("PPL quality sidecar bytes changed")
         try:
             nll, argmax = ppl_run.load_nlls(path), ppl_run.load_argmax(path)
-            base_nll, base_argmax = ppl_run.load_nlls(baseline_path), ppl_run.load_argmax(baseline_path)
-            if (not ppl_run.cell_ok(cell, nll, argmax)
-                    or not ppl_run.cell_ok(baseline, base_nll, base_argmax)
-                    or cell.get("skip_tokens") != baseline.get("skip_tokens")
-                    or cell.get("tokens_scored") != baseline.get("tokens_scored")
-                    or cell.get("terrible_nll") != ppl_run.TERRIBLE_NLL):
+            base_nll, base_argmax = (
+                ppl_run.load_nlls(baseline_path),
+                ppl_run.load_argmax(baseline_path),
+            )
+            if (
+                not ppl_run.cell_ok(cell, nll, argmax)
+                or not ppl_run.cell_ok(baseline, base_nll, base_argmax)
+                or cell.get("skip_tokens") != baseline.get("skip_tokens")
+                or cell.get("tokens_scored") != baseline.get("tokens_scored")
+                or cell.get("terrible_nll") != ppl_run.TERRIBLE_NLL
+            ):
                 raise ValueError("PPL quality sidecars are not complete finite aligned")
             # Scorer aggregates are mathematical summaries of the represented FP32 sidecars.
-            compare_bf16_repeats._validate_sidecar_content("candidate", cell["prompt_tokens"], cell, path)
+            compare_bf16_repeats._validate_sidecar_content(
+                "candidate", cell["prompt_tokens"], cell, path
+            )
             rebuilt = copy.deepcopy(cell)
-            ppl_run.apply_baseline(rebuilt, nll, baseline["mean_nll"], gates, cell["scheme"],
-                base_nll, argmax, base_argmax, baseline["terrible_tokens"],
-                limits["maximum_new_severe_rate"], limits["minimum_new_severe_budget"])
+            ppl_run.apply_baseline(
+                rebuilt,
+                nll,
+                baseline["mean_nll"],
+                gates,
+                cell["scheme"],
+                base_nll,
+                argmax,
+                base_argmax,
+                baseline["terrible_tokens"],
+                limits["maximum_new_severe_rate"],
+                limits["minimum_new_severe_budget"],
+            )
         except SystemExit as error:
             raise ValueError(f"PPL quality sidecars are malformed: {error}") from error
         if cell.get("quality_tier") != tier or rebuilt != cell:
             raise ValueError("PPL quality gate does not recompute from aligned sidecars")
-    if type(campaign.get("pass")) is not bool or campaign["pass"] != all(cell.get("pass") is True for cell in cells):
+    if type(campaign.get("pass")) is not bool or campaign["pass"] != all(
+        cell.get("pass") is True for cell in cells
+    ):
         raise ValueError("PPL campaign pass differs from measured cell outcomes")
 
 
 def _campaign_quality_candidate(
-    campaign: dict[str, Any], weights_id: str, group: int, prefill_chunk: int | None,
+    campaign: dict[str, Any],
+    weights_id: str,
+    group: int,
+    prefill_chunk: int | None,
 ) -> tuple[dict, dict]:
     artifact = campaign.get("candidate_artifact")
     representation = {
         "q4_activation_bits": campaign.get("q4_activation_bits"),
         "w8_activation_bits": campaign.get("w8_activation_bits"),
-        "fp8_qk_wmma_profile": campaign.get("fp8_qk_wmma_profile"),
+        "decode_attention_profile": campaign.get("decode_attention_profile"),
         "xattention_profile": campaign.get("xattention_profile"),
         "kv_plane_layouts": campaign.get("candidate_kv_plane_layouts"),
     }
@@ -666,8 +779,7 @@ def _campaign_quality_candidate(
         or artifact["bytes"] <= 0
         or representation["q4_activation_bits"] != 8
         or representation["w8_activation_bits"] != 8
-        or representation["fp8_qk_wmma_profile"]
-        != "t1-ge64-t2-ge320-t3plus-stream-v1"
+        or representation["decode_attention_profile"] != "packed-t1to6-split512-t4tree-v1"
         or representation["xattention_profile"] not in ("dense", "b128-s16-tau900")
         or representation["kv_plane_layouts"] != R9700_KV_PLANE_LAYOUTS
         or campaign.get("required_candidate_identity")
@@ -683,7 +795,8 @@ def _campaign_quality_candidate(
         raise ValueError("PPL campaign cells must be an array")
     for tokens, label in ((8192, "8k"), (32768, "32k")):
         matches = [
-            cell for cell in campaign_cells
+            cell
+            for cell in campaign_cells
             if isinstance(cell, dict)
             and cell.get("scheme") == f"r9700-g{group}"
             and cell.get("schedule") == "prefill"
@@ -704,8 +817,8 @@ def _campaign_quality_candidate(
             "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
             "q4_activation_bits": 8,
             "w8_activation_bits": 8,
-            "fp8_qk_wmma_enabled": True,
-            "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+            "split512_enabled": True,
+            "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
         }
         expected_cell_identity.update(
             {"xattention_qualification": False}
@@ -725,7 +838,9 @@ def _campaign_quality_candidate(
         if representation["xattention_profile"] == "dense" and any(
             key in cell
             for key in (
-                "xattention_profile", "xattention_find_block", "xattention_stride",
+                "xattention_profile",
+                "xattention_find_block",
+                "xattention_stride",
                 "xattention_tau_permille",
             )
         ):
@@ -759,7 +874,9 @@ def _campaign_quality_candidate(
             )
         sources[label] = {"path": str(cell_path), "sha256": {}}
         for suffix, retained_key in (
-            ("json", None), ("nllf32", "nll_sha256"), ("argmaxi32", "argmax_sha256")
+            ("json", None),
+            ("nllf32", "nll_sha256"),
+            ("argmaxi32", "argmax_sha256"),
         ):
             source_path = cell_path if suffix == "json" else cell_path.with_suffix(f".{suffix}")
             digest = file_sha256(source_path) if source_path.is_file() else None
@@ -782,7 +899,9 @@ def _campaign_quality_candidate(
             or not isinstance(cell.get("delta_mean_nll"), (int, float))
             or not math.isfinite(float(cell["delta_mean_nll"]))
         ):
-            raise ValueError(f"PPL campaign {weights_id}/G{group}/{label} has invalid quality evidence")
+            raise ValueError(
+                f"PPL campaign {weights_id}/G{group}/{label} has invalid quality evidence"
+            )
         cells[label] = {
             "eligible": cell["quality_eligible"],
             "tier": tier,
@@ -809,7 +928,8 @@ def _campaign_quality_candidate(
             "reference_execution": campaign.get("reference_execution"),
             "bf16_scorer": (
                 campaign.get("scorers", {}).get("bf16-reference")
-                if isinstance(campaign.get("scorers"), dict) else None
+                if isinstance(campaign.get("scorers"), dict)
+                else None
             ),
             "reused_bf16_campaign": campaign.get("reused_bf16_campaign"),
             "bf16_repeat_comparison": campaign.get("bf16_repeat_comparison"),
@@ -819,31 +939,33 @@ def _campaign_quality_candidate(
 
 def _quality_cells_eligible(cells: dict) -> bool:
     from tools.ppl.pareto import _quality_objective
+
     if not isinstance(cells, dict) or set(cells) != {"8k", "32k"}:
         raise ValueError("terminal candidate lacks complete numerical quality measurements")
-    reasons = [reason for label, cell in cells.items()
-               for reason in _quality_objective(cell, label)[1]]
+    reasons = [
+        reason for label, cell in cells.items() for reason in _quality_objective(cell, label)[1]
+    ]
     if any(not reason.startswith("quality_guardrails_not_met:") for reason in reasons):
         raise ValueError("terminal candidate has malformed numerical quality measurements")
     return not reasons
 
 
 def assemble_candidate(
-    name: str, weights_id: str, group: int, quality_path: Path,
-    capacity_root: Path, whole_root: Path | None, prefill_chunk: int,
+    name: str,
+    weights_id: str,
+    group: int,
+    quality_path: Path,
+    capacity_root: Path,
+    whole_root: Path | None,
+    prefill_chunk: int,
     prefill_chunk_authority: dict[str, Any],
-    reporting_recovery: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if prefill_chunk not in PRODUCTION_PREFILL_CHUNKS:
         raise ValueError("selected prefill chunk is unsupported")
     quality = json.loads(quality_path.read_text(encoding="utf-8"))
-    quality_cells, quality_source = _quality_candidate(
-        quality, weights_id, group, prefill_chunk
-    )
+    quality_cells, quality_source = _quality_candidate(quality, weights_id, group, prefill_chunk)
     manifests = {"pareto-capacity": _manifest(capacity_root, "pareto-capacity")}
-    capacity_failures = _missing_capacity_provenance(
-        capacity_root, manifests["pareto-capacity"]
-    )
+    capacity_failures = _missing_capacity_provenance(capacity_root, manifests["pareto-capacity"])
     quality_eligible = _quality_cells_eligible(quality_cells)
     if not capacity_failures and quality_eligible and whole_root is None:
         raise ValueError("capacity- and quality-eligible candidate requires a whole matrix")
@@ -854,8 +976,7 @@ def assemble_candidate(
         if _manifest_prefill_chunk(manifest, preset) != prefill_chunk:
             raise ValueError(f"{preset} does not use selected prefill chunk {prefill_chunk}")
         profile_field = (
-            "base_capacity_profile" if preset == "pareto-capacity"
-            else "base_ranking_profile"
+            "base_capacity_profile" if preset == "pareto-capacity" else "base_ranking_profile"
         )
         if manifest.get(profile_field) != "spec-none-ordinary":
             raise ValueError(f"{preset} is not bound to spec-none ordinary")
@@ -882,8 +1003,8 @@ def assemble_candidate(
             != quality_source["representation"]["q4_activation_bits"]
             or manifest.get("expected_w8_activation_bits")
             != quality_source["representation"]["w8_activation_bits"]
-            or manifest.get("expected_fp8_qk_wmma_profile")
-            != quality_source["representation"]["fp8_qk_wmma_profile"]
+            or manifest.get("expected_decode_attention_profile")
+            != quality_source["representation"]["decode_attention_profile"]
             or manifest.get("expected_xattention_profile")
             != quality_source["representation"].get("xattention_profile")
         ):
@@ -893,12 +1014,10 @@ def assemble_candidate(
         )
         if manifest.get("required_candidate_identity") != hybrid_identity:
             raise ValueError(f"{preset} weight-recipe authority does not match quality evidence")
-        if (weights_id in TERMINAL_RECIPE_IDS
-                and actual.get("conversion_receipt")
-                != quality_source.get("conversion_receipt")):
-            raise ValueError(
-                f"{preset} N16 migration receipt differs from quality evidence"
-            )
+        if weights_id in TERMINAL_RECIPE_IDS and actual.get(
+            "conversion_receipt"
+        ) != quality_source.get("conversion_receipt"):
+            raise ValueError(f"{preset} N16 migration receipt differs from quality evidence")
         if weights_id == HYBRID_WEIGHTS_ID:
             validate_hybrid_shared_workspace_authority(
                 manifest.get("hybrid_shared_workspace_authority"), [prefill_chunk]
@@ -906,36 +1025,31 @@ def assemble_candidate(
         elif manifest.get("hybrid_shared_workspace_authority") is not None:
             raise ValueError(f"{preset} non-hybrid candidate carries hybrid workspace authority")
     benches = {json.dumps(manifest["bench"], sort_keys=True) for manifest in manifests.values()}
-    if reporting_recovery is not None:
-        from tools.ppl.benchmark_reporting_recovery import mapping, expected_benchmark
-        reporting_source = {
-            "artifact": identity, "cache_value_group": group,
-            "quality": {"representation": quality_source["representation"]},
-        }
-        reporting_row = mapping(reporting_recovery, group,
-                                quality_source["representation"]["xattention_profile"])
-        for preset, manifest in manifests.items():
-            if manifest["bench"] != expected_benchmark(reporting_source, preset, reporting_recovery):
-                raise ValueError("matrix benchmark differs from reporting recovery")
-            if weights_id == HYBRID_WEIGHTS_ID:
-                field = "new_planner" if preset == "pareto-whole" else "old_hybrid_planner"
-                if manifest["hybrid_shared_workspace_authority"]["tool"] != reporting_row[field]:
-                    raise ValueError("matrix planner differs from reporting recovery")
-    elif len(benches) != 1:
+    if len(benches) != 1:
         raise ValueError("capacity and whole matrices use different benchmark bytes")
-    if reporting_recovery is None and weights_id == HYBRID_WEIGHTS_ID and len({
-        json.dumps(manifest["hybrid_shared_workspace_authority"]["tool"], sort_keys=True)
-        for manifest in manifests.values()
-    }) != 1:
+    if (
+        weights_id == HYBRID_WEIGHTS_ID
+        and len(
+            {
+                json.dumps(manifest["hybrid_shared_workspace_authority"]["tool"], sort_keys=True)
+                for manifest in manifests.values()
+            }
+        )
+        != 1
+    ):
         raise ValueError("capacity and whole hybrid matrices use different planner bytes")
 
     capacity_reports = _reports(
-        capacity_root, manifests["pareto-capacity"], "pareto-capacity", prefill_chunk,
+        capacity_root,
+        manifests["pareto-capacity"],
+        "pareto-capacity",
+        prefill_chunk,
         allow_missing=True,
     )
     whole_reports = (
         _reports(whole_root, manifests["pareto-whole"], "pareto-whole", prefill_chunk)
-        if whole_root is not None else {}
+        if whole_root is not None
+        else {}
     )
     capacity: dict[str, Any] = {}
     speeds: dict[str, float] = {}
@@ -969,7 +1083,9 @@ def assemble_candidate(
         "execution_profile": {
             key: quality_source["representation"][key]
             for key in (
-                "q4_activation_bits", "w8_activation_bits", "fp8_qk_wmma_profile",
+                "q4_activation_bits",
+                "w8_activation_bits",
+                "decode_attention_profile",
                 "xattention_profile",
             )
         },
@@ -985,8 +1101,7 @@ def assemble_candidate(
         "prefill_chunk_authority": prefill_chunk_authority,
         "cache_value_group": group,
         "artifact": identity,
-        "benchmark_executable": (reporting_row["new_benchmark"] if reporting_recovery is not None
-                                 else manifests["pareto-capacity"]["bench"]),
+        "benchmark_executable": manifests["pareto-capacity"]["bench"],
         "quality": {
             "path": str(quality_path),
             "sha256": file_sha256(quality_path),
@@ -1011,7 +1126,8 @@ def assemble_candidate(
                 ],
             }
             for preset, root in (
-                ("pareto-capacity", capacity_root), ("pareto-whole", whole_root),
+                ("pareto-capacity", capacity_root),
+                ("pareto-whole", whole_root),
             )
             if root is not None
         },
@@ -1021,7 +1137,8 @@ def assemble_candidate(
 
 
 def validate_xattention_dense_controls(
-    candidates: list[dict[str, Any]], provenance: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    provenance: list[dict[str, Any]],
 ) -> None:
     """Require complete dense/sparse G16/G32 controls for every candidate recipe."""
 
@@ -1037,20 +1154,25 @@ def validate_xattention_dense_controls(
     for candidate, source in zip(candidates, provenance, strict=True):
         artifact = source.get("artifact", {})
         key = (
-            artifact.get("weights_id"), artifact.get("sha256"),
+            artifact.get("weights_id"),
+            artifact.get("sha256"),
             artifact.get("file_size_bytes"),
         )
         candidates_by_artifact.setdefault(key, []).append(candidate)
     for key, recipe_candidates in candidates_by_artifact.items():
         if (
-            not isinstance(key[0], str) or not key[0]
+            not isinstance(key[0], str)
+            or not key[0]
             or not _valid_sha256(key[1])
-            or type(key[2]) is not int or key[2] <= 0
+            or type(key[2]) is not int
+            or key[2] <= 0
         ):
             raise ValueError("XAttention candidate artifact identity is incomplete")
         actual = [
-            (candidate.get("cache_profile", {}).get("value_group"),
-             candidate.get("execution_profile", {}).get("xattention_profile"))
+            (
+                candidate.get("cache_profile", {}).get("value_group"),
+                candidate.get("execution_profile", {}).get("xattention_profile"),
+            )
             for candidate in recipe_candidates
         ]
         if len(actual) != len(expected) or set(actual) != expected:
@@ -1062,9 +1184,7 @@ def validate_xattention_dense_controls(
     campaign_by_artifact_profile: dict[
         tuple[object, object, object, str], set[tuple[str, str]]
     ] = {}
-    capacity_eligibility: dict[
-        tuple[object, object, object, int], dict[str, bool]
-    ] = {}
+    capacity_eligibility: dict[tuple[object, object, object, int], dict[str, bool]] = {}
     shared_bindings: set[str] = set()
     for candidate, source in zip(candidates, provenance, strict=True):
         profile = candidate["execution_profile"]["xattention_profile"]
@@ -1084,7 +1204,8 @@ def validate_xattention_dense_controls(
         quality_eligible = _quality_cells_eligible(candidate.get("quality_cells"))
         expected_matrices = (
             {"pareto-capacity", "pareto-whole"}
-            if capacity_eligible and quality_eligible else {"pareto-capacity"}
+            if capacity_eligible and quality_eligible
+            else {"pareto-capacity"}
         )
         if not isinstance(matrices, dict) or set(matrices) != expected_matrices:
             raise ValueError(
@@ -1123,9 +1244,8 @@ def validate_xattention_dense_controls(
             or not isinstance(reused_bf16.get("path"), str)
             or not _valid_sha256(reused_bf16.get("sha256"))
             or not isinstance(repeat_comparison, dict)
-            or set(repeat_comparison) != {
-                "path", "sha256", "authority_input", "authority_campaign_sha256"
-            }
+            or set(repeat_comparison)
+            != {"path", "sha256", "authority_input", "authority_campaign_sha256"}
             or repeat_comparison.get("authority_input") not in ("first", "second")
             or repeat_comparison.get("authority_campaign_sha256") != reused_bf16.get("sha256")
         ):
@@ -1145,26 +1265,37 @@ def validate_xattention_dense_controls(
         artifact = source["artifact"]
         group = candidate["cache_profile"]["value_group"]
         eligibility_key = (
-            artifact["weights_id"], artifact["sha256"], artifact["file_size_bytes"], group,
+            artifact["weights_id"],
+            artifact["sha256"],
+            artifact["file_size_bytes"],
+            group,
         )
         capacity_eligibility.setdefault(eligibility_key, {})[profile] = capacity_eligible
         campaign_key = (
-            artifact["weights_id"], artifact["sha256"], artifact["file_size_bytes"], profile,
+            artifact["weights_id"],
+            artifact["sha256"],
+            artifact["file_size_bytes"],
+            profile,
         )
         campaign_by_artifact_profile.setdefault(campaign_key, set()).add((path, digest))
-        shared_bindings.add(json.dumps({
-            "corpus": identity.get("corpus"),
-            "prefill_chunk": identity.get("prefill_chunk"),
-            "reference_weights_id": identity.get("reference_weights_id"),
-            "reference_source": identity.get("reference_source"),
-            "reference_execution": identity.get("reference_execution"),
-            "bf16_scorer": identity.get("bf16_scorer"),
-            "reused_bf16_campaign": identity.get("reused_bf16_campaign"),
-            "bf16_repeat_comparison": identity.get("bf16_repeat_comparison"),
-        }, sort_keys=True, separators=(",", ":")))
+        shared_bindings.add(
+            json.dumps(
+                {
+                    "corpus": identity.get("corpus"),
+                    "prefill_chunk": identity.get("prefill_chunk"),
+                    "reference_weights_id": identity.get("reference_weights_id"),
+                    "reference_source": identity.get("reference_source"),
+                    "reference_execution": identity.get("reference_execution"),
+                    "bf16_scorer": identity.get("bf16_scorer"),
+                    "reused_bf16_campaign": identity.get("reused_bf16_campaign"),
+                    "bf16_repeat_comparison": identity.get("bf16_repeat_comparison"),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
     if any(
-        set(profiles) != {"dense", "b128-s16-tau900"}
-        or len(set(profiles.values())) != 1
+        set(profiles) != {"dense", "b128-s16-tau900"} or len(set(profiles.values())) != 1
         for profiles in capacity_eligibility.values()
     ):
         raise ValueError(
@@ -1176,7 +1307,9 @@ def validate_xattention_dense_controls(
             "each artifact's XAttention profile must use one shared G16/G32 PPL campaign"
         )
     if len(shared_bindings) != 1:
-        raise ValueError("dense and XAttention PPL campaigns do not share one BF16/corpus authority")
+        raise ValueError(
+            "dense and XAttention PPL campaigns do not share one BF16/corpus authority"
+        )
     required_recipes = TERMINAL_RECIPE_IDS
     present_recipes = {key[0] for key in candidates_by_artifact}
     if present_recipes != required_recipes:
@@ -1187,18 +1320,20 @@ def validate_xattention_dense_controls(
 
 
 def validate_chunk_candidate_bindings(
-    chunk_selection: dict[str, Any], provenance: list[dict[str, Any]],
-    resource_recovery: dict[str, Any] | None = None,
-    reporting_recovery: dict[str, Any] | None = None,
+    chunk_selection: dict[str, Any],
+    provenance: list[dict[str, Any]],
 ) -> None:
-    from tools.ppl.fp8_context_recovery import resolved_benchmark
+    from tools.ppl.pareto import reject_retired_recovery_bridges
+
+    reject_retired_recovery_bridges(provenance)
     sources = chunk_selection.get("sources")
     if not isinstance(sources, list) or len(sources) != len(provenance):
         raise ValueError("prefill-chunk selection does not cover every Pareto candidate")
     expected = {}
     for source in sources:
         key = (
-            source.get("weights_id"), source.get("kv_value_group"),
+            source.get("weights_id"),
+            source.get("kv_value_group"),
             source.get("xattention_profile"),
         )
         if key in expected:
@@ -1210,28 +1345,18 @@ def validate_chunk_candidate_bindings(
         quality = source.get("quality", {})
         representation = quality.get("representation", {}) if isinstance(quality, dict) else {}
         key = (
-            artifact.get("weights_id"), source.get("cache_value_group"),
+            artifact.get("weights_id"),
+            source.get("cache_value_group"),
             representation.get("xattention_profile"),
         )
         bound = expected.get(key)
-        from tools.ppl.benchmark_reporting_recovery import expected_benchmark, validate_source_matrices
-        capacity_benchmark = expected_benchmark(source, "pareto-capacity", reporting_recovery)
         if (
             bound is None
             or bound.get("artifact") != artifact
-            or resolved_benchmark(bound, resource_recovery) != capacity_benchmark
+            or bound.get("benchmark_executable") != source.get("benchmark_executable")
         ):
             raise ValueError("Pareto candidate does not match its prefill-chunk selection identity")
         actual.add(key)
-        if reporting_recovery is not None:
-            validate_source_matrices(source, reporting_recovery)
-        if resource_recovery is not None:
-            from tools.ppl.fp8_context_recovery import validate_recovered_capacity
-            # The resource bridge still owns the unchanged capacity proof. The
-            # reporting bridge above owns fresh whole benchmark/planner identity.
-            retained = source if reporting_recovery is None else {
-                **source, "matrices": {"pareto-capacity": source["matrices"]["pareto-capacity"]}}
-            validate_recovered_capacity(retained, resource_recovery)
     if actual != set(expected):
         raise ValueError("prefill-chunk selection and Pareto candidate sets differ")
 
@@ -1251,11 +1376,13 @@ def bind_post_chunk_capacity_validation(
     before = file_sha256(resolved)
     retained = json.loads(resolved.read_text(encoding="utf-8"))
     from tools.bench.validate_post_chunk_capacity_campaign import validate_campaign
+
     rebuilt = validate_campaign(chunk_selection_path, capacity_roots, executed=True)
     if retained != rebuilt or file_sha256(resolved) != before:
         raise ValueError("post-chunk capacity validation differs from its physical campaign")
     eligible = {
-        tuple(identity) for identity in retained.get("capacity_eligible_identities", [])
+        tuple(identity)
+        for identity in retained.get("capacity_eligible_identities", [])
         if isinstance(identity, list) and len(identity) == 3
     }
     actual = {
@@ -1282,28 +1409,36 @@ def bind_post_chunk_capacity_validation(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--candidate", action="append", nargs=6, required=True,
+        "--candidate",
+        action="append",
+        nargs=6,
+        required=True,
         metavar=(
-            "NAME", "WEIGHTS_ID", "GROUP", "QUALITY_JSON", "CAPACITY_DIR", "WHOLE_DIR",
+            "NAME",
+            "WEIGHTS_ID",
+            "GROUP",
+            "QUALITY_JSON",
+            "CAPACITY_DIR",
+            "WHOLE_DIR",
         ),
     )
     parser.add_argument(
-        "--require-xattention-dense-controls", action="store_true",
+        "--require-xattention-dense-controls",
+        action="store_true",
         help="require matched dense and B128/S16/tau900 G16/G32 admission candidates",
     )
     parser.add_argument(
-        "--prefill-chunk-selection", type=Path, required=True,
+        "--prefill-chunk-selection",
+        type=Path,
+        required=True,
         help="validated schema-v2 global prefill-chunk selection record",
     )
     parser.add_argument(
-        "--post-chunk-capacity-validation", type=Path,
+        "--post-chunk-capacity-validation",
+        type=Path,
         help="executed twelve-matrix capacity validation controlling whole eligibility",
     )
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--fp8-context-recovery", type=Path,
-                        help="qualified allocation-only hybrid build bridge; never a capacity waiver")
-    parser.add_argument("--benchmark-reporting-recovery", type=Path,
-                        help="reviewed host-reporting-only bridge retaining existing capacity")
     args = parser.parse_args()
     chunk_selection_path = args.prefill_chunk_selection.resolve()
     prefill_chunk_authority, chunk_selection = validate_prefill_chunk_authority(
@@ -1311,39 +1446,26 @@ def main() -> int:
     )
     chunk_selection_sha256 = prefill_chunk_authority["sha256"]
     prefill_chunk = chunk_selection["selected_prefill_chunk"]
-    reporting_recovery = None
-    if args.benchmark_reporting_recovery is not None:
-        from tools.ppl.benchmark_reporting_recovery import validate_bridge as validate_reporting
-        from tools.ppl.fp8_context_recovery import identity
-        reporting_recovery = validate_reporting(args.benchmark_reporting_recovery, chunk_selection)
-        if (args.fp8_context_recovery is None or reporting_recovery["fp8_context_resource_recovery"]
-                != identity(args.fp8_context_recovery)):
-            raise ValueError("reporting bridge requires its exact FP8 resource authority")
     candidates, provenance = [], []
     for name, weights_id, group, quality, capacity, whole in args.candidate:
         whole_path = None if whole == "-" else Path(whole).resolve()
         candidate, source = assemble_candidate(
-            name, weights_id, int(group), Path(quality).resolve(), Path(capacity).resolve(),
-            whole_path, prefill_chunk, prefill_chunk_authority, reporting_recovery,
+            name,
+            weights_id,
+            int(group),
+            Path(quality).resolve(),
+            Path(capacity).resolve(),
+            whole_path,
+            prefill_chunk,
+            prefill_chunk_authority,
         )
         candidates.append(candidate)
         provenance.append(source)
-        if reporting_recovery is not None:
-            source["benchmark_reporting_recovery"] = identity(args.benchmark_reporting_recovery)
     if args.require_xattention_dense_controls:
         validate_xattention_dense_controls(candidates, provenance)
-        recovery = None
-        if args.fp8_context_recovery is not None:
-            from tools.ppl.fp8_context_recovery import identity, validate_bridge
-            recovery = validate_bridge(args.fp8_context_recovery, chunk_selection)
-            binding = identity(args.fp8_context_recovery)
-            for source in provenance:
-                source["fp8_context_resource_recovery"] = binding
-        validate_chunk_candidate_bindings(chunk_selection, provenance, recovery, reporting_recovery)
+        validate_chunk_candidate_bindings(chunk_selection, provenance)
         if args.post_chunk_capacity_validation is None:
-            raise SystemExit(
-                "static profile selection requires --post-chunk-capacity-validation"
-            )
+            raise SystemExit("static profile selection requires --post-chunk-capacity-validation")
         capacity_binding = bind_post_chunk_capacity_validation(
             args.post_chunk_capacity_validation,
             chunk_selection_path,
@@ -1353,8 +1475,7 @@ def main() -> int:
         )
         for source in provenance:
             source["post_chunk_capacity_validation"] = capacity_binding
-    elif (args.post_chunk_capacity_validation is not None or args.fp8_context_recovery is not None
-          or args.benchmark_reporting_recovery is not None):
+    elif args.post_chunk_capacity_validation is not None:
         raise SystemExit(
             "--post-chunk-capacity-validation requires --require-xattention-dense-controls"
         )

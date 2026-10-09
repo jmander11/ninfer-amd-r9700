@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
 import json
-from pathlib import Path
 import time
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
@@ -65,14 +65,18 @@ def _checkpoint_receipt(model: Path) -> dict[str, object]:
     ):
         raise ValueError("BF16 source index has invalid exact tensor byte count")
     shard_names = sorted(set(weight_map.values()))
-    shards = [
-        {"name": name, "bytes": (model / name).stat().st_size} for name in shard_names
-    ]
+    shards = [{"name": name, "bytes": (model / name).stat().st_size} for name in shard_names]
     return {
-        "config": {"path": str(config.resolve()), "bytes": config.stat().st_size,
-                   "sha256": _sha256(config)},
-        "index": {"path": str(index.resolve()), "bytes": index.stat().st_size,
-                  "sha256": _sha256(index)},
+        "config": {
+            "path": str(config.resolve()),
+            "bytes": config.stat().st_size,
+            "sha256": _sha256(config),
+        },
+        "index": {
+            "path": str(index.resolve()),
+            "bytes": index.stat().st_size,
+            "sha256": _sha256(index),
+        },
         "indexed_tensor_count": len(weight_map),
         "index_total_tensor_bytes": int(total_tensor_bytes),
         "shards": shards,
@@ -89,9 +93,7 @@ def preflight_conversion(
 ) -> Q4W8MseConversionPreflight:
     model = Path(model_dir)
     q4_w8_mse_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
@@ -124,17 +126,22 @@ def preflight_summary(preflight: Q4W8MseConversionPreflight) -> dict[str, object
         "shards": preflight.source.source_shard_count,
         "dtypes": preflight.source.source_dtype_counts,
     }
-    if source_summary["tensors"] != 1199 or source_summary["shards"] != 18 or source_summary[
-        "dtypes"
-    ] != {"BF16": 1199}:
+    if (
+        source_summary["tensors"] != 1199
+        or source_summary["shards"] != 18
+        or source_summary["dtypes"] != {"BF16": 1199}
+    ):
         raise ValueError("source is not the exact 1,199-BF16-tensor/18-shard checkpoint")
     statistics = family_conversion.object_statistics(objects)
     if statistics["count"] != len(q4_w8_mse_inventory.OBJECT_SPECS):
         raise ValueError("mixed source-MSE object plan is incomplete")
     checkpoint = _checkpoint_receipt(preflight.model_dir)
     resource_receipt = [
-        {"name": resource.name, "bytes": len(resource.data),
-         "sha256": hashlib.sha256(resource.data).hexdigest()}
+        {
+            "name": resource.name,
+            "bytes": len(resource.data),
+            "sha256": hashlib.sha256(resource.data).hexdigest(),
+        }
         for resource in preflight.resources
     ]
     if [row["name"] for row in resource_receipt] != list(resources.OFFICIAL_RESOURCE_SHA256):
@@ -242,36 +249,32 @@ def convert(
     output.parent.mkdir(parents=True, exist_ok=True)
     resource_payloads = {resource.name: resource.data for resource in preflight.resources}
 
-    with ShardReader(preflight.model_dir) as reader:
-        with ArtifactWriter(
+    with (
+        ShardReader(preflight.model_dir) as reader,
+        ArtifactWriter(
             output,
-            ArtifactIdentity(
-                q4_w8_mse_inventory.MODEL_ID, q4_w8_mse_inventory.WEIGHTS_ID
-            ),
+            ArtifactIdentity(q4_w8_mse_inventory.MODEL_ID, q4_w8_mse_inventory.WEIGHTS_ID),
             preflight.object_plan.specs,
-        ) as writer:
-            if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError(
-                    "Q4/W8 source-MSE writer plan differs from completed preflight"
-                )
-            for index, spec in enumerate(q4_w8_mse_inventory.OBJECT_SPECS, start=1):
-                if isinstance(spec, q4_w8_mse_inventory.ResourceSpec):
-                    payload = resource_payloads[spec.name]
-                else:
-                    tensor = source.materialize_tensor(spec, reader, preflight.draft)
-                    payload = _encode_tensor(tensor, spec, resolved_device)
-                    del tensor
-                writer.write(spec.name, payload)
-                del payload
-                print(
-                    f"[{index}/{len(q4_w8_mse_inventory.OBJECT_SPECS)}] {spec.name}",
-                    flush=True,
-                )
+        ) as writer,
+    ):
+        if writer.objects != preflight.object_plan.objects:
+            raise RuntimeError("Q4/W8 source-MSE writer plan differs from completed preflight")
+        for index, spec in enumerate(q4_w8_mse_inventory.OBJECT_SPECS, start=1):
+            if isinstance(spec, q4_w8_mse_inventory.ResourceSpec):
+                payload = resource_payloads[spec.name]
+            else:
+                tensor = source.materialize_tensor(spec, reader, preflight.draft)
+                payload = _encode_tensor(tensor, spec, resolved_device)
+                del tensor
+            writer.write(spec.name, payload)
+            del payload
+            print(
+                f"[{index}/{len(q4_w8_mse_inventory.OBJECT_SPECS)}] {spec.name}",
+                flush=True,
+            )
 
     report = family_conversion.build_conversion_report(
-        identity=ArtifactIdentity(
-            q4_w8_mse_inventory.MODEL_ID, q4_w8_mse_inventory.WEIGHTS_ID
-        ),
+        identity=ArtifactIdentity(q4_w8_mse_inventory.MODEL_ID, q4_w8_mse_inventory.WEIGHTS_ID),
         target_key=q4_w8_mse_inventory.TARGET_KEY,
         recipe_id=q4_w8_mse_inventory.RECIPE_ID,
         repo_root=_repo_root(),
@@ -325,7 +328,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.preflight_only:
         if args.out is not None or args.device is not None:
             parser.error("--preflight-only does not accept --out or --device")
-        print(json.dumps(preflight_summary(preflight_conversion(args.model, args.draft_ranking)), indent=2))
+        print(
+            json.dumps(
+                preflight_summary(preflight_conversion(args.model, args.draft_ranking)), indent=2
+            )
+        )
         return
     if args.out is None or args.device is None:
         parser.error("conversion requires --out and --device")

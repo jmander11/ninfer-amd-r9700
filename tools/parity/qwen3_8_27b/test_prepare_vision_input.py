@@ -1,6 +1,6 @@
+import os
 import tempfile
 import unittest
-import os
 from pathlib import Path
 from unittest import mock
 
@@ -35,12 +35,13 @@ class PrepareVisionInputTest(unittest.TestCase):
             messages.write_text('[{"role":"user","content":"x"}]')
             binding = mock.MagicMock()
             binding.__enter__.return_value = binding
-            with mock.patch(
-                "tools.parity.qwen3_8_27b.prepare_vision_input.VisionArtifactBinding.open",
-                return_value=binding,
-            ), mock.patch(
-                "tools.parity.qwen3_8_27b.prepare_vision_input.Frontend"
-            ) as frontend:
+            with (
+                mock.patch(
+                    "tools.parity.qwen3_8_27b.prepare_vision_input.VisionArtifactBinding.open",
+                    return_value=binding,
+                ),
+                mock.patch("tools.parity.qwen3_8_27b.prepare_vision_input.Frontend") as frontend,
+            ):
                 frontend.return_value.process.return_value = self.batch()
                 contract = prepare(weights, messages, output)
             reopened, reopened_contract = load_prepared_batch(output)
@@ -80,14 +81,16 @@ class PrepareVisionInputTest(unittest.TestCase):
                 os.replace(foreign, pending)
                 real_link(pending, destination)
 
-            with mock.patch(
-                "tools.parity.qwen3_8_27b.prepare_vision_input.VisionArtifactBinding.open",
-                return_value=binding,
-            ), mock.patch(
-                "tools.parity.qwen3_8_27b.prepare_vision_input.Frontend"
-            ) as frontend, mock.patch(
-                "tools.parity.qwen3_8_27b.prepare_vision_input.os.link",
-                side_effect=replace_then_link,
+            with (
+                mock.patch(
+                    "tools.parity.qwen3_8_27b.prepare_vision_input.VisionArtifactBinding.open",
+                    return_value=binding,
+                ),
+                mock.patch("tools.parity.qwen3_8_27b.prepare_vision_input.Frontend") as frontend,
+                mock.patch(
+                    "tools.parity.qwen3_8_27b.prepare_vision_input.os.link",
+                    side_effect=replace_then_link,
+                ),
             ):
                 frontend.return_value.process.return_value = self.batch()
                 with self.assertRaisesRegex(ValueError, "pending inode"):

@@ -1,0 +1,66 @@
+{
+  "artifact_type": "ninfer_qwen3_8_27b_bf16_checkpoint_preflight",
+  "schema_version": 1,
+  "status": "passed",
+  "validated_on": "2026-09-05",
+  "source": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16",
+  "validator": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/reference/qwen3_8_27b_bf16/protocol.py",
+    "bytes": 34509,
+    "sha256": "3257b3c5c848b298a458adf276d81a5c9a404d1776c7e026e2c91ff445e4a02a",
+    "call": "validate_checkpoint_files",
+    "python": {
+      "path": "/usr/bin/python3",
+      "version": "3.12.3"
+    },
+    "contract": "exact Qwen3.8 config fields, 1,199-entry weight map, exact index total size, every required Text tensor, exact 18-name shard set, and every shard a nonempty regular file"
+  },
+  "metadata": {
+    "config": {
+      "path": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16/config.json",
+      "bytes": 4312,
+      "sha256": "191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab"
+    },
+    "index": {
+      "path": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16/model.safetensors.index.json",
+      "bytes": 112216,
+      "sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df"
+    },
+    "indexed_tensor_count": 1199,
+    "index_total_tensor_bytes": 55562855904,
+    "canonical_weight_map_sha256": "1a5f0c9442cebf63eb9f0c4cd4d7d80b338f90012744edf79ee26ce45dba441b"
+  },
+  "shards": {
+    "expected_count": 18,
+    "indexed_count": 18,
+    "all_named_exactly": true,
+    "all_regular_nonempty": true,
+    "total_file_bytes": 55563006776,
+    "payload_sha256": null,
+    "payload_hash_policy": "not computed: the target-owned prerequisite validator requires exact names and nonempty regular files, not full payload hashes",
+    "files": [
+      {"name": "model-00001-of-00018.safetensors", "bytes": 3966730552},
+      {"name": "model-00002-of-00018.safetensors", "bytes": 3043080328},
+      {"name": "model-00003-of-00018.safetensors", "bytes": 2542796952},
+      {"name": "model-00004-of-00018.safetensors", "bytes": 3988973152},
+      {"name": "model-00005-of-00018.safetensors", "bytes": 2099339864},
+      {"name": "model-00006-of-00018.safetensors", "bytes": 3979553696},
+      {"name": "model-00007-of-00018.safetensors", "bytes": 2108759344},
+      {"name": "model-00008-of-00018.safetensors", "bytes": 3979553696},
+      {"name": "model-00009-of-00018.safetensors", "bytes": 2108759344},
+      {"name": "model-00010-of-00018.safetensors", "bytes": 3979553696},
+      {"name": "model-00011-of-00018.safetensors", "bytes": 2108759344},
+      {"name": "model-00012-of-00018.safetensors", "bytes": 3979553696},
+      {"name": "model-00013-of-00018.safetensors", "bytes": 2108759344},
+      {"name": "model-00014-of-00018.safetensors", "bytes": 3979553696},
+      {"name": "model-00015-of-00018.safetensors", "bytes": 2108759344},
+      {"name": "model-00016-of-00018.safetensors", "bytes": 3979564040},
+      {"name": "model-00017-of-00018.safetensors", "bytes": 2108759344},
+      {"name": "model-00018-of-00018.safetensors", "bytes": 3392197344}
+    ]
+  },
+  "result": {
+    "checkpoint_prerequisite": "available",
+    "unblocks": "BF16-source conversion, PPL, and exact-token preflight; GPU execution and candidate admission remain separate"
+  }
+}

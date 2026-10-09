@@ -11,11 +11,10 @@ import argparse
 import hashlib
 import json
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from tools.convert.qwen3_8_27b_r9700 import e4m3_inventory
-
 
 SCHEMA = "ninfer.r9700.e4m3-capacity-analysis.v1"
 PAGE_TOKENS = 64
@@ -89,8 +88,11 @@ def project_workspace(chunk: int, incumbent_workspace: int) -> dict[str, int]:
 
 
 def project_cell(
-    source: Mapping[str, object], *, value_group: int, workspace_bytes: int,
-    resident_weight_bytes: int
+    source: Mapping[str, object],
+    *,
+    value_group: int,
+    workspace_bytes: int,
+    resident_weight_bytes: int,
 ) -> dict[str, object]:
     memory = source["memory"]
     if not isinstance(memory, Mapping):
@@ -246,9 +248,7 @@ def _read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def run(
-    *, workspace_summary_path: Path, capacity_root: Path, output: Path
-) -> dict[str, object]:
+def run(*, workspace_summary_path: Path, capacity_root: Path, output: Path) -> dict[str, object]:
     workspace_summary = _read_json(workspace_summary_path)
     sources: dict[int, dict[int, Mapping[str, object]]] = {}
     source_records = []
@@ -263,8 +263,12 @@ def run(
             )
             sources[group][concurrency] = _read_json(path)
             source_records.append(
-                {"path": str(path), "sha256": _sha256(path), "kv_value_group": group,
-                 "concurrency": concurrency}
+                {
+                    "path": str(path),
+                    "sha256": _sha256(path),
+                    "kv_value_group": group,
+                    "concurrency": concurrency,
+                }
             )
     report = assemble_report(
         workspace_summary=workspace_summary,
@@ -303,13 +307,21 @@ def main() -> int:
         capacity_root=args.capacity_root,
         output=args.output,
     )
-    print(json.dumps({
-        f"p{scenario['workspace']['prefill_chunk']}": [
-            {"g": group["kv_value_group"], "statuses": [cell["status"] for cell in group["cells"]]}
-            for group in scenario["groups"]
-        ]
-        for scenario in report["scenarios"]
-    }, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                f"p{scenario['workspace']['prefill_chunk']}": [
+                    {
+                        "g": group["kv_value_group"],
+                        "statuses": [cell["status"] for cell in group["cells"]],
+                    }
+                    for group in scenario["groups"]
+                ]
+                for scenario in report["scenarios"]
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 

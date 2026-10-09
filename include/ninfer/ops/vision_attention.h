@@ -25,11 +25,11 @@ namespace ninfer::ops {
  *   ideal[:,h,t] = sum_j softmax(score)[j] * v[:,h,j].
  *
  * q/k/v are BF16 [72,16,P] with contiguous feature and head dimensions; token strides may be
- * padded. out is contiguous BF16 [72,16,P]. cu_seqlens is contiguous I32 [S+1], begins at 0,
- * ends at P, and is strictly increasing. The oracle evaluates `ideal` naively in FP64 from the
- * represented inputs. The BF16 out is promoted and compared directly with that result; output
- * storage rounding belongs to the Op's numerical criterion, not the oracle. Inputs and output are
- * mutually non-overlapping.
+ * padded but, like the base pointers, must be 16-byte aligned. out is contiguous BF16 [72,16,P].
+ * cu_seqlens is contiguous I32 [S+1], begins at 0, ends at P, and is strictly increasing. The
+ * oracle evaluates `ideal` naively in FP64 from the represented inputs. The BF16 out is promoted
+ * and compared directly with that result; output storage rounding belongs to the Op's numerical
+ * criterion, not the oracle. Inputs and output are mutually non-overlapping.
  *
  * The Op allocates required opaque tile descriptors from `workspace` for the duration of the call;
  * no capacity is consumed for a single segment. There is no persistent state side effect.

@@ -74,7 +74,8 @@ def prepare(weights: Path, messages: Path, output: Path) -> dict[str, object]:
         target = os.stat(output, follow_symlinks=False)
         pending_stat = os.stat(pending, follow_symlinks=False)
         if (target.st_dev, target.st_ino) != owner or (
-            pending_stat.st_dev, pending_stat.st_ino
+            pending_stat.st_dev,
+            pending_stat.st_ino,
         ) != owner:
             raise ValueError("published prepared input does not retain its pending inode")
         directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)

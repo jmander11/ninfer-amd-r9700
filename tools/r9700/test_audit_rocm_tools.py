@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from audit_rocm_tools import _supported_compute_architectures, summarize_database
+from tools.r9700.audit_rocm_tools import _supported_compute_architectures, summarize_database
 
 
 class RocprofEvidenceTest(unittest.TestCase):
@@ -16,7 +16,7 @@ class RocprofEvidenceTest(unittest.TestCase):
             database = Path(temporary) / "evidence.db"
             connection = sqlite3.connect(database)
             suffix = "_00000001_fixture"
-            connection.executescript(f'''
+            connection.executescript(f"""
                 create table rocpd_info_process{suffix} (id integer, command text);
                 insert into rocpd_info_process{suffix} values (1, 'fixture --context 66');
                 create table rocpd_info_agent{suffix}
@@ -37,14 +37,15 @@ class RocprofEvidenceTest(unittest.TestCase):
                 insert into rocpd_info_pmc{suffix} values (7, 'SQ_WAVES');
                 create table rocpd_pmc_event{suffix} (id integer, pmc_id integer, value real);
                 insert into rocpd_pmc_event{suffix} values (1, 7, 0), (2, 7, 4);
-            ''')
+            """)
             connection.commit()
             connection.close()
 
             summary = summarize_database(database)
             self.assertEqual(summary["commands"], ["fixture --context 66"])
-            self.assertEqual(summary["row_counts"], {
-                "kernel_dispatch": 1, "memory_copy": 1, "runtime_region": 1})
+            self.assertEqual(
+                summary["row_counts"], {"kernel_dispatch": 1, "memory_copy": 1, "runtime_region": 1}
+            )
             self.assertEqual(summary["counters"]["SQ_WAVES"]["samples"], 2)
             self.assertEqual(summary["counters"]["SQ_WAVES"]["nonzero_samples"], 1)
             self.assertEqual(summary["counters"]["SQ_WAVES"]["sum"], 4)

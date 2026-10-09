@@ -8,7 +8,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 BEGIN = re.compile(r"-- Begin function\s+(\S+)")
 INTEGER_FIELDS = {
     "lds": re.compile(r"\.amdhsa_group_segment_fixed_size\s+(\d+)"),
@@ -49,8 +48,9 @@ def kernels(assembly: str) -> list[Kernel]:
         for index, match in enumerate(matches[:-1])
         if "split512_" in match.group(1) or "qk_wmma_kernel" in match.group(1)
     ]
-    if matches and ("split512_" in matches[-1].group(1) or
-                    "qk_wmma_kernel" in matches[-1].group(1)):
+    if matches and (
+        "split512_" in matches[-1].group(1) or "qk_wmma_kernel" in matches[-1].group(1)
+    ):
         selected.append(Kernel(matches[-1].group(1), assembly[matches[-1].start() :]))
     return selected
 
@@ -63,9 +63,7 @@ def check_isa(selected: list[Kernel]) -> None:
             f"split-512 static gate expected 2 retained T1 QK specializations, got {len(t1_qk)}"
         )
     if len(qk) != 2:
-        raise SystemExit(
-            f"split-512 static gate expected 2 T4 QK specializations, got {len(qk)}"
-        )
+        raise SystemExit(f"split-512 static gate expected 2 T4 QK specializations, got {len(qk)}")
     for kernel in t1_qk:
         if "v_wmma_f32_16x16x16_fp8_fp8" not in kernel.body:
             raise SystemExit(f"{kernel.name}: missing native FP8 WMMA instruction")
@@ -85,7 +83,7 @@ def check_resources(selected: list[Kernel]) -> None:
         "partial": {"lds": 6224, "vgpr": 26},
         "merge": {"lds": 2124, "vgpr": 25},
     }
-    counts = {kind: 0 for kind in limits}
+    counts = dict.fromkeys(limits, 0)
     for kernel in selected:
         kind = kernel.kind
         if kind is None:
@@ -98,9 +96,7 @@ def check_resources(selected: list[Kernel]) -> None:
             )
         for field, limit in limits[kind].items():
             if values[field] > limit:
-                raise SystemExit(
-                    f"{kernel.name}: {field}={values[field]} exceeds {limit}"
-                )
+                raise SystemExit(f"{kernel.name}: {field}={values[field]} exceeds {limit}")
         print(
             f"{kind}: lds={values['lds']} vgpr={values['vgpr']} "
             f"private={values['private']} scratch={values['scratch']}"

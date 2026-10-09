@@ -44,8 +44,8 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_ACTIVATION_BITS=${NINFER_R9700_Q4_ACTIVATION_BITS})
 
-set(NINFER_R9700_Q4_PREFILL_A4_FAMILIES "1" CACHE STRING
-  "Q4 prefill A4 policy: 1=selected gate/up; evaluators: 0=none, 2=MLP, 3=projections, 4=attention input, 5=gate/up+attention input")
+set(NINFER_R9700_Q4_PREFILL_A4_FAMILIES "0" CACHE STRING
+  "Q4 prefill A4 policy: 0=selected uniform A8; evaluators: 1=gate/up, 2=MLP, 3=projections, 4=attention input, 5=gate/up+attention input")
 set_property(CACHE NINFER_R9700_Q4_PREFILL_A4_FAMILIES PROPERTY STRINGS 0 1 2 3 4 5)
 if(NOT NINFER_R9700_Q4_PREFILL_A4_FAMILIES MATCHES "^[0-5]$")
   message(FATAL_ERROR "NINFER_R9700_Q4_PREFILL_A4_FAMILIES must be in [0,5]")
@@ -115,19 +115,6 @@ endif()
 add_compile_definitions(
   NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=${NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE})
 
-# Qualification-only exact-shape hipBLASLt selector. One preserves the qualified e2e001... T128
-# default and requires the same identity as a viable T129 choice, independent of prepare order.
-set(NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE "0" CACHE STRING
-  "Select the qualified common T128/T129 FP8 gate/up algorithm")
-set_property(CACHE NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE PROPERTY STRINGS 0 1)
-if(NOT NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE STREQUAL "0" AND
-   NOT NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE STREQUAL "1")
-  message(FATAL_ERROR
-    "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE must be 0 or 1; got "
-    "'${NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE}'")
-endif()
-add_compile_definitions(
-  NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE=${NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE})
 
 # The selected W8G32 profile uses dynamic A8G32 only at measured winning shapes/token extents and
 # retains exact represented-BF16 activation below each crossover. The explicit A16 build is the
@@ -203,6 +190,16 @@ endif()
 
 project(ninfer LANGUAGES C CXX HIP)
 
+# The build host is shared with GPU work and other agents: Ninja never runs more than
+# NINFER_BUILD_JOBS compile or link jobs, whatever -j a caller passes (bare Ninja uses cores+2).
+set(NINFER_BUILD_JOBS 8 CACHE STRING "Maximum concurrent Ninja compile/link jobs (1..8)")
+if(NOT NINFER_BUILD_JOBS MATCHES "^[1-8]$")
+  message(FATAL_ERROR "NINFER_BUILD_JOBS must be 1..8")
+endif()
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS ninfer_jobs=${NINFER_BUILD_JOBS})
+set(CMAKE_JOB_POOL_COMPILE ninfer_jobs)
+set(CMAKE_JOB_POOL_LINK ninfer_jobs)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_HIP_STANDARD 20)
@@ -215,7 +212,6 @@ endif()
 # HIP's compiler package supplies the runtime link target and selected ROCm include
 # roots. The production core links it directly without a source-level compatibility shim.
 find_package(hip REQUIRED CONFIG)
-find_package(hipblaslt REQUIRED CONFIG)
 find_package(rocprofiler-sdk-roctx REQUIRED CONFIG)
 get_target_property(NINFER_AMDHIP64_LOCATION hip::amdhip64 IMPORTED_LOCATION_RELEASE)
 if(NOT NINFER_AMDHIP64_LOCATION)
@@ -240,6 +236,8 @@ find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(NINFER_ZSTD REQUIRED IMPORTED_TARGET libzstd)
 include(cmake/xgrammar.cmake)
+# After the third-party xgrammar target, so its sources keep their upstream diagnostics.
+include(cmake/warnings.cmake)
 
 add_subdirectory(src)
 if(NINFER_BUILD_APPS)

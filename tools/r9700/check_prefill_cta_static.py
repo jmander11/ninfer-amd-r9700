@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 BEGIN = re.compile(r"-- Begin function\s+(\S+)")
+
 
 @dataclass(frozen=True)
 class Profile:
@@ -26,38 +27,93 @@ class Profile:
     maximum_workgroup_size: int
     occupancy: int = 0
 
+
 PROFILES = {
     "q4-dot8": Profile(
         "",
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_136a8q4g64_linear_decode_dot8_t1_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj",
-        "v_dot8_i32_iu4", 16, 0, 64, 0, 0, 0, 0, 256,
+        "v_dot8_i32_iu4",
+        16,
+        0,
+        64,
+        0,
+        0,
+        0,
+        0,
+        256,
     ),
+    # M128xN128 production: two K64 bodies (pipelined loop plus peeled final group) of 2x4
+    # fragments, each four IU4 WMMA sites.
     "q4": Profile(
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_152a8q4g64_linear_prefill_cta_m64n128_regression_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_133a8q4g64_linear_prefill_cta_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "v_wmma_i32_16x16x32_iu4", 8, 17152, 96, 0, 8, 8576, 96, 512, 16,
+        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_133a8q4g64_linear_prefill_cta_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj",
+        "v_wmma_i32_16x16x32_iu4",
+        64,
+        26624,
+        232,
+        0,
+        8,
+        8576,
+        96,
+        256,
+        7,
     ),
     "w8": Profile(
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_158a8w8g32_linear_prefill_cta_global_inv_qualification_kernelEPKaPKtPKjS5_S7_P12hip_bfloat16jjjj",
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_133a8w8g32_linear_prefill_cta_kernelEPKaPKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "v_wmma_i32_16x16x16_iu8", 2, 4352, 50, 2, 2, 4352, 50, 512,
+        "v_wmma_i32_16x16x16_iu8",
+        2,
+        4352,
+        50,
+        2,
+        2,
+        4352,
+        50,
+        512,
     ),
     "q4-m128n128": Profile(
         "",
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_156a8q4g64_linear_prefill_cta_m128n128_qualification_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "v_wmma_i32_16x16x32_iu4", 8, 12800, 96, 0, 0, 0, 0, 1024,
+        "v_wmma_i32_16x16x32_iu4",
+        8,
+        12800,
+        96,
+        0,
+        0,
+        0,
+        0,
+        1024,
     ),
     "q4-a4-m64n128": Profile(
         "",
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_139q4g64_linear_prefill_cta_m64n128_kernelEPKhPKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "v_wmma_i32_16x16x32_iu4", 4, 6528, 85, 0, 0, 0, 0, 512, 16,
+        "v_wmma_i32_16x16x32_iu4",
+        4,
+        6528,
+        85,
+        0,
+        0,
+        0,
+        0,
+        512,
+        16,
     ),
     "q4-a4-pingpong": Profile(
         "",
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_138a4q4g64_linear_prefill_pingpong_kernelEPKhPKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "v_wmma_i32_16x16x32_iu4", 4, 13056, 96, 0, 0, 0, 0, 512, 16,
+        "v_wmma_i32_16x16x32_iu4",
+        4,
+        13056,
+        96,
+        0,
+        0,
+        0,
+        0,
+        512,
+        16,
     ),
 }
+
 
 def _function(text: str, symbol: str, label: str) -> str:
     matches = list(BEGIN.finditer(text))
@@ -68,7 +124,8 @@ def _function(text: str, symbol: str, label: str) -> str:
         )
     index = selected[0]
     end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-    return text[matches[index].start():end]
+    return text[matches[index].start() : end]
+
 
 def _one_integer(body: str, pattern: str, field: str) -> int:
     values = re.findall(pattern, body, flags=re.MULTILINE)
@@ -76,36 +133,41 @@ def _one_integer(body: str, pattern: str, field: str) -> int:
         raise ValueError(f"selected metadata must contain one {field}, found {len(values)}")
     return int(values[0])
 
+
 def _maximum_workgroup(text: str, symbol: str) -> int:
     values = re.findall(
         rf"^\s*\.max_flat_workgroup_size:\s*(\d+)\s*$\n"
         rf"^\s*\.name:\s*{re.escape(symbol)}\s*$",
-        text, flags=re.MULTILINE,
+        text,
+        flags=re.MULTILINE,
     )
     if len(values) != 1:
         raise ValueError(
             "selected metadata must contain one symbol-bound maximum flat workgroup size, "
-            f"found {len(values)}")
+            f"found {len(values)}"
+        )
     return int(values[0])
 
+
 def _kernel_metadata_record(text: str, symbol: str) -> str:
-    names = list(re.finditer(rf"^\s*\.name:\s*{re.escape(symbol)}\s*$", text,
-                             flags=re.MULTILINE))
+    names = list(re.finditer(rf"^\s*\.name:\s*{re.escape(symbol)}\s*$", text, flags=re.MULTILINE))
     if len(names) != 1:
         raise ValueError(
-            "selected metadata must contain one symbol-bound kernel record, "
-            f"found {len(names)}")
-    starts = [match.start() for match in re.finditer(r"^\s{2}- \.args:\s*$", text,
-                                                      flags=re.MULTILINE)
-              if match.start() < names[0].start()]
+            f"selected metadata must contain one symbol-bound kernel record, found {len(names)}"
+        )
+    starts = [
+        match.start()
+        for match in re.finditer(r"^\s{2}- \.args:\s*$", text, flags=re.MULTILINE)
+        if match.start() < names[0].start()
+    ]
     if not starts:
         raise ValueError("selected metadata kernel record has no argument-list boundary")
     end = text.find("\n  - .args:", names[0].end())
-    return text[starts[-1]:len(text) if end < 0 else end]
+    return text[starts[-1] : len(text) if end < 0 else end]
+
 
 def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, int | str]:
-    if mode not in ("decode-dot8", "lds-scope", "m128n128", "a4-m64n128",
-                    "incumbent-diagnostic"):
+    if mode not in ("decode-dot8", "lds-scope", "m128n128", "a4-m64n128", "incumbent-diagnostic"):
         raise ValueError(f"unsupported static-gate mode: {mode}")
     if (recipe == "q4-m128n128") != (mode == "m128n128"):
         raise ValueError("q4-m128n128 recipe and mode must be selected together")
@@ -114,68 +176,87 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
     if (recipe == "q4-dot8") != (mode == "decode-dot8"):
         raise ValueError("q4-dot8 recipe and decode-dot8 mode must be selected together")
     profile = PROFILES[recipe]
-    symbol = (profile.incumbent_symbol if mode == "incumbent-diagnostic"
-              else profile.production_symbol)
+    symbol = (
+        profile.incumbent_symbol if mode == "incumbent-diagnostic" else profile.production_symbol
+    )
     assembly_body = _function(assembly.read_text(encoding="utf-8"), symbol, "assembly")
     metadata_body = _function(metadata.read_text(encoding="utf-8"), symbol, "metadata")
-    expected_opcode_count = (profile.opcode_count if mode != "incumbent-diagnostic"
-                             else profile.incumbent_opcode_count)
-    opcode_count = len(re.findall(
-        rf"^\s*{re.escape(profile.opcode)}(?:\s|$)", assembly_body, flags=re.MULTILINE
-    ))
+    expected_opcode_count = (
+        profile.opcode_count if mode != "incumbent-diagnostic" else profile.incumbent_opcode_count
+    )
+    opcode_count = len(
+        re.findall(rf"^\s*{re.escape(profile.opcode)}(?:\s|$)", assembly_body, flags=re.MULTILINE)
+    )
     if opcode_count != expected_opcode_count:
         raise ValueError(
             f"{recipe}: {profile.opcode} count {opcode_count}, expected {expected_opcode_count}"
         )
     if mode == "decode-dot8":
         opcode_lines = re.findall(
-            rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body, flags=re.MULTILINE)
+            rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body, flags=re.MULTILINE
+        )
         unsigned = sum("neg_lo:[0,1,0]" in line for line in opcode_lines)
         signed = sum("neg_lo:[1,1,0]" in line for line in opcode_lines)
         if unsigned != 8 or signed != 8:
             raise ValueError(
                 "q4-dot8: requires eight unsigned-A/signed-W and eight "
-                f"signed-A/signed-W dot8 instructions, got {unsigned} and {signed}")
+                f"signed-A/signed-W dot8 instructions, got {unsigned} and {signed}"
+            )
         forbidden = re.findall(
             r"^\s*(v_wmma\S*|ds_\S*|s_barrier\S*|global_inv)(?:\s|$)",
-            assembly_body, flags=re.MULTILINE)
+            assembly_body,
+            flags=re.MULTILINE,
+        )
         if forbidden:
             raise ValueError(f"q4-dot8: forbidden instructions in selected symbol: {forbidden}")
-        lds = _one_integer(metadata_body,
-                           r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS size")
-        private = _one_integer(metadata_body,
-                               r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)",
-                               "private segment size")
-        vgpr = _one_integer(metadata_body,
-                            r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)", "VGPR count")
+        lds = _one_integer(
+            metadata_body, r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS size"
+        )
+        private = _one_integer(
+            metadata_body,
+            r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)",
+            "private segment size",
+        )
+        vgpr = _one_integer(metadata_body, r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)", "VGPR count")
         flat_scratch = _one_integer(
-            metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)",
-            "flat-scratch use")
+            metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)", "flat-scratch use"
+        )
         scratch = _one_integer(metadata_body, r"^;\s*ScratchSize:\s*(\d+)", "scratch size")
         maximum_workgroup = _maximum_workgroup(metadata.read_text(encoding="utf-8"), symbol)
         if lds != 0 or private != 0 or flat_scratch != 0 or scratch != 0:
             raise ValueError(
                 f"q4-dot8: requires zero LDS/private/scratch, got "
-                f"lds={lds} private={private} flat={flat_scratch} scratch={scratch}")
+                f"lds={lds} private={private} flat={flat_scratch} scratch={scratch}"
+            )
         if vgpr > profile.vgpr_ceiling:
             raise ValueError(f"q4-dot8: VGPR count {vgpr} exceeds {profile.vgpr_ceiling}")
         if maximum_workgroup != profile.maximum_workgroup_size:
             raise ValueError(
                 f"q4-dot8: maximum workgroup {maximum_workgroup}, expected "
-                f"{profile.maximum_workgroup_size}")
-        return {"recipe": recipe, "mode": mode, "opcode_count": opcode_count,
-                "vgpr": vgpr, "lds": lds, "private": private,
-                "scratch": scratch, "maximum_workgroup": maximum_workgroup}
+                f"{profile.maximum_workgroup_size}"
+            )
+        return {
+            "recipe": recipe,
+            "mode": mode,
+            "opcode_count": opcode_count,
+            "vgpr": vgpr,
+            "lds": lds,
+            "private": private,
+            "scratch": scratch,
+            "maximum_workgroup": maximum_workgroup,
+        }
     if mode == "a4-m64n128":
         opcode_lines = re.findall(
-            rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body, flags=re.MULTILINE)
+            rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body, flags=re.MULTILINE
+        )
         if any("neg_lo:[1,1,0]" not in line for line in opcode_lines):
             raise ValueError(
-                "q4-a4-m64n128: every IU4 WMMA must use signed A, signed W, unclamped I32")
-    signal_operands = re.findall(r"^\s*s_barrier_signal\s+([^\s;]+)", assembly_body,
-                                 flags=re.MULTILINE)
-    wait_operands = re.findall(r"^\s*s_barrier_wait\s+([^\s;]+)", assembly_body,
-                               flags=re.MULTILINE)
+                "q4-a4-m64n128: every IU4 WMMA must use signed A, signed W, unclamped I32"
+            )
+    signal_operands = re.findall(
+        r"^\s*s_barrier_signal\s+([^\s;]+)", assembly_body, flags=re.MULTILINE
+    )
+    wait_operands = re.findall(r"^\s*s_barrier_wait\s+([^\s;]+)", assembly_body, flags=re.MULTILINE)
     signal_count = len(signal_operands)
     wait_count = len(wait_operands)
     if signal_count != 2 or wait_count != 2:
@@ -192,13 +273,17 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
         r"^\s*(s_barrier_(?:signal|wait))(?:\s|$)", assembly_body, flags=re.MULTILINE
     )
     if barrier_sequence != [
-        "s_barrier_signal", "s_barrier_wait", "s_barrier_signal", "s_barrier_wait"
+        "s_barrier_signal",
+        "s_barrier_wait",
+        "s_barrier_signal",
+        "s_barrier_wait",
     ]:
         raise ValueError(f"{recipe}: signal/wait operations are not two ordered barrier pairs")
     if re.search(r"^\s*s_barrier(?:\s|$)", assembly_body, flags=re.MULTILINE):
         raise ValueError(f"{recipe}: monolithic s_barrier is forbidden")
     barrier_mnemonics = re.findall(
-        r"^\s*(s_barrier(?:_[A-Za-z0-9_]+)?)(?:\s|$)", assembly_body,
+        r"^\s*(s_barrier(?:_[A-Za-z0-9_]+)?)(?:\s|$)",
+        assembly_body,
         flags=re.MULTILINE,
     )
     if barrier_mnemonics != barrier_sequence:
@@ -206,19 +291,19 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
             f"{recipe}: unexpected barrier-family instruction in selected symbol: "
             f"{barrier_mnemonics}"
         )
-    global_inv_count = len(re.findall(r"^\s*global_inv(?:\s|$)", assembly_body,
-                                      flags=re.MULTILINE))
-    expected_global_inv = (0 if mode in ("lds-scope", "a4-m64n128")
-                           else profile.incumbent_global_inv_count)
+    global_inv_count = len(re.findall(r"^\s*global_inv(?:\s|$)", assembly_body, flags=re.MULTILINE))
+    expected_global_inv = (
+        0 if mode in ("lds-scope", "a4-m64n128") else profile.incumbent_global_inv_count
+    )
     if global_inv_count != expected_global_inv:
         raise ValueError(
             f"{recipe}: global_inv count {global_inv_count}, expected {expected_global_inv} "
             f"for {mode}"
         )
-    lds = _one_integer(metadata_body, r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)",
-                       "LDS size")
-    private = _one_integer(metadata_body, r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)",
-                           "private segment size")
+    lds = _one_integer(metadata_body, r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS size")
+    private = _one_integer(
+        metadata_body, r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)", "private segment size"
+    )
     vgpr = _one_integer(metadata_body, r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)", "VGPR count")
     flat_scratch = _one_integer(
         metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)", "flat-scratch use"
@@ -228,18 +313,23 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
     metadata_text = metadata.read_text(encoding="utf-8")
     maximum_workgroup = _maximum_workgroup(metadata_text, symbol)
     kernel_record = _kernel_metadata_record(metadata_text, symbol)
-    sgpr_spills = _one_integer(kernel_record, r"^\s*\.sgpr_spill_count:\s*(\d+)",
-                               "SGPR spill count")
-    vgpr_spills = _one_integer(kernel_record, r"^\s*\.vgpr_spill_count:\s*(\d+)",
-                               "VGPR spill count")
+    sgpr_spills = _one_integer(
+        kernel_record, r"^\s*\.sgpr_spill_count:\s*(\d+)", "SGPR spill count"
+    )
+    vgpr_spills = _one_integer(
+        kernel_record, r"^\s*\.vgpr_spill_count:\s*(\d+)", "VGPR spill count"
+    )
     if maximum_workgroup != profile.maximum_workgroup_size:
         raise ValueError(
             f"{recipe}: maximum flat workgroup {maximum_workgroup}, "
-            f"expected {profile.maximum_workgroup_size}")
-    lds_ceiling = (profile.lds_ceiling if mode != "incumbent-diagnostic"
-                   else profile.incumbent_lds_ceiling)
-    vgpr_ceiling = (profile.vgpr_ceiling if mode != "incumbent-diagnostic"
-                    else profile.incumbent_vgpr_ceiling)
+            f"expected {profile.maximum_workgroup_size}"
+        )
+    lds_ceiling = (
+        profile.lds_ceiling if mode != "incumbent-diagnostic" else profile.incumbent_lds_ceiling
+    )
+    vgpr_ceiling = (
+        profile.vgpr_ceiling if mode != "incumbent-diagnostic" else profile.incumbent_vgpr_ceiling
+    )
     if lds > lds_ceiling or vgpr > vgpr_ceiling:
         raise ValueError(
             f"{recipe}: resources lds={lds}/{lds_ceiling} "
@@ -247,8 +337,7 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
         )
     pipelined = recipe == "q4" and mode == "lds-scope"
     if pipelined and lds != lds_ceiling:
-        raise ValueError(
-            f"{recipe}: LDS size {lds}, expected exactly {lds_ceiling}")
+        raise ValueError(f"{recipe}: LDS size {lds}, expected exactly {lds_ceiling}")
     if private != 0 or scratch != 0 or flat_scratch != 0 or sgpr_spills != 0 or vgpr_spills != 0:
         raise ValueError(
             f"{recipe}: private={private} scratch={scratch} flat_scratch={flat_scratch} "
@@ -256,81 +345,101 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
             "all must be zero"
         )
     if profile.occupancy and occupancy != profile.occupancy:
-        raise ValueError(
-            f"{recipe}: occupancy {occupancy}, expected exactly {profile.occupancy}")
+        raise ValueError(f"{recipe}: occupancy {occupancy}, expected exactly {profile.occupancy}")
     n16_weight_b64_sites = 0
     scalar_base_load_sites = 0
     if pipelined:
         opcode_lines = re.findall(
-            rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body,
+            rf"^\s*{re.escape(profile.opcode)}[^\n]*$",
+            assembly_body,
             flags=re.MULTILINE,
         )
-        if (sum("neg_lo:[0,1,0]" in line for line in opcode_lines) != 4 or
-                sum("neg_lo:[1,1,0]" in line for line in opcode_lines) != 4):
+        if (
+            sum("neg_lo:[0,1,0]" in line for line in opcode_lines) != 32
+            or sum("neg_lo:[1,1,0]" in line for line in opcode_lines) != 32
+        ):
             raise ValueError(
-                "q4: expected four unsigned-low/signed-W and four signed-high/signed-W IU4 sites")
-        first_wmma = assembly_body.find(profile.opcode)
-        loads = list(re.finditer(r"^\s*global_load_b(?:32|64)(?:\s|$)",
-                                 assembly_body[:first_wmma], flags=re.MULTILINE))
-        if (sum("global_load_b32" in match.group(0) for match in loads) != 4 or
-                sum("global_load_b64" in match.group(0) for match in loads) != 2):
-            raise ValueError(
-                "q4: expected prologue+successor pairs of two activation b32 and one N16/K16 weight b64 load")
-        n16_weight_b64_sites = 2
-        global_loads = re.findall(
-            r"^\s*(global_load_(?:b32|b64|d16_b16))\s+"
-            r"v(?:\[\d+:\d+\]|\d+),\s+v\d+,\s+(s\[\d+:\d+\])\s*$",
-            assembly_body, flags=re.MULTILINE,
+                "q4: expected 32 unsigned-low/signed-W and 32 signed-high/signed-W IU4 sites"
+            )
+        global_loads = list(
+            re.finditer(
+                r"^\s*(global_load_b128)\s+v\[\d+:\d+\],\s+v\d+,\s+(s\[\d+:\d+\])\s*$",
+                assembly_body,
+                flags=re.MULTILINE,
+            )
         )
-        expected_loads = [
-            ("global_load_b32", "s[4:5]"),
-            ("global_load_b32", "s[6:7]"),
-            ("global_load_b64", "s[16:17]"),
-            ("global_load_d16_b16", "s[8:9]"),
-            ("global_load_d16_b16", "s[18:19]"),
-        ] * 2
-        if global_loads != expected_loads:
+        roles = [(match.group(1), match.group(2)) for match in global_loads]
+        if (
+            roles
+            != [
+                ("global_load_b128", "s[4:5]"),
+                ("global_load_b128", "s[6:7]"),
+                ("global_load_b128", "s[16:17]"),
+            ]
+            * 2
+        ):
             raise ValueError(
-                "q4: production loads must retain exact scalar-base role/order "
-                "with one VGPR U32 offset and default cache policy")
+                "q4: production loads must be prologue and successor triples of low-code, "
+                "high-code and N16/K16 weight b128 loads from scalar bases with U32 offsets"
+            )
+        scale_loads = re.findall(
+            r"^\s*global_load_d16_b16(?:\s|$)", assembly_body, flags=re.MULTILINE
+        )
+        if len(scale_loads) != 2:
+            raise ValueError("q4: expected one prologue and one successor FP16 scale load")
+        n16_weight_b64_sites = 2
         scalar_base_load_sites = len(global_loads)
-        overlap_window = assembly_body[loads[-3].start():first_wmma]
-        overlap_widths = re.findall(r"^\s*global_load_b(32|64)(?:\s|$)",
-                                    overlap_window, flags=re.MULTILINE)
-        if overlap_widths != ["32", "32", "64"] or re.search(
-                r"^\s*s_wait_loadcnt\s+0x0", overlap_window, flags=re.MULTILINE):
+        successor = global_loads[3].start()
+        first_loop_wmma = assembly_body.find(profile.opcode, successor)
+        overlap_window = assembly_body[successor:first_loop_wmma]
+        if first_loop_wmma < 0 or re.search(
+            r"^\s*s_wait_loadcnt\s+0x0", overlap_window, flags=re.MULTILINE
+        ):
             raise ValueError(
-                "q4: next-group activation b32+b32 and N16/K16 weight b64 must remain outstanding across current WMMA")
-        last_wmma = assembly_body.rfind(profile.opcode)
-        publish_window = assembly_body[last_wmma:]
-        if len(re.findall(r"^\s*ds_store(?:_\S+)?", publish_window,
-                          flags=re.MULTILINE)) < 3 or "s_wait_loadcnt 0x0" not in publish_window:
+                "q4: next-group code planes must remain outstanding across current WMMA"
+            )
+        publish = re.search(r"^\s*ds_store", assembly_body[first_loop_wmma:], flags=re.MULTILINE)
+        if (
+            publish is None
+            or "s_wait_loadcnt"
+            not in assembly_body[first_loop_wmma : first_loop_wmma + publish.start()]
+        ):
             raise ValueError(
-                f"{recipe}: prefetched payload must be waited before LDS publication")
+                f"{recipe}: prefetched payload must be waited and published after current WMMA"
+            )
     return {
-        "recipe": recipe, "mode": mode, "opcode_count": opcode_count,
-        "barrier_pair_count": signal_count, "global_inv_count": global_inv_count,
-        "lds_bytes": lds, "vgpr_count": vgpr, "private_bytes": private,
-        "scratch_bytes": scratch, "flat_scratch": flat_scratch,
-        "sgpr_spill_count": sgpr_spills, "vgpr_spill_count": vgpr_spills,
+        "recipe": recipe,
+        "mode": mode,
+        "opcode_count": opcode_count,
+        "barrier_pair_count": signal_count,
+        "global_inv_count": global_inv_count,
+        "lds_bytes": lds,
+        "vgpr_count": vgpr,
+        "private_bytes": private,
+        "scratch_bytes": scratch,
+        "flat_scratch": flat_scratch,
+        "sgpr_spill_count": sgpr_spills,
+        "vgpr_spill_count": vgpr_spills,
         "maximum_workgroup_size": maximum_workgroup,
         "occupancy": occupancy,
         "n16_weight_b64_sites": n16_weight_b64_sites,
         "scalar_base_load_sites": scalar_base_load_sites,
     }
 
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipe", required=True, choices=tuple(PROFILES))
     parser.add_argument(
-        "--mode", required=True,
-        choices=("decode-dot8", "lds-scope", "m128n128", "a4-m64n128",
-                 "incumbent-diagnostic"),
+        "--mode",
+        required=True,
+        choices=("decode-dot8", "lds-scope", "m128n128", "a4-m64n128", "incumbent-diagnostic"),
         help="LDS-scope mode selects the promoted production symbol; incumbent mode is diagnostic.",
     )
     parser.add_argument("--assembly", required=True, type=Path)
     parser.add_argument("--metadata", required=True, type=Path)
     return parser.parse_args(argv)
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
@@ -339,12 +448,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, UnicodeError, ValueError) as error:
         raise SystemExit(str(error)) from error
     print(" ".join(f"{key}={value}" for key, value in result.items()))
-    print("diagnostic_only=true admission=false" if args.mode == "incumbent-diagnostic"
-          else ("decode_dot8_production_static_gate=passed" if args.mode == "decode-dot8"
-          else ("a4_m64n128_challenger_static_gate=passed" if args.mode == "a4-m64n128"
-                else "m128n128_challenger_static_gate=passed" if args.mode == "m128n128"
-                else "lds_scope_production_static_gate=passed")))
+    print(
+        "diagnostic_only=true admission=false"
+        if args.mode == "incumbent-diagnostic"
+        else (
+            "decode_dot8_production_static_gate=passed"
+            if args.mode == "decode-dot8"
+            else (
+                "a4_m64n128_challenger_static_gate=passed"
+                if args.mode == "a4-m64n128"
+                else "m128n128_challenger_static_gate=passed"
+                if args.mode == "m128n128"
+                else "lds_scope_production_static_gate=passed"
+            )
+        )
+    )
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

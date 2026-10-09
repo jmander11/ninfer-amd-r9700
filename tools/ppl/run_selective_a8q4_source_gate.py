@@ -5,12 +5,11 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from tools.ppl.compare_selective_a8q4_source import _load_score, validate_comparison
-
 
 REPO = Path(__file__).resolve().parents[2]
 PYTHON = Path("/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python")
@@ -61,10 +60,23 @@ def _arm_state(profile: str, path: Path) -> str:
 
 def _score_command(profile: str, path: Path) -> list[str]:
     return [
-        str(PYTHON), "-m", "tools.ppl.selective_a8q4_source_diagnostic",
-        "--weights", str(WEIGHTS), "--ids", str(IDS), "--profile", profile,
-        "--source-screen", str(SCREEN), "--bf16", str(BF16), "--device", "0",
-        "--out", str(path),
+        str(PYTHON),
+        "-m",
+        "tools.ppl.selective_a8q4_source_diagnostic",
+        "--weights",
+        str(WEIGHTS),
+        "--ids",
+        str(IDS),
+        "--profile",
+        profile,
+        "--source-screen",
+        str(SCREEN),
+        "--bf16",
+        str(BF16),
+        "--device",
+        "0",
+        "--out",
+        str(path),
     ]
 
 
@@ -79,20 +91,29 @@ def run() -> int:
     if COMPARISON.exists() or COMPARISON.is_symlink():
         if COMPARISON.is_symlink() or not COMPARISON.is_file():
             raise ValueError("activation-inclusive comparison is not a regular file")
-        report = validate_comparison(COMPARISON, ARMS["a8g64-q4g64-control"],
-                                     ARMS["a8g128-q4g128-mse"], BF16)
+        report = validate_comparison(
+            COMPARISON, ARMS["a8g64-q4g64-control"], ARMS["a8g128-q4g128-mse"], BF16
+        )
     else:
         command = [
-            str(PYTHON), "-m", "tools.ppl.compare_selective_a8q4_source",
-            "--control", str(ARMS["a8g64-q4g64-control"]),
-            "--candidate", str(ARMS["a8g128-q4g128-mse"]),
-            "--bf16", str(BF16), "--out", str(COMPARISON),
+            str(PYTHON),
+            "-m",
+            "tools.ppl.compare_selective_a8q4_source",
+            "--control",
+            str(ARMS["a8g64-q4g64-control"]),
+            "--candidate",
+            str(ARMS["a8g128-q4g128-mse"]),
+            "--bf16",
+            str(BF16),
+            "--out",
+            str(COMPARISON),
         ]
         completed = subprocess.run(command, check=False)
         if completed.returncode not in (0, 1):
             raise RuntimeError(f"activation-inclusive comparator failed: {completed.returncode}")
-        report = validate_comparison(COMPARISON, ARMS["a8g64-q4g64-control"],
-                                     ARMS["a8g128-q4g128-mse"], BF16)
+        report = validate_comparison(
+            COMPARISON, ARMS["a8g64-q4g64-control"], ARMS["a8g128-q4g128-mse"], BF16
+        )
     return 0 if report["pass"] else 1
 
 
@@ -100,8 +121,13 @@ def main(argv: list[str] | None = None) -> int:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     try:
         return run()
-    except (FileExistsError, OSError, RuntimeError, ValueError,
-            subprocess.SubprocessError) as error:
+    except (
+        FileExistsError,
+        OSError,
+        RuntimeError,
+        ValueError,
+        subprocess.SubprocessError,
+    ) as error:
         print(f"run-selective-a8q4-source-gate: {error}", file=sys.stderr)
         return 2
 

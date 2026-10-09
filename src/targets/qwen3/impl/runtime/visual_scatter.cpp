@@ -13,8 +13,8 @@ void copy_i32(const std::int32_t* source, Tensor& destination, hipStream_t strea
         destination.data == nullptr) {
         throw std::invalid_argument("copy_i32: invalid host source or I32 destination");
     }
-    HIP_CHECK(hipMemcpyAsync(destination.data, source, destination.bytes(),
-                            hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMemcpyAsync(destination.data, source, destination.bytes(), hipMemcpyHostToDevice,
+                             stream));
 }
 
 } // namespace

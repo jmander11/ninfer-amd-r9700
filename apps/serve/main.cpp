@@ -64,7 +64,8 @@ int main(int argc, char** argv) {
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, "loading model...");
         if (!options.generation_recovery) {
             ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Warning,
-                "generation recovery disabled: no cycle exclusions or internal retries; tool grammar remains enabled");
+                                             "generation recovery disabled: no cycle exclusions or "
+                                             "internal retries; tool grammar remains enabled");
         }
         auto load_progress_options        = ninfer::product::stderr_load_progress_options();
         load_progress_options.line_prefix = [] {
@@ -95,9 +96,17 @@ int main(int argc, char** argv) {
                  << " slack=" << format_bytes(memory.planned_slack_bytes)
                  << " graphs=" << format_bytes(memory.device_graph_observed_bytes) << '/'
                  << format_bytes(memory.device_graph_allowance_bytes)
+                 << " ckpt-pin=" << format_bytes(memory.checkpoint_image_host_bytes)
+                 << " ckpt-heads=" << memory.checkpoint_image_pool_heads
                  << " kv-ram=" << ninfer::serve::format_kv_ram_occupancy(memory)
                  << " kv-disk=" << ninfer::serve::format_kv_disk_occupancy(memory);
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, capacity.str());
+        const std::uint32_t forward = service.options().mixed_forward.value_or(0);
+        ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info,
+                                         "Mixed forward " +
+                                             (forward == 0 ? std::string("off (prefill-first)")
+                                                           : std::to_string(forward) + " columns") +
+                                             (options.mixed_forward ? " (explicit)" : " (auto)"));
 
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, "warming up...");
         service.warmup();

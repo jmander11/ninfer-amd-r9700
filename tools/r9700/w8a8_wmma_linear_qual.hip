@@ -853,6 +853,7 @@ std::string shell_quote(std::string_view value) {
 
 std::string sha256_file(const std::filesystem::path& path) {
     const std::string command = "sha256sum -- " + shell_quote(path.string());
+    // NOLINTNEXTLINE(bugprone-command-processor): fixed sha256sum on a shell-quoted path
     FILE* pipe = popen(command.c_str(), "r");
     if (pipe == nullptr) fail("cannot launch sha256sum");
     std::array<char, 128> buffer{};
@@ -1647,6 +1648,7 @@ int main(int argc, char** argv) {
                        !lds_scope_benchmark) {
                 write_json(output_path, device, results, resources, false, error.what());
             }
+            // NOLINTNEXTLINE(bugprone-empty-catch): best-effort failure report; the error prints below
         } catch (...) {
         }
         std::cerr << "w8a8_wmma_linear_qualification: FAIL: " << error.what() << '\n';

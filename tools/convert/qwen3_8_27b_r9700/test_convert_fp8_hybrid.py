@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stdout
 import hashlib
 import io
 import json
+import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest import mock
 
 import torch
@@ -72,6 +72,7 @@ class Fp8HybridConverterTest(unittest.TestCase):
 
                 def get(self, name):
                     return tensors[name]
+
             ranking = root / "ranking.i64"
             ranking.write_bytes(b"synthetic-ranking")
             resource = family_conversion.ResourcePayload("frontend/tokenizer.json", b"{}")
@@ -80,9 +81,7 @@ class Fp8HybridConverterTest(unittest.TestCase):
                 TensorSpec(selected_name, (16, 128), "F8E4M3_ROW_F32S", "row-scaled-k128-v1"),
                 TensorSpec(q4_name, (16, 128), "Q4G64_F16S", "r9700-q4g64-n16-k16-v1"),
             )
-            plan = family_conversion.build_object_plan(
-                object_specs, {resource.name: resource.data}
-            )
+            plan = family_conversion.build_object_plan(object_specs, {resource.name: resource.data})
             preflight = convert_fp8_hybrid.Fp8HybridConversionPreflight(
                 model_dir=root,
                 config_summary={"synthetic": True},
@@ -130,7 +129,7 @@ class Fp8HybridConverterTest(unittest.TestCase):
                 mock.patch.object(
                     convert_fp8_hybrid.source,
                     "materialize_tensor",
-                    side_effect=lambda spec, reader, draft: reader.get(spec.name),
+                    side_effect=lambda spec, reader, _draft: reader.get(spec.name),
                 ),
                 redirect_stdout(io.StringIO()),
             ):
@@ -159,9 +158,7 @@ class Fp8HybridConverterTest(unittest.TestCase):
                 fp8_hybrid_inventory.SELECTION_SHA256,
             )
             self.assertFalse(report["candidate"]["weight_recipe_selected"])
-            validation = convert_fp8_hybrid.validate_completed_conversion(
-                preflight, output
-            )
+            validation = convert_fp8_hybrid.validate_completed_conversion(preflight, output)
             self.assertEqual(validation["status"], "valid")
             self.assertEqual(validation["objects"], 3)
             report["candidate"]["object_plan_sha256"] = "0" * 64
@@ -190,10 +187,16 @@ class Fp8HybridConverterTest(unittest.TestCase):
                 projected + convert_fp8_hybrid._DISK_HEADROOM_BYTES,
             )
             with (
-                mock.patch.object(convert_fp8_hybrid.preflight_identity, "source_checkpoint",
-                                  return_value={"indexed_tensor_count": 1199}),
-                mock.patch.object(convert_fp8_hybrid.preflight_identity, "frontend_resources",
-                                  return_value=[{"name": "fixture"}] * 6),
+                mock.patch.object(
+                    convert_fp8_hybrid.preflight_identity,
+                    "source_checkpoint",
+                    return_value={"indexed_tensor_count": 1199},
+                ),
+                mock.patch.object(
+                    convert_fp8_hybrid.preflight_identity,
+                    "frontend_resources",
+                    return_value=[{"name": "fixture"}] * 6,
+                ),
             ):
                 summary = convert_fp8_hybrid.preflight_summary(checked, destination)
             self.assertEqual(summary["identity"]["weights_id"], fp8_hybrid_inventory.WEIGHTS_ID)
@@ -202,13 +205,15 @@ class Fp8HybridConverterTest(unittest.TestCase):
             self.assertEqual(summary["conversion_argv"][-1], "cuda")
             self.assertEqual(summary["validation_argv"][-1], "--validate-only")
 
-            with mock.patch.object(
-                convert_fp8_hybrid.shutil,
-                "disk_usage",
-                return_value=SimpleNamespace(free=projected),
+            with (
+                mock.patch.object(
+                    convert_fp8_hybrid.shutil,
+                    "disk_usage",
+                    return_value=SimpleNamespace(free=projected),
+                ),
+                self.assertRaisesRegex(OSError, "insufficient free space"),
             ):
-                with self.assertRaisesRegex(OSError, "insufficient free space"):
-                    convert_fp8_hybrid.preflight_destination(checked, output)
+                convert_fp8_hybrid.preflight_destination(checked, output)
             occupied = root / "occupied.ninfer"
             occupied.write_bytes(b"occupied")
             with self.assertRaisesRegex(FileExistsError, "already exists"):

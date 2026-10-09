@@ -27,15 +27,16 @@ def metadata(text: str, symbol_fragment: str) -> tuple[int, int, int, int]:
     name = re.search(rf"(?m)^\s*\.name:\s+.*{re.escape(symbol_fragment)}.*$", text)
     if name is None:
         fail(f"missing metadata name: {symbol_fragment}")
-    groups = list(re.finditer(r"(?m)^\s*\.group_segment_fixed_size:\s+(\d+)\s*$",
-                              text[:name.start()]))
+    groups = list(
+        re.finditer(r"(?m)^\s*\.group_segment_fixed_size:\s+(\d+)\s*$", text[: name.start()])
+    )
     if not groups:
         fail(f"missing group_segment_fixed_size: {symbol_fragment}")
     values = [int(groups[-1].group(1))]
-    block = text[name.end():]
+    block = text[name.end() :]
     next_name = re.search(r"(?m)^\s*\.name:", block)
     if next_name is not None:
-        block = block[:next_name.start()]
+        block = block[: next_name.start()]
     for field in ("private_segment_fixed_size", "sgpr_count", "vgpr_count"):
         match = re.search(rf"(?m)^\s*\.{field}:\s+(\d+)\s*$", block)
         if match is None:
@@ -60,12 +61,12 @@ def main() -> int:
             fail(f"selector changed an excluded kernel: {symbol}")
 
     expected = {
-        ("off", "snapshot_kernelILb1EE"): (1536, 0, 44, 58),
+        ("off", "snapshot_kernelILb1EE"): (1536, 0, 44, 59),
         ("on", "snapshot_kernelILb1EE"): (1032, 0, 48, 60),
-        ("off", "record_kernelILb1EE"): (1536, 0, 56, 66),
-        ("on", "record_kernelILb1EE"): (1032, 0, 52, 67),
-        ("off", "record_kernelILb0EE"): (1536, 0, 52, 54),
-        ("on", "record_kernelILb0EE"): (1032, 0, 52, 60),
+        ("off", "record_kernelILb1EE"): (18560, 0, 48, 65),
+        ("on", "record_kernelILb1EE"): (18560, 0, 48, 63),
+        ("off", "record_kernelILb0EE"): (18560, 0, 36, 56),
+        ("on", "record_kernelILb0EE"): (18560, 0, 36, 59),
     }
     for (arm, symbol), wanted in expected.items():
         actual = metadata(off if arm == "off" else on, symbol)

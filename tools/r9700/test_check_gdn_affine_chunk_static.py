@@ -1,15 +1,24 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from tools.r9700.check_gdn_affine_chunk_static import check
 
 
-def fixture(*, scratch: int = 0, private: int = 0, vgprs: int = 80,
-            occupancy: int = 8, lds: int = 16384, wave32: int = 1,
-            wgp: int = 1, maximum_workgroup: int = 256,
-            wmma: bool = False, omit: str | None = None,
-            duplicate: str | None = None) -> str:
+def fixture(
+    *,
+    scratch: int = 0,
+    private: int = 0,
+    vgprs: int = 80,
+    occupancy: int = 8,
+    lds: int = 16384,
+    wave32: int = 1,
+    wgp: int = 1,
+    maximum_workgroup: int = 256,
+    wmma: bool = False,
+    omit: str | None = None,
+    duplicate: str | None = None,
+) -> str:
     blocks = []
     metadata = []
     for stage in ("build", "boundaries", "replay"):
@@ -73,9 +82,11 @@ class StaticCheckTest(unittest.TestCase):
 
     def test_rejects_wrong_execution_geometry(self):
         for arguments in ({"wave32": 0}, {"wgp": 0}, {"maximum_workgroup": 128}):
-            with self.subTest(arguments=arguments):
-                with self.assertRaisesRegex(ValueError, "geometry fails"):
-                    self.run_check(fixture(**arguments))
+            with (
+                self.subTest(arguments=arguments),
+                self.assertRaisesRegex(ValueError, "geometry fails"),
+            ):
+                self.run_check(fixture(**arguments))
 
     def test_rejects_ambiguous_stage_symbol(self):
         with self.assertRaisesRegex(ValueError, "build: expected one exact stage symbol"):

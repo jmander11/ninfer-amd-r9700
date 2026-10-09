@@ -2,13 +2,17 @@
 .cache
 .claude
 .codex
+.cortexkit
+.env
 .idea
 .pytest_cache
+.rocprofv3
 .vscode
 
 build
 build-*
 cmake-build-*
+tools/r9700/build
 eval/runs
 eval/server-logs
 out

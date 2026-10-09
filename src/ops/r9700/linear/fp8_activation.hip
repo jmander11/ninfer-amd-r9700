@@ -1,22 +1,64 @@
 #include "ops/r9700/linear/fp8_activation.h"
+#include "ops/r9700/linear/fp8_activation_kernels.h"
 
 #include <hip/amd_detail/amd_hip_fp8.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 
 namespace ninfer::ops::r9700::linear {
+namespace fp8_activation_kernels {
+
+__global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
+    const hip_bfloat16* input, std::uint8_t* codes, float* scales, std::uint32_t* status,
+    std::uint32_t tokens, std::uint32_t columns, std::uint32_t padded, CacheWarm warm,
+    std::uint32_t work_ctas) {
+    __shared__ QuantizeShared shared;
+    quantize_activation_body(persistent::LaunchCta{}, shared, input, codes, scales, status, tokens,
+                             columns, padded, warm, work_ctas);
+}
+
+__global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* weight, float eps, bool unit_offset,
+    std::uint8_t* codes, float* scales, std::uint32_t* status, hip_bfloat16* normalized,
+    CacheWarm warm, std::uint32_t tokens) {
+    __shared__ NormalizedShared<kNormThreads> shared;
+    quantize_normalized_body<kNormThreads>(persistent::LaunchCta{}, shared, input, weight, eps,
+                                           unit_offset, codes, scales, status, normalized, warm,
+                                           tokens);
+}
+
+__global__ __launch_bounds__(kGatedNormThreads) void fp8_quantize_gated_rmsnorm_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* gate, const hip_bfloat16* weight, float eps,
+    std::uint8_t* codes, float* scales, std::uint32_t* status, CacheWarm warm,
+    std::uint32_t tokens) {
+    __shared__ EncodeShared<kGatedNormThreads> shared;
+    quantize_gated_rmsnorm_body<kGatedNormThreads>(persistent::LaunchCta{}, shared, input, gate,
+                                                   weight, eps, codes, scales, status, warm,
+                                                   tokens);
+}
+
+} // namespace fp8_activation_kernels
+
 namespace {
 
-constexpr std::uint32_t kWaveSize        = 32U;
-constexpr std::uint32_t kBlockSize       = 256U;
-constexpr std::uint32_t kWavesPerBlock   = kBlockSize / kWaveSize;
-constexpr std::uint32_t kColumnAlignment = 128U;
-constexpr std::size_t kPlaneAlignment    = 256U;
-constexpr float kE4M3FiniteMaximum       = 448.0F;
+using fp8_activation_kernels::fp8_quantize_activation_kernel;
+using fp8_activation_kernels::fp8_quantize_gated_kernel;
+using fp8_activation_kernels::fp8_quantize_gated_rmsnorm_kernel;
+using fp8_activation_kernels::fp8_quantize_normalized_kernel;
+using fp8_activation_kernels::kBlockSize;
+using fp8_activation_kernels::kGatedNormColumns;
+using fp8_activation_kernels::kGatedNormThreads;
+using fp8_activation_kernels::kNormFeatures;
+using fp8_activation_kernels::kNormThreads;
+
+constexpr std::uint32_t kQuantizeResidentBlocks = 128U;
+constexpr std::uint32_t kColumnAlignment        = 128U;
+constexpr std::size_t kPlaneAlignment           = 256U;
 
 bool checked_mul(std::size_t lhs, std::size_t rhs, std::size_t* out) noexcept {
     if (out == nullptr || (rhs != 0U && lhs > std::numeric_limits<std::size_t>::max() / rhs)) {
@@ -50,7 +92,7 @@ bool padded_columns(std::uint32_t columns, std::uint32_t* out) noexcept {
 struct WorkspaceGeometry {
     std::uint32_t padded      = 0;
     std::size_t code_bytes    = 0;
-    std::size_t scale_offset = 0;
+    std::size_t scale_offset  = 0;
     std::size_t scale_bytes   = 0;
     std::size_t status_offset = 0;
     std::size_t total_bytes   = 0;
@@ -69,7 +111,8 @@ bool workspace_geometry(std::uint32_t tokens, std::uint32_t columns,
     std::size_t scale_end = 0;
     if (!checked_add(result.scale_offset, result.scale_bytes, &scale_end) ||
         !align_up(scale_end, kPlaneAlignment, &result.status_offset) ||
-        !checked_add(result.status_offset, sizeof(std::uint32_t), &result.total_bytes)) {
+        !checked_add(result.status_offset, static_cast<std::size_t>(tokens) * sizeof(std::uint32_t),
+                     &result.total_bytes)) {
         return false;
     }
     *out = result;
@@ -95,6 +138,10 @@ bool ranges_overlap(const void* lhs, std::size_t lhs_bytes, const void* rhs,
     return lhs_begin < rhs_end && rhs_begin < lhs_end;
 }
 
+std::size_t status_bytes(const Fp8ActivationWorkspace& workspace) noexcept {
+    return static_cast<std::size_t>(workspace.tokens) * sizeof(std::uint32_t);
+}
+
 bool valid_workspace(const Fp8ActivationWorkspace& workspace) noexcept {
     WorkspaceGeometry geometry;
     return workspace_geometry(workspace.tokens, workspace.columns, &geometry) &&
@@ -108,71 +155,12 @@ bool valid_workspace(const Fp8ActivationWorkspace& workspace) noexcept {
            !ranges_overlap(workspace.codes, workspace.code_bytes, workspace.scales,
                            workspace.scale_bytes) &&
            !ranges_overlap(workspace.codes, workspace.code_bytes, workspace.status,
-                           sizeof(std::uint32_t)) &&
+                           status_bytes(workspace)) &&
            !ranges_overlap(workspace.scales, workspace.scale_bytes, workspace.status,
-                           sizeof(std::uint32_t));
+                           status_bytes(workspace));
 }
 
-__global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
-    const hip_bfloat16* input, std::uint8_t* codes, float* scales, std::uint32_t* status,
-    std::uint32_t columns, std::uint32_t padded) {
-    const std::uint32_t token = blockIdx.x;
-    const std::uint32_t lane = threadIdx.x % kWaveSize;
-    const std::uint32_t wave = threadIdx.x / kWaveSize;
-    float local_maximum = 0.0F;
-    unsigned local_bad  = 0U;
-    for (std::uint32_t column = threadIdx.x; column < columns; column += blockDim.x) {
-        const float value = static_cast<float>(
-            input[static_cast<std::size_t>(token) * columns + column]);
-        local_bad |= static_cast<unsigned>(!isfinite(value));
-        if (isfinite(value)) local_maximum = fmaxf(local_maximum, fabsf(value));
-    }
-#pragma unroll
-    for (std::uint32_t delta = kWaveSize / 2U; delta != 0U; delta >>= 1U) {
-        local_maximum = fmaxf(local_maximum, __shfl_down(local_maximum, delta, kWaveSize));
-        local_bad |= __shfl_down(local_bad, delta, kWaveSize);
-    }
-
-    __shared__ float wave_maxima[kWavesPerBlock];
-    __shared__ unsigned wave_bad[kWavesPerBlock];
-    __shared__ float token_scale;
-    __shared__ unsigned token_bad;
-    if (lane == 0U) {
-        wave_maxima[wave] = local_maximum;
-        wave_bad[wave] = local_bad;
-    }
-    __syncthreads();
-
-    if (wave == 0U) {
-        float maximum = lane < kWavesPerBlock ? wave_maxima[lane] : 0.0F;
-        unsigned bad  = lane < kWavesPerBlock ? wave_bad[lane] : 0U;
-#pragma unroll
-        for (std::uint32_t delta = kWaveSize / 2U; delta != 0U; delta >>= 1U) {
-            maximum = fmaxf(maximum, __shfl_down(maximum, delta, kWaveSize));
-            bad |= __shfl_down(bad, delta, kWaveSize);
-        }
-        if (lane == 0U) {
-            token_bad = bad != 0U;
-            token_scale = bad != 0U ? 0.0F : maximum / kE4M3FiniteMaximum;
-            scales[token] = token_scale;
-            if (bad != 0U) {
-                atomicOr(status, static_cast<std::uint32_t>(Fp8ActivationNonfinite));
-            }
-        }
-    }
-    __syncthreads();
-
-    for (std::uint32_t column = threadIdx.x; column < padded; column += blockDim.x) {
-        std::uint8_t code = 0U;
-        if (token_bad == 0U && token_scale != 0.0F && column < columns) {
-            const float value = static_cast<float>(
-                input[static_cast<std::size_t>(token) * columns + column]);
-            code = static_cast<std::uint8_t>(
-                __hip_cvt_float_to_fp8(value / token_scale, __HIP_SATFINITE, __HIP_E4M3));
-        }
-        codes[static_cast<std::size_t>(token) * padded + column] = code;
-    }
-}
+constexpr std::uint32_t kGatedColumns = 6144U;
 
 } // namespace
 
@@ -188,12 +176,11 @@ hipError_t fp8_bind_activation_workspace(void* storage, std::size_t storage_byte
     WorkspaceGeometry geometry;
     if (storage == nullptr || out == nullptr ||
         reinterpret_cast<std::uintptr_t>(storage) % kPlaneAlignment != 0U ||
-        !workspace_geometry(tokens, columns, &geometry) ||
-        storage_bytes != geometry.total_bytes) {
+        !workspace_geometry(tokens, columns, &geometry) || storage_bytes != geometry.total_bytes) {
         return hipErrorInvalidValue;
     }
     auto* bytes = static_cast<std::uint8_t*>(storage);
-    *out = Fp8ActivationWorkspace{
+    *out        = Fp8ActivationWorkspace{
         bytes,
         geometry.code_bytes,
         reinterpret_cast<float*>(bytes + geometry.scale_offset),
@@ -212,19 +199,110 @@ hipError_t fp8_quantize_activation(const Fp8ActivationQuantizeArgs& args,
     std::size_t input_elements = 0, input_bytes = 0;
     if (!checked_mul(args.workspace.tokens, args.workspace.columns, &input_elements) ||
         !checked_mul(input_elements, sizeof(hip_bfloat16), &input_bytes) ||
-        ranges_overlap(args.input, input_bytes, args.workspace.codes,
-                       args.workspace.code_bytes) ||
+        ranges_overlap(args.input, input_bytes, args.workspace.codes, args.workspace.code_bytes) ||
         ranges_overlap(args.input, input_bytes, args.workspace.scales,
                        args.workspace.scale_bytes) ||
-        ranges_overlap(args.input, input_bytes, args.workspace.status, sizeof(std::uint32_t))) {
+        ranges_overlap(args.input, input_bytes, args.workspace.status,
+                       status_bytes(args.workspace))) {
         return hipErrorInvalidValue;
     }
-    hipError_t result = hipMemsetAsync(args.workspace.status, 0, sizeof(std::uint32_t), stream);
-    if (result != hipSuccess) return result;
-    hipLaunchKernelGGL(fp8_quantize_activation_kernel, dim3(args.workspace.tokens),
+    const std::uint32_t work_ctas = std::min(args.workspace.tokens, kQuantizeResidentBlocks);
+    hipLaunchKernelGGL(fp8_quantize_activation_kernel,
+                       dim3(work_ctas + cache_warm_ctas(args.warm, kBlockSize, work_ctas)),
                        dim3(kBlockSize), 0, stream, args.input, args.workspace.codes,
-                       args.workspace.scales, args.workspace.status, args.workspace.columns,
-                       args.workspace.padded_columns);
+                       args.workspace.scales, args.workspace.status, args.workspace.tokens,
+                       args.workspace.columns, args.workspace.padded_columns, args.warm, work_ctas);
+    return hipGetLastError();
+}
+
+hipError_t fp8_quantize_normalized_activation(const Fp8NormalizedQuantizeArgs& args,
+                                              hipStream_t stream) noexcept {
+    const Fp8ActivationWorkspace& workspace = args.workspace;
+    std::size_t input_bytes                 = 0;
+    if (args.input == nullptr || args.weight == nullptr || !valid_workspace(workspace) ||
+        workspace.columns != kNormFeatures || workspace.padded_columns != kNormFeatures ||
+        !std::isfinite(args.eps) || !(args.eps > 0.0F) ||
+        reinterpret_cast<std::uintptr_t>(args.input) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(args.weight) % 16U != 0U ||
+        !checked_mul(static_cast<std::size_t>(workspace.tokens) * kNormFeatures,
+                     sizeof(hip_bfloat16), &input_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.codes, workspace.code_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.scales, workspace.scale_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.status, status_bytes(workspace))) {
+        return hipErrorInvalidValue;
+    }
+    if (args.normalized != nullptr &&
+        (reinterpret_cast<std::uintptr_t>(args.normalized) % 16U != 0U ||
+         ranges_overlap(args.normalized, input_bytes, args.input, input_bytes) ||
+         ranges_overlap(args.normalized, input_bytes, args.weight,
+                        kNormFeatures * sizeof(hip_bfloat16)) ||
+         ranges_overlap(args.normalized, input_bytes, workspace.codes, workspace.code_bytes) ||
+         ranges_overlap(args.normalized, input_bytes, workspace.scales, workspace.scale_bytes) ||
+         ranges_overlap(args.normalized, input_bytes, workspace.status, status_bytes(workspace)))) {
+        return hipErrorInvalidValue;
+    }
+    hipLaunchKernelGGL(
+        fp8_quantize_normalized_kernel,
+        dim3(workspace.tokens + cache_warm_ctas(args.warm, kNormThreads, workspace.tokens)),
+        dim3(kNormThreads), 0, stream, args.input, args.weight, args.eps, args.unit_offset,
+        workspace.codes, workspace.scales, workspace.status, args.normalized, args.warm,
+        workspace.tokens);
+    return hipGetLastError();
+}
+
+hipError_t fp8_quantize_gated_activation(const Fp8GatedQuantizeArgs& args,
+                                         hipStream_t stream) noexcept {
+    const Fp8ActivationWorkspace& workspace = args.workspace;
+    std::size_t elements = 0, gate_bytes = 0, attention_bytes = 0;
+    if (args.gate == nullptr || args.attention == nullptr || !valid_workspace(workspace) ||
+        workspace.columns != kGatedColumns || workspace.padded_columns != kGatedColumns ||
+        reinterpret_cast<std::uintptr_t>(args.gate) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(args.attention) % 16U != 0U ||
+        !checked_mul(workspace.tokens, kGatedColumns, &elements) ||
+        !checked_mul(elements, sizeof(hip_bfloat16), &gate_bytes) ||
+        !checked_mul(elements, sizeof(float), &attention_bytes) ||
+        ranges_overlap(args.gate, gate_bytes, workspace.codes, workspace.code_bytes) ||
+        ranges_overlap(args.attention, attention_bytes, workspace.codes, workspace.code_bytes) ||
+        ranges_overlap(args.gate, gate_bytes, workspace.scales, workspace.scale_bytes) ||
+        ranges_overlap(args.attention, attention_bytes, workspace.scales, workspace.scale_bytes) ||
+        ranges_overlap(args.gate, gate_bytes, workspace.status, status_bytes(workspace)) ||
+        ranges_overlap(args.attention, attention_bytes, workspace.status,
+                       status_bytes(workspace))) {
+        return hipErrorInvalidValue;
+    }
+    hipLaunchKernelGGL(
+        fp8_quantize_gated_kernel<kGatedColumns / 8U>,
+        dim3(workspace.tokens + cache_warm_ctas(args.warm, kGatedColumns / 8U, workspace.tokens)),
+        dim3(kGatedColumns / 8U), 0, stream, args.gate, args.attention, workspace.codes,
+        workspace.scales, workspace.status, args.warm, workspace.tokens);
+    return hipGetLastError();
+}
+
+hipError_t fp8_quantize_gated_rmsnorm_activation(const Fp8GatedRmsNormQuantizeArgs& args,
+                                                 hipStream_t stream) noexcept {
+    const Fp8ActivationWorkspace& workspace = args.workspace;
+    std::size_t elements = 0, input_bytes = 0;
+    if (args.input == nullptr || args.gate == nullptr || args.weight == nullptr ||
+        !valid_workspace(workspace) || workspace.columns != kGatedNormColumns ||
+        workspace.padded_columns != kGatedNormColumns || !std::isfinite(args.eps) ||
+        !(args.eps > 0.0F) || reinterpret_cast<std::uintptr_t>(args.input) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(args.gate) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(args.weight) % 16U != 0U ||
+        !checked_mul(workspace.tokens, kGatedNormColumns, &elements) ||
+        !checked_mul(elements, sizeof(hip_bfloat16), &input_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.codes, workspace.code_bytes) ||
+        ranges_overlap(args.gate, input_bytes, workspace.codes, workspace.code_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.scales, workspace.scale_bytes) ||
+        ranges_overlap(args.gate, input_bytes, workspace.scales, workspace.scale_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.status, status_bytes(workspace)) ||
+        ranges_overlap(args.gate, input_bytes, workspace.status, status_bytes(workspace))) {
+        return hipErrorInvalidValue;
+    }
+    hipLaunchKernelGGL(
+        fp8_quantize_gated_rmsnorm_kernel,
+        dim3(workspace.tokens + cache_warm_ctas(args.warm, kGatedNormThreads, workspace.tokens)),
+        dim3(kGatedNormThreads), 0, stream, args.input, args.gate, args.weight, args.eps,
+        workspace.codes, workspace.scales, workspace.status, args.warm, workspace.tokens);
     return hipGetLastError();
 }
 

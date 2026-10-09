@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
-from pathlib import Path
 import struct
 import sys
+import unittest
+from dataclasses import replace
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType
-import unittest
 from unittest.mock import MagicMock, patch
 
 from tools.artifact.container import ArtifactIdentity, ArtifactWriter, TensorSpec, plan_objects
@@ -24,12 +24,15 @@ from tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 import (
 
 class DFlash2ConversionPublicationTest(unittest.TestCase):
     def test_recipe_conversion_copies_base_and_bf16_payloads_exactly(self) -> None:
-        self._check_payload_copy(conversion.inventory.ALL_Q4_BASE_WEIGHTS_ID,
-                                 conversion.dflash2_matrix_recipes.RECIPES)
+        self._check_payload_copy(
+            conversion.inventory.ALL_Q4_BASE_WEIGHTS_ID, conversion.dflash2_matrix_recipes.RECIPES
+        )
 
     def test_selective_companion_copies_base_and_bf16_codebook_exactly(self) -> None:
-        self._check_payload_copy(conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID,
-                                 (conversion.dflash2_matrix_recipes.get_recipe("canonical-q4g64"),))
+        self._check_payload_copy(
+            conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID,
+            (conversion.dflash2_matrix_recipes.get_recipe("canonical-q4g64"),),
+        )
 
     def _check_payload_copy(self, base_weights_id, recipes) -> None:
         # Exercise the real container/publication path with small represented payloads.
@@ -51,9 +54,13 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                 # and make the independent inverse check reinitialize them.
                 import numpy  # noqa: F401
 
-                base_specs += (TensorSpec("text/output_head", (16, 128), "W8G32_F16S", "row-split-k128-v1"),)
-                base_payloads += (bytes(((i % 255 - 127) & 255) for i in range(16 * 128))
-                                  + struct.pack("<64H", *range(0x3c00, 0x3c40)),)
+                base_specs += (
+                    TensorSpec("text/output_head", (16, 128), "W8G32_F16S", "row-split-k128-v1"),
+                )
+                base_payloads += (
+                    bytes(((i % 255 - 127) & 255) for i in range(16 * 128))
+                    + struct.pack("<64H", *range(0x3C00, 0x3C40)),
+                )
             base_count = len(base_specs)
             with ArtifactWriter(base, identity, base_specs) as writer:
                 for spec, payload in zip(base_specs, base_payloads, strict=True):
@@ -71,50 +78,97 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
             for recipe in recipes:
                 output = root / (recipe.key + ".ninfer")
                 matrix = conversion.dflash2_matrix_recipes.tensor_spec(
-                    "dflash/feature_projection", (16, 128), recipe.matrix_format)
-                codebook = conversion.TensorSpec("dflash/selector/predecessor_codebook",
-                    (2,), "BF16", "contiguous-le-v1")
-                bindings = (inv.SourceBinding(matrix, ("matrix",)),
-                            inv.SourceBinding(codebook, ("codebook",)))
-                specs = base_specs + tuple(TensorSpec(spec.name, spec.shape, spec.format,
-                    spec.layout) for spec in (matrix, codebook))
+                    "dflash/feature_projection", (16, 128), recipe.matrix_format
+                )
+                codebook = conversion.TensorSpec(
+                    "dflash/selector/predecessor_codebook", (2,), "BF16", "contiguous-le-v1"
+                )
+                bindings = (
+                    inv.SourceBinding(matrix, ("matrix",)),
+                    inv.SourceBinding(codebook, ("codebook",)),
+                )
+                specs = base_specs + tuple(
+                    TensorSpec(spec.name, spec.shape, spec.format, spec.layout)
+                    for spec in (matrix, codebook)
+                )
                 if selective:
-                    specs = tuple(replace(spec, layout="r9700-w8g32-n16-k16-v1")
-                                  if spec.name == "text/output_head" else spec for spec in specs)
+                    specs = tuple(
+                        replace(spec, layout="r9700-w8g32-n16-k16-v1")
+                        if spec.name == "text/output_head"
+                        else spec
+                        for spec in specs
+                    )
                 objects = plan_objects(specs)
-                out_identity = ArtifactIdentity(inv.MODEL_ID,
-                    inv.companion_weights_id(identity.weights_id, recipe.key))
-                file_bytes = conversion.align_up(16 + len(conversion.encode_directory(
-                    out_identity, objects)), 4096) + objects[-1].offset + objects[-1].bytes
-                checked = conversion.Preflight(base, root, {}, identity, out_identity,
-                    specs, objects, file_bytes, 0, recipe.key)
-                matrix_payload = bytes((index % 251 for index in range(objects[base_count].bytes)))
-                with patch.dict(sys.modules, {"torch": torch,
-                    "tools.convert.common.quantize": quantize,
-                    "tools.convert.common.safetensors": safetensors,
-                    "tools.convert.qwen3.common.conversion": family}), \
-                    patch.object(conversion, "preflight", return_value=checked), \
-                    patch.object(conversion, "_base_authority", return_value=None), \
-                    patch.object(conversion, "_load_source_tensor", return_value=object()), \
-                    patch.object(inv, "source_bindings_for_recipe", return_value=bindings), \
-                    patch.object(conversion.dflash2_matrix_recipes, "encode_matrix_payload",
-                                 return_value=matrix_payload) as encoder:
-                    report_path = conversion.convert(base, root, output, device="cpu",
-                                                     matrix_recipe=recipe.key)
+                out_identity = ArtifactIdentity(
+                    inv.MODEL_ID, inv.companion_weights_id(identity.weights_id, recipe.key)
+                )
+                file_bytes = (
+                    conversion.align_up(
+                        16 + len(conversion.encode_directory(out_identity, objects)), 4096
+                    )
+                    + objects[-1].offset
+                    + objects[-1].bytes
+                )
+                checked = conversion.Preflight(
+                    base,
+                    root,
+                    {},
+                    identity,
+                    out_identity,
+                    specs,
+                    objects,
+                    file_bytes,
+                    0,
+                    recipe.key,
+                )
+                matrix_payload = bytes(index % 251 for index in range(objects[base_count].bytes))
+                with (
+                    patch.dict(
+                        sys.modules,
+                        {
+                            "torch": torch,
+                            "tools.convert.common.quantize": quantize,
+                            "tools.convert.common.safetensors": safetensors,
+                            "tools.convert.qwen3.common.conversion": family,
+                        },
+                    ),
+                    patch.object(conversion, "preflight", return_value=checked),
+                    patch.object(conversion, "_base_authority", return_value=None),
+                    patch.object(conversion, "_load_source_tensor", return_value=object()),
+                    patch.object(inv, "source_bindings_for_recipe", return_value=bindings),
+                    patch.object(
+                        conversion.dflash2_matrix_recipes,
+                        "encode_matrix_payload",
+                        return_value=matrix_payload,
+                    ) as encoder,
+                ):
+                    report_path = conversion.convert(
+                        base, root, output, device="cpu", matrix_recipe=recipe.key
+                    )
                 self.assertEqual(encoder.call_args.args[2], recipe.key)
                 with conversion.Artifact.open(output) as artifact:
                     self.assertEqual(artifact.identity, out_identity)
-                    for obj, payload in zip(artifact.objects[:base_count], base_payloads, strict=True):
+                    for obj, payload in zip(
+                        artifact.objects[:base_count], base_payloads, strict=True
+                    ):
                         actual = bytes(artifact.payload(obj))
                         if obj.name == "text/output_head" and selective:
-                            actual = b"".join(conversion.transcode_w8_n16k16(actual, obj.shape, inverse=True))
+                            actual = b"".join(
+                                conversion.transcode_w8_n16k16(actual, obj.shape, inverse=True)
+                            )
                         self.assertEqual(actual, payload)
-                    self.assertEqual(bytes(artifact.payload(artifact.objects[base_count])), matrix_payload)
-                    self.assertEqual(bytes(artifact.payload(artifact.objects[base_count + 1])), preserved)
+                    self.assertEqual(
+                        bytes(artifact.payload(artifact.objects[base_count])), matrix_payload
+                    )
+                    self.assertEqual(
+                        bytes(artifact.payload(artifact.objects[base_count + 1])), preserved
+                    )
                 report = json.loads(report_path.read_text())
                 self.assertEqual(report["recipe_id"], recipe.recipe_id)
-                self.assertEqual(report["base"]["payload_copy"],
-                                 "byte_exact_except_losslessly_tiled_output_head" if selective else "byte_exact")
+                self.assertEqual(
+                    report["base"]["payload_copy"],
+                    "byte_exact_except_losslessly_tiled_output_head" if selective else "byte_exact",
+                )
                 self.assertFalse(conversion._pending_path(output).exists())
 
     def test_all_recipe_plans_bind_distinct_identities_and_storage(self) -> None:
@@ -122,34 +176,51 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
         identities = set()
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for base_id in (inv.ALL_Q4_BASE_WEIGHTS_ID, inv.MIXED_BASE_WEIGHTS_ID,
-                            inv.HYBRID_BASE_WEIGHTS_ID):
+            for base_id in (
+                inv.ALL_Q4_BASE_WEIGHTS_ID,
+                inv.MIXED_BASE_WEIGHTS_ID,
+                inv.HYBRID_BASE_WEIGHTS_ID,
+            ):
                 base = root / (base_id + ".ninfer")
                 base_identity = ArtifactIdentity(inv.MODEL_ID, base_id)
                 fixture = TensorSpec("fixture", (1,), "BF16", "contiguous-le-v1")
                 expected_base = conversion.TensorSpec(
-                    fixture.name, fixture.shape, fixture.format, fixture.layout)
+                    fixture.name, fixture.shape, fixture.format, fixture.layout
+                )
                 with ArtifactWriter(base, base_identity, (fixture,)) as writer:
                     writer.write("fixture", b"\x80\x3f")
                 for recipe in conversion.dflash2_matrix_recipes.RECIPES:
-                    with patch.object(inv, "validate_source", return_value={}), patch.object(
-                        conversion, "_expected_base",
-                        return_value=((expected_base,), base_identity, inv.TENSOR_ENCODED_BYTES + 256)
+                    with (
+                        patch.object(inv, "validate_source", return_value={}),
+                        patch.object(
+                            conversion,
+                            "_expected_base",
+                            return_value=(
+                                (expected_base,),
+                                base_identity,
+                                inv.TENSOR_ENCODED_BYTES + 256,
+                            ),
+                        ),
                     ):
                         checked = conversion.preflight(base, root, recipe.key)
                     identities.add(checked.output_identity.weights_id)
                     expected = inv.matrix_recipe_summary(recipe.key)
                     self.assertEqual(checked.matrix_recipe, recipe.key)
-                    self.assertEqual(checked.projected_device_arena_bytes,
-                        256 + expected["tensor_encoded_bytes"])
+                    self.assertEqual(
+                        checked.projected_device_arena_bytes, 256 + expected["tensor_encoded_bytes"]
+                    )
                     appended = checked.objects[1:]
-                    self.assertEqual(sum(obj.bytes for obj in appended),
-                                     expected["tensor_encoded_bytes"])
-                    self.assertEqual(sum(obj.format == recipe.matrix_format
-                                         for obj in appended), 32)
+                    self.assertEqual(
+                        sum(obj.bytes for obj in appended), expected["tensor_encoded_bytes"]
+                    )
+                    self.assertEqual(
+                        sum(obj.format == recipe.matrix_format for obj in appended), 32
+                    )
                     self.assertEqual(sum(obj.format == "BF16" for obj in appended), 34)
-                    self.assertEqual(checked.output_identity.weights_id,
-                                     inv.companion_weights_id(base_id, recipe.key))
+                    self.assertEqual(
+                        checked.output_identity.weights_id,
+                        inv.companion_weights_id(base_id, recipe.key),
+                    )
             self.assertEqual(len(identities), 9)
             self.assertIn(inv.ALL_Q4_WEIGHTS_ID, identities)
             self.assertIn(inv.MIXED_WEIGHTS_ID, identities)
@@ -162,12 +233,16 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
             base.write_bytes(b"hybrid-base")
             base_sha256 = _sha256(base)
             receipt = {
-                "path": str(base) + ".conversion.json", "sha256": "0" * 64,
+                "path": str(base) + ".conversion.json",
+                "sha256": "0" * 64,
                 "recipe_id": conversion.fp8_hybrid_inventory.RECIPE_ID,
                 "selection_sha256": conversion.fp8_hybrid_inventory.SELECTION_SHA256,
-                "object_plan_sha256": "1" * 64, "source_index_sha256": "2" * 64,
-                "source_ranking_sha256": "3" * 64, "source_artifact_sha256": "4" * 64,
-                "source_receipt_sha256": "5" * 64, "transcoder_sha256": "6" * 64,
+                "object_plan_sha256": "1" * 64,
+                "source_index_sha256": "2" * 64,
+                "source_ranking_sha256": "3" * 64,
+                "source_artifact_sha256": "4" * 64,
+                "source_receipt_sha256": "5" * 64,
+                "transcoder_sha256": "6" * 64,
             }
             with patch("tools.ppl.run.validate_n16_conversion_receipt", return_value=receipt):
                 authority = conversion._base_authority(
@@ -185,17 +260,23 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             base = Path(temporary) / "selective.ninfer"
             base.write_bytes(b"represented selective base")
-            identity = ArtifactIdentity(conversion.inventory.MODEL_ID,
-                                        conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID)
+            identity = ArtifactIdentity(
+                conversion.inventory.MODEL_ID, conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID
+            )
             receipt = {
                 "artifact_type": "ninfer_r9700_selective_protected_conversion",
-                "schema_version": 1, "identity": conversion._identity_record(identity),
+                "schema_version": 1,
+                "identity": conversion._identity_record(identity),
                 "recipe_id": conversion.selective_protected_inventory.RECIPE_ID,
                 "weight_recipe_selected": False,
                 "changed_formats": conversion.selective_protected_inventory.CHANGED_FORMATS,
-                "source": {"model_path": "explicit-source"}, "base": {"sha256": "base"},
-                "artifact": {"path": str(base.resolve()), "bytes": base.stat().st_size,
-                             "sha256": _sha256(base)},
+                "source": {"model_path": "explicit-source"},
+                "base": {"sha256": "base"},
+                "artifact": {
+                    "path": str(base.resolve()),
+                    "bytes": base.stat().st_size,
+                    "sha256": _sha256(base),
+                },
             }
             receipt_path = Path(str(base) + ".conversion.json")
             receipt_path.write_text(json.dumps(receipt))
@@ -206,17 +287,22 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                 conversion._base_authority(base, identity, "0" * 64)
 
     def test_selective_base_maps_to_its_exact_inventory(self) -> None:
-        expected, output, arena = conversion._expected_base(ArtifactIdentity(
-            conversion.inventory.MODEL_ID, conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID))
+        expected, output, arena = conversion._expected_base(
+            ArtifactIdentity(
+                conversion.inventory.MODEL_ID, conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID
+            )
+        )
         self.assertEqual(expected, conversion.selective_protected_inventory.OBJECT_SPECS)
         self.assertEqual(output.weights_id, conversion.inventory.SELECTIVE_WEIGHTS_ID)
         self.assertEqual(arena, 18_874_746_880)
 
     def test_hybrid_base_maps_to_its_own_companion(self) -> None:
-        expected, output, arena = conversion._expected_base(ArtifactIdentity(
-            conversion.inventory.MODEL_ID,
-            conversion.inventory.HYBRID_BASE_WEIGHTS_ID,
-        ))
+        expected, output, arena = conversion._expected_base(
+            ArtifactIdentity(
+                conversion.inventory.MODEL_ID,
+                conversion.inventory.HYBRID_BASE_WEIGHTS_ID,
+            )
+        )
         self.assertIs(expected, conversion.fp8_hybrid_inventory.OBJECT_SPECS)
         self.assertEqual(output.weights_id, conversion.inventory.HYBRID_WEIGHTS_ID)
         self.assertEqual(arena, conversion.inventory.HYBRID_DEVICE_ARENA_BYTES)
@@ -243,8 +329,7 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
             self.assertEqual(result["base"]["sha256"], _sha256(base))
             self.assertEqual(
                 tuple(
-                    recipe["key"]
-                    for recipe in result["dflash_plan"]["candidate_matrix_recipes"]
+                    recipe["key"] for recipe in result["dflash_plan"]["candidate_matrix_recipes"]
                 ),
                 ("source-mse-q4g64", "source-mse-w8g32"),
             )
@@ -362,23 +447,35 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
             # even though canonical and MSE Q4 share exactly the same storage format.
             for recipe in conversion.dflash2_matrix_recipes.RECIPES[1:]:
                 selected = replace(checked, matrix_recipe=recipe.key)
-                _atomic_json(pending_path, {
-                    "schema": 1, "identity": conversion._identity_record(identity),
-                    "base": {"identity": conversion._identity_record(base_identity),
-                             "sha256": _sha256(base_path)},
-                    "dflash_source": selected.source,
-                    "dflash_matrix_recipe": conversion.inventory.matrix_recipe_summary(
-                        conversion._CANONICAL_RECIPE),
-                })
-                with patch.object(conversion, "preflight", return_value=selected):
-                    with self.assertRaisesRegex(ValueError, "receipt differs"):
-                        conversion.finalize_report(base_path, root / "source", output,
-                                                   matrix_recipe=recipe.key)
-                recipe_report = conversion._report_value(selected, output,
-                    _sha256(base_path), output_sha256, {})
+                _atomic_json(
+                    pending_path,
+                    {
+                        "schema": 1,
+                        "identity": conversion._identity_record(identity),
+                        "base": {
+                            "identity": conversion._identity_record(base_identity),
+                            "sha256": _sha256(base_path),
+                        },
+                        "dflash_source": selected.source,
+                        "dflash_matrix_recipe": conversion.inventory.matrix_recipe_summary(
+                            conversion._CANONICAL_RECIPE
+                        ),
+                    },
+                )
+                with (
+                    patch.object(conversion, "preflight", return_value=selected),
+                    self.assertRaisesRegex(ValueError, "receipt differs"),
+                ):
+                    conversion.finalize_report(
+                        base_path, root / "source", output, matrix_recipe=recipe.key
+                    )
+                recipe_report = conversion._report_value(
+                    selected, output, _sha256(base_path), output_sha256, {}
+                )
                 self.assertEqual(recipe_report["recipe_id"], recipe.recipe_id)
-                self.assertEqual(recipe_report["dflash_recipe"]["matrix_format"],
-                                 recipe.matrix_format)
+                self.assertEqual(
+                    recipe_report["dflash_recipe"]["matrix_format"], recipe.matrix_format
+                )
                 self.assertFalse(recipe_report["weight_recipe_selected"])
 
 

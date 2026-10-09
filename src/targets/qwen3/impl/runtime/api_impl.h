@@ -7,6 +7,7 @@
 
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace ninfer::targets::qwen3 {
 
@@ -172,17 +173,17 @@ runtime::AdmissionResources Program<Variant>::admission_capacity() const noexcep
 }
 
 template <>
-runtime::PrefillStepResult
-Program<Variant>::start_prefill_lane(std::uint32_t lane, PreparedPrompt&& prompt,
-                                     RequestPlan<Variant>&& plan,
-                                     runtime::TransientRegion transient, const OutputSession* output) {
+runtime::PrefillStepResult Program<Variant>::start_prefill_lane(
+    std::uint32_t lane, PreparedPrompt&& prompt, RequestPlan<Variant>&& plan,
+    runtime::TransientRegion transient, const OutputSession* output, bool decode_waiting) {
     return impl_->start_prefill_lane(lane, PreparedPromptAccess::take(std::move(prompt)),
-                                     std::move(plan), transient, output);
+                                     std::move(plan), transient, output, decode_waiting);
 }
 
 template <>
-runtime::PrefillStepResult Program<Variant>::advance_prefill_lane(std::uint32_t lane) {
-    return impl_->advance_prefill_lane(lane);
+runtime::PrefillStepResult Program<Variant>::advance_prefill_lane(std::uint32_t lane,
+                                                                  bool decode_waiting) {
+    return impl_->advance_prefill_lane(lane, decode_waiting);
 }
 
 template <>
@@ -190,6 +191,24 @@ runtime::BatchedGeneratedRound
 Program<Variant>::decode_batch(std::span<const std::uint32_t> lanes,
                                std::span<const runtime::RoundBudget> budgets) {
     return impl_->decode_batch(lanes, budgets);
+}
+
+template <>
+bool Program<Variant>::prefill_mixable(std::uint32_t lane) const noexcept {
+    return impl_->prefill_mixable(lane);
+}
+
+template <>
+std::uint32_t Program<Variant>::mixed_forward() const noexcept {
+    return impl_->mixed_forward;
+}
+
+template <>
+runtime::MixedGeneratedRound
+Program<Variant>::decode_batch_with_prefill(std::span<const std::uint32_t> lanes,
+                                            std::span<const runtime::RoundBudget> budgets,
+                                            std::uint32_t prefill_lane) {
+    return impl_->decode_batch_with_prefill(lanes, budgets, prefill_lane);
 }
 
 template <>
@@ -228,8 +247,15 @@ void Program<Variant>::abort_lane(std::uint32_t lane) noexcept {
 }
 
 template <>
-void Program<Variant>::retain_lane(std::uint32_t lane) {
-    impl_->retain_lane(lane);
+bool Program<Variant>::retain_reusable_lane(std::uint32_t lane) {
+    return impl_->retain_reusable_lane(lane);
+}
+
+template <>
+bool Program<Variant>::copy_reusable_prompt(std::uint32_t lane, std::uint32_t prompt_tokens,
+                                            std::vector<TokenId>& tokens,
+                                            std::uint32_t& rewrite_frontier) const {
+    return impl_->copy_reusable_prompt(lane, prompt_tokens, tokens, rewrite_frontier);
 }
 
 template <>
@@ -253,8 +279,15 @@ void Program<Variant>::evict_retained_lane(std::uint32_t lane) noexcept {
 }
 
 template <>
-bool Program<Variant>::capture_retained_lane(std::uint32_t lane, std::uint64_t* ram_entry_id) {
-    return impl_->capture_retained_lane(lane, ram_entry_id);
+void Program<Variant>::mark_turn_closed(std::uint32_t lane) noexcept {
+    impl_->mark_turn_closed(lane);
+}
+
+template <>
+bool Program<Variant>::capture_retained_lane(std::uint32_t lane, std::uint64_t* ram_entry_id,
+                                             bool may_block, bool* deferred,
+                                             std::span<const std::uint64_t> attempt_ram_ids) {
+    return impl_->capture_retained_lane(lane, ram_entry_id, may_block, deferred, attempt_ram_ids);
 }
 
 template <>
@@ -267,6 +300,21 @@ template <>
 void Program<Variant>::restore_disk_entry(std::uint32_t lane, std::uint64_t entry_id,
                                           const RequestPlan<Variant>& plan) {
     impl_->restore_disk_entry(lane, entry_id, plan);
+}
+
+template <>
+bool Program<Variant>::ram_restore_ready(std::uint64_t entry_id) const {
+    return impl_->ram_restore_ready(entry_id);
+}
+
+template <>
+bool Program<Variant>::disk_restore_ready(std::uint64_t entry_id) const {
+    return impl_->disk_restore_ready(entry_id);
+}
+
+template <>
+bool Program<Variant>::kv_ram_reclaim_pending() const {
+    return impl_->kv_ram_reclaim_pending();
 }
 
 template <>
@@ -289,9 +337,10 @@ bool Program<Variant>::claim_disk_entry(std::uint64_t entry_id, std::uint32_t ex
                                         std::uint64_t hash_lo, std::uint64_t hash_hi,
                                         std::uint32_t expected_reuse_base,
                                         PrefixReusePath expected_reuse,
-                                         std::uint64_t expected_committed_generation) {
+                                        std::uint64_t expected_committed_generation) {
     return impl_->claim_disk_entry(entry_id, expected_frontier, hash_lo, hash_hi,
-                                   expected_reuse_base, expected_reuse, expected_committed_generation);
+                                   expected_reuse_base, expected_reuse,
+                                   expected_committed_generation);
 }
 
 template <>
@@ -332,6 +381,16 @@ void Program<Variant>::cancel_disk_restore() {
 }
 
 template <>
+void Program<Variant>::begin_copy_hold_cancel() {
+    impl_->begin_copy_hold_cancel();
+}
+
+template <>
+bool Program<Variant>::copy_hold_cancel_settled() const {
+    return impl_->copy_hold_cancel_settled();
+}
+
+template <>
 void Program<Variant>::discard_ram_capture(std::uint64_t ram_id) {
     impl_->discard_ram_capture(ram_id);
 }
@@ -357,13 +416,19 @@ qwen3::detail::KvRamCopySeconds Program<Variant>::harvest_kv_ram_copy_seconds() 
 }
 
 template <>
-qwen3::detail::KvDiskSnapshot Program<Variant>::kv_disk_snapshot() const noexcept {
-    return impl_->kv_disk_snapshot();
+std::optional<qwen3::detail::KvDiskSnapshot>
+Program<Variant>::try_kv_disk_snapshot() const noexcept {
+    return impl_->try_kv_disk_snapshot();
 }
 
 template <>
 qwen3::detail::KvDiskCopySeconds Program<Variant>::harvest_kv_disk_copy_seconds() {
     return impl_->harvest_kv_disk_copy_seconds();
+}
+
+template <>
+qwen3::detail::KvGpuSnapshot Program<Variant>::kv_gpu_snapshot() const noexcept {
+    return impl_->kv_gpu_snapshot();
 }
 
 template <>
@@ -468,18 +533,20 @@ SequencePlanner<Variant> make_sequence_planner<Variant>(DeviceContext& device,
         device, options, weights_profile));
 }
 
+// The plan is consumed (its impl_ reset) only on success; on failure the caller keeps it.
 template <>
-std::unique_ptr<Program<Variant>>
-create_program<Variant>(const Variant::ModelView& model, Variant::WeightsProfile weights_profile,
-                        SequencePlan<Variant>&& plan, DeviceContext& device,
-                        std::unique_ptr<HostPinnedArena> kv_ram_arena) {
+std::unique_ptr<Program<Variant>> create_program<Variant>(
+    const Variant::ModelView& model, Variant::WeightsProfile weights_profile,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved): see above
+    SequencePlan<Variant>&& plan, DeviceContext& device,
+    std::unique_ptr<HostPinnedArena> kv_ram_arena) {
     if (plan.impl_ == nullptr) { throw std::invalid_argument("sequence plan is empty"); }
     if (plan.impl_->weights_profile != weights_profile) {
         throw std::invalid_argument(
             "loaded model weights profile does not match the sequence plan");
     }
-    auto impl = std::make_unique<detail::ProgramImpl<Variant>>(
-        model, *plan.impl_, device, std::move(kv_ram_arena));
+    auto impl = std::make_unique<detail::ProgramImpl<Variant>>(model, *plan.impl_, device,
+                                                               std::move(kv_ram_arena));
     plan.impl_.reset();
     return std::unique_ptr<Program<Variant>>(new Program<Variant>(std::move(impl)));
 }

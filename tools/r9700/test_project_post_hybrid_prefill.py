@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from project_post_hybrid_prefill import project
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -30,8 +29,7 @@ class PostHybridPrefillProjectionTest(unittest.TestCase):
             ROOT / "profiles/bench/r9700-fp8-vs-a8q4-gate-up-linear-execution-20260904.json",
             ROOT
             / "profiles/bench/r9700-fp8-vs-a8q4-attention-qk-gate-value-linear-execution-20260904.json",
-            ROOT
-            / "profiles/bench/r9700-fp8-vs-a8q4-gdn-query-key-linear-execution-20260904.json",
+            ROOT / "profiles/bench/r9700-fp8-vs-a8q4-gdn-query-key-linear-execution-20260904.json",
         ]
 
     def test_retained_inputs_produce_the_bounded_inventory(self) -> None:
@@ -39,9 +37,7 @@ class PostHybridPrefillProjectionTest(unittest.TestCase):
         self.assertAlmostEqual(report["floor"]["remaining_wall_gap_ms"], 235.509372)
         self.assertEqual(report["selected_fp8_roles"]["semantic_calls"], 144)
         self.assertEqual(report["remaining_q4_roles"]["semantic_calls"], 176)
-        self.assertAlmostEqual(
-            report["selected_fp8_roles"]["projected_saving_ms"], 198.49288
-        )
+        self.assertAlmostEqual(report["selected_fp8_roles"]["projected_saving_ms"], 198.49288)
         self.assertEqual(report["dense_attention"]["semantic_layer_calls"], 16)
         self.assertEqual(report["gdn_recurrence"]["semantic_calls"], 48)
         self.assertEqual(report["xattention"]["current_trace_calls"], 0)

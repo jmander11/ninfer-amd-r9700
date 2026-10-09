@@ -18,23 +18,23 @@
 #include <utility>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 class MtpKvTransactionBatch {
 public:
     explicit MtpKvTransactionBatch(std::size_t count) : size_(count) {
         if (count == 0U || count > transactions_.size()) {
-            throw std::invalid_argument("MTP KV transaction batch size must be in [1,4]");
+            throw std::invalid_argument("MTP KV transaction batch size must be in [1,8]");
         }
     }
 
-    MtpKvTransactionBatch(const MtpKvTransactionBatch&) = delete;
+    MtpKvTransactionBatch(const MtpKvTransactionBatch&)            = delete;
     MtpKvTransactionBatch& operator=(const MtpKvTransactionBatch&) = delete;
 
     void append(qwen3::PagedKVTransaction transaction) {
         if (next_ >= size_) { throw std::logic_error("MTP KV transaction batch overflow"); }
-        transactions_[next_].emplace(std::move(transaction));
-        bindings_[next_] = &*transactions_[next_];
+        bindings_[next_] = &transactions_[next_].emplace(std::move(transaction));
         ++next_;
     }
 
@@ -46,7 +46,7 @@ public:
     void commit() {
         if (next_ != size_) { throw std::logic_error("MTP KV transaction batch is incomplete"); }
         for (std::size_t row = 0; row < size_; ++row) {
-            committed_frontiers_[row] = transactions_[row]->commit();
+            committed_frontiers_[row] = transactions_[row].value().commit();
         }
         committed_ = true;
     }
@@ -64,7 +64,7 @@ private:
     std::array<std::uint32_t, kMaximumConcurrency> committed_frontiers_{};
     std::size_t size_ = 0;
     std::size_t next_ = 0;
-    bool committed_ = false;
+    bool committed_   = false;
 };
 
 void require_i32_panel(const Tensor& tensor, std::int32_t width, std::int32_t batch,
@@ -84,10 +84,9 @@ void require_i32_vector(const Tensor& tensor, std::int32_t count, const char* la
     }
 }
 
-void begin_transaction_segments(
-    std::span<qwen3::PagedKVTransaction* const> transactions,
-    const Tensor& positions, const Tensor& device_counts,
-    std::span<const std::int32_t> host_maximum_counts) {
+void begin_transaction_segments(std::span<qwen3::PagedKVTransaction* const> transactions,
+                                const Tensor& positions, const Tensor& device_counts,
+                                std::span<const std::int32_t> host_maximum_counts) {
     const std::int32_t width = positions.ne[0];
     const std::int32_t batch = device_counts.ne[0];
     require_i32_panel(positions, width, batch, "MTP KV positions");
@@ -98,24 +97,23 @@ void begin_transaction_segments(
         throw std::logic_error("MTP KV authorities do not match the packed batch");
     }
     const auto* all_positions = static_cast<const std::int32_t*>(positions.data);
-    const auto* all_counts = static_cast<const std::int32_t*>(device_counts.data);
+    const auto* all_counts    = static_cast<const std::int32_t*>(device_counts.data);
     for (std::int32_t row = 0; row < batch; ++row) {
         const std::int32_t maximum = host_maximum_counts.empty()
                                          ? width
                                          : host_maximum_counts[static_cast<std::size_t>(row)];
-        auto* transaction = transactions[static_cast<std::size_t>(row)];
+        auto* transaction          = transactions[static_cast<std::size_t>(row)];
         if (transaction == nullptr || maximum <= 0 || maximum > width) {
             throw std::logic_error("MTP KV row has an invalid authority or append maximum");
         }
-        transaction->begin_device_segment(
-            all_positions + static_cast<std::size_t>(row) * static_cast<std::size_t>(width),
-            static_cast<std::size_t>(maximum), all_counts + row);
+        transaction->begin_device_segment(all_positions + static_cast<std::size_t>(row) *
+                                                              static_cast<std::size_t>(width),
+                                          static_cast<std::size_t>(maximum), all_counts + row);
     }
 }
 
-void end_transaction_segments(
-    std::span<qwen3::PagedKVTransaction* const> transactions,
-    hipStream_t stream) {
+void end_transaction_segments(std::span<qwen3::PagedKVTransaction* const> transactions,
+                              hipStream_t stream) {
     for (qwen3::PagedKVTransaction* transaction : transactions) {
         if (transaction == nullptr) {
             throw std::logic_error("MTP KV segment binding contains null");
@@ -160,12 +158,12 @@ void mtp_bridge_and_propose(PrefillContext& state, const Tensor& next_token,
     }
     state.execution.work.reset();
     TextContext card(state.execution.device, state.execution.model,
-                     state.execution.linear_execution, state.execution.work,
-                     state.text_kv, state.execution.linear_attention, state.execution.io,
+                     state.execution.linear_execution, state.execution.work, state.text_kv,
+                     state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
-                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+                     state.text_kv_base, state.mtp_kv, state.mtp_cache);
     configure_text_card(card, state.execution, state.sampling, state.current_state_slot,
-                        state.rewrite_checkpoint_state_slot, state.mtp_proposal_extent);
+                        state.mtp_proposal_extent);
 
     Tensor position_view = state.execution.io.mtp->target_positions.slice(0, 0, 1);
     ops::set_i32_scalar(position_view, position, state.execution.device.stream);
@@ -214,8 +212,7 @@ void mtp_bridge_and_propose(PrefillContext& state, const Tensor& next_token,
     }
     const std::uint32_t committed_frontier = static_cast<std::uint32_t>(position) + 1U;
     if (state.mtp_kv_publication->valid_frontier != committed_frontier) {
-        state.mtp_cache->truncate_publication(*state.mtp_kv_allocation,
-                                              *state.mtp_kv_publication,
+        state.mtp_cache->truncate_publication(*state.mtp_kv_allocation, *state.mtp_kv_publication,
                                               committed_frontier);
     }
 }
@@ -228,16 +225,15 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
         }
 
         qwen3::MtpDecodeState& frame = state.frame;
-        const std::int32_t width       = static_cast<std::int32_t>(k) + 1;
+        const std::int32_t width     = static_cast<std::int32_t>(k) + 1;
         HIP_CHECK(hipMemcpyAsync(frame.ingress.data, &state.host_ingress,
                                  sizeof(qwen3::MtpDecodeIngress), hipMemcpyHostToDevice,
                                  state.execution.device.stream));
 
-        TextContext card(state.execution.device, state.execution.model,
-                         state.execution.linear_execution, state.execution.work, {},
-                         state.execution.linear_attention, state.execution.io,
-                         state.execution.prefill_hidden, state.execution.prefill_chunk, 0, {},
-                         &state.text_cache, &state.mtp_cache);
+        TextContext card(
+            state.execution.device, state.execution.model, state.execution.linear_execution,
+            state.execution.work, {}, state.execution.linear_attention, state.execution.io,
+            state.execution.prefill_hidden, state.execution.prefill_chunk, 0, {}, &state.mtp_cache);
         if (!state.text_kv_transactions.empty()) {
             card.set_text_kv_transactions(state.text_kv_transactions);
         }
@@ -278,23 +274,21 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
         if (compact) {
             state.execution.work.reset();
             auto copy_panel = [&](Tensor src, std::int32_t rows) {
-                Tensor dst =
-                    state.execution.work.alloc(DType::I32, {rows, batch_size});
-                qwen3::copy_i32_panel(dst, src.slice(0, 0, rows),
-                                        state.execution.device.stream);
+                Tensor dst = state.execution.work.alloc(DType::I32, {rows, batch_size});
+                qwen3::copy_i32_panel(dst, src.slice(0, 0, rows), state.execution.device.stream);
                 return dst;
             };
-            current_drafts   = copy_panel(current_drafts, static_cast<std::int32_t>(k));
-            target_rope      = copy_panel(target_rope, width);
-            Tensor compact_verify =
-                state.execution.work.alloc(DType::I32, {width, batch_size});
+            current_drafts        = copy_panel(current_drafts, static_cast<std::int32_t>(k));
+            target_rope           = copy_panel(target_rope, width);
+            Tensor compact_verify = state.execution.work.alloc(DType::I32, {width, batch_size});
             // The Program opens target-cache transactions before entering this schedule. Keep the
             // exact packed position panel in persistent round storage rather than scratch whose
             // address and lifetime are owned by the workspace arena.
-            Tensor compact_pos = frame.target_positions
-                                     .view({static_cast<std::int32_t>(frame.target_positions.numel())})
-                                     .slice(0, 0, width * batch_size)
-                                     .view({width, batch_size});
+            Tensor compact_pos =
+                frame.target_positions
+                    .view({static_cast<std::int32_t>(frame.target_positions.numel())})
+                    .slice(0, 0, width * batch_size)
+                    .view({width, batch_size});
             verify_ids       = compact_verify;
             target_positions = compact_pos;
             target_tokens    = state.execution.work.alloc(DType::I32, {width, batch_size});
@@ -302,16 +296,14 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
             alignment_ids    = state.execution.work.alloc(DType::I32, {width, batch_size});
             target_logits    = state.execution.work.alloc(
                 DType::BF16, {TextConfig::output_rows, width, batch_size});
-            target_hidden = state.execution.work.alloc(
-                DType::BF16, {TextConfig::hidden, width, batch_size});
-            alignment_hidden = state.execution.work.alloc(
-                DType::BF16, {TextConfig::hidden, width, batch_size});
+            target_hidden =
+                state.execution.work.alloc(DType::BF16, {TextConfig::hidden, width, batch_size});
+            alignment_hidden =
+                state.execution.work.alloc(DType::BF16, {TextConfig::hidden, width, batch_size});
             if (k > 1) {
-                ar_positions = ar_positions.slice(1, 0, static_cast<std::int32_t>(k) - 1);
-                ar_rope_positions =
-                    ar_rope_positions.slice(1, 0, static_cast<std::int32_t>(k) - 1);
-                ar_valid_columns =
-                    ar_valid_columns.slice(1, 0, static_cast<std::int32_t>(k) - 1);
+                ar_positions      = ar_positions.slice(1, 0, static_cast<std::int32_t>(k) - 1);
+                ar_rope_positions = ar_rope_positions.slice(1, 0, static_cast<std::int32_t>(k) - 1);
+                ar_valid_columns  = ar_valid_columns.slice(1, 0, static_cast<std::int32_t>(k) - 1);
             }
         }
 
@@ -319,8 +311,7 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
         ops::speculative_prepare_verify_inputs(anchors, current_drafts, base_frontiers,
                                                current_extents, verify_ids, target_positions,
                                                state.execution.device.stream);
-        begin_transaction_segments(state.text_kv_transactions, target_positions, target_valid,
-                                   {});
+        begin_transaction_segments(state.text_kv_transactions, target_positions, target_valid, {});
         target_verify_accept(state.execution, state.continuation_hidden_store, card,
                              TargetVerifyFrameView{
                                  .ids             = verify_ids,
@@ -342,17 +333,19 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
                                  .selected_hidden = selected_hidden,
                                  .replay_records  = state.execution.replay_records,
                                  .sampling        = frame.sampling,
-                                 .tool_masks      = state.tool_masks,
+                                 .token_masks     = state.token_masks,
                              },
                              !compact);
+        qwen3::record_round_logprobs(frame.logprobs, target_logits, licensed_tokens,
+                                     &licensed_counts, nullptr, TextConfig::token_domain,
+                                     state.execution.device.stream);
         end_transaction_segments(state.text_kv_transactions, state.execution.device.stream);
         if (compact) {
             Tensor licensed_frame =
                 frame.licensed_tokens.slice(1, 0, batch_size).slice(0, 0, width);
-            qwen3::copy_i32_panel(licensed_frame, licensed_tokens,
-                                    state.execution.device.stream);
+            qwen3::copy_i32_panel(licensed_frame, licensed_tokens, state.execution.device.stream);
             qwen3::copy_strided_width_panel(frame.target_hidden.slice(2, 0, batch_size),
-                                              target_hidden, state.execution.device.stream);
+                                            target_hidden, state.execution.device.stream);
         }
 
         ops::mtp_prepare_next_round(verify_ids, anchors, accepted, frontiers, budgets,
@@ -414,7 +407,7 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
 void capture_mtp_decode_batch(MtpBatchContext& state, std::int32_t batch_size, std::uint32_t k,
                               DecodeGraphDefinition& definition) {
     auto body = mtp_decode_batch_body(state, batch_size, k);
-    capture_graph(state, definition, body);
+    capture_graph(state, definition, batch_size, body);
 }
 
 void mtp_decode_batch(MtpBatchContext& state, std::int32_t batch_size, std::uint32_t k,

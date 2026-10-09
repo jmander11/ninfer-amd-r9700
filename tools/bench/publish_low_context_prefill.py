@@ -43,9 +43,7 @@ def publish(
     pending_inode = _inode(pending)
     transient_inode = _inode(transient) if transient is not None else None
     actual = json.loads(pending.read_text(encoding="utf-8"))
-    expected = validate_ladder(
-        manifest, minimum_p2048_tok_s, executable, artifact, selection
-    )
+    expected = validate_ladder(manifest, minimum_p2048_tok_s, executable, artifact, selection)
     if actual != expected:
         raise ValueError("pending low-context authority differs from fresh validation")
 

@@ -7,8 +7,8 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 import torch
 from safetensors import safe_open
@@ -25,7 +25,6 @@ from tools.convert.qwen3.common.recipe import (
 
 from . import draft_head, e4m3_inventory, source_recipe
 from .e4m3_rowwise import decode_e4m3_rowwise, encode_e4m3_rowwise
-
 
 SCHEMA = "ninfer.qwen3_8_27b.e4m3-rowwise-sampled-quality.v1"
 SELECTION_ALGORITHM = "endpoints-plus-sha256-counter-v1"
@@ -47,9 +46,7 @@ def select_row_indices(name: str, rows: int, count: int) -> tuple[int, ...]:
     selected: set[int] = {0}
     if wanted > 1:
         selected.add(rows - 1)
-    seed = hashlib.sha256(
-        f"{SELECTION_ALGORITHM}\0{name}\0{rows}".encode("utf-8")
-    ).digest()
+    seed = hashlib.sha256(f"{SELECTION_ALGORITHM}\0{name}\0{rows}".encode()).digest()
     counter = 0
     while len(selected) < wanted:
         digest = hashlib.sha256(seed + counter.to_bytes(8, "little")).digest()
@@ -72,9 +69,7 @@ class SampledShardReader:
         if shard == self._shard:
             return self._handle
         self.close()
-        self._context = safe_open(
-            str(self.model_dir / shard), framework="pt", device="cpu"
-        )
+        self._context = safe_open(str(self.model_dir / shard), framework="pt", device="cpu")
         self._handle = self._context.__enter__()
         self._shard = shard
         return self._handle
@@ -97,7 +92,7 @@ class SampledShardReader:
         self._context = None
         self._handle = None
 
-    def __enter__(self) -> "SampledShardReader":
+    def __enter__(self) -> SampledShardReader:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
@@ -132,11 +127,9 @@ def _sample_expression(
         rows: list[torch.Tensor] = []
         for index in indices:
             offset = 0
-            for part, shape in zip(expression.sources, shapes):
+            for part, shape in zip(expression.sources, shapes, strict=True):
                 if index < offset + shape[0]:
-                    rows.append(
-                        _sample_expression(part, [index - offset], reader, draft_ids)
-                    )
+                    rows.append(_sample_expression(part, [index - offset], reader, draft_ids))
                     break
                 offset += shape[0]
             else:
@@ -164,9 +157,7 @@ def _sample_expression(
             width = sliced.end - sliced.begin
             if output_shape[0] == inner_shape[0] * width:
                 physical = [
-                    (index // width) * inner_shape[1]
-                    + sliced.begin
-                    + index % width
+                    (index // width) * inner_shape[1] + sliced.begin + index % width
                     for index in indices
                 ]
                 return reader.rows(sliced.source.source, physical)
@@ -177,7 +168,9 @@ def _sample_expression(
     )
 
 
-def _measure(name: str, shape: tuple[int, int], indices: tuple[int, ...], source: torch.Tensor) -> dict[str, object]:
+def _measure(
+    name: str, shape: tuple[int, int], indices: tuple[int, ...], source: torch.Tensor
+) -> dict[str, object]:
     if tuple(source.shape) != (len(indices), shape[1]):
         raise ValueError(f"{name}: sampled source has wrong shape {tuple(source.shape)}")
     finite = torch.isfinite(source)
@@ -201,20 +194,14 @@ def _measure(name: str, shape: tuple[int, int], indices: tuple[int, ...], source
         )
         return record
 
-    decoded = decode_e4m3_rowwise(
-        encode_e4m3_rowwise(source), len(indices), shape[1]
-    )
+    decoded = decode_e4m3_rowwise(encode_e4m3_rowwise(source), len(indices), shape[1])
     reference = source.to(torch.float64)
     difference = decoded.to(torch.float64) - reference
     squared_error = float(torch.sum(difference.square()).item())
     squared_reference = float(torch.sum(reference.square()).item())
     record.update(
         max_abs=float(torch.max(torch.abs(difference)).item()),
-        relative_l2=(
-            math.sqrt(squared_error / squared_reference)
-            if squared_reference
-            else 0.0
-        ),
+        relative_l2=(math.sqrt(squared_error / squared_reference) if squared_reference else 0.0),
         squared_error=squared_error,
         squared_reference=squared_reference,
     )
@@ -236,12 +223,12 @@ def assemble_report(
     squared_error = sum(float(item["squared_error"]) for item in finite)
     squared_reference = sum(float(item["squared_reference"]) for item in finite)
     max_abs = max((float(item["max_abs"]) for item in finite), default=0.0)
-    by_relative = sorted(
-        finite, key=lambda item: (-float(item["relative_l2"]), str(item["name"]))
-    )[:worst_count]
-    by_absolute = sorted(
-        finite, key=lambda item: (-float(item["max_abs"]), str(item["name"]))
-    )[:worst_count]
+    by_relative = sorted(finite, key=lambda item: (-float(item["relative_l2"]), str(item["name"])))[
+        :worst_count
+    ]
+    by_absolute = sorted(finite, key=lambda item: (-float(item["max_abs"]), str(item["name"])))[
+        :worst_count
+    ]
     return {
         "schema": SCHEMA,
         "candidate": {
@@ -263,20 +250,14 @@ def assemble_report(
             "zero_rows": sum(int(item["zero_rows"]) for item in ordered),
             "max_abs": max_abs,
             "relative_l2": (
-                math.sqrt(squared_error / squared_reference)
-                if squared_reference
-                else 0.0
+                math.sqrt(squared_error / squared_reference) if squared_reference else 0.0
             ),
         },
         "worst_tensors": {
             "relative_l2": [
-                {"name": item["name"], "value": item["relative_l2"]}
-                for item in by_relative
+                {"name": item["name"], "value": item["relative_l2"]} for item in by_relative
             ],
-            "max_abs": [
-                {"name": item["name"], "value": item["max_abs"]}
-                for item in by_absolute
-            ],
+            "max_abs": [{"name": item["name"], "value": item["max_abs"]} for item in by_absolute],
         },
         "source": dict(source),
         "implementation_sha256": dict(sorted(implementation.items())),

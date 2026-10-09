@@ -20,7 +20,10 @@ class PrefillChunkSelectionIoTest(unittest.TestCase):
         self.assertIn("--create-only", script)
         result = subprocess.run(
             [sys.executable, "-m", "tools.bench.prefill_chunk_selection_io", "--help"],
-            cwd=repo, capture_output=True, text=True, check=False,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -70,9 +73,12 @@ class PrefillChunkSelectionIoTest(unittest.TestCase):
                     raise ValueError("readback failed")
                 return {}
 
-            with mock.patch.object(
-                publication, "validate_selection_record", side_effect=replace_then_fail
-            ), self.assertRaisesRegex(ValueError, "readback failed"):
+            with (
+                mock.patch.object(
+                    publication, "validate_selection_record", side_effect=replace_then_fail
+                ),
+                self.assertRaisesRegex(ValueError, "readback failed"),
+            ):
                 publication.publish(pending, published)
             self.assertTrue(pending.exists())
             self.assertEqual(published.read_text(encoding="utf-8"), "foreign\n")

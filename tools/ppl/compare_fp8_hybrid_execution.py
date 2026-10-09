@@ -13,12 +13,21 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl import run
-from tools.ppl.compare_fp8_hybrid_source import _load_hybrid
-from tools.ppl.compare_q4_group_source import _load_bf16, _source_key
-from tools.ppl.q4_group_source_diagnostic import _atomic_new, sha256_file
-from tools.ppl.validate_fp8_hybrid_greedy import (
-    _candidate_sidecars, validate as validate_product,
+from tools.ppl import run  # noqa: E402  after sys.path setup
+from tools.ppl.compare_fp8_hybrid_source import _load_hybrid  # noqa: E402  after sys.path setup
+from tools.ppl.compare_q4_group_source import (  # noqa: E402  after sys.path setup
+    _load_bf16,
+    _source_key,
+)
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
+    _atomic_new,
+    sha256_file,
+)
+from tools.ppl.validate_fp8_hybrid_greedy import (  # noqa: E402  after sys.path setup
+    _candidate_sidecars,
+)
+from tools.ppl.validate_fp8_hybrid_greedy import (  # noqa: E402  after sys.path setup
+    validate as validate_product,
 )
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_fp8_hybrid_execution_localization"
@@ -31,26 +40,34 @@ def _input(path: Path) -> dict:
     return {"path": str(path.resolve()), "sha256": sha256_file(path)}
 
 
-def _pair(reference_nll: list[float], candidate_nll: list[float],
-          reference_argmax: list[int], candidate_argmax: list[int]) -> dict:
-    if (len(reference_nll) != len(candidate_nll)
-            or len(reference_argmax) != len(candidate_argmax)
-            or len(reference_nll) != len(reference_argmax)
-            or not reference_nll):
+def _pair(
+    reference_nll: list[float],
+    candidate_nll: list[float],
+    reference_argmax: list[int],
+    candidate_argmax: list[int],
+) -> dict:
+    if (
+        len(reference_nll) != len(candidate_nll)
+        or len(reference_argmax) != len(candidate_argmax)
+        or len(reference_nll) != len(reference_argmax)
+        or not reference_nll
+    ):
         raise ValueError("localization sidecars are not nonempty and exactly aligned")
     if not all(math.isfinite(value) for value in (*reference_nll, *candidate_nll)):
         raise ValueError("localization NLL sidecars contain non-finite values")
     summary = run.paired_delta_summary(candidate_nll, reference_nll)
     assert summary is not None
     severe = run.severe_position_stats(
-        candidate_nll, reference_nll, threshold=THRESHOLD,
+        candidate_nll,
+        reference_nll,
+        threshold=THRESHOLD,
         maximum_new_rate=run.QUALITY_TIERS["capacity-speed"]["maximum_new_severe_rate"],
         minimum_budget=0,
     )
     return {
         "reference_mean_nll": sum(reference_nll) / len(reference_nll),
         "candidate_mean_nll": sum(candidate_nll) / len(candidate_nll),
-        "mean_nll_delta": sum(c - r for r, c in zip(reference_nll, candidate_nll))
+        "mean_nll_delta": sum(c - r for r, c in zip(reference_nll, candidate_nll, strict=True))
         / len(reference_nll),
         "paired_delta_se": run.paired_delta_se(candidate_nll, reference_nll),
         **summary,
@@ -70,7 +87,7 @@ def _greedy_attribution(bf16: list[int], source: list[int], product: list[int]) 
         "both_differ_from_bf16_same_prediction": 0,
         "both_differ_from_bf16_different_predictions": 0,
     }
-    for reference, source_token, product_token in zip(bf16, source, product):
+    for reference, source_token, product_token in zip(bf16, source, product, strict=True):
         source_differs = source_token != reference
         product_differs = product_token != reference
         if not source_differs and not product_differs:
@@ -103,8 +120,14 @@ def _severe_attribution(bf16: list[float], source: list[float], product: list[fl
     }
 
 
-def compare(source_path: Path | None, product_campaign_path: Path, artifact_path: Path,
-            bf16_campaign_path: Path, repeat_path: Path, tokens: int) -> dict:
+def compare(
+    source_path: Path | None,
+    product_campaign_path: Path,
+    artifact_path: Path,
+    bf16_campaign_path: Path,
+    repeat_path: Path,
+    tokens: int,
+) -> dict:
     if tokens not in SUPPORTED_TOKENS:
         raise ValueError(f"unsupported localization token length: {tokens}")
     if source_path is not None:
@@ -119,8 +142,10 @@ def compare(source_path: Path | None, product_campaign_path: Path, artifact_path
     )
     product_campaign = json.loads(product_campaign_path.read_text(encoding="utf-8"))
     product_cells = [
-        cell for cell in product_campaign["cells"]
-        if cell.get("scheme") == "r9700-g16" and cell.get("schedule") == "prefill"
+        cell
+        for cell in product_campaign["cells"]
+        if cell.get("scheme") == "r9700-g16"
+        and cell.get("schedule") == "prefill"
         and cell.get("prompt_tokens") == tokens
     ]
     if len(product_cells) != 1:
@@ -129,12 +154,16 @@ def compare(source_path: Path | None, product_campaign_path: Path, artifact_path
 
     bf16_path = Path(product_validation["bf16_cell"]["path"])
     bf16_report, bf16_nll, bf16_argmax = _load_bf16(bf16_path)
-    bf16_key = _source_key({"source": {
-        "config_sha256": bf16_report["source_config_sha256"],
-        "index_sha256": bf16_report["source_index_sha256"],
-        "shards_sha256": bf16_report["source_shards_sha256"],
-        "corpus_ids_sha256": bf16_report["corpus_ids_sha256"],
-    }})
+    bf16_key = _source_key(
+        {
+            "source": {
+                "config_sha256": bf16_report["source_config_sha256"],
+                "index_sha256": bf16_report["source_index_sha256"],
+                "shards_sha256": bf16_report["source_shards_sha256"],
+                "corpus_ids_sha256": bf16_report["corpus_ids_sha256"],
+            }
+        }
+    )
     if (
         bf16_report.get("prompt_tokens") != tokens
         or bf16_report.get("skip_tokens") != tokens // 2
@@ -168,8 +197,10 @@ def compare(source_path: Path | None, product_campaign_path: Path, artifact_path
             "bf16_cell": _input(bf16_path),
         },
         "workload": {
-            "tokens": tokens, "skip_tokens": tokens // 2,
-            "scored_positions": len(bf16_nll), "schedule": "prefill",
+            "tokens": tokens,
+            "skip_tokens": tokens // 2,
+            "scored_positions": len(bf16_nll),
+            "schedule": "prefill",
             "prefill_chunk": 4096,
         },
         "product_vs_bf16": product_vs_bf16,
@@ -188,9 +219,13 @@ def compare(source_path: Path | None, product_campaign_path: Path, artifact_path
     if _source_key(source_report) != bf16_key:
         raise ValueError("source-codec and product BF16 source/corpus identities differ")
     if (
-        source_report.get("workload") != {
-            "tokens": tokens, "skip": "half", "prefill_chunk": 4096,
-            "schedule": "prefill", "device": 0,
+        source_report.get("workload")
+        != {
+            "tokens": tokens,
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": 0,
         }
         or len(source_nll) != tokens // 2 - 1
         or len(source_argmax) != tokens // 2 - 1
@@ -198,23 +233,21 @@ def compare(source_path: Path | None, product_campaign_path: Path, artifact_path
         raise ValueError("source/product/BF16 scored-position domains differ")
     if source_report["identity"] != identity:
         raise ValueError("source-codec and product artifact identities differ")
-    report.update({
-        "source_codec_vs_bf16": _pair(
-            bf16_nll, source_nll, bf16_argmax, source_argmax
-        ),
-        "product_minus_source_codec": _pair(
-            source_nll, product_nll, source_argmax, product_argmax
-        ),
-        "greedy_attribution": _greedy_attribution(
-            bf16_argmax, source_argmax, product_argmax
-        ),
-        "severe_attribution": _severe_attribution(bf16_nll, source_nll, product_nll),
-        "limitations": [
-            "The source-codec route fixes represented weights while retaining BF16 activations and matrix arithmetic.",
-            "Product-minus-source therefore localizes the collective runtime increment: activation quantization, product matrix arithmetic/reduction, FP8-K/INT4-V cache effects, and fused implementation differences are not separable from these sidecars.",
-            "All argmax and product-minus-source severe transitions are diagnostic and do not alter either existing quality gate.",
-        ],
-    })
+    report.update(
+        {
+            "source_codec_vs_bf16": _pair(bf16_nll, source_nll, bf16_argmax, source_argmax),
+            "product_minus_source_codec": _pair(
+                source_nll, product_nll, source_argmax, product_argmax
+            ),
+            "greedy_attribution": _greedy_attribution(bf16_argmax, source_argmax, product_argmax),
+            "severe_attribution": _severe_attribution(bf16_nll, source_nll, product_nll),
+            "limitations": [
+                "The source-codec route fixes represented weights while retaining BF16 activations and matrix arithmetic.",
+                "Product-minus-source therefore localizes the collective runtime increment: activation quantization, product matrix arithmetic/reduction, FP8-K/INT4-V cache effects, and fused implementation differences are not separable from these sidecars.",
+                "All argmax and product-minus-source severe transitions are diagnostic and do not alter either existing quality gate.",
+            ],
+        }
+    )
     return report
 
 
@@ -232,12 +265,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.out.exists() or args.out.is_symlink():
             raise FileExistsError(f"refusing to overwrite {args.out}")
         report = compare(
-            args.source_codec, args.product_campaign, args.artifact,
-            args.bf16_campaign, args.bf16_repeat_comparison, args.tokens,
+            args.source_codec,
+            args.product_campaign,
+            args.artifact,
+            args.bf16_campaign,
+            args.bf16_repeat_comparison,
+            args.tokens,
         )
-        _atomic_new(
-            args.out, (json.dumps(report, indent=2, allow_nan=False) + "\n").encode()
-        )
+        _atomic_new(args.out, (json.dumps(report, indent=2, allow_nan=False) + "\n").encode())
         return 0
     except (FileExistsError, KeyError, OSError, RuntimeError, ValueError) as error:
         print(f"compare-fp8-hybrid-execution: {error}", file=sys.stderr)

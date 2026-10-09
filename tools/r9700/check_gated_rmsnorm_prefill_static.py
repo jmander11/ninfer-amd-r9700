@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 
 def _one(body: str, pattern: str, label: str) -> int:
@@ -22,19 +22,22 @@ def check(path: Path) -> dict[str, int | str | bool]:
     functions: list[tuple[str, str]] = []
     for index, start in enumerate(starts):
         end = starts[index + 1].start() if index + 1 < len(starts) else len(text)
-        functions.append((start.group(1), text[start.start():end]))
+        functions.append((start.group(1), text[start.start() : end]))
     marker = "gated_rmsnorm_k6144_token8_kernel"
     selected = [(symbol, body) for symbol, body in functions if marker in symbol]
     if len(selected) != 1:
         raise ValueError(f"expected one exact qualification symbol, found {len(selected)}")
     symbol, body = selected[0]
-    records = [record for record in re.split(r"(?=^  - \.args:)", text, flags=re.MULTILINE)
-               if re.search(rf"^    \.name:\s+{re.escape(symbol)}$", record,
-                            flags=re.MULTILINE)]
+    records = [
+        record
+        for record in re.split(r"(?=^  - \.args:)", text, flags=re.MULTILINE)
+        if re.search(rf"^    \.name:\s+{re.escape(symbol)}$", record, flags=re.MULTILINE)
+    ]
     if len(records) != 1:
         raise ValueError(f"expected one exact metadata record, found {len(records)}")
-    maximum_workgroup = _one(records[0], r"^\s*\.max_flat_workgroup_size:\s*(\d+)",
-                             "maximum workgroup")
+    maximum_workgroup = _one(
+        records[0], r"^\s*\.max_flat_workgroup_size:\s*(\d+)", "maximum workgroup"
+    )
     lds = _one(body, r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS")
     private = _one(body, r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)", "private")
     vgprs = _one(body, r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)", "VGPR")
@@ -56,10 +59,17 @@ def check(path: Path) -> dict[str, int | str | bool]:
         raise ValueError(f"resources fail vgprs={vgprs}/120 occupancy={occupancy}/12")
     if wave32 != 1 or wgp != 1 or maximum_workgroup != 256:
         raise ValueError(
-            f"execution geometry fails wave32={wave32} WGP={wgp} maxWG={maximum_workgroup}")
-    return {"symbol": symbol, "vgprs": vgprs, "occupancy": occupancy,
-            "maximum_workgroup": maximum_workgroup, "vector_loads": vector_loads,
-            "production": True, "rows_minimum": 64}
+            f"execution geometry fails wave32={wave32} WGP={wgp} maxWG={maximum_workgroup}"
+        )
+    return {
+        "symbol": symbol,
+        "vgprs": vgprs,
+        "occupancy": occupancy,
+        "maximum_workgroup": maximum_workgroup,
+        "vector_loads": vector_loads,
+        "production": True,
+        "rows_minimum": 64,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:

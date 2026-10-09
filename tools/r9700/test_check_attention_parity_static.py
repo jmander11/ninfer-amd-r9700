@@ -5,25 +5,26 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent
 CHECK = ROOT / "check_attention_parity_static.py"
+ASSEMBLY = ROOT / "build" / "kv_op_qual.s"
+
+
+def setUpModule() -> None:
+    # Check the assembly of the current source, never a stale build product.
+    subprocess.run(["make", "-s", "-C", str(ROOT), "build/kv_op_qual.s"], check=True)
 
 
 class AttentionParityStaticTest(unittest.TestCase):
     def test_current_gfx1201_assembly(self) -> None:
-        assembly = ROOT / "build" / "kv_op_qual.s"
-        if not assembly.exists():
-            self.skipTest("build/kv_op_qual.s has not been generated")
+        assembly = ASSEMBLY
         subprocess.run(["python3", str(CHECK), str(assembly)], check=True)
 
     def test_rejects_resource_mutation(self) -> None:
-        assembly = ROOT / "build" / "kv_op_qual.s"
-        if not assembly.exists():
-            self.skipTest("build/kv_op_qual.s has not been generated")
+        assembly = ASSEMBLY
         text = assembly.read_text(encoding="utf-8")
-        marker = ".vgpr_count:     24"
-        symbol = "qk_wmma_batched_dflash_verify_kernelILb1EE"
+        marker = ".vgpr_count:     235"
+        symbol = "dense_verify_kernelILj16EE"
         metadata = text.find(".amdgpu_metadata")
         symbol_at = text.find(symbol, metadata)
         start = text.rfind(".name:", metadata, symbol_at)
@@ -31,12 +32,16 @@ class AttentionParityStaticTest(unittest.TestCase):
         self.assertGreaterEqual(location, 0)
         with tempfile.TemporaryDirectory() as temporary:
             mutated = Path(temporary) / "mutated.s"
-            mutated.write_text(text[:location] + ".vgpr_count:     25" +
-                               text[location + len(marker):],
-                               encoding="utf-8")
-            result = subprocess.run(["python3", str(CHECK), str(mutated)],
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True)
+            mutated.write_text(
+                text[:location] + ".vgpr_count:     236" + text[location + len(marker) :],
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["python3", str(CHECK), str(mutated)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
             self.assertNotEqual(result.returncode, 0)
 
 

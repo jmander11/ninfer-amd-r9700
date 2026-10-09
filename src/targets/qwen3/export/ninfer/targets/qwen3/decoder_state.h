@@ -11,6 +11,10 @@
 #include <optional>
 #include <span>
 
+namespace ninfer::ops::r9700::kv {
+struct Fp8Int4KvAppendArgs;
+} // namespace ninfer::ops::r9700::kv
+
 namespace ninfer::targets::qwen3 {
 
 // The sole Qwen3.8 growing-cache identity. K is direct OCP E4M3FN, V is canonical signed INT4,
@@ -18,12 +22,12 @@ namespace ninfer::targets::qwen3 {
 // sharing one statically selected V group. There is no dtype, K scale, K mean, sparsity policy,
 // keep-fraction, or alternate growing-cache branch.
 struct DecoderStateSpec {
-    std::uint32_t full_attention_layers     = 0;
-    std::uint32_t mtp_layers                = 0;
-    std::uint32_t capacity                  = 0;
-    std::int32_t kv_heads                   = 0;
-    std::int32_t attention_head_dim         = 0;
-    std::int32_t value_group                = 0;
+    std::uint32_t full_attention_layers = 0;
+    std::uint32_t mtp_layers            = 0;
+    std::uint32_t capacity              = 0;
+    std::int32_t kv_heads               = 0;
+    std::int32_t attention_head_dim     = 0;
+    std::int32_t value_group            = 0;
     Fp8KInt4VPlaneLayouts text_plane_layouts;
     Fp8KInt4VPlaneLayouts mtp_plane_layouts;
     bool enable_mtp                         = false;
@@ -47,18 +51,18 @@ struct PagedKVCacheLayout {
 // launched mutation poisons only this sequence; no cache frontier can advance before device status
 // has been copied back and the ordered stream has completed.
 struct PagedKVPublication {
-    std::uint32_t valid_frontier = 0;
-    bool healthy                 = true;
-    bool transaction_open        = false;
+    std::uint32_t valid_frontier         = 0;
+    bool healthy                         = true;
+    bool transaction_open                = false;
     std::uint64_t transaction_generation = 0;
 };
 
 struct PagedKVTransactionWorkspace {
     // Host-position transactions stage through positions. Device-position transactions consume
     // their caller-owned I32 panel directly and require only status.
-    std::uint32_t* positions = nullptr;
+    std::uint32_t* positions      = nullptr;
     std::size_t position_capacity = 0;
-    std::uint32_t* status = nullptr;
+    std::uint32_t* status         = nullptr;
     // Fixed-address cumulative frontier for a segmented MTP round. Ordinary one-segment and
     // compaction transactions leave this null.
     std::uint32_t* cursor = nullptr;
@@ -73,6 +77,7 @@ public:
     PagedKVCacheView() noexcept = default;
 
     [[nodiscard]] bool valid() const noexcept { return cache_ != nullptr; }
+
     [[nodiscard]] std::uint32_t max_context() const noexcept;
     [[nodiscard]] Fp8KInt4VPagedKVLayerView layer_view(std::uint32_t layer) const;
 
@@ -80,7 +85,7 @@ private:
     friend class PagedKVCache;
     PagedKVCacheView(const PagedKVCache& cache, const PagedKVAllocation& allocation) noexcept;
 
-    const PagedKVCache* cache_ = nullptr;
+    const PagedKVCache* cache_           = nullptr;
     const PagedKVAllocation* allocation_ = nullptr;
 };
 
@@ -94,64 +99,62 @@ public:
     PagedKVCache& operator=(PagedKVCache&&)      = delete;
 
     [[nodiscard]] std::uint32_t max_context() const noexcept { return max_context_; }
+
     [[nodiscard]] std::uint32_t layers() const noexcept { return layers_; }
+
     [[nodiscard]] const Fp8KInt4VPagedKVSpec& spec() const noexcept { return spec_; }
+
     [[nodiscard]] Fp8KInt4VSemanticFingerprint fingerprint() const noexcept {
         return fp8_k_int4_v_semantic_fingerprint(spec_);
     }
+
     [[nodiscard]] PagedKVPool& pool() noexcept { return pool_; }
+
     [[nodiscard]] const PagedKVPool& pool() const noexcept { return pool_; }
 
     [[nodiscard]] PagedKVCacheView execution_view(const PagedKVAllocation& allocation) const;
-    [[nodiscard]] PagedKVLayerRead
-    published_layer_read(const PagedKVAllocation& allocation,
-                         const PagedKVPublication& publication,
-                         std::uint32_t layer) const;
-    [[nodiscard]] Fp8KInt4VPagedKVLayerView
-    layer_view(std::int32_t layer, const PagedKVAllocation& allocation) const;
+    [[nodiscard]] PagedKVLayerRead published_layer_read(const PagedKVAllocation& allocation,
+                                                        const PagedKVPublication& publication,
+                                                        std::uint32_t layer) const;
+    [[nodiscard]] Fp8KInt4VPagedKVLayerView layer_view(std::int32_t layer,
+                                                       const PagedKVAllocation& allocation) const;
     [[nodiscard]] Fp8KInt4VAppendBinding
     bind_append(const PagedKVAllocation& allocation, std::int32_t layer,
                 std::span<const std::uint32_t> logical_positions) const;
 
-    [[nodiscard]] PagedKVTransaction
-    begin_append(PagedKVAllocation& allocation, PagedKVPublication& publication,
-                 std::span<const std::uint32_t> logical_positions,
-                 PagedKVTransactionWorkspace workspace);
-    [[nodiscard]] PagedKVTransaction
-    begin_device_append(PagedKVAllocation& allocation, PagedKVPublication& publication,
-                        const std::int32_t* device_positions, std::size_t position_count,
-                        PagedKVTransactionWorkspace workspace);
+    [[nodiscard]] PagedKVTransaction begin_append(PagedKVAllocation& allocation,
+                                                  PagedKVPublication& publication,
+                                                  std::span<const std::uint32_t> logical_positions,
+                                                  PagedKVTransactionWorkspace workspace);
+    [[nodiscard]] PagedKVTransaction begin_device_append(PagedKVAllocation& allocation,
+                                                         PagedKVPublication& publication,
+                                                         const std::int32_t* device_positions,
+                                                         std::size_t position_count,
+                                                         PagedKVTransactionWorkspace workspace);
     // Opens a fixed-maximum launch whose active prefix count is produced on device. Pending reads
     // are authorized only up to the conservative maximum and must still consume causal row
     // positions; commit resolves the count and publishes exactly that many tokens, including zero.
-    [[nodiscard]] PagedKVTransaction
-    begin_device_prefix_append(PagedKVAllocation& allocation, PagedKVPublication& publication,
-                               const std::int32_t* device_positions,
-                               std::size_t maximum_position_count,
-                               const std::int32_t* device_position_count,
-                               PagedKVTransactionWorkspace workspace);
+    [[nodiscard]] PagedKVTransaction begin_device_prefix_append(
+        PagedKVAllocation& allocation, PagedKVPublication& publication,
+        const std::int32_t* device_positions, std::size_t maximum_position_count,
+        const std::int32_t* device_position_count, PagedKVTransactionWorkspace workspace);
     // Opens one graph-capturable MTP round. The device base is copied into workspace.cursor once,
     // then each segment validates against and advances that cursor on the ordered stream. The
     // host publication remains open until one batched post-execution resolution.
-    [[nodiscard]] PagedKVTransaction
-    begin_device_segmented_append(PagedKVAllocation& allocation,
-                                  PagedKVPublication& publication,
-                                  const std::int32_t* device_base_frontier,
-                                  std::uint32_t minimum_base_frontier,
-                                  std::uint32_t maximum_base_frontier,
-                                  std::uint32_t visible_frontier_limit,
-                                  PagedKVTransactionWorkspace workspace,
-                                  const std::int32_t* device_table_row = nullptr);
-    [[nodiscard]] PagedKVTransaction
-    begin_compact(PagedKVAllocation& allocation, PagedKVPublication& publication,
-                  PagedKVTransactionWorkspace workspace);
+    [[nodiscard]] PagedKVTransaction begin_device_segmented_append(
+        PagedKVAllocation& allocation, PagedKVPublication& publication,
+        const std::int32_t* device_base_frontier, std::uint32_t minimum_base_frontier,
+        std::uint32_t maximum_base_frontier, std::uint32_t visible_frontier_limit,
+        PagedKVTransactionWorkspace workspace, const std::int32_t* device_table_row = nullptr);
+    [[nodiscard]] PagedKVTransaction begin_compact(PagedKVAllocation& allocation,
+                                                   PagedKVPublication& publication,
+                                                   PagedKVTransactionWorkspace workspace);
 
     // Close a previously published speculative suffix without touching its now-invisible bytes.
     // This is the zero-copy rollback counterpart to begin_compact: callers use begin_compact when
     // accepted tokens must be gathered into a different logical order, and truncate_publication
     // when the retained prefix is already physically in place (including a zero-token rollback).
-    void truncate_publication(const PagedKVAllocation& allocation,
-                              PagedKVPublication& publication,
+    void truncate_publication(const PagedKVAllocation& allocation, PagedKVPublication& publication,
                               std::uint32_t retained_frontier) const;
 
 private:
@@ -174,21 +177,27 @@ public:
     PagedKVLayerRead() noexcept = default;
 
     [[nodiscard]] bool valid_for(hipStream_t stream) const noexcept;
+
     [[nodiscard]] const Fp8KInt4VPagedKVLayerView& layer() const noexcept { return layer_; }
-    [[nodiscard]] std::uint32_t visible_frontier() const noexcept {
-        return visible_frontier_;
-    }
+
+    [[nodiscard]] std::uint32_t visible_frontier() const noexcept { return visible_frontier_; }
+
     [[nodiscard]] std::uint32_t mapped_pages() const noexcept { return mapped_pages_; }
+
     [[nodiscard]] bool pending() const noexcept { return pending_; }
+
     [[nodiscard]] const std::int32_t* device_table_row() const noexcept {
         return device_table_row_;
     }
+
     [[nodiscard]] const std::uint32_t* pool_block_tables() const noexcept {
         return pool_block_tables_;
     }
+
     [[nodiscard]] std::uint32_t pool_table_row_stride() const noexcept {
         return pool_table_row_stride_;
     }
+
     [[nodiscard]] std::uint32_t pool_table_row_count() const noexcept {
         return pool_table_row_count_;
     }
@@ -197,37 +206,31 @@ private:
     friend class PagedKVCache;
     friend class PagedKVTransaction;
 
-    PagedKVLayerRead(Fp8KInt4VPagedKVLayerView layer,
-                     const PagedKVAllocation& allocation,
-                     const PagedKVPublication& publication,
-                     std::uint32_t publication_frontier,
-                     std::uint32_t visible_frontier,
-                     std::uint32_t mapped_pages,
-                     std::int32_t bound_row,
-                     std::uint64_t mapping_generation,
-                     std::uint64_t generation,
-                     hipStream_t ordered_stream,
-                     bool pending,
-                     const std::int32_t* device_table_row = nullptr,
+    PagedKVLayerRead(Fp8KInt4VPagedKVLayerView layer, const PagedKVAllocation& allocation,
+                     const PagedKVPublication& publication, std::uint32_t publication_frontier,
+                     std::uint32_t visible_frontier, std::uint32_t mapped_pages,
+                     std::int32_t bound_row, std::uint64_t mapping_generation,
+                     std::uint64_t generation, hipStream_t ordered_stream, bool pending,
+                     const std::int32_t* device_table_row   = nullptr,
                      const std::uint32_t* pool_block_tables = nullptr,
-                     std::uint32_t pool_table_row_stride = 0,
-                     std::uint32_t pool_table_row_count = 0) noexcept;
+                     std::uint32_t pool_table_row_stride    = 0,
+                     std::uint32_t pool_table_row_count     = 0) noexcept;
 
     Fp8KInt4VPagedKVLayerView layer_;
-    const PagedKVAllocation* allocation_ = nullptr;
-    const PagedKVPublication* publication_ = nullptr;
-    std::uint32_t publication_frontier_ = 0;
-    std::uint32_t visible_frontier_ = 0;
-    std::uint32_t mapped_pages_ = 0;
-    std::int32_t bound_row_ = -1;
-    std::uint64_t mapping_generation_ = 0;
-    std::uint64_t generation_ = 0;
-    hipStream_t ordered_stream_ = nullptr;
-    bool pending_ = false;
-    const std::int32_t* device_table_row_ = nullptr;
+    const PagedKVAllocation* allocation_    = nullptr;
+    const PagedKVPublication* publication_  = nullptr;
+    std::uint32_t publication_frontier_     = 0;
+    std::uint32_t visible_frontier_         = 0;
+    std::uint32_t mapped_pages_             = 0;
+    std::int32_t bound_row_                 = -1;
+    std::uint64_t mapping_generation_       = 0;
+    std::uint64_t generation_               = 0;
+    hipStream_t ordered_stream_             = nullptr;
+    bool pending_                           = false;
+    const std::int32_t* device_table_row_   = nullptr;
     const std::uint32_t* pool_block_tables_ = nullptr;
-    std::uint32_t pool_table_row_stride_ = 0;
-    std::uint32_t pool_table_row_count_ = 0;
+    std::uint32_t pool_table_row_stride_    = 0;
+    std::uint32_t pool_table_row_count_     = 0;
 };
 
 // One transaction covers every layer of one Text or MTP cache. It stages checked host positions
@@ -237,16 +240,22 @@ private:
 class PagedKVTransaction {
 public:
     ~PagedKVTransaction() noexcept;
-    PagedKVTransaction(const PagedKVTransaction&) = delete;
+    PagedKVTransaction(const PagedKVTransaction&)            = delete;
     PagedKVTransaction& operator=(const PagedKVTransaction&) = delete;
     PagedKVTransaction(PagedKVTransaction&& other) noexcept;
     PagedKVTransaction& operator=(PagedKVTransaction&& other) noexcept;
 
     void launch_append_layer(std::uint32_t layer, const hip_bfloat16* keys,
                              const hip_bfloat16* values, hipStream_t stream);
+    // The same layer append for the distinct transactions of one compact decode batch (at most
+    // four, one cache), as one codec launch. Each transaction keeps its own host authority,
+    // positions, table row and status word exactly as its launch_append_layer would.
+    static void launch_append_layers(std::span<PagedKVTransaction* const> transactions,
+                                     std::uint32_t layer, std::span<const hip_bfloat16* const> keys,
+                                     std::span<const hip_bfloat16* const> values,
+                                     hipStream_t stream);
     void launch_compact_layer(std::uint32_t layer, std::uint32_t prefix,
-                              std::span<const std::uint32_t> selected_path,
-                              hipStream_t stream);
+                              std::span<const std::uint32_t> selected_path, hipStream_t stream);
     void begin_device_segment(const std::int32_t* device_positions,
                               std::size_t maximum_position_count,
                               const std::int32_t* device_position_count);
@@ -254,16 +263,17 @@ public:
     // Graph replay executes already-captured codec/cursor nodes. This marks the host authority as
     // in flight so the same one-shot resolution and failure poisoning rules apply.
     void mark_graph_replay(hipStream_t stream);
-    void enqueue_segmented_resolution(std::uint32_t* host_status,
-                                      std::uint32_t* host_cursor);
+    void enqueue_segmented_resolution(std::uint32_t* host_status, std::uint32_t* host_cursor);
     void finish_segmented_resolution(std::uint32_t status, std::uint32_t cursor,
                                      std::uint32_t retained_frontier);
     // Capture records device work but must neither publish the representative frontier nor leave
     // a dummy host authority open after hipStreamEndCapture.
     void close_captured_segmented();
+
     // For device-prefix transactions this is the conservative launch maximum; the committed
     // count remains device-owned until commit() resolves it.
     [[nodiscard]] std::size_t position_count() const noexcept { return position_count_; }
+
     [[nodiscard]] PagedKVLayerRead pending_layer_read(std::uint32_t layer) const;
     [[nodiscard]] std::uint32_t commit();
     void abort() noexcept;
@@ -271,48 +281,52 @@ public:
 private:
     friend class PagedKVCache;
     PagedKVTransaction(PagedKVCache& cache, PagedKVAllocation& allocation,
-                       PagedKVPublication& publication,
-                       std::span<const std::uint32_t> positions,
+                       PagedKVPublication& publication, std::span<const std::uint32_t> positions,
                        const std::int32_t* device_positions, std::size_t position_count,
                        const std::int32_t* device_position_count,
                        PagedKVTransactionWorkspace workspace, bool append_mode,
                        const std::int32_t* device_base_frontier = nullptr,
-                       std::uint32_t minimum_base_frontier = 0,
-                       std::uint32_t maximum_base_frontier = 0,
-                       std::uint32_t visible_frontier_limit = 0,
-                       const std::int32_t* device_table_row = nullptr);
+                       std::uint32_t minimum_base_frontier      = 0,
+                       std::uint32_t maximum_base_frontier      = 0,
+                       std::uint32_t visible_frontier_limit     = 0,
+                       const std::int32_t* device_table_row     = nullptr);
 
     void prepare_launch(hipStream_t stream);
+    // Validates and stages one layer append; record_append_layer follows its launch.
+    [[nodiscard]] ops::r9700::kv::Fp8Int4KvAppendArgs
+    prepare_append_layer(std::uint32_t layer, const hip_bfloat16* keys, const hip_bfloat16* values,
+                         hipStream_t stream);
+    void record_append_layer(std::uint32_t layer) noexcept;
     void require_open(const char* operation) const;
     void require_new_layer(std::uint32_t layer, const char* operation) const;
     void finish(bool poison) noexcept;
 
-    PagedKVCache* cache_ = nullptr;
-    PagedKVAllocation* allocation_ = nullptr;
+    PagedKVCache* cache_             = nullptr;
+    PagedKVAllocation* allocation_   = nullptr;
     PagedKVPublication* publication_ = nullptr;
     std::span<const std::uint32_t> positions_;
-    const std::int32_t* device_positions_ = nullptr;
-    std::size_t position_count_ = 0;
+    const std::int32_t* device_positions_      = nullptr;
+    std::size_t position_count_                = 0;
     const std::int32_t* device_position_count_ = nullptr;
-    const std::int32_t* device_base_frontier_ = nullptr;
-    const std::int32_t* device_table_row_ = nullptr;
+    const std::int32_t* device_base_frontier_  = nullptr;
+    const std::int32_t* device_table_row_      = nullptr;
     PagedKVTransactionWorkspace workspace_;
-    hipStream_t stream_ = nullptr;
-    std::uint32_t published_frontier_ = 0;
-    std::uint32_t initial_frontier_ = 0;
-    std::uint32_t minimum_base_frontier_ = 0;
-    std::uint32_t maximum_base_frontier_ = 0;
-    std::uint32_t visible_frontier_limit_ = 0;
-    std::uint32_t compact_prefix_ = 0;
-    std::uint64_t layers_launched_ = 0;
+    hipStream_t stream_                          = nullptr;
+    std::uint32_t published_frontier_            = 0;
+    std::uint32_t initial_frontier_              = 0;
+    std::uint32_t minimum_base_frontier_         = 0;
+    std::uint32_t maximum_base_frontier_         = 0;
+    std::uint32_t visible_frontier_limit_        = 0;
+    std::uint32_t compact_prefix_                = 0;
+    std::uint64_t layers_launched_               = 0;
     std::uint64_t allocation_mapping_generation_ = 0;
-    std::int32_t allocation_bound_row_ = -1;
-    bool append_mode_ = false;
-    bool segmented_mode_ = false;
-    bool segment_open_ = false;
-    bool launched_ = false;
-    bool positions_uploaded_ = false;
-    bool closed_ = false;
+    std::int32_t allocation_bound_row_           = -1;
+    bool append_mode_                            = false;
+    bool segmented_mode_                         = false;
+    bool segment_open_                           = false;
+    bool launched_                               = false;
+    bool positions_uploaded_                     = false;
+    bool closed_                                 = false;
 };
 
 struct DecoderStateLayout {

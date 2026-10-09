@@ -27,8 +27,7 @@ class PvDeterminismProbeTest(unittest.TestCase):
         for rows in (1, 250, 251, 252, 8193):
             for query, head in ((0, 0), (7, 2), (31, 5)):
                 expected = sum(
-                    ((source + query * 17 + head * 29) % 251) + 1
-                    for source in range(rows)
+                    ((source + query * 17 + head * 29) % 251) + 1 for source in range(rows)
                 )
                 self.assertEqual(probe.probability_denominator(rows, query, head), expected)
 
@@ -36,8 +35,7 @@ class PvDeterminismProbeTest(unittest.TestCase):
         rows = 37
         coordinate = (7, 2, 31)
         expected = math.fsum(
-            probe.represented_probability(source, rows, 7, 2)
-            * probe.represented_value(source, 31)
+            probe.represented_probability(source, rows, 7, 2) * probe.represented_value(source, 31)
             for source in range(rows)
         )
         self.assertEqual(probe.sampled_fp64_oracle(rows, coordinate), expected)
@@ -48,8 +46,8 @@ class PvDeterminismProbeTest(unittest.TestCase):
         one_shot = probe.one_shot_pv(torch, probabilities, values)
         fixed = probe.fixed_order_pv(torch, probabilities, values, source_chunk=64)
         self.assertEqual(tuple(fixed.shape), (32, 6, 256))
-        self.assertTrue(probe._accuracy(torch, one_shot, 257)["pass"])
-        self.assertTrue(probe._accuracy(torch, fixed, 257)["pass"])
+        self.assertTrue(probe._accuracy(one_shot, 257)["pass"])
+        self.assertTrue(probe._accuracy(fixed, 257)["pass"])
         self.assertLessEqual(float((fixed - one_shot).abs().max().item()), 1.0e-6)
 
     def test_comparison_requires_exact_route_hashes(self) -> None:
@@ -61,23 +59,34 @@ class PvDeterminismProbeTest(unittest.TestCase):
         changed["cases"][-1]["routes"]["one-shot-einsum"]["sha256"] = "b" * 64
         comparison = probe.compare_reports(report, changed)
         self.assertFalse(comparison["all_routes_exact"])
-        self.assertTrue(
-            comparison["cases"][-1]["routes"]["fixed-ascending-chunks"]["exact"]
-        )
+        self.assertTrue(comparison["cases"][-1]["routes"]["fixed-ascending-chunks"]["exact"])
 
     @staticmethod
     def _report() -> dict:
         cases = []
         for rows in probe.SOURCE_EXTENTS:
-            route = {"sha256": "a" * 64, "finite": True,
-                     "accuracy": {"pass": True}}
-            cases.append({"source_rows": rows, "input_sha256": "c" * 64,
-                          "chunks": [list(value) for value in probe.source_chunks(rows)],
-                          "routes": {"one-shot-einsum": copy.deepcopy(route),
-                                     "fixed-ascending-chunks": copy.deepcopy(route)}})
-        return {"artifact_type": probe.SCHEMA, "schema_version": probe.SCHEMA_VERSION,
-                "generator": probe.GENERATOR, "geometry": {}, "fixed_route": {},
-                "provenance": {}, "all_accuracy_pass": True, "cases": cases}
+            route = {"sha256": "a" * 64, "finite": True, "accuracy": {"pass": True}}
+            cases.append(
+                {
+                    "source_rows": rows,
+                    "input_sha256": "c" * 64,
+                    "chunks": [list(value) for value in probe.source_chunks(rows)],
+                    "routes": {
+                        "one-shot-einsum": copy.deepcopy(route),
+                        "fixed-ascending-chunks": copy.deepcopy(route),
+                    },
+                }
+            )
+        return {
+            "artifact_type": probe.SCHEMA,
+            "schema_version": probe.SCHEMA_VERSION,
+            "generator": probe.GENERATOR,
+            "geometry": {},
+            "fixed_route": {},
+            "provenance": {},
+            "all_accuracy_pass": True,
+            "cases": cases,
+        }
 
 
 if __name__ == "__main__":

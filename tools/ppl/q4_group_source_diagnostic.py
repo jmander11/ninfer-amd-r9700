@@ -11,22 +11,21 @@ not evidence for the product A8Q4 execution profile.
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import struct
 import sys
-from typing import Iterable
+from collections import defaultdict
+from collections.abc import Iterable
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.reference.qwen3_8_27b_bf16 import protocol
-
+from tools.reference.qwen3_8_27b_bf16 import protocol  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_q4_group_source_diagnostic"
 COMPARISON_TYPE = "ninfer_qwen3_8_q4_group_source_comparison"
@@ -133,7 +132,9 @@ def _sidecar(path: Path, suffix: str) -> Path:
     return path.with_suffix(suffix)
 
 
-def _write_score(path: Path, report: dict, nlls: tuple[float, ...], argmax: tuple[int, ...]) -> None:
+def _write_score(
+    path: Path, report: dict, nlls: tuple[float, ...], argmax: tuple[int, ...]
+) -> None:
     targets = (path, _sidecar(path, ".nllf32"), _sidecar(path, ".argmaxi32"))
     if any(target.exists() or target.is_symlink() for target in targets):
         raise FileExistsError("refusing to overwrite Q4 group diagnostic output")
@@ -145,8 +146,10 @@ def _write_score(path: Path, report: dict, nlls: tuple[float, ...], argmax: tupl
     }
     created: list[Path] = []
     try:
-        _atomic_new(targets[1], nll_bytes); created.append(targets[1])
-        _atomic_new(targets[2], argmax_bytes); created.append(targets[2])
+        _atomic_new(targets[1], nll_bytes)
+        created.append(targets[1])
+        _atomic_new(targets[2], argmax_bytes)
+        created.append(targets[2])
         _atomic_new(path, (json.dumps(report, indent=2, allow_nan=False) + "\n").encode())
     except BaseException:
         for target in created:
@@ -169,6 +172,7 @@ def _source_identity(weights: Path, weight_map: dict[str, str], ids: list[int]) 
 
 def validate_source_metadata(weights: Path, weight_map: dict[str, str]) -> None:
     from safetensors import safe_open
+
     by_shard: dict[str, list] = defaultdict(list)
     for requirement in protocol.expected_text_tensors():
         by_shard[weight_map[requirement.name]].append(requirement)
@@ -176,8 +180,10 @@ def validate_source_metadata(weights: Path, weight_map: dict[str, str]) -> None:
         with safe_open(str(weights / shard), framework="numpy") as handle:
             for requirement in requirements:
                 tensor = handle.get_slice(requirement.name)
-                if (tuple(tensor.get_shape()) != requirement.shape
-                        or str(tensor.get_dtype()) != requirement.dtype):
+                if (
+                    tuple(tensor.get_shape()) != requirement.shape
+                    or str(tensor.get_dtype()) != requirement.dtype
+                ):
                     raise ValueError(f"{requirement.name} source metadata differs")
 
 
@@ -198,8 +204,13 @@ def preflight_payload(args: argparse.Namespace, weight_map: dict[str, str], ids:
         "status": "ready_for_source_only_gpu_diagnostic",
         "group_size": args.group,
         "source": _source_identity(args.weights, weight_map, ids),
-        "workload": {"tokens": len(ids), "skip": "half", "prefill_chunk": 4096,
-                     "schedule": "prefill", "device": args.device},
+        "workload": {
+            "tokens": len(ids),
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": args.device,
+        },
         "matrix_scope": {
             "raw_text_matrix_count": len(matrices),
             "logical_product_q4_matrix_count": 322,
@@ -234,8 +245,10 @@ def run_score(args: argparse.Namespace) -> int:
     if args.preflight_only:
         _atomic_new(
             args.out,
-            (json.dumps(preflight_payload(args, weight_map, ids), indent=2, allow_nan=False)
-             + "\n").encode(),
+            (
+                json.dumps(preflight_payload(args, weight_map, ids), indent=2, allow_nan=False)
+                + "\n"
+            ).encode(),
         )
         return 0
     source = _source_identity(args.weights, weight_map, ids)
@@ -246,8 +259,12 @@ def run_score(args: argparse.Namespace) -> int:
     checkpoint = GroupQuantizedCheckpoint(SourceCheckpoint(args.weights, weight_map), args.group)
     checkpoint.validate_metadata()
     scorer = LayerMajorTextScorer(
-        checkpoint, device_index=args.device, prefill_chunk=4096, schedule="prefill",
-        skip_text="half", kv_value_group=None,
+        checkpoint,
+        device_index=args.device,
+        prefill_chunk=4096,
+        schedule="prefill",
+        skip_text="half",
+        kv_value_group=None,
     )
     vectors = scorer.score(ids)
     finite = [value for value in vectors.nlls if math.isfinite(value)]
@@ -271,15 +288,22 @@ def run_score(args: argparse.Namespace) -> int:
             "bf16_backend": sha256_file(REPO / "tools/reference/qwen3_8_27b_bf16/backend.py"),
             "bf16_protocol": sha256_file(REPO / "tools/reference/qwen3_8_27b_bf16/protocol.py"),
         },
-        "workload": {"tokens": len(ids), "skip": "half", "prefill_chunk": 4096,
-                     "schedule": "prefill", "device": args.device},
+        "workload": {
+            "tokens": len(ids),
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": args.device,
+        },
         "result": {
-            "tokens_scored": len(vectors.nlls), "argmax_tokens": len(vectors.argmax),
+            "tokens_scored": len(vectors.nlls),
+            "argmax_tokens": len(vectors.argmax),
             "non_finite": len(vectors.nlls) - len(finite),
             "terrible_tokens": sum(value >= TERRIBLE_NLL for value in finite),
             "sum_nll": sum(finite),
             "mean_nll": sum(finite) / len(finite),
-            "max_nll": max(finite), "ppl": math.exp(sum(finite) / len(finite)),
+            "max_nll": max(finite),
+            "ppl": math.exp(sum(finite) / len(finite)),
             "score_seconds": vectors.score_seconds,
         },
         "command": [str(Path(sys.argv[0])), *sys.argv[1:]],
@@ -297,7 +321,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
-        "--preflight-only", action="store_true",
+        "--preflight-only",
+        action="store_true",
         help="validate/hash the complete source and matrix geometry without importing torch",
     )
     return parser

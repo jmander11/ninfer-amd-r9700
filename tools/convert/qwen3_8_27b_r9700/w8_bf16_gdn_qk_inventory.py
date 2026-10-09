@@ -15,15 +15,14 @@ from tools.convert.qwen3.common.inventory import (
     DIRECT_FORMATS,
     FP32,
     I32,
+    W8,
     ResourceSpec,
     StoredObjectSpec,
     TensorSpec,
-    W8,
     tensor_spec,
 )
 
 from . import source_inventory
-
 
 MODEL_ID = "qwen3.8-27b"
 WEIGHTS_ID = "r9700-w8-bf16-gdn-qk-eval"
@@ -33,8 +32,7 @@ RECIPE_ID = "r9700-w8g32-bf16-gdn-query-key-eval-v0"
 
 def _is_promoted(spec: TensorSpec) -> bool:
     return any(
-        spec.name == f"text/layers/{layer}/gdn/query_key"
-        for layer in source_inventory.GDN_LAYERS
+        spec.name == f"text/layers/{layer}/gdn/query_key" for layer in source_inventory.GDN_LAYERS
     )
 
 
@@ -88,10 +86,9 @@ def validate_inventory() -> None:
     ):
         raise ValueError("W8/BF16-GDN-QK inventory differs from the source plan")
     expected_counts = {BF16: 630, FP32: 96, I32: 1, W8: 391}
-    if FORMAT_COUNTS != expected_counts:
+    if expected_counts != FORMAT_COUNTS:
         raise ValueError(
-            "W8/BF16-GDN-QK format counts differ: "
-            f"expected {expected_counts}, got {FORMAT_COUNTS}"
+            f"W8/BF16-GDN-QK format counts differ: expected {expected_counts}, got {FORMAT_COUNTS}"
         )
     expected_bytes = {
         BF16: 2_071_912_928,
@@ -99,7 +96,7 @@ def validate_inventory() -> None:
         I32: 524_288,
         W8: 29_131_676_544,
     }
-    if FORMAT_ENCODED_BYTES != dict(sorted(expected_bytes.items())):
+    if dict(sorted(expected_bytes.items())) != FORMAT_ENCODED_BYTES:
         raise ValueError("W8/BF16-GDN-QK encoded byte totals differ from the fixed plan")
     if TENSOR_ENCODED_BYTES != 31_204_132_192:
         raise ValueError("W8/BF16-GDN-QK tensor payload byte total differs")
@@ -108,11 +105,11 @@ def validate_inventory() -> None:
     promoted = tuple(spec for spec in TENSOR_SPECS if _is_promoted(spec))
     if len(promoted) != 48 or any(spec.format != BF16 for spec in promoted):
         raise ValueError("W8/BF16-GDN-QK promoted role family changed")
-    for source, candidate in zip(
-        source_inventory.TENSOR_SPECS, TENSOR_SPECS, strict=True
-    ):
-        expected = BF16 if _is_promoted(source) else (
-            source.format if source.format in DIRECT_FORMATS else W8
+    for source, candidate in zip(source_inventory.TENSOR_SPECS, TENSOR_SPECS, strict=True):
+        expected = (
+            BF16
+            if _is_promoted(source)
+            else (source.format if source.format in DIRECT_FORMATS else W8)
         )
         if candidate.format != expected:
             raise ValueError(f"W8/BF16-GDN-QK format mismatch for {candidate.name}")
@@ -130,11 +127,11 @@ __all__ = [
     "OBJECT_SPECS",
     "RECIPE_ID",
     "RESOURCE_SPECS",
-    "ResourceSpec",
     "TARGET_KEY",
     "TENSOR_ENCODED_BYTES",
     "TENSOR_SPECS",
-    "TensorSpec",
     "WEIGHTS_ID",
+    "ResourceSpec",
+    "TensorSpec",
     "validate_inventory",
 ]

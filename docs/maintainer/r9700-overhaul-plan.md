@@ -15,7 +15,7 @@ historical floor/ceiling holds and package-regeneration prohibitions recorded be
 BF16 references; repeat only quality evidence affected by subsequent arithmetic or format changes.
 
 Replace the RTX 5090/CUDA implementation with one from-scratch Radeon AI PRO R9700 implementation.
-The delivered engine remains a single-GPU, single-resident-model, startup-fixed C=1..4 Qwen3.8-27B
+The delivered engine remains a single-GPU, single-resident-model, startup-fixed C=1..8 Qwen3.8-27B
 product. It is compiled only for RDNA 4 `gfx1201` and uses ROCm/HIP throughout. CUDA is removed;
 Vulkan is not a second product backend. NVFP4 is removed from the artifact registry, target
 identity, runtime state, kernels, tools, tests, and active documentation; it is not retained as a
@@ -32,8 +32,8 @@ The implementation decisions are:
 - Keep available subagent slots occupied with useful, bounded, independent CPU/static work while
   serialized GPU work or long builds are pending; the primary owner coordinates shared-file and
   GPU ownership. Do not create low-value work solely to occupy a slot.
-- Never schedule or require a product, benchmark, or profiling cell above C=4. Active evidence is
-  exactly C=1..4; any retained C=5..8 result is historical only.
+- Never schedule or require a product, benchmark, or profiling cell above C=8. Active evidence is
+  exactly C=1..8; cells measured under the former C=1..4 cap remain historical evidence.
 - ROCm/HIP is the sole production programming model.
 - Compile specifically with `--offload-arch=gfx1201`; do not add runtime GPU discovery or a generic
   multi-backend layer.
@@ -367,7 +367,7 @@ layout. Historical schema-v19 reports in the schema-v12 matrices resolve G16 C1.
 262144, 524288, 570304, 558080, 545856, 533632, 521408, and 509184 tokens; G32 resolves to
 262144, 524288, 593152, 580416, 567680, 555008, 542272, and 529536. C1/C2 were bounded by the
 per-request model context and C3..C8 by device memory for both groups. These manifests are not
-current C=1..4 product evidence and must be rerun under the migrated contract. Their G16/G32
+current product evidence and must be rerun under the migrated contract. Their G16/G32
 SHA-256 values are
 `be1d5727948512560f28a7e149547714f9b80dca96169646a2eef0310a883feb` and
 `c7e5020b03cd104440011fcc17095e3166defdc59045274192e6b930b027d922`; they bind the same all-Q4
@@ -716,8 +716,8 @@ Replace functional routes with measured gfx1201 families:
   `[2048,34816,5120]` qualifier report exists. Qualifier SHA-256
   `8f14df460c0b413cea99309a289c41cde2b71f32431450e76a9d4527d4af6306` for
   `profiles/bench/r9700-fp8-vs-a8q4-gate-up-shared-source-20260904.json` measured
-  4.083197 ms FP8 versus 6.826113 ms Q4 (1.671757x faster). The owner is
-  `tools/bench/decide_fp8_gate_up.py`; it admits only schema v2 with live harness-source and
+  4.083197 ms FP8 versus 6.826113 ms Q4 (1.671757x faster). The decision tool (retired with the
+  hipBLASLt FP8 gate/up qualifier in 438f6a89) admitted only schema v2 with live harness-source and
   executable hashes,
   the exact nine-point axis-sensitive FP64 represented-format oracle, seven balanced timing pairs,
   the R9700/auto-power complete-path identity, and retained P2048 trace/capacity hashes. It replaces the
@@ -742,7 +742,8 @@ Replace functional routes with measured gfx1201 families:
   refreshed executed-path proof for the shared-source gate and the distinct post-gate attention
   algorithm remains required before production promotion.
 - [x] Run the two fixed-shape physical inputs for the capacity-optimal post-gate/up FP8 role
-  decision, then execute `tools/bench/decide_fp8_post_gate_up.py`. The exact selected addition is
+  decision, then execute the post-gate/up decision tool (retired with the hipBLASLt FP8 gate/up
+  qualifier in 438f6a89). The exact selected addition is
   `text.attention.query_key` plus `text.attention.gate_value` at `[2048,7168,5120]` and
   `text.gdn.query_key` at `[2048,4096,5120]`: three role-consistent families, 80 objects,
   1,024,065,536 added bytes, and 87,724,946 ns of measured Q4 service. The attention roles share
@@ -2093,7 +2094,7 @@ Replace functional routes with measured gfx1201 families:
   value-Z, g, and beta; convolution/state remain after the boundary, through the existing GDN
   leaf family, with explicit caller-owned scratch. Scope is ordinary base Text T1 exact
   Q4+BF16_CTRL. The detailed native-IU4, BF16 reduction/seam, branch/barrier, LDS/resource gate
-  and `0.896 ms/token` ideal bound are in `plans/r9700-autonomous-todos.md`; full
+  and `0.896 ms/token` ideal bound are in the retired 2026-09 ledger (git history); full
   control+quantize+pair qualification/timing follows only after static feasibility and review.
   Normalization fusion remains second. No GPU action is currently admitted.
   The following GDN projection/control heterogeneous-grid direct qualification passed. The reviewed
@@ -2145,8 +2146,8 @@ Replace functional routes with measured gfx1201 families:
   acceptance-quality and whole DFlash work becomes the primary path to the C1 `>=60 tok/s` target.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
-  all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph
-  executable allocation; this is
+  all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4, the former cap). Bind the newly
+  measured Device Graph executable allocation; this is
   still required even though the aliased split scratch does not raise the modeled global arena.
   The prior CPU command structure in
   `profiles/bench/post-chunk-twelve-candidate-20260905` is a non-runnable template until regenerated
@@ -2193,7 +2194,7 @@ qualified functional baseline. Remove the superseded route once its replacement 
 ### Stage 5: graphs and scheduling
 
 1. Capture fixed-address decode rounds after eager semantics and lifetimes are stable.
-2. Prefer a finite startup-created graph set for the supported C=1..4 membership and speculative
+2. Prefer a finite startup-created graph set for the supported C=1..8 membership and speculative
    width tiers if HIP update constraints make dynamic updates fragile.
 3. Capture owned kernels directly. Admit a ROCm library call only after an on-device graph-safety
    and speed test.
@@ -2214,7 +2215,7 @@ qualified, and improves real Engine timing without invalid lifetime or capacity 
 2. Use `rocprofv3` for HIP/HSA dispatch, memory traces, and hardware counters; use Radeon GPU
    Profiler or Radeon GPU Analyzer only when they resolve a live attribution/ISA question.
 3. Measure real Engine prefill, first-token latency, per-request decode, aggregate decode, VRAM, and
-   long-context behavior at C=1..4 with the final artifact and default final KV format.
+   long-context behavior at C=1..8 with the final artifact and default final KV format.
 4. Run affected OpenAI/Anthropic schema and observable streaming/request behavior tests.
 5. Replace RTX 5090 build, command, performance, profiler, and hardware documentation rather than
    appending an AMD compatibility section.
@@ -2246,13 +2247,13 @@ artifact, ROCm/driver, and relevant settings recorded.
 - Capacity checks: one resident 27B artifact plus workspace, graph allocation, state, and KV at each
   supported concurrency/context point within the 32 GB device. A promoted split-512 attention
   route invalidates every pre-promotion capacity executable even when its aliased scratch leaves
-  the modeled global arena unchanged; rerun all 48 C=1..4 cells and bind the newly measured Device
-  Graph allocation before reusing capacity evidence.
+  the modeled global arena unchanged; rerun all 48 C=1..4 cells (the former C=1..4 cap) and bind
+  the newly measured Device Graph allocation before reusing capacity evidence.
 - Performance checks: Op latency for real shapes, Engine round attribution, prefill/first-token,
   per-request and aggregate decode, and end-to-end serving where claimed.
 - Pareto selection: compare only quality-eligible profiles with complete matched whole-inference
   and capacity cells. A profile dominates another only when it is no worse in mean-NLL delta,
-  new-severe-position rate, resolved capacity, and every required C=1..4 speed cell, and strictly
+  new-severe-position rate, resolved capacity, and every required C=1..8 speed cell, and strictly
   better in at least one. Quality is admission; retain one static-profile winner per recipe, then
   emit one `terminal_production_selection` by maximin matched throughput, capacity, quality-budget
   consumption, and canonical artifact/static identity in that order. The exact retained means
@@ -2289,7 +2290,7 @@ artifact, ROCm/driver, and relevant settings recorded.
 
 The overhaul is complete when NInfer builds only for HIP `gfx1201`, loads only the selected
 Qwen3.8 R9700 artifact identity, runs its complete supported CLI/serve workload on one R9700 at
-C=1..4, uses qualified R9700-native kernels and device graphs, meets numerical/state/capacity
+C=1..8, uses qualified R9700-native kernels and device graphs, meets numerical/state/capacity
 contracts, has direct R9700 performance evidence, and contains no active CUDA/Vulkan backend,
 runtime weight repacking, superseded checkpoint lane, or RTX 5090 product instruction. At that
 point integrate stable content into the active references and remove this plan.

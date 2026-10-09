@@ -2,58 +2,60 @@
 
 #include "fp8_int4_kv_append.h"
 
+#include <span>
+
 namespace ninfer::ops::r9700::kv {
 
 // First owned A3 QK stage: represented BF16 Q, paged OCP E4M3FN K, FP32 scores. It is a
 // vector baseline used to qualify page translation and score numerics before the raw-WMMA
 // challenger is admitted. q_to_kv is the fixed Qwen GQA ratio (six for Hq24/Hkv4).
 struct Fp8KvQkArgs {
-    const hip_bfloat16* query = nullptr; // [query_heads][256]
-    const std::uint8_t* key_codes = nullptr;
-    const std::uint32_t* page_table = nullptr;
-    std::uint32_t page_table_pages = 0;
-    const std::int32_t* page_table_row = nullptr;
+    const hip_bfloat16* query           = nullptr; // [query_heads][256]
+    const std::uint8_t* key_codes       = nullptr;
+    const std::uint32_t* page_table     = nullptr;
+    std::uint32_t page_table_pages      = 0;
+    const std::int32_t* page_table_row  = nullptr;
     std::uint32_t page_table_row_stride = 0;
-    std::uint32_t page_table_row_count = 0;
-    std::size_t context = 0;
-    std::size_t physical_tokens = 0;
-    std::uint32_t query_heads = 0;
-    std::uint32_t kv_heads = 0;
-    std::uint32_t q_to_kv = 0;
-    float attention_scale = 0.0F;
-    Fp8Int4KvPlaneLayout key_layout = Fp8Int4KvPlaneLayout::FeatureFastest;
-    float* scores = nullptr; // [query_heads][context]
+    std::uint32_t page_table_row_count  = 0;
+    std::size_t context                 = 0;
+    std::size_t physical_tokens         = 0;
+    std::uint32_t query_heads           = 0;
+    std::uint32_t kv_heads              = 0;
+    std::uint32_t q_to_kv               = 0;
+    float attention_scale               = 0.0F;
+    Fp8Int4KvPlaneLayout key_layout     = Fp8Int4KvPlaneLayout::FeatureFastest;
+    float* scores                       = nullptr; // [query_heads][context]
 };
 
-[[nodiscard]] hipError_t fp8_kv_qk_vector(const Fp8KvQkArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t fp8_kv_qk_vector(const Fp8KvQkArgs& a, hipStream_t stream) noexcept;
 
 // Raw gfx12 wave32 FP8xFP8-to-FP32 WMMA challenger. It tiles one KV head's six Q heads by sixteen
 // context tokens, leaves the unused ten WMMA rows zero, and uses the owned fragment map qualified
 // by r9700_qual. Its execution profile explicitly quantizes represented BF16 Q to E4M3FN before
 // the dot product; its FP8-Q oracle is therefore distinct from the vector baseline's BF16-Q oracle.
-[[nodiscard]] hipError_t fp8_kv_qk_wmma(const Fp8KvQkArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t fp8_kv_qk_wmma(const Fp8KvQkArgs& a, hipStream_t stream) noexcept;
 
 struct Int4KvPvArgs {
-    const float* probabilities = nullptr; // [query_heads][context], FP32
-    const std::uint8_t* value_codes = nullptr;
-    const std::uint16_t* value_scale_bits = nullptr;
-    const std::uint32_t* page_table = nullptr;
-    std::uint32_t page_table_pages = 0;
-    const std::int32_t* page_table_row = nullptr;
-    std::uint32_t page_table_row_stride = 0;
-    std::uint32_t page_table_row_count = 0;
-    std::size_t context = 0;
-    std::size_t physical_tokens = 0;
-    std::uint32_t query_heads = 0;
-    std::uint32_t kv_heads = 0;
-    std::uint32_t q_to_kv = 0;
-    std::uint32_t value_group = 0;
-    Fp8Int4KvPlaneLayout value_layout = Fp8Int4KvPlaneLayout::FeatureFastest;
+    const float* probabilities              = nullptr; // [query_heads][context], FP32
+    const std::uint8_t* value_codes         = nullptr;
+    const std::uint16_t* value_scale_bits   = nullptr;
+    const std::uint32_t* page_table         = nullptr;
+    std::uint32_t page_table_pages          = 0;
+    const std::int32_t* page_table_row      = nullptr;
+    std::uint32_t page_table_row_stride     = 0;
+    std::uint32_t page_table_row_count      = 0;
+    std::size_t context                     = 0;
+    std::size_t physical_tokens             = 0;
+    std::uint32_t query_heads               = 0;
+    std::uint32_t kv_heads                  = 0;
+    std::uint32_t q_to_kv                   = 0;
+    std::uint32_t value_group               = 0;
+    Fp8Int4KvPlaneLayout value_layout       = Fp8Int4KvPlaneLayout::FeatureFastest;
     Fp8Int4KvPlaneLayout value_scale_layout = Fp8Int4KvPlaneLayout::FeatureFastest;
-    float* output = nullptr; // [query_heads][256]
+    float* output                           = nullptr; // [query_heads][256]
 };
 
-[[nodiscard]] hipError_t int4_kv_pv_vector(const Int4KvPvArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t int4_kv_pv_vector(const Int4KvPvArgs& a, hipStream_t stream) noexcept;
 
 // Correctness-first fused A3 candidate. One wave32 block owns one Q head and streams the paged
 // context without materializing scores: BF16-Q/FP8-K scores feed online FP32 softmax, then each
@@ -64,22 +66,22 @@ struct Fp8Int4KvAttentionArgs {
     // instance and page table but may have different visible causal frontiers. query_rows is any
     // positive U32 extent; the launcher stages it into legal gfx1201 grid-Y intervals, so the
     // same score-streaming implementation serves decode, verification, and configured prefill.
-    const hip_bfloat16* query = nullptr;
-    const std::uint8_t* key_codes = nullptr;
-    const std::uint8_t* value_codes = nullptr;
+    const hip_bfloat16* query             = nullptr;
+    const std::uint8_t* key_codes         = nullptr;
+    const std::uint8_t* value_codes       = nullptr;
     const std::uint16_t* value_scale_bits = nullptr;
-    const std::uint32_t* page_table = nullptr;
-    std::uint32_t page_table_pages = 0;
-    const std::int32_t* page_table_row = nullptr;
-    std::uint32_t page_table_row_stride = 0;
-    std::uint32_t page_table_row_count = 0;
-    std::size_t context = 0;
-    std::size_t physical_tokens = 0;
-    std::uint32_t query_heads = 0;
-    std::uint32_t kv_heads = 0;
-    std::uint32_t q_to_kv = 0;
-    std::uint32_t value_group = 0;
-    std::uint32_t query_rows = 1;
+    const std::uint32_t* page_table       = nullptr;
+    std::uint32_t page_table_pages        = 0;
+    const std::int32_t* page_table_row    = nullptr;
+    std::uint32_t page_table_row_stride   = 0;
+    std::uint32_t page_table_row_count    = 0;
+    std::size_t context                   = 0;
+    std::size_t physical_tokens           = 0;
+    std::uint32_t query_heads             = 0;
+    std::uint32_t kv_heads                = 0;
+    std::uint32_t q_to_kv                 = 0;
+    std::uint32_t value_group             = 0;
+    std::uint32_t query_rows              = 1;
     // Optional device I32 array [query_rows] of zero-based causal positions. When null, every row
     // observes `context`; this is the single-row decode fast path. Each supplied position must be
     // in [0, context-1], and its visible context is position+1. The I32 representation is the
@@ -101,73 +103,96 @@ struct Fp8Int4KvAttentionArgs {
     // later row exact positive zero without reading that row's query, causal/tree metadata, or
     // cache. A negative or over-width value poisons every output row with NaN. This device-side
     // boundary permits one fixed-width captured launch to serve dynamic MTP verification panels.
-    const std::int32_t* active_query_rows = nullptr;
-    float attention_scale = 0.0F;
-    Fp8Int4KvPlaneLayout key_layout = Fp8Int4KvPlaneLayout::FeatureFastest;
-    Fp8Int4KvPlaneLayout value_layout = Fp8Int4KvPlaneLayout::FeatureFastest;
+    const std::int32_t* active_query_rows   = nullptr;
+    float attention_scale                   = 0.0F;
+    Fp8Int4KvPlaneLayout key_layout         = Fp8Int4KvPlaneLayout::FeatureFastest;
+    Fp8Int4KvPlaneLayout value_layout       = Fp8Int4KvPlaneLayout::FeatureFastest;
     Fp8Int4KvPlaneLayout value_scale_layout = Fp8Int4KvPlaneLayout::FeatureFastest;
     // Optional [query_heads][context] FP32 workspace for the native-WMMA route. The launcher
     // reuses it across query rows on the ordered stream, so its persistent cost is independent
     // of T. The score-streaming baseline ignores this field.
     float* score_workspace = nullptr;
-    float* output = nullptr; // [query_rows][query_heads][256]
+    float* output          = nullptr; // [query_rows][query_heads][256]
 };
 
-[[nodiscard]] hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& args,
-                                                      hipStream_t stream) noexcept;
-
-struct DensePrefillWmmaResources {
-    int registers = 0;
-    int static_shared_bytes = 0;
-    int local_bytes = 0;
-};
-
-// Staged causal prefill over bounded query panels. The caller owns one reusable FP32 score panel
-// and one FP32 maximum per (panel row, query head). QK uses Bk16 for calls below 512 rows and
-// Bk32 otherwise, independently of the private panel width. Row positions remain absolute.
-enum class DensePrefillFullScoreStage : std::uint32_t {
-    QkBk16 = 0U,
-    Maximum = 1U,
-    Pv = 2U,
-    QkBk32 = 3U,
-};
-[[nodiscard]] std::size_t fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-    std::uint32_t query_rows, std::size_t visible_context) noexcept;
-// Conservative envelope maximum; unlike the exact query above, this remains valid across the
-// sawtooth in panel widths as visible context grows.
-[[nodiscard]] std::size_t fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(
-    std::uint32_t maximum_query_rows, std::size_t maximum_visible_context) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill_full_score(
-    const Fp8Int4KvAttentionArgs& args, void* workspace, std::size_t workspace_bytes,
-    hipStream_t stream) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill_full_score_resources(
-    std::uint32_t value_group, DensePrefillFullScoreStage stage,
-    DensePrefillWmmaResources* resources) noexcept;
-
-// Native gfx12 decode challenger: raw wave32 FP8-Q/FP8-K WMMA writes one reusable FP32 score workspace,
-// followed by a stable FP32 softmax plus exact signed-INT4-times-FP16-scale PV consumer. Q's
-// private E4M3 cast is an implementation profile and is checked directly against the same
-// represented-input FP64 attention oracle; no FP16 probability or V materialization is introduced.
-[[nodiscard]] hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& args,
+[[nodiscard]] hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,
                                                      hipStream_t stream) noexcept;
 
-// Production DFlash K3..5/W4..6 chain route. The caller owns `rows` independent FP32
-// score planes (rows in {4, 5, 6}); QK, stable Softmax, and exact INT4/FP16 PV each launch once
-// across all causal rows.
-[[nodiscard]] std::size_t fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
-    std::size_t context, std::uint32_t rows) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_dflash_verify_batched_wmma(
-    const Fp8Int4KvAttentionArgs& args, hipStream_t stream) noexcept;
+struct DensePrefillWmmaResources {
+    int registers           = 0;
+    int static_shared_bytes = 0;
+    int local_bytes         = 0;
+};
 
-// Production long-context decode leaf for the one selected R9700 cache layout. T=1 keeps the
-// qualified FP8-Q/FP8-K WMMA score profile; fixed-width T=4 uses represented-BF16 Q and shares one
-// decoded 16-token K tile across all four rows and six query heads of each KV head. Both feed
+// Fused causal dense prefill without a score plane. Represented BF16 Q and exact-BF16 FP8 K feed
+// BF16 WMMA with FP32 accumulation; online FP32 Softmax produces FP16 probabilities for FP16
+// WMMA against INT4-times-FP16-scale V staged as FP16 V/8, with FP32 numerator and denominator.
+// Row positions are absolute; invalid rows, positions, page-table rows, and physical pages
+// poison exactly the dependent rows with NaN, and device-inactive rows are exact positive zero.
+// The launch needs no caller-owned workspace.
+[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill(const Fp8Int4KvAttentionArgs& a,
+                                                             hipStream_t stream) noexcept;
+// `split` selects the mid-row context-split instantiation of the same tile body.
+[[nodiscard]] hipError_t
+fp8_int4_kv_attention_dense_prefill_resources(std::uint32_t value_group, bool split,
+                                              DensePrefillWmmaResources* resources) noexcept;
+
+// Production mid-row route (use_mid_rows_attention: 9..127 host-fixed causal rows, and up to 1023
+// rows when the wave model splits the context, such as appended turns, tool results and prompt
+// tails): the dense-prefill tile arithmetic above, split over context chunks into the
+// caller-owned FP32 partial workspace and normalized by the stable FP32 merge of the packed
+// decode route. Row positions are absolute; invalid positions, page-table rows and
+// physical pages poison exactly the dependent rows with NaN. Device-selected row counts and tree
+// metadata are rejected.
+[[nodiscard]] std::size_t
+fp8_int4_kv_attention_mid_rows_workspace_bytes(std::size_t context, std::uint32_t rows) noexcept;
+// Closed-form planning bound covering every mid-row call of at most `max_rows` rows at every
+// context up to `context`: min(kMidRowsPartialRows, max_rows x chunk limit) partial slots.
+[[nodiscard]] std::size_t
+fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(std::size_t context,
+                                                        std::uint32_t max_rows) noexcept;
+[[nodiscard]] hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& a,
+                                                        hipStream_t stream) noexcept;
+
+// Native gfx12 decode challenger: raw wave32 FP8-Q/FP8-K WMMA writes one reusable FP32 score
+// workspace, followed by a stable FP32 softmax plus exact signed-INT4-times-FP16-scale PV consumer.
+// Q's private E4M3 cast is an implementation profile and is checked directly against the same
+// represented-input FP64 attention oracle; no FP16 probability or V materialization is introduced.
+[[nodiscard]] hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& a,
+                                                    hipStream_t stream) noexcept;
+
+// Production packed decode route (1..8 host-fixed rows: ordinary decode, MTP, DFlash chain
+// verification), split over the context: one
+// 192-thread CTA per KV head and context chunk (at most 64 chunks of at least 256 keys) runs the
+// dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K in BF16 WMMA, online FP32
+// Softmax with FP16 probabilities, FP16 V/8 PV with FP32 accumulation) and writes per-row
+// numerator/origin/denominator partials to the caller workspace; one stable FP32 merge normalizes.
+// Row positions are absolute; invalid positions, page-table rows and physical pages poison exactly
+// the dependent rows with NaN.
+// One launch pair serves up to kMaximumConcurrency sequences of a compact decode batch (grid z =
+// sequence), each with its own arguments, rows, frontier and caller-owned score_workspace partials;
+// every sequence's output bytes equal those of its one-sequence launch. Sequences must not share
+// output or workspace storage.
+inline constexpr std::size_t kPackedDecodeMaximumSequences = kMaximumConcurrency;
+[[nodiscard]] std::size_t
+fp8_int4_kv_attention_packed_decode_workspace_bytes(std::size_t context,
+                                                    std::uint32_t rows) noexcept;
+[[nodiscard]] hipError_t
+fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentionArgs> sequences,
+                                    hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t fp8_int4_kv_attention_packed_decode(const Fp8Int4KvAttentionArgs& args,
+                                                             hipStream_t stream) noexcept;
+
+// Long-context decode leaf for tree or device-selected rows (see use_split512_attention). T=1 keeps
+// the qualified FP8-Q/FP8-K WMMA score profile; fixed-width T=4 uses represented-BF16 Q and shares
+// one decoded 16-token K tile across all four rows and six query heads of each KV head. Both feed
 // 512-token FP32 Softmax/INT4-V partials and one stable FP32 merge. The caller owns the exact,
 // fixed-address workspace returned below; the implementation performs no device allocation.
-[[nodiscard]] std::size_t fp8_int4_kv_attention_split512_workspace_capacity_bytes(
-    std::uint32_t query_rows, std::size_t context) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_split512(
-    const Fp8Int4KvAttentionArgs& args, void* workspace, std::size_t workspace_bytes,
-    hipStream_t stream) noexcept;
+[[nodiscard]] std::size_t
+fp8_int4_kv_attention_split512_workspace_capacity_bytes(std::uint32_t query_rows,
+                                                        std::size_t context) noexcept;
+[[nodiscard]] hipError_t fp8_int4_kv_attention_split512(const Fp8Int4KvAttentionArgs& a,
+                                                        void* storage, std::size_t storage_bytes,
+                                                        hipStream_t stream) noexcept;
 
 } // namespace ninfer::ops::r9700::kv

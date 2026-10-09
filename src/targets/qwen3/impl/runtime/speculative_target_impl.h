@@ -6,8 +6,8 @@
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
 
-void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_store,
-                          TextContext& card, TargetVerifyFrameView frame, bool reset_workspace) {
+TargetVerifyFrameView target_verify_prepare(ExecutionCore& execution, TextContext& card,
+                                            TargetVerifyFrameView frame) {
     if (frame.replay_records == nullptr) {
         throw std::logic_error("speculative target verify has no ReplaySSM record storage");
     }
@@ -19,27 +19,42 @@ void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_
         tree != (frame.fold_path.data != nullptr)) {
         throw std::logic_error("speculative tree verify frame is incomplete");
     }
-    card.set_gdn_state_action(GdnStateAction::RecordForReplay, frame.replay_records);
-    if (frame.tool_masks) {
-        frame.sampling = frame.tool_masks->enqueue(frame.ids, tree ? &frame.parent_index : nullptr,
-                                                   frame.valid_columns, execution.device.stream);
+    if (tree && frame.gdn_fold != nullptr) {
+        throw std::logic_error("speculative tree verify cannot carry a deferred GDN fold");
     }
-    card.set_sampling(frame.sampling);
+    card.set_gdn_state_action(GdnStateAction::RecordForReplay, frame.replay_records,
+                              frame.gdn_fold);
+    if (frame.token_masks) {
+        frame.sampling = frame.token_masks->publish(frame.ids, tree ? &frame.parent_index : nullptr,
+                                                    frame.valid_columns, execution.device.stream);
+    }
+    card.set_sampling(frame.sampling, frame.token_masks);
     if (tree) {
         card.set_tree_verify(&frame.parent_index, &frame.ancestor_mask, &frame.prefix_lengths);
     }
+    return frame;
+}
+
+void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_store,
+                          TextContext& card, TargetVerifyFrameView frame, bool reset_workspace) {
+    frame = target_verify_prepare(execution, card, frame);
     if (frame.feature_sink != nullptr) {
         card.target_verify_batch(frame.ids, frame.cache_positions, frame.rope_positions,
                                  frame.valid_columns, frame.kv_table_rows, frame.lanes,
                                  frame.target_hidden, frame.target_logits, frame.target_tokens,
-                                 *frame.feature_sink, reset_workspace,
-                                 frame.dflash_target_verify);
+                                 *frame.feature_sink, reset_workspace);
     } else {
         card.target_verify_batch(frame.ids, frame.cache_positions, frame.rope_positions,
                                  frame.valid_columns, frame.kv_table_rows, frame.lanes,
                                  frame.target_hidden, frame.target_logits, frame.target_tokens,
-                                 reset_workspace, frame.dflash_target_verify);
+                                 reset_workspace);
     }
+    target_verify_resolve(execution, continuation_hidden_store, card, frame);
+}
+
+void target_verify_resolve(ExecutionCore& execution, Tensor& continuation_hidden_store,
+                           TextContext& card, TargetVerifyFrameView frame) {
+    const bool tree = frame.tree_verify;
     if (tree) {
         ops::speculative_accept_tree_drafts(
             frame.target_tokens, frame.target_logits, frame.ids, frame.parent_index,
@@ -57,7 +72,8 @@ void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_
             frame.accepted_drafts, TextConfig::token_domain, frame.sampling, execution.work,
             execution.device.stream,
             frame.draft_selector_ids.data != nullptr ? &frame.draft_selector_ids : nullptr,
-            frame.draft_selector_q.data != nullptr ? &frame.draft_selector_q : nullptr);
+            frame.draft_selector_q.data != nullptr ? &frame.draft_selector_q : nullptr,
+            frame.proposal_calibration.data != nullptr ? &frame.proposal_calibration : nullptr);
         ops::speculative_select_accepted_hidden(frame.target_hidden, frame.accepted_drafts,
                                                 frame.selected_hidden, execution.device.stream);
     }

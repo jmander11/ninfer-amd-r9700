@@ -14,7 +14,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 ROLE_SPECS = (
     ("mlp_gate_up", 64, "post_mixer"),
     ("attention_query_key_and_gate_value", 32, "attention"),
@@ -168,9 +167,7 @@ def project(
     return {
         "schema": "ninfer.r9700.post_hybrid_prefill_projection.v1",
         "scope": "bounded_cross_run_projection_not_a_measurement",
-        "inputs": [
-            {"path": str(path), "sha256": _sha256(path)} for path in input_paths
-        ],
+        "inputs": [{"path": str(path), "sha256": _sha256(path)} for path in input_paths],
         "workload": expected_workload,
         "floor": {
             "prefill_tok_s": floor_tok_s,

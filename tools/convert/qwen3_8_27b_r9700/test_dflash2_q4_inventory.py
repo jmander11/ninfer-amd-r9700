@@ -2,29 +2,37 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import unittest
+from collections import Counter
 
 from tools.convert.qwen3.common.inventory import TensorSpec
-from tools.convert.qwen3_8_27b_r9700 import dflash2_q4_inventory as inventory
 from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes as recipes
+from tools.convert.qwen3_8_27b_r9700 import dflash2_q4_inventory as inventory
 
 
 class DFlash2Q4InventoryTest(unittest.TestCase):
     def test_selective_protected_has_only_canonical_companion(self) -> None:
         from tools.convert.qwen3_8_27b_r9700 import selective_protected_inventory as base
-        for actual, original in zip(inventory.SELECTIVE_OBJECT_SPECS[:1124], base.OBJECT_SPECS):
+
+        for actual, original in zip(
+            inventory.SELECTIVE_OBJECT_SPECS[:1124], base.OBJECT_SPECS, strict=True
+        ):
             if original.name == "text/output_head":
-                self.assertEqual((actual.name, actual.shape, actual.format),
-                                 (original.name, original.shape, original.format))
+                self.assertEqual(
+                    (actual.name, actual.shape, actual.format),
+                    (original.name, original.shape, original.format),
+                )
                 self.assertEqual(actual.layout, "r9700-w8g32-n16-k16-v1")
             else:
                 self.assertEqual(actual, original)
         self.assertEqual(inventory.SELECTIVE_OBJECT_SPECS[1124:], inventory.TENSOR_SPECS)
-        self.assertEqual(inventory.SELECTIVE_DEVICE_ARENA_BYTES,
-                         base.DEVICE_ARENA_BYTES + 1_209_469_440)
-        self.assertEqual(inventory.companion_weights_id(base.WEIGHTS_ID, "canonical-q4g64"),
-                         inventory.SELECTIVE_WEIGHTS_ID)
+        self.assertEqual(
+            inventory.SELECTIVE_DEVICE_ARENA_BYTES, base.DEVICE_ARENA_BYTES + 1_209_469_440
+        )
+        self.assertEqual(
+            inventory.companion_weights_id(base.WEIGHTS_ID, "canonical-q4g64"),
+            inventory.SELECTIVE_WEIGHTS_ID,
+        )
         for recipe in ("source-mse-q4g64", "source-mse-w8g32"):
             with self.assertRaisesRegex(ValueError, "only canonical"):
                 inventory.companion_weights_id(base.WEIGHTS_ID, recipe)
@@ -60,10 +68,8 @@ class DFlash2Q4InventoryTest(unittest.TestCase):
         self.assertTrue(all(len(binding.sources) == 2 for binding in gate_up))
 
     def test_three_explicit_base_compositions(self) -> None:
-        self.assertEqual(inventory.ALL_Q4_WEIGHTS_ID,
-                         "r9700-q4g64-n16k16-dflash2-q4-eval")
-        self.assertEqual(inventory.MIXED_WEIGHTS_ID,
-                         "r9700-q4-w8-mse-n16k16-dflash2-q4-eval")
+        self.assertEqual(inventory.ALL_Q4_WEIGHTS_ID, "r9700-q4g64-n16k16-dflash2-q4-eval")
+        self.assertEqual(inventory.MIXED_WEIGHTS_ID, "r9700-q4-w8-mse-n16k16-dflash2-q4-eval")
         self.assertEqual(
             inventory.HYBRID_WEIGHTS_ID,
             "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval",

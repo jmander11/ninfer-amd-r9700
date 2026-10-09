@@ -57,39 +57,47 @@ enum class WeightsProfile : std::uint8_t {
     R9700Q4G64DFlash2W8MseEvaluation,
     R9700Q4W8MseDFlash2W8MseEvaluation,
     R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation,
+    // The admitted production profile: the selective-cap DFlash2 base with every Text matrix
+    // outside its own 21 FP8 protections and the output head in (GPTQ-rounded) FP8LUT4.
+    R9700Fp8Lut4,
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) symbol,
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
 };
 
+// The endpoint rows are generated lookups whose results repeat across consecutive rows, so they
+// are independent early returns rather than switch cases.
 [[nodiscard]] constexpr WeightsProfile fp8_capped_base_profile(WeightsProfile profile) noexcept {
-    switch (profile) {
-#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
-    case WeightsProfile::symbol: return WeightsProfile::base;
+    if (profile == WeightsProfile::R9700Fp8Lut4) {
+        return WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
+    }
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
+    if (profile == WeightsProfile::symbol) return WeightsProfile::base;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default: return profile;
-    }
+    return profile;
 }
 
 [[nodiscard]] constexpr bool fp8_capped_w8_embedding(WeightsProfile profile) noexcept {
-    switch (profile) {
-#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
-    case WeightsProfile::symbol: return embed != 0;
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
+    if (profile == WeightsProfile::symbol) return (embed) != 0;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default: return false;
-    }
+    return false;
 }
 
 [[nodiscard]] constexpr bool fp8_capped_w8_head(WeightsProfile profile) noexcept {
-    switch (profile) {
-#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
-    case WeightsProfile::symbol: return head != 0;
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
+    if (profile == WeightsProfile::symbol) return (head) != 0;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
-    default: return false;
-    }
+    return false;
+}
+
+// Text projections outside the profile's FP8 protections (`fp8_capped_selection.inc`), and the
+// output head, are FP8LUT4 codebook matrices.
+[[nodiscard]] constexpr bool is_fp8lut4_text_profile(WeightsProfile profile) noexcept {
+    return profile == WeightsProfile::R9700Fp8Lut4;
 }
 
 [[nodiscard]] constexpr bool is_fp8_capped_profile(WeightsProfile profile) noexcept {

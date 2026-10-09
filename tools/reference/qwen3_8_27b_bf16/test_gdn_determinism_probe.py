@@ -5,9 +5,9 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from . import gdn_determinism_probe as probe
 
@@ -19,11 +19,21 @@ class GdnDeterminismProbeTest(unittest.TestCase):
         self.assertEqual(defaults.repeats, 3)
         self.assertEqual(defaults.routes, ("chunk", "fused-recurrent"))
         self.assertFalse(defaults.deterministic_algorithms)
-        selected = probe.parse_options([
-            "--rows", "128", "--repeats", "4", "--device", "2",
-            "--routes", "chunk,fused-recurrent", "--deterministic-algorithms",
-            "--out-json", "-",
-        ])
+        selected = probe.parse_options(
+            [
+                "--rows",
+                "128",
+                "--repeats",
+                "4",
+                "--device",
+                "2",
+                "--routes",
+                "chunk,fused-recurrent",
+                "--deterministic-algorithms",
+                "--out-json",
+                "-",
+            ]
+        )
         self.assertEqual(
             selected,
             probe.Options(128, 4, 2, ("chunk", "fused-recurrent"), True, "-"),

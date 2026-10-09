@@ -4,18 +4,17 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
 import importlib
 import importlib.metadata
 import json
 import os
-from pathlib import Path
 import platform
 import sys
 import time
-from typing import Sequence
-
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -56,9 +55,7 @@ def _parse_routes(raw: str) -> tuple[str, ...]:
         raise argparse.ArgumentTypeError("--routes must be a nonempty unique comma-separated list")
     invalid = [value for value in values if value not in ROUTES]
     if invalid:
-        raise argparse.ArgumentTypeError(
-            "unknown recurrence route(s): " + ", ".join(invalid)
-        )
+        raise argparse.ArgumentTypeError("unknown recurrence route(s): " + ", ".join(invalid))
     return values
 
 
@@ -70,13 +67,17 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument(
-        "--rows", type=int, default=4096,
+        "--rows",
+        type=int,
+        default=4096,
         help="4096 reproduces the scorer's inter-chunk grid; use 64 with project-naive",
     )
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument(
-        "--routes", type=_parse_routes, default=("chunk", "fused-recurrent"),
+        "--routes",
+        type=_parse_routes,
+        default=("chunk", "fused-recurrent"),
         help="comma-separated routes; project-naive is bounded to at most 256 rows",
     )
     parser.add_argument(
@@ -101,8 +102,12 @@ def parse_options(argv: Sequence[str] | None = None) -> Options:
             "project-naive is bounded to 256 rows; omit it for a larger chunk-only probe"
         )
     return Options(
-        args.rows, args.repeats, args.device, args.routes,
-        args.deterministic_algorithms, args.out_json,
+        args.rows,
+        args.repeats,
+        args.device,
+        args.routes,
+        args.deterministic_algorithms,
+        args.out_json,
     )
 
 
@@ -142,7 +147,8 @@ def distribution_record(name: str) -> dict:
         ),
         "direct_url_sha256": (
             file_sha256(Path(distribution.locate_file(direct_url)))
-            if direct_url is not None else None
+            if direct_url is not None
+            else None
         ),
     }
 
@@ -213,26 +219,21 @@ def _integer_pattern(torch, shape: tuple[int, ...], multiplier: int, offset: int
 def _make_inputs(torch, rows: int) -> dict[str, object]:
     q = _integer_pattern(torch, (rows, 16, 128), 37, 11, 64.0)
     k = _integer_pattern(torch, (rows, 16, 128), 53, 29, 64.0)
-    q = (q * torch.rsqrt(torch.sum(q * q, dim=-1, keepdim=True) + 1.0e-6)).to(
-        torch.bfloat16
-    )
-    k = (k * torch.rsqrt(torch.sum(k * k, dim=-1, keepdim=True) + 1.0e-6)).to(
-        torch.bfloat16
-    )
+    q = (q * torch.rsqrt(torch.sum(q * q, dim=-1, keepdim=True) + 1.0e-6)).to(torch.bfloat16)
+    k = (k * torch.rsqrt(torch.sum(k * k, dim=-1, keepdim=True) + 1.0e-6)).to(torch.bfloat16)
     value = _integer_pattern(torch, (rows, 48, 128), 71, 7, 48.0).to(torch.bfloat16)
-    decay = -(
-        ((_integer_pattern(torch, (rows, 48), 19, 3, 1.0) + 128.0) % 257.0)
-        + 1.0
-    ) / 4096.0
-    beta = (
-        (_integer_pattern(torch, (rows, 48), 23, 17, 1.0) + 128.0) % 257.0
-    ) / 256.0
+    decay = -(((_integer_pattern(torch, (rows, 48), 19, 3, 1.0) + 128.0) % 257.0) + 1.0) / 4096.0
+    beta = ((_integer_pattern(torch, (rows, 48), 23, 17, 1.0) + 128.0) % 257.0) / 256.0
     state = _integer_pattern(torch, (48, 128, 128), 31, 5, 8192.0)
     return {"q": q, "k": k, "value": value, "decay": decay, "beta": beta, "state": state}
 
 
 def _execute_route(
-    torch, backend, chunk_recurrent, fused_recurrent, route: str,
+    torch,
+    backend,
+    chunk_recurrent,
+    fused_recurrent,
+    route: str,
     tensors: dict[str, object],
 ):
     q = tensors["q"].to(backend_device := tensors["device"])
@@ -282,9 +283,12 @@ def run_probe(options: Options) -> dict:
             chunk_gated_delta_rule,
             fused_recurrent_gated_delta_rule,
         )
+
         from tools.reference.qwen3_8_27b_bf16 import backend
     except (ImportError, OSError, RuntimeError) as error:
-        raise RuntimeError("probe requires the scorer's ROCm PyTorch and FLA environment") from error
+        raise RuntimeError(
+            "probe requires the scorer's ROCm PyTorch and FLA environment"
+        ) from error
     if not torch.cuda.is_available():
         raise RuntimeError("probe requires a ROCm accelerator")
     torch.use_deterministic_algorithms(options.deterministic_algorithms)
@@ -297,7 +301,11 @@ def run_probe(options: Options) -> dict:
         "generator": GENERATOR,
         "sha256": _input_sha256(torch, cpu_inputs),
         "tensors": {
-            name: {"dtype": str(value.dtype), "shape": list(value.shape), "sha256": _tensor_sha256(torch, value)}
+            name: {
+                "dtype": str(value.dtype),
+                "shape": list(value.shape),
+                "sha256": _tensor_sha256(torch, value),
+            }
             for name, value in cpu_inputs.items()
         },
     }
@@ -313,45 +321,55 @@ def run_probe(options: Options) -> dict:
                 torch.cuda.synchronize(device)
                 started = time.perf_counter()
                 output, state = _execute_route(
-                    torch, backend, chunk_gated_delta_rule,
-                    fused_recurrent_gated_delta_rule, route, execution_inputs
+                    torch,
+                    backend,
+                    chunk_gated_delta_rule,
+                    fused_recurrent_gated_delta_rule,
+                    route,
+                    execution_inputs,
                 )
                 torch.cuda.synchronize(device)
                 retained[route].append((output.detach().cpu(), state.detach().cpu()))
-                route_results[route].append({
-                    "repeat": repeat,
-                    "seconds": time.perf_counter() - started,
-                    "output_sha256": _tensor_sha256(torch, output),
-                    "final_state_sha256": _tensor_sha256(torch, state),
-                    "combined_sha256": _result_sha256(torch, output, state),
-                    "output_finite": bool(torch.isfinite(output).all().item()),
-                    "final_state_finite": bool(torch.isfinite(state).all().item()),
-                })
+                route_results[route].append(
+                    {
+                        "repeat": repeat,
+                        "seconds": time.perf_counter() - started,
+                        "output_sha256": _tensor_sha256(torch, output),
+                        "final_state_sha256": _tensor_sha256(torch, state),
+                        "combined_sha256": _result_sha256(torch, output, state),
+                        "output_finite": bool(torch.isfinite(output).all().item()),
+                        "final_state_finite": bool(torch.isfinite(state).all().item()),
+                    }
+                )
     comparisons = []
     for route, values in retained.items():
         reference_output, reference_state = values[0]
         for repeat, (output, state) in enumerate(values[1:], 1):
-            comparisons.append({
-                "kind": "within-route",
-                "route": route,
-                "reference_repeat": 0,
-                "repeat": repeat,
-                "output": _delta(torch, output, reference_output),
-                "final_state": _delta(torch, state, reference_state),
-            })
+            comparisons.append(
+                {
+                    "kind": "within-route",
+                    "route": route,
+                    "reference_repeat": 0,
+                    "repeat": repeat,
+                    "output": _delta(torch, output, reference_output),
+                    "final_state": _delta(torch, state, reference_state),
+                }
+            )
     authority = "project-naive" if "project-naive" in retained else options.routes[0]
     authority_output, authority_state = retained[authority][0]
     for route in options.routes:
         if route == authority:
             continue
         output, state = retained[route][0]
-        comparisons.append({
-            "kind": "cross-route",
-            "route": route,
-            "reference_route": authority,
-            "output": _delta(torch, output, authority_output),
-            "final_state": _delta(torch, state, authority_state),
-        })
+        comparisons.append(
+            {
+                "kind": "cross-route",
+                "route": route,
+                "reference_route": authority,
+                "output": _delta(torch, output, authority_output),
+                "final_state": _delta(torch, state, authority_state),
+            }
+        )
     repeat_exact = {
         route: len({run["combined_sha256"] for run in runs}) == 1
         for route, runs in route_results.items()
@@ -408,10 +426,9 @@ def run_probe(options: Options) -> dict:
             "fla_runtime": {
                 "cache_mode": os.environ.get("FLA_CACHE_MODE", "disabled"),
                 "cache_results": os.environ.get("FLA_CACHE_RESULTS", "1") == "1",
-                "backend_dispatch_disabled":
-                    os.environ.get("FLA_DISABLE_BACKEND_DISPATCH", "0") == "1",
-                "tensor_cache_disabled":
-                    os.environ.get("FLA_DISABLE_TENSOR_CACHE", "0") == "1",
+                "backend_dispatch_disabled": os.environ.get("FLA_DISABLE_BACKEND_DISPATCH", "0")
+                == "1",
+                "tensor_cache_disabled": os.environ.get("FLA_DISABLE_TENSOR_CACHE", "0") == "1",
             },
             "sources": {
                 name: file_sha256(module_root / name)

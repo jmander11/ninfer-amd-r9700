@@ -25,6 +25,8 @@ while (($#)); do
     *) echo "Unknown option: $1; pass CTest arguments after --." >&2; exit 2 ;;
   esac
 done
+jobs="${NINFER_DEV_JOBS:-8}"
+[[ "$jobs" =~ ^[1-8]$ ]] || { echo 'NINFER_DEV_JOBS must be 1..8.' >&2; exit 2; }
 if ((use_builder)); then
   bash "$repo_root/scripts/dev-setup.sh"
   args=()
@@ -32,7 +34,7 @@ if ((use_builder)); then
   ((run_python)) && args+=(--python)
   [[ -n "$artifact" ]] && args+=(--real "$artifact")
   docker exec -e NINFER_BUILD_DIR=/build -e NINFER_PYTHON=/opt/python311/bin/python3.11 \
-    -e "NINFER_DEV_JOBS=${NINFER_DEV_JOBS:-$(nproc)}" \
+    -e "NINFER_DEV_JOBS=$jobs" \
     -e "NINFER_DRM_RENDER_NODE=${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}" \
     -e "NINFER_MIN_FREE_VRAM_GIB=${NINFER_MIN_FREE_VRAM_GIB:-20}" \
     -w /src "$builder" bash /src/scripts/run-unit-tests.sh "${args[@]}" -- "${ctest_args[@]}"
@@ -55,12 +57,26 @@ if ((gpu)) || [[ -n "$artifact" ]]; then
   exec 9>"$build_dir/.r9700-tests.lock"
   flock -n 9 || { echo 'Another test runner owns this build GPU lane.' >&2; exit 1; }
 fi
-cmake --build "$build_dir" --parallel "${NINFER_DEV_JOBS:-$(nproc)}"
+cmake --build "$build_dir" --parallel "$jobs"
 selection=()
 ((gpu)) || selection+=(-LE r9700)
-ctest --test-dir "$build_dir" --output-on-failure "${selection[@]}" "${ctest_args[@]}"
+# Disk-tier tests fsync heavily. Keep their scratch files on the build tree's filesystem
+# instead of the container overlay, unless the caller chose a TMPDIR.
+scratch=""
+if [[ -z "${TMPDIR:-}" ]]; then
+  scratch="$(mktemp -d "$build_dir/test-tmp.XXXXXX")"
+  export TMPDIR="$scratch"
+fi
+status=0
+ctest --test-dir "$build_dir" --output-on-failure "${selection[@]}" "${ctest_args[@]}" || status=$?
+if [[ -n "$scratch" ]]; then
+  rm -rf "$scratch"
+  unset TMPDIR
+fi
+((status == 0)) || exit "$status"
 if [[ -n "$artifact" ]]; then
   "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
+  "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" mtp
 fi
 if ((run_python)); then
   "$python" -c 'import sys; assert sys.version_info[:2] == (3, 11); import pytest, torch'

@@ -6,11 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import struct
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from tools.ppl.run import inspect_candidate_artifact
-
 
 MAGIC = b"NINFER\x00\x02"
 PREFIX = struct.Struct("<8sQ")
@@ -50,8 +49,9 @@ def validate(path: Path, weights_id: str) -> None:
         artifact = inspect_candidate_artifact(path)
     except SystemExit as error:
         raise ValueError(str(error)) from error
-    if (artifact.get("weights_id") != weights_id
-            or not isinstance(artifact.get("conversion_receipt"), dict)):
+    if artifact.get("weights_id") != weights_id or not isinstance(
+        artifact.get("conversion_receipt"), dict
+    ):
         raise ValueError(f"artifact lacks its exact N16 migration receipt: {path}")
 
 

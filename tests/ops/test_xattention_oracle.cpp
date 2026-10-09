@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace xo = ninfer::test::xattention_oracle;
+namespace xo    = ninfer::test::xattention_oracle;
 namespace codec = ninfer::test::fp8_int4_kv_oracle;
 
 namespace {
@@ -29,16 +29,15 @@ void expect_throws(Function&& function, const char* message) {
     try {
         function();
         expect(false, message);
+        // NOLINTNEXTLINE(bugprone-empty-catch): the expected exception is the pass path
     } catch (const Exception&) {
-    } catch (...) {
-        expect(false, message);
-    }
+    } catch (...) { expect(false, message); }
 }
 
 struct Fixture {
     xo::Geometry geometry{16U, 6U, 1U};
     std::size_t context = 257U;
-    std::size_t rows = 129U;
+    std::size_t rows    = 129U;
     std::vector<float> query;
     codec::Fp8Keys keys;
     codec::Int4Values values;
@@ -65,8 +64,8 @@ struct Fixture {
             value_source[token * geometry.head_dim] = static_cast<float>(token % 7U) - 3.0F;
         }
         keys = codec::encode_keys(key_source, context * geometry.kv_heads, geometry.head_dim);
-        values = codec::encode_values(value_source, context * geometry.kv_heads,
-                                      geometry.head_dim, 16U);
+        values =
+            codec::encode_values(value_source, context * geometry.kv_heads, geometry.head_dim, 16U);
     }
 };
 
@@ -81,13 +80,12 @@ void test_dense_identity_and_deterministic_order() {
         expect(keep.at(head, 1U) == std::vector<std::uint16_t>({0U, 1U, 2U, 3U, 4U}),
                "tau one must retain the causal tail page in increasing order");
     }
-    const std::vector<double> sparse = xo::sparse_attention_fp64(
-        fixture.query, fixture.keys, fixture.values, fixture.positions, fixture.geometry, keep,
-        0.25);
+    const std::vector<double> sparse =
+        xo::sparse_attention_fp64(fixture.query, fixture.keys, fixture.values, fixture.positions,
+                                  fixture.geometry, keep, 0.25);
     expect(sparse.size() == fixture.query.size() &&
-               std::all_of(sparse.begin(), sparse.end(), [](double value) {
-                   return std::isfinite(value);
-               }),
+               std::all_of(sparse.begin(), sparse.end(),
+                           [](double value) { return std::isfinite(value); }),
            "tau-one sparse oracle must produce complete finite output");
 }
 
@@ -130,18 +128,16 @@ void test_short_initial_partial_plane_retains_mandatory_page() {
     std::iota(fixture.positions.begin(), fixture.positions.end(), std::int32_t{0});
     const xo::KeepSets keep = xo::antidiagonal_keep_sets(
         fixture.query, fixture.keys, fixture.positions, fixture.geometry, 16U, 0.5, 0.25);
-    expect(keep.query_blocks == 1U,
-           "short initial prefill must use one partial estimator plane");
+    expect(keep.query_blocks == 1U, "short initial prefill must use one partial estimator plane");
     for (std::size_t head = 0U; head < fixture.geometry.query_heads; ++head) {
         expect(keep.at(head, 0U) == std::vector<std::uint16_t>({0U}),
                "partial plane with no complete key group must retain the mandatory causal page");
     }
-    const std::vector<double> output = xo::sparse_attention_fp64(
-        fixture.query, fixture.keys, fixture.values, fixture.positions, fixture.geometry, keep,
-        0.25);
-    expect(std::all_of(output.begin(), output.end(), [](double value) {
-               return std::isfinite(value);
-           }),
+    const std::vector<double> output =
+        xo::sparse_attention_fp64(fixture.query, fixture.keys, fixture.values, fixture.positions,
+                                  fixture.geometry, keep, 0.25);
+    expect(std::all_of(output.begin(), output.end(),
+                       [](double value) { return std::isfinite(value); }),
            "short initial partial-plane attention must remain finite");
 }
 
@@ -155,17 +151,16 @@ void test_each_plane_is_softmax_normalized_before_page_accumulation() {
         {{8U, -1.3862943611198906}, {16U, 0.0}, {17U, 0.0}, {18U, 0.0}, {19U, 0.0}},
     };
     const std::vector<double> normalized = xo::normalized_block_mass(logits, 3U, 16U);
-    expect(normalized[1] > normalized[2],
-           "per-plane softmax must rank page one above page two");
+    expect(normalized[1] > normalized[2], "per-plane softmax must rank page one above page two");
     expect(std::abs(std::accumulate(normalized.begin(), normalized.end(), 0.0) - 2.0) < 1e-12,
            "each nonempty estimator plane must contribute unit probability mass");
 
     std::vector<double> buggy(3U, 0.0);
     for (const auto& plane : logits) {
-        const double maximum = std::max_element(
-            plane.begin(), plane.end(),
-            [](const auto& left, const auto& right) { return left.second < right.second; })
-                                   ->second;
+        const double maximum =
+            std::max_element(plane.begin(), plane.end(), [](const auto& left, const auto& right) {
+                return left.second < right.second;
+            })->second;
         for (const auto& [key_group, logit] : plane) {
             buggy[(key_group * 16U) / xo::kFindBlockSize] += std::exp(logit - maximum);
         }
@@ -179,9 +174,8 @@ void test_each_plane_is_softmax_normalized_before_page_accumulation() {
             if (mass[left] != mass[right]) return mass[left] > mass[right];
             return left < right;
         });
-        const double required =
-            0.5 * std::accumulate(mass.begin(), mass.end(), 0.0);
-        double retained = 0.0;
+        const double required = 0.5 * std::accumulate(mass.begin(), mass.end(), 0.0);
+        double retained       = 0.0;
         std::vector<std::size_t> keep;
         for (const std::size_t page : rank) {
             if (retained >= required || !(mass[page] > 0.0)) break;
@@ -198,11 +192,9 @@ void test_each_plane_is_softmax_normalized_before_page_accumulation() {
 
 void test_mandatory_pages_count_toward_tau_budget() {
     const std::vector<double> mass{0.45, 0.10, 0.05, 0.40};
-    expect(xo::select_blocks(mass, 0.50, 3U, 3U) ==
-               std::vector<std::uint16_t>({0U, 3U}),
+    expect(xo::select_blocks(mass, 0.50, 3U, 3U) == std::vector<std::uint16_t>({0U, 3U}),
            "sink and recent page mass must count toward the tau budget");
-    expect(xo::select_blocks(mass, 0.90, 3U, 3U) ==
-               std::vector<std::uint16_t>({0U, 1U, 3U}),
+    expect(xo::select_blocks(mass, 0.90, 3U, 3U) == std::vector<std::uint16_t>({0U, 1U, 3U}),
            "selection must add only enough nonmandatory mass to cross tau");
     const std::vector<double> uniform(10U, 1.0);
     expect(xo::select_blocks(uniform, 0.90, 9U, 9U) ==
@@ -213,14 +205,14 @@ void test_mandatory_pages_count_toward_tau_budget() {
 void test_b128_selection_expands_only_existing_b64_pages() {
     const xo::Geometry geometry{16U, 1U, 1U};
     constexpr std::size_t context = 130U;
-    constexpr std::size_t rows = 2U;
+    constexpr std::size_t rows    = 2U;
     std::vector<float> query(rows * geometry.head_dim, 0.0F);
     std::vector<float> key_source(context * geometry.head_dim, 0.0F);
     const codec::Fp8Keys keys = codec::encode_keys(key_source, context, geometry.head_dim);
     const std::vector<std::int32_t> positions{128, 129};
 
-    const xo::KeepSets keep = xo::antidiagonal_keep_sets(
-        query, keys, positions, geometry, 16U, 0.9, 0.25);
+    const xo::KeepSets keep =
+        xo::antidiagonal_keep_sets(query, keys, positions, geometry, 16U, 0.9, 0.25);
     expect(keep.at(0U, 0U) == std::vector<std::uint16_t>({0U, 1U, 2U}),
            "B128 selections must expand to paired B64 pages without emitting a nonexistent "
            "odd-tail page");
@@ -229,7 +221,7 @@ void test_b128_selection_expands_only_existing_b64_pages() {
 void test_partial_key_group_contributes_zero_padded_logit() {
     const xo::Geometry geometry{16U, 1U, 1U};
     constexpr std::size_t context = 393U;
-    constexpr std::size_t rows = 9U;
+    constexpr std::size_t rows    = 9U;
     std::vector<float> query(rows * geometry.head_dim, 0.0F);
     query[8U * geometry.head_dim] = 1.0F;
     std::vector<float> key_source(context * geometry.head_dim, 0.0F);
@@ -239,8 +231,8 @@ void test_partial_key_group_contributes_zero_padded_logit() {
     const codec::Fp8Keys keys = codec::encode_keys(key_source, context, geometry.head_dim);
     std::vector<std::int32_t> positions(rows);
     std::iota(positions.begin(), positions.end(), std::int32_t{384});
-    const xo::KeepSets keep = xo::antidiagonal_keep_sets(
-        query, keys, positions, geometry, 16U, 0.9, 0.25);
+    const xo::KeepSets keep =
+        xo::antidiagonal_keep_sets(query, keys, positions, geometry, 16U, 0.9, 0.25);
     expect(keep.at(0U, 0U) == std::vector<std::uint16_t>({0U, 1U, 6U}),
            "partial final K group must contribute its mixed real/zero-padded logit");
 }
@@ -277,9 +269,9 @@ void test_malformed_and_nonfinite_rejection() {
         },
         "XAttention oracle must reject an unqualified stride");
 
-    fixture.query[0] = 0.0F;
-    xo::KeepSets keep = xo::antidiagonal_keep_sets(
-        fixture.query, fixture.keys, fixture.positions, fixture.geometry, 16U, 0.9, 0.25);
+    fixture.query[0]  = 0.0F;
+    xo::KeepSets keep = xo::antidiagonal_keep_sets(fixture.query, fixture.keys, fixture.positions,
+                                                   fixture.geometry, 16U, 0.9, 0.25);
     fixture.query.back() = std::numeric_limits<float>::infinity();
     expect_throws<std::invalid_argument>(
         [&] {
@@ -288,7 +280,7 @@ void test_malformed_and_nonfinite_rejection() {
         },
         "XAttention FP64 attention oracle must reject a nonfinite query");
     fixture.query.back() = 0.0F;
-    keep.pages.front() = {1U, 0U};
+    keep.pages.front()   = {1U, 0U};
     expect_throws<std::invalid_argument>(
         [&] {
             (void)xo::sparse_attention_fp64(fixture.query, fixture.keys, fixture.values,

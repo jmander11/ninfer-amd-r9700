@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 auto ordinary_batch_body(OrdinaryBatchContext& state, std::int32_t batch_size) {
@@ -23,8 +24,7 @@ auto ordinary_batch_body(OrdinaryBatchContext& state, std::int32_t batch_size) {
         TextContext card(state.execution.device, state.execution.model,
                          state.execution.linear_execution, state.execution.work, {},
                          state.execution.linear_attention, state.execution.io,
-                         state.execution.prefill_hidden, state.execution.prefill_chunk, 0, {},
-                         &state.text_cache);
+                         state.execution.prefill_hidden, state.execution.prefill_chunk, 0);
         if (!state.text_kv_transactions.empty()) {
             card.set_text_kv_transactions(state.text_kv_transactions);
         }
@@ -46,14 +46,18 @@ auto ordinary_batch_body(OrdinaryBatchContext& state, std::int32_t batch_size) {
             state.text_kv_transactions[static_cast<std::size_t>(row)]->begin_device_segment(
                 all_positions + row, 1U, nullptr);
         }
-        card.ordinary_decode_batch(tokens, cache_positions, rope_positions, kv_rows, lanes,
-                                   hidden, logits);
+        card.ordinary_decode_batch(tokens, cache_positions, rope_positions, kv_rows, lanes, hidden,
+                                   logits);
         for (qwen3::PagedKVTransaction* transaction : state.text_kv_transactions) {
             transaction->end_device_segment(state.execution.device.stream);
         }
         ops::scatter(hidden, lanes, state.continuation_hidden_store, state.execution.device.stream);
         ops::sample(logits, sampled, TextConfig::token_domain, ordinary.sampling, cache_positions,
                     ops::kSamplePurposeDecode, state.execution.work, state.execution.device.stream);
+        qwen3::record_round_logprobs(
+            ordinary.logprobs, Tensor(logits.data, DType::BF16, {logits.ne[0], 1, batch_size}),
+            Tensor(sampled.data, DType::I32, {1, batch_size}), nullptr, nullptr,
+            TextConfig::token_domain, state.execution.device.stream);
         HIP_CHECK(hipMemcpyAsync(&state.host_egress, ordinary.egress.data,
                                  sizeof(qwen3::OrdinaryDecodeEgress), hipMemcpyDeviceToHost,
                                  state.execution.device.stream));
@@ -65,7 +69,7 @@ auto ordinary_batch_body(OrdinaryBatchContext& state, std::int32_t batch_size) {
 void capture_ordinary_decode_batch(OrdinaryBatchContext& state, std::int32_t batch_size,
                                    DecodeGraphDefinition& definition) {
     auto body = ordinary_batch_body(state, batch_size);
-    capture_graph(state, definition, body);
+    capture_graph(state, definition, batch_size, body);
 }
 
 void ordinary_decode_batch(OrdinaryBatchContext& state, std::int32_t batch_size,

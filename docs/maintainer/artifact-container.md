@@ -44,16 +44,20 @@ real BF16-source quality, capacity, and whole-inference Pareto gates select the 
 
 ## Planning and materialization
 
-The binder consumes every target-owned object exactly once and produces host-resource and
-device-tensor placements. Device placements are 256-byte aligned. Materialization allocates one
-device arena, retains only requested resources on the host, coalesces aligned direct-I/O spans,
-and uses pinned staging slots plus the owning HIP load stream. It verifies that planned offsets and
-sizes equal the reader descriptors before copying and publishes completion only after the stream is
-synchronized.
+The binder consumes every target-owned object exactly once and produces host-resource,
+device-tensor, and mapped-host-tensor placements. Tensor placements keep their device alignment
+(256 bytes). Materialization allocates one device arena and, when any tensor is placed
+`MappedHost`, one pinned host backing whose device address must equal its host address; kernels
+read those tensors in place. It retains only requested resources on the host, coalesces aligned
+direct-I/O spans for both tensor placements, and uses pinned staging slots plus the owning HIP load
+stream (mapped-host bytes are copied from the slots by the host). It verifies that planned offsets
+and sizes equal the reader descriptors before copying and publishes completion only after the
+stream is synchronized. Statistics report H2D and mapped-host bytes separately.
 
-No object is implicitly converted during loading. `Q4G64_F16S` accepts only
-`r9700-q4g64-n16-k16-v1`; old row-split Q4 artifacts are rejected and may be migrated only by the
-one-shot offline transcoder before startup. A descriptor's format and layout are immutable
+No object is implicitly converted during loading. Q4G64 Linear matrices bind only
+`r9700-q4g64-n16-k16-v1` and the Q4G64 token embedding binds only `row-split-k128-v1`; an artifact
+in another layout is rejected and may be migrated only by the offline transcoders
+(`transcode_q4_n16k16.py`, `transcode_embedding_rows.py`) before startup. A descriptor's format and layout are immutable
 persistent semantics. Exact byte layout is defined in `storage-layouts.md`; numeric reconstruction
 is defined in `tensor-formats.md`; the current target inventory and conversion gate are defined in
 `r9700-integer-artifact-candidate.md`.

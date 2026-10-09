@@ -44,11 +44,7 @@ def load_wikitext() -> str | None:
                 load_dataset("wikitext", "wikitext-2-raw-v1", split="test"),
                 load_dataset("wikitext", "wikitext-2-raw-v1", split="validation"),
             ]
-            parts = [
-                str(row.get("text") or "").strip()
-                for split in splits
-                for row in split
-            ]
+            parts = [str(row.get("text") or "").strip() for split in splits for row in split]
             text = "\n\n".join(part for part in parts if part)
             if text:
                 return text
@@ -78,8 +74,12 @@ def load_source_text(paths: list[str]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--weights", type=Path, required=True,
-                        help="Qwen3.8-27B artifact whose embedded tokenizer encodes the corpus")
+    parser.add_argument(
+        "--weights",
+        type=Path,
+        required=True,
+        help="Qwen3.8-27B artifact whose embedded tokenizer encodes the corpus",
+    )
     parser.add_argument("--tokens", type=int, default=DEFAULT_TOKENS)
     parser.add_argument("--long", action="store_true", help=f"bake {LONG_TOKENS} tokens")
     parser.add_argument("--source-text", action="append", default=[])

@@ -16,16 +16,26 @@
 namespace ninfer::ops {
 namespace {
 
-constexpr int kHeadDim          = 72;
-constexpr int kHeads            = 16;
-constexpr int kQueryTile        = 64;
-constexpr int kMatrixTile       = 16;
-constexpr int kFeatureTiles     = (kHeadDim + kMatrixTile - 1) / kMatrixTile;
-constexpr int kOutputTiles      = kFeatureTiles;
-constexpr int kWave             = 32;
-constexpr int kWavesPerBlock    = kQueryTile / kMatrixTile;
-constexpr int kThreads          = kWave * kWavesPerBlock;
-constexpr float kScale          = 0.11785113019775792073F;
+constexpr int kHeadDim       = 72;
+constexpr int kHeads         = 16;
+constexpr int kMatrixTile    = 16;
+constexpr int kWave          = 32;
+constexpr int kWavesPerBlock = 8;
+constexpr int kQueryTile     = kWavesPerBlock * kMatrixTile;
+constexpr int kThreads       = kWave * kWavesPerBlock;
+// Keys staged per iteration; the score and value products run over these two 16-key subtiles.
+constexpr int kKeyTile      = 32;
+constexpr int kKeySubtiles  = kKeyTile / kMatrixTile;
+constexpr int kFeatureTiles = (kHeadDim + kMatrixTile - 1) / kMatrixTile;
+constexpr int kPaddedDim    = kFeatureTiles * kMatrixTile;
+constexpr int kChunk        = 8; // BF16 elements per 16-byte vector
+constexpr int kChunks       = kHeadDim / kChunk;
+// LDS row pitches (elements): 16-byte aligned rows, offset to spread banks.
+constexpr int kKeyPitch    = kPaddedDim + kChunk;
+constexpr int kValuePitch  = kKeyTile + kChunk;
+constexpr float kScale     = 0.11785113019775792073F;
+constexpr float kLog2Scale = kScale * 1.44269504088896340736F;
+static_assert(kHeadDim % kChunk == 0);
 
 using Bf16Fragment = short __attribute__((ext_vector_type(8)));
 using F32Fragment  = float __attribute__((ext_vector_type(8)));
@@ -36,6 +46,7 @@ struct alignas(16) VisionAttentionTile {
     std::int32_t end;
     std::int32_t reserved;
 };
+
 static_assert(sizeof(VisionAttentionTile) == 16);
 
 __global__ void vision_attention_prepare_tiles(const std::int32_t* cu_seqlens, int segments,
@@ -57,160 +68,189 @@ __global__ void vision_attention_prepare_tiles(const std::int32_t* cu_seqlens, i
     }
 }
 
-__device__ __forceinline__ float subgroup_max(float value) {
-#pragma unroll
-    for (int offset = kMatrixTile / 2; offset > 0; offset >>= 1) {
-        value = fmaxf(value, __shfl_xor(value, offset, kMatrixTile));
-    }
-    return value;
+__device__ __forceinline__ short bf16_bits(float value) {
+    return static_cast<short>(hip_bfloat16(value).data);
 }
 
-__device__ __forceinline__ float subgroup_sum(float value) {
-#pragma unroll
-    for (int offset = kMatrixTile / 2; offset > 0; offset >>= 1) {
-        value += __shfl_xor(value, offset, kMatrixTile);
-    }
-    return value;
-}
-
+// Flash attention over one segment-bounded 128-query tile and one head. Scores are formed
+// transposed, S^T = K Q^T, so each lane owns one query column of the accumulator: the
+// softmax statistics are per-lane values combined with the partner half-wave, and the
+// accumulator already has the B-operand layout of O^T = V^T P^T, with no LDS transpose. K and a
+// transposed V are staged per 32-key tile with 16-byte loads; probabilities enter the value
+// product as a BF16 high part plus its BF16 residual.
 __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
     const hip_bfloat16* __restrict__ q, const hip_bfloat16* __restrict__ k,
-    const hip_bfloat16* __restrict__ v, const VisionAttentionTile* __restrict__ tiles,
-    int patches, int uniform_segment_length, hip_bfloat16* __restrict__ output,
-    std::int64_t q_stride_d, std::int64_t q_stride_h, std::int64_t q_stride_t,
-    std::int64_t k_stride_d, std::int64_t k_stride_h, std::int64_t k_stride_t,
-    std::int64_t v_stride_d, std::int64_t v_stride_h, std::int64_t v_stride_t) {
+    const hip_bfloat16* __restrict__ v, const VisionAttentionTile* __restrict__ tiles, int patches,
+    int uniform_segment_length, hip_bfloat16* __restrict__ output, std::int64_t q_stride_t,
+    std::int64_t k_stride_t, std::int64_t v_stride_t) {
     VisionAttentionTile tile;
     if (tiles != nullptr) {
         tile = tiles[blockIdx.x];
     } else if (uniform_segment_length > 0) {
-        const int tiles_per_segment =
-            (uniform_segment_length + kQueryTile - 1) / kQueryTile;
-        const int segment = static_cast<int>(blockIdx.x) / tiles_per_segment;
-        const int within  = static_cast<int>(blockIdx.x) - segment * tiles_per_segment;
-        const int begin   = segment * uniform_segment_length;
+        const int tiles_per_segment = (uniform_segment_length + kQueryTile - 1) / kQueryTile;
+        const int segment           = static_cast<int>(blockIdx.x) / tiles_per_segment;
+        const int within            = static_cast<int>(blockIdx.x) - segment * tiles_per_segment;
+        const int begin             = segment * uniform_segment_length;
         tile = {begin + within * kQueryTile, begin, begin + uniform_segment_length, 0};
     } else {
         tile = {static_cast<int>(blockIdx.x) * kQueryTile, 0, patches, 0};
     }
     if (tile.q0 < 0) { return; }
 
-    const int tid  = static_cast<int>(threadIdx.x);
-    const int wave = tid / kWave;
-    const int lane = tid % kWave;
-    const int half = lane / kMatrixTile;
-    const int axis = lane % kMatrixTile;
-    const int head = static_cast<int>(blockIdx.y);
-    const int query_base = tile.q0 + wave * kMatrixTile;
-    __shared__ float probability[kWavesPerBlock][kMatrixTile][kMatrixTile];
+    __shared__ __attribute__((aligned(16))) short keys[kKeyTile * kKeyPitch];
+    __shared__ __attribute__((aligned(16))) short values_t[kPaddedDim * kValuePitch];
 
-    float maximum[8];
-    float denominator[8];
-    F32Fragment attended[kOutputTiles];
-#pragma unroll
-    for (int item = 0; item < 8; ++item) {
-        maximum[item] = -INFINITY;
-        denominator[item] = 0.0F;
+    const int tid          = static_cast<int>(threadIdx.x);
+    const int wave         = tid / kWave;
+    const int lane         = tid % kWave;
+    const int half         = lane / kMatrixTile;
+    const int axis         = lane % kMatrixTile;
+    const int head         = static_cast<int>(blockIdx.y);
+    const int query        = tile.q0 + wave * kMatrixTile + axis;
+    const bool query_valid = query < tile.end;
+
+    // Padding features 72..79 of K and of V^T stay zero for every key tile.
+    for (int index = tid; index < kKeyTile; index += kThreads) {
+        *reinterpret_cast<uint4*>(&keys[index * kKeyPitch + kHeadDim]) = uint4{};
     }
-#pragma unroll
-    for (int output_tile = 0; output_tile < kOutputTiles; ++output_tile) {
-        attended[output_tile] = F32Fragment{};
+    for (int index = tid; index < (kPaddedDim - kHeadDim) * kValuePitch; index += kThreads) {
+        values_t[kHeadDim * kValuePitch + index] = 0;
     }
 
-    for (int key_base = tile.begin; key_base < tile.end; key_base += kMatrixTile) {
-        F32Fragment score{};
+    // Q^T as the B operand: this lane's query column, features ft*16 + half*8 + 0..7.
+    Bf16Fragment query_fragment[kFeatureTiles];
 #pragma unroll
-        for (int feature_tile = 0; feature_tile < kFeatureTiles; ++feature_tile) {
-            Bf16Fragment q_fragment{};
-            Bf16Fragment k_fragment{};
-#pragma unroll
-            for (int item = 0; item < 8; ++item) {
-                const int feature = feature_tile * kMatrixTile + half * 8 + item;
-                const int query = query_base + axis;
-                const int key = key_base + axis;
-                if (query < tile.end && feature < kHeadDim) {
-                    const std::int64_t offset = static_cast<std::int64_t>(query) * q_stride_t +
-                                                static_cast<std::int64_t>(head) * q_stride_h +
-                                                static_cast<std::int64_t>(feature) * q_stride_d;
-                    q_fragment[item] = static_cast<short>(q[offset].data);
-                }
-                if (key < tile.end && feature < kHeadDim) {
-                    const std::int64_t offset = static_cast<std::int64_t>(key) * k_stride_t +
-                                                static_cast<std::int64_t>(head) * k_stride_h +
-                                                static_cast<std::int64_t>(feature) * k_stride_d;
-                    k_fragment[item] = static_cast<short>(k[offset].data);
-                }
-            }
-            score = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-                q_fragment, k_fragment, score);
+    for (int feature_tile = 0; feature_tile < kFeatureTiles; ++feature_tile) {
+        const int chunk              = feature_tile * 2 + half;
+        query_fragment[feature_tile] = Bf16Fragment{};
+        if (query_valid && chunk < kChunks) {
+            query_fragment[feature_tile] = *reinterpret_cast<const Bf16Fragment*>(
+                q + static_cast<std::int64_t>(query) * q_stride_t + head * kHeadDim +
+                chunk * kChunk);
         }
+    }
 
-        float alpha[8];
+    float maximum     = -INFINITY;
+    float denominator = 0.0F;
+    F32Fragment attended[kFeatureTiles];
 #pragma unroll
-        for (int item = 0; item < 8; ++item) {
-            const int query_row = half * 8 + item;
-            const bool valid_query = query_base + query_row < tile.end;
-            const bool valid_key = key_base + axis < tile.end;
-            const float scaled_score =
-                valid_query && valid_key ? score[item] * kScale : -INFINITY;
-            const float block_maximum = subgroup_max(scaled_score);
-            const float next_maximum = fmaxf(maximum[item], block_maximum);
-            alpha[item] = isfinite(maximum[item]) ? expf(maximum[item] - next_maximum) : 0.0F;
-            const float unnormalized =
-                valid_query && valid_key ? expf(scaled_score - next_maximum) : 0.0F;
-            const float block_sum = subgroup_sum(unnormalized);
-            denominator[item] = denominator[item] * alpha[item] + block_sum;
-            maximum[item] = next_maximum;
-            probability[wave][query_row][axis] = unnormalized;
+    for (int dimension_tile = 0; dimension_tile < kFeatureTiles; ++dimension_tile) {
+        attended[dimension_tile] = F32Fragment{};
+    }
+
+    for (int key_base = tile.begin; key_base < tile.end; key_base += kKeyTile) {
+        __syncthreads();
+        for (int index = tid; index < kKeyTile * kChunks; index += kThreads) {
+            const int key_local = index / kChunks;
+            const int chunk     = index - key_local * kChunks;
+            const int key       = key_base + key_local;
+            uint4 key_bits{};
+            uint4 value_bits{};
+            if (key < tile.end) {
+                key_bits = *reinterpret_cast<const uint4*>(
+                    k + static_cast<std::int64_t>(key) * k_stride_t + head * kHeadDim +
+                    chunk * kChunk);
+                value_bits = *reinterpret_cast<const uint4*>(
+                    v + static_cast<std::int64_t>(key) * v_stride_t + head * kHeadDim +
+                    chunk * kChunk);
+            }
+            *reinterpret_cast<uint4*>(&keys[key_local * kKeyPitch + chunk * kChunk]) = key_bits;
+            const short* value_elements = reinterpret_cast<const short*>(&value_bits);
+#pragma unroll
+            for (int element = 0; element < kChunk; ++element) {
+                values_t[(chunk * kChunk + element) * kValuePitch + key_local] =
+                    value_elements[element];
+            }
         }
         __syncthreads();
 
-        for (int output_tile = 0; output_tile < kOutputTiles; ++output_tile) {
+        // S^T subtiles: rows are keys kt*16 + half*8 + item, the column is this lane's query.
+        F32Fragment score[kKeySubtiles];
 #pragma unroll
-            for (int item = 0; item < 8; ++item) {
-                attended[output_tile][item] *= alpha[item];
-            }
-            Bf16Fragment probability_fragment{};
-            Bf16Fragment probability_residual{};
-            Bf16Fragment value_fragment{};
+        for (int key_tile = 0; key_tile < kKeySubtiles; ++key_tile) {
+            score[key_tile] = F32Fragment{};
 #pragma unroll
-            for (int item = 0; item < 8; ++item) {
-                const int local_key = half * 8 + item;
-                const int dimension = output_tile * kMatrixTile + axis;
-                const float probability_value = probability[wave][axis][local_key];
-                const hip_bfloat16 probability_high(probability_value);
-                const hip_bfloat16 probability_low(
-                    probability_value - static_cast<float>(probability_high));
-                probability_fragment[item] = static_cast<short>(probability_high.data);
-                probability_residual[item] = static_cast<short>(probability_low.data);
-                if (key_base + local_key < tile.end && dimension < kHeadDim) {
-                    const std::int64_t offset =
-                        static_cast<std::int64_t>(key_base + local_key) * v_stride_t +
-                        static_cast<std::int64_t>(head) * v_stride_h +
-                        static_cast<std::int64_t>(dimension) * v_stride_d;
-                    value_fragment[item] = static_cast<short>(v[offset].data);
-                }
+            for (int feature_tile = 0; feature_tile < kFeatureTiles; ++feature_tile) {
+                const Bf16Fragment key_fragment = *reinterpret_cast<const Bf16Fragment*>(
+                    &keys[(key_tile * kMatrixTile + axis) * kKeyPitch + feature_tile * kMatrixTile +
+                          half * kChunk]);
+                score[key_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
+                    key_fragment, query_fragment[feature_tile], score[key_tile]);
             }
-            attended[output_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-                probability_fragment, value_fragment, attended[output_tile]);
-            attended[output_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-                probability_residual, value_fragment, attended[output_tile]);
         }
-        __syncthreads();
+
+        float tile_maximum = -INFINITY;
+#pragma unroll
+        for (int key_tile = 0; key_tile < kKeySubtiles; ++key_tile) {
+#pragma unroll
+            for (int item = 0; item < 8; ++item) {
+                const int key = key_base + key_tile * kMatrixTile + half * kChunk + item;
+                const float scaled =
+                    key < tile.end ? score[key_tile][item] * kLog2Scale : -INFINITY;
+                score[key_tile][item] = scaled;
+                tile_maximum          = fmaxf(tile_maximum, scaled);
+            }
+        }
+        tile_maximum = fmaxf(tile_maximum, __shfl_xor(tile_maximum, kMatrixTile, kWave));
+        const float next_maximum = fmaxf(maximum, tile_maximum);
+        const float alpha        = exp2f(maximum - next_maximum);
+        float tile_sum           = 0.0F;
+#pragma unroll
+        for (int key_tile = 0; key_tile < kKeySubtiles; ++key_tile) {
+#pragma unroll
+            for (int item = 0; item < 8; ++item) {
+                const float probability = exp2f(score[key_tile][item] - next_maximum);
+                score[key_tile][item]   = probability;
+                tile_sum += probability;
+            }
+        }
+        tile_sum += __shfl_xor(tile_sum, kMatrixTile, kWave);
+        denominator = denominator * alpha + tile_sum;
+        maximum     = next_maximum;
+#pragma unroll
+        for (int dimension_tile = 0; dimension_tile < kFeatureTiles; ++dimension_tile) {
+            attended[dimension_tile] *= alpha;
+        }
+
+        // O^T += V^T P^T: P^T's B operand is exactly this lane's score column.
+#pragma unroll
+        for (int key_tile = 0; key_tile < kKeySubtiles; ++key_tile) {
+            Bf16Fragment probability_high;
+            Bf16Fragment probability_low;
+#pragma unroll
+            for (int item = 0; item < 8; ++item) {
+                const float probability = score[key_tile][item];
+                const hip_bfloat16 high(probability);
+                probability_high[item] = static_cast<short>(high.data);
+                probability_low[item]  = bf16_bits(probability - static_cast<float>(high));
+            }
+#pragma unroll
+            for (int dimension_tile = 0; dimension_tile < kFeatureTiles; ++dimension_tile) {
+                const Bf16Fragment value_fragment = *reinterpret_cast<const Bf16Fragment*>(
+                    &values_t[(dimension_tile * kMatrixTile + axis) * kValuePitch +
+                              key_tile * kMatrixTile + half * kChunk]);
+                attended[dimension_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
+                    value_fragment, probability_high, attended[dimension_tile]);
+                attended[dimension_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
+                    value_fragment, probability_low, attended[dimension_tile]);
+            }
+        }
     }
 
-    for (int output_tile = 0; output_tile < kOutputTiles; ++output_tile) {
-        const int dimension = output_tile * kMatrixTile + axis;
+    if (!query_valid) { return; }
+    const float inverse = 1.0F / denominator;
+#pragma unroll
+    for (int dimension_tile = 0; dimension_tile < kFeatureTiles; ++dimension_tile) {
+        const int chunk = dimension_tile * 2 + half;
+        if (chunk >= kChunks) { continue; }
+        Bf16Fragment packed;
 #pragma unroll
         for (int item = 0; item < 8; ++item) {
-            const int query_row = half * 8 + item;
-            const int query = query_base + query_row;
-            if (query < tile.end && dimension < kHeadDim) {
-                const std::int64_t offset =
-                    (static_cast<std::int64_t>(query) * kHeads + head) * kHeadDim + dimension;
-                output[offset] = hip_bfloat16(attended[output_tile][item] / denominator[item]);
-            }
+            packed[item] = bf16_bits(attended[dimension_tile][item] * inverse);
         }
+        *reinterpret_cast<Bf16Fragment*>(
+            output + (static_cast<std::int64_t>(query) * kHeads + head) * kHeadDim +
+            chunk * kChunk) = packed;
     }
 }
 
@@ -238,12 +278,15 @@ void require_qkv(const Tensor& tensor, std::int32_t patches, const char* label) 
     constexpr std::int64_t element = sizeof(hip_bfloat16);
     if (tensor.nb[0] != element || tensor.nb[1] != element * kHeadDim ||
         tensor.nb[2] < element * kHeadDim * kHeads || tensor.nb[2] % element != 0) {
-        throw std::invalid_argument(std::string("vision_attention: invalid ") + label +
-                                    " strides");
+        throw std::invalid_argument(std::string("vision_attention: invalid ") + label + " strides");
     }
     if (tensor.data == nullptr) {
         throw std::invalid_argument(std::string("vision_attention: ") + label +
                                     " data must be non-null");
+    }
+    if (reinterpret_cast<std::uintptr_t>(tensor.data) % 16 != 0 || tensor.nb[2] % 16 != 0) {
+        throw std::invalid_argument(std::string("vision_attention: ") + label +
+                                    " rows must be 16-byte aligned");
     }
 }
 
@@ -252,15 +295,13 @@ std::int64_t stride_elements(const Tensor& tensor, int dimension) {
 }
 
 void launch_attention(const Tensor& q, const Tensor& k, const Tensor& v,
-                      const VisionAttentionTile* tiles, int uniform_segment_length,
-                      int query_tiles, Tensor& out, hipStream_t stream) {
+                      const VisionAttentionTile* tiles, int uniform_segment_length, int query_tiles,
+                      Tensor& out, hipStream_t stream) {
     const dim3 grid(static_cast<unsigned>(query_tiles), static_cast<unsigned>(kHeads), 1U);
     vision_attention_wave32_kernel<<<grid, kThreads, 0, stream>>>(
         static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
         static_cast<const hip_bfloat16*>(v.data), tiles, q.ne[2], uniform_segment_length,
-        static_cast<hip_bfloat16*>(out.data), stride_elements(q, 0), stride_elements(q, 1),
-        stride_elements(q, 2), stride_elements(k, 0), stride_elements(k, 1),
-        stride_elements(k, 2), stride_elements(v, 0), stride_elements(v, 1),
+        static_cast<hip_bfloat16*>(out.data), stride_elements(q, 2), stride_elements(k, 2),
         stride_elements(v, 2));
     HIP_CHECK(hipGetLastError());
 }
@@ -281,9 +322,8 @@ std::size_t vision_attention_workspace_capacity_bytes(std::int32_t min_patches,
     return layout.peak_bytes(1);
 }
 
-void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
-                      const Tensor& cu_seqlens, WorkspaceArena& workspace, Tensor& out,
-                      hipStream_t stream) {
+void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& cu_seqlens,
+                      WorkspaceArena& workspace, Tensor& out, hipStream_t stream) {
     const int patches  = q.ne[2];
     const int segments = cu_seqlens.ne[0] - 1;
     if (patches <= 0) { throw std::invalid_argument("vision_attention: P must be positive"); }
@@ -299,18 +339,18 @@ void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
         !cu_seqlens.is_contiguous() || cu_seqlens.data == nullptr) {
         throw std::invalid_argument("vision_attention: cu_seqlens must be contiguous I32 [S+1]");
     }
-    auto scope = workspace.scope();
+    auto scope               = workspace.scope();
     Tensor descriptor_tensor = allocate_workspace(workspace, patches, segments);
     VisionAttentionTile* descriptors =
         descriptor_tensor.data == nullptr
             ? nullptr
             : static_cast<VisionAttentionTile*>(descriptor_tensor.data);
-    const int query_tiles = descriptors == nullptr ? (patches + kQueryTile - 1) / kQueryTile
-                                                   : descriptor_tensor.ne[1];
+    const int query_tiles =
+        descriptors == nullptr ? (patches + kQueryTile - 1) / kQueryTile : descriptor_tensor.ne[1];
     if (descriptors != nullptr) {
         vision_attention_prepare_tiles<<<1, 256, 0, stream>>>(
-            static_cast<const std::int32_t*>(cu_seqlens.data), segments, descriptors,
-            query_tiles, patches);
+            static_cast<const std::int32_t*>(cu_seqlens.data), segments, descriptors, query_tiles,
+            patches);
         HIP_CHECK(hipGetLastError());
     }
     launch_attention(q, k, v, descriptors, 0, query_tiles, out, stream);
@@ -330,7 +370,7 @@ void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
     if (segment_length <= 0 || patches % segment_length != 0) {
         throw std::invalid_argument("vision_attention: invalid uniform segment length");
     }
-    const int segments = patches / segment_length;
+    const int segments    = patches / segment_length;
     const int query_tiles = segments * ((segment_length + kQueryTile - 1) / kQueryTile);
     launch_attention(q, k, v, nullptr, segment_length, query_tiles, out, stream);
 }

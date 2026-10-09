@@ -125,7 +125,7 @@ DFlash2 supports Vision-composed target hidden features and target MRoPE verific
 ```
 
 For Qwen3.8-27B DFlash2, the R9700 artifact must contain the appended `dflash/` objects. The native
-runtime uses chain verification with K in 1..5; `--dflash-verify-width` must equal K+1
+runtime uses chain verification with K in 1..7; `--dflash-verify-width` must equal K+1
 when explicitly supplied.
 
 ```bash
@@ -136,8 +136,10 @@ when explicitly supplied.
 ```
 
 MTP and DFlash cannot be enabled together. DFlash requires appended `dflash/` objects and
-uses chain verification `W=k+1`, `k` in `1..5`. `--adaptive-draft` selects live K from `{3,4,5}`
-using measured expected yield divided by round time; explicit `--draft-tokens 4` stays fixed.
+uses chain verification `W=k+1`, `k` in `1..7`. `--adaptive-draft` selects live K from `{3..N}`
+for `--draft-tokens N` (5..7; MTP stays `{3,4,5}`) using measured expected yield divided by round
+time; explicit `--draft-tokens 4` stays fixed. The recommended DFlash setting is
+`--draft-tokens 7 --adaptive-draft` (see `docs/performance.md`).
 For DFlash, K describes the physical captured graph. Per-request output and context limits
 still clip the logical proposals and published tokens. Near an output limit, a larger padded
 graph may be selected only with measured cost at the current batch size and enough remaining
@@ -150,17 +152,19 @@ R9700 speed recommendations require R9700 end-to-end measurements; NVIDIA timing
 |---|---|---:|
 | `--max-context N` | per-sequence logical context ceiling | `2048` |
 | `--kv-capacity N\|auto` | explicit shared Main Text KV capacity, or maximize it from remaining GPU memory; omitted means `--max-context` | `2048` |
+| `--kv-capacity-headroom MiB` | device memory `--kv-capacity auto` leaves free; requires `auto` | `64` |
 | `--kv-ram-capacity off\|N` | pinned host KV prefix-cache capacity in MiB; `off` disables the tier | `off` |
 | `--kv-disk-capacity off\|N` | SSD KV prefix-cache unique-object capacity in MiB; `off` disables the tier | `off` |
 | `--kv-disk-location PATH` | directory for the SSD page store; required iff `--kv-disk-capacity` is enabled | unset |
 | `--kv-disk-compress off\|zstd` | zstd-1 on new GDN/hidden/cyclic writes; KV pages stay uncompressed | `off` |
-| `--prefill-chunk N` | positive text-prefill chunk, in multiples of 128 | `4096` |
+| `--prefill-chunk N` | positive text-prefill chunk, in multiples of 128 | `2048` |
 | `--max-new N` | requested output-token limit | `128` |
 | `--device N` | HIP device index | `0` |
 | `--spec mtp\|dflash` | speculative backend | off |
-| `--draft-tokens N` | MTP and DFlash2 `1..5` | unset |
-| `--adaptive-draft` | pick live draft K in `{3,4,5}` by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
-| `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..6` | auto |
+| `--draft-tokens N` | MTP `1..5`, DFlash2 `1..7` | unset |
+| `--adaptive-draft` | pick live draft K in `{3..N}` (DFlash `--draft-tokens N>=5`; MTP `{3,4,5}`) by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
+| `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..8` | auto |
+| `--dflash-p-less-draft-temperature T` | Pins the DFlash2 draft temperature `0..2` for p-less requests: drafts are drawn from the 16-candidate path-select softmax at `T` and verified against that proposal, so output stays exactly the p-less target distribution. `0` drafts greedily. Unset, the engine calibrates it online per p-less `--temperature` and draft length: every chain round scores eight candidate temperatures against the verified target distribution and the next round uses the best ([model §8](maintainer/qwen3.8-27b-model.md#8-dflash2-block-diffusion-draft-model)) | calibrated |
 | `--lm-head-draft` | optimized proposal head | off |
 | `--vision` | enable image/video input and load Vision GPU allocations | off |
 | `--no-device-graph` | disable Device Graph decode | graphs on |
@@ -203,7 +207,8 @@ content. There is no CLI flag. P-less membership is `p_v ≥ max(L·exp(-2ε/T),
 `ε = 1/16` (first-order softmax perturbation of the logits) and `M = 1024`; L is the
 unperturbed collision probability, and an empty set falls back to the eligible mode.
 Under MTP or DFlash2,
-p-less applies at every hop (chain Leviathan with one-hot draft `q`) and to the bonus after a full
+p-less applies at every hop (block verification over the chain with the recorded draft `q`; DFlash2 drafts are sampled
+at the calibrated or pinned `--dflash-p-less-draft-temperature`, MTP drafts are one-hot) and to the bonus after a full
 accept. The cycle exclusion applies only to the first hop's next-token decision; later hops use
 their unmodified p-less candidate sets. Temperature zero remains greedy at every hop.
 The reasoning terminator (including split-token forms) and model stop tokens are never
@@ -217,8 +222,8 @@ and tools-off/raw output remain allowed. This is a sampling-domain constraint,
 not response-text deletion or an automatic retry.
 
 With current declared tools, Engine separately withholds suspected duplicate-tool loops
-using repeated reasoning, identical calls and unchanged associated results. It can rebuild
-the internal context and retry at most twice, within the original output budget and resource
+using repeated reasoning, identical calls and unchanged associated results. It can extend
+the cached context and retry at most twice, within the original output budget and resource
 reservation. Rejected calls are not printed or executed; already printed reasoning/prose is
 not retracted. Exhaustion is an explicit request error, not forced EOS or an engine shutdown.
 For text-only thinking requests, persistent reasoning can also trigger an internal retry:
@@ -229,11 +234,14 @@ repetition-evidence threshold, not a 4,096-token reasoning limit. The occurrence
 have a fixed separation,
 so changing words elsewhere in a multi-paragraph loop does not hide the repeated passage.
 Hashes locate candidates; exact token comparison confirms them. Two copies alone do not
-trigger a retry. Long reasoning without that repetition is not limited. The failed
-generated reasoning and closed historical reasoning are omitted from
-the internal retry context; original user content and actual tool results are preserved,
-and an explicitly labeled engine system notice asks for concrete progress. No call or
-tool result is invented. Reasoning and duplicate-tool recovery share the two-retry budget.
+trigger a retry. Long reasoning without that repetition is not limited. The retry keeps
+the cached prompt, including historical reasoning. It closes the open think turn and
+appends the notice or rejected-call feedback; only the failed generation is omitted. A
+later retry appends another notice after the first; the earlier notice stays. A ready
+checkpoint at the prompt frontier is restored and only the appended suffix is prefilled.
+Original user content and actual tool results stay in that prompt, and an explicitly
+labeled engine system notice asks for concrete progress. No call or tool result is
+invented. Reasoning and duplicate-tool recovery share the two-retry budget.
 Raw output and media inputs do not use these internal retries. See the serving reference
 for the detector's conservative scope and recovery usage fields.
 
@@ -279,10 +287,34 @@ no runtime cache-format selector. The prepared prompt must fit
 the 64-token page size. `--kv-capacity auto` loads the selected weights, measures the remaining GPU
 memory, and directly chooses the largest legal page capacity for the complete enabled runtime
 layout. This includes the selected speculative backend, fixed sequence state, workspace, Vision
-request transient, and Device Graph allowance, while leaving the default 1 GiB automatic headroom
-unallocated. It does not probe allocations or resize the pool at request time. The single-request
+request transient, and Device Graph allowance, while leaving `--kv-capacity-headroom` MiB (default
+64) unallocated. The Engine allocates all device memory at startup, so the default only covers
+driver-side growth such as lazily allocated kernel scratch; raise it when a desktop or another
+process uses the same GPU. A startup failure in automatic mode names this option. The token
+embedding is held in pinned host memory rather than VRAM (the load summary's `weight pinned host`),
+so it is not part of the device weights. It does not probe
+allocations or resize the pool at request time. The single-request
 CLI normally leaves the option omitted so it follows
 `--max-context`; the distinction matters primarily to a concurrent Engine or server.
+Checkpoint images live in one pinned host slab that startup allocates, prefaults, and registers
+outside `--kv-ram-capacity`: each lane's turn (rewrite) checkpoint image of the GDN state
+(146.8 MiB on Qwen3.8-27B, plus 40 MiB of DFlash local K/V), and with MTP or DFlash a pool of
+context-checkpoint heads (the same image plus the hidden row) for prefill-ladder and
+turn-rollback heads, including heads restored from the RAM or disk tier. The pool holds one
+rollback head per lane plus the most ladder heads all lanes can hold at once: marks above
+`--max-context` are unreachable, and a lane holding k ladder heads keeps at least the k-th mark's
+tokens of the shared KV capacity. The Compose deployment (C=1, 32768-token max context, DFlash)
+reaches only the 24576 mark, so it holds 2 heads (0.37 GiB) plus one 0.18 GiB rewrite image; C=1
+at a 262144-token max context with KV capacity for every mark holds 7 heads (1.3 GiB). Serve
+prints the slab as `ckpt-pin=` and `ckpt-heads=` on the KV capacity line and the CLI as
+`checkpoint host pinned`. Serving never allocates or frees pinned checkpoint memory; while every
+head is owned, an optional capture or restored head is skipped. Startup fails with the required
+size when the slab would leave less than 4096 MiB of the host's available memory;
+`--context-checkpoints off` shrinks the pool to one turn-rollback head per lane, and without MTP
+or DFlash there is no pool. With MTP or DFlash, capture copies the state into the Engine-wide
+device staging slot (a device-to-device copy) and drains it to the host image on the copy stream
+behind later work; a restore while staging still holds that image copies it back on the device,
+otherwise it costs one H2D before the suffix prefill.
 `--kv-ram-capacity N` is a separate pinned-host budget in MiB for completed prefix bundles. It is
 not a token capacity, does not enlarge the GPU pool, and defaults to `off`. `N` must be a positive
 decimal integer; `0` is rejected. Construction fails if the host pin cannot be allocated.
@@ -307,14 +339,17 @@ counts as shutdown runs.
 Host RAM is an exclusive FIFO: a bundle lives in VRAM or in this budget, not both. One long MTP
 or DFlash bundle with five context-checkpoint heads is about 6 GiB (Main KV, optional MTP KV or
 DFlash cyclic state, plus GDN checkpoint images); size the
-budget accordingly. `off` still captures live-lane GDN to ordinary pinned buffers so same-lane
-rollback works; other-lane restore after eviction remains a miss. Startup still
+budget accordingly. `off` still captures live-lane GDN into the startup checkpoint pool so
+same-lane rollback works; other-lane restore after eviction remains a miss. Startup still
 prints capacity plus `used`/`entries`. Serve `[req] done` and throughput lines print live
 host-resident `kv-ram=` used bytes plus `n=` / `restores=` / `evicts=` / `drops=` / `save=` /
 `load=`. When disk is enabled the same lines also print `kv-disk=` occupancy and counters. `kv-ram=` / `n=` exclude a chat after consume following a restore onto a KV lane; a later
 spill recaptures it as a new FIFO tail. RAM `save=` / `load=` are HIP event elapsed for that request's
-RAM-tier D2H capture and H2D unpack of the FIFO bundle (Main+backend KV, rewrite GDN, and any ladder
-GDN/cyclic images in the same copy span). Disk `save=` is spill-session wall harvested onto the
+RAM-tier D2H capture and H2D unpack of the FIFO bundle (Main+backend KV, current GDN/cyclic state,
+and hidden); rewrite-checkpoint and ladder GDN/cyclic images already live in pinned host memory and
+are copied host-to-host outside that span. Admission completes only after its copies land, so it
+bills them itself; a capture that a deferred or failed admission rolled back counts only toward
+the lifetime totals, never toward another request. Disk `save=` is spill-session wall harvested onto the
 request; disk `load=` is the host wall from the first live SSD read of that
 restore until the last page or state object has arrived in the pinned host window (not H2D, and not a
 sum of overlapped SSD and copy clocks). Disk `h2d=` is the host wall from that last host arrival until
@@ -339,3 +374,21 @@ growth.
 
 All weight, sequence, workspace, request-transient, and graph allocations are released when the
 Engine is destroyed.
+
+## Constrained output
+
+Use `--json-object` for an arbitrary JSON object, `--json-schema FILE` to read a JSON Schema,
+or `--grammar FILE` to read an XGrammar EBNF grammar with a `root` rule. Select one constraint:
+
+```bash
+build-r9700/apps/ninfer /path/to/qwen3.8-27b-r9700-fp8lut4.ninfer --prompt 'Return a JSON object with an answer.' \
+  --json-schema answer.schema.json --no-thinking --max-new 256
+```
+
+The constraint applies to answer content after reasoning, and supports Device Graphs, MTP, and
+DFlash through the same token masks used for tools. Schema assertions are enforced at decoding;
+unsupported assertions are rejected at preparation rather than relaxed. Describe the desired
+answer in the prompt; the schema is not added to the conversation. Tools and output constraints
+cannot be combined. Stops, cancellation, or output/context limits may truncate a valid prefix;
+complete JSON validity requires finishing the grammar. See the constrained-output contract in
+`docs/serving.md` for the supported schema subset and HTTP triggers.

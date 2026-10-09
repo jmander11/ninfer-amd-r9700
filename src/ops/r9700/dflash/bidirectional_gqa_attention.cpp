@@ -14,9 +14,9 @@ namespace ninfer::ops {
 namespace {
 
 constexpr std::int32_t kHeadDim = 128;
-constexpr std::int32_t kQHeads = 32;
+constexpr std::int32_t kQHeads  = 32;
 constexpr std::int32_t kKvHeads = 8;
-constexpr float kExpectedScale = 0.08838834764831844055F;
+constexpr float kExpectedScale  = 0.08838834764831844055F;
 
 void require_shape(const Tensor& tensor, std::int32_t n0, std::int32_t n1, std::int32_t n2,
                    std::int32_t n3, const char* name) {
@@ -44,9 +44,8 @@ std::uint32_t validate_context(const BidirectionalGqaBF16ContextView& context) {
                   "context key pages");
     require_shape(context.value_pages, kHeadDim, kPagedKVPageSize, physical_pages, kKvHeads,
                   "context value pages");
-    if (physical_pages <= 0 || context.block_tables.ne[0] <= 0 ||
-        context.block_tables.ne[1] <= 0 || context.block_tables.ne[2] != 1 ||
-        context.block_tables.ne[3] != 1) {
+    if (physical_pages <= 0 || context.block_tables.ne[0] <= 0 || context.block_tables.ne[1] <= 0 ||
+        context.block_tables.ne[2] != 1 || context.block_tables.ne[3] != 1) {
         throw std::invalid_argument("bidirectional_gqa_attention: invalid context capacity");
     }
     const std::uint64_t capacity =
@@ -85,7 +84,7 @@ void bidirectional_gqa_attention(const Tensor& q, const Tensor& query_k, const T
                                  GqaContextExecutionEnvelope envelope, WorkspaceArena& workspace,
                                  Tensor& out, hipStream_t stream) {
     const std::int32_t tokens = q.ne[2];
-    const std::int32_t batch = q.ne[3];
+    const std::int32_t batch  = q.ne[3];
     validate_profile(envelope, tokens, tokens, batch);
     require_tensor(q, DType::BF16, "q");
     require_tensor(query_k, DType::BF16, "query k");

@@ -7,16 +7,18 @@ import argparse
 import json
 import os
 import stat
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+    DECODE_ATTENTION_PROFILE,
     MATRIX_SCHEMA_VERSION,
+    PACKED_DECODE_MIN_CONTEXT,
     PRODUCT_CONCURRENCIES,
     R9700_KV_PLANE_LAYOUTS,
+    SPLIT512_MIN_CONTEXT,
     build_cases,
     file_sha256,
     load_bench_report,
@@ -24,11 +26,9 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_automatic_feasibility,
     validate_manifest_output_ownership,
 )
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.bench.select_prefill_chunk import REQUIRED_GROUPS, REQUIRED_PROFILES, REQUIRED_RECIPES
 from tools.ppl.assemble_pareto import _missing_capacity_provenance
 from tools.ppl.run import validate_n16_receipt_summary
-
 
 EXPECTED_IDENTITIES = {
     (recipe, group, profile)
@@ -54,7 +54,9 @@ def _require_option(command: list[str], option: str, value: str) -> None:
 
 
 def _validate_capacity_outcomes(
-    root: Path, manifest: dict[str, Any], records: list[dict[str, Any]],
+    root: Path,
+    manifest: dict[str, Any],
+    records: list[dict[str, Any]],
 ) -> int:
     """Require each scheduled cell to be a valid report or one exact retained failure."""
 
@@ -82,7 +84,7 @@ def _validate_capacity_outcomes(
                 manifest["expected_kv_value_group"],
                 manifest["expected_q4_activation_bits"],
                 manifest["expected_w8_activation_bits"],
-                manifest["expected_fp8_qk_wmma_enabled"],
+                manifest["expected_split512_enabled"],
                 record["concurrency"],
                 manifest["artifact"],
                 record["command"],
@@ -101,7 +103,8 @@ def _validate_capacity_outcomes(
         stdout = root / "logs" / f"{stem}.stdout.txt"
         _regular(stderr, "capacity failure stderr")
         matches = [
-            index for index, failure in enumerate(failures)
+            index
+            for index, failure in enumerate(failures)
             if isinstance(failure, dict)
             and failure.get("suite") == record["suite"]
             and failure.get("case") == record["case"]
@@ -110,8 +113,8 @@ def _validate_capacity_outcomes(
             and failure.get("stderr") == str(stderr)
             and failure.get("stdout") == str(stdout)
             and (
-                type(failure.get("returncode")) is int and failure["returncode"] != 0
-                or isinstance(failure.get("error"), str) and bool(failure["error"])
+                (type(failure.get("returncode")) is int and failure["returncode"] != 0)
+                or (isinstance(failure.get("error"), str) and bool(failure["error"]))
             )
         ]
         if len(matches) != 1:
@@ -127,7 +130,10 @@ def _validate_capacity_outcomes(
 
 
 def validate_matrix(
-    root: Path, authority: dict[str, Any], *, executed: bool,
+    root: Path,
+    authority: dict[str, Any],
+    *,
+    executed: bool,
 ) -> tuple[tuple[str, int, str], int]:
     root = root.expanduser().resolve(strict=True)
     path = root / "manifest.json"
@@ -153,25 +159,20 @@ def validate_matrix(
         or manifest.get("expected_kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
         or manifest.get("expected_q4_activation_bits") != 8
         or manifest.get("expected_w8_activation_bits") != 8
-        or manifest.get("expected_fp8_qk_wmma_enabled") is not True
-        or manifest.get("expected_fp8_qk_wmma_profile") != FP8_QK_WMMA_PROFILE
-        or manifest.get("expected_fp8_qk_wmma_t1_min_context")
-        != FP8_QK_WMMA_T1_MIN_CONTEXT
-        or manifest.get("expected_fp8_qk_wmma_t2_min_context")
-        != FP8_QK_WMMA_T2_MIN_CONTEXT
+        or manifest.get("expected_split512_enabled") is not True
+        or manifest.get("expected_decode_attention_profile") != DECODE_ATTENTION_PROFILE
+        or manifest.get("expected_packed_decode_min_context") != PACKED_DECODE_MIN_CONTEXT
+        or manifest.get("expected_split512_min_context") != SPLIT512_MIN_CONTEXT
     ):
         raise ValueError(f"{path} is not an exact schema-v14 post-chunk capacity matrix")
     validate_manifest_output_ownership(root, manifest)
     artifact = manifest.get("artifact")
     if not isinstance(artifact, dict) or artifact.get("weights_id") not in REQUIRED_RECIPES:
         raise ValueError("capacity manifest has an unsupported artifact recipe")
-    validate_n16_receipt_summary(
-        artifact.get("conversion_receipt"), artifact["weights_id"]
-    )
+    validate_n16_receipt_summary(artifact.get("conversion_receipt"), artifact["weights_id"])
     is_hybrid = artifact["weights_id"] == REQUIRED_RECIPES[2]
-    if (
-        is_hybrid
-        != (manifest.get("required_candidate_identity") == "fp8-hybrid-selection-authority")
+    if is_hybrid != (
+        manifest.get("required_candidate_identity") == "fp8-hybrid-selection-authority"
     ):
         raise ValueError("capacity manifest hybrid selection authority differs from its recipe")
     identity = (
@@ -186,11 +187,15 @@ def validate_matrix(
         ("pareto_effective_capacity", "effective_capacity_ordinary", concurrency)
         for concurrency in PRODUCT_CONCURRENCIES
     }
-    actual_points = {
-        (record.get("suite"), record.get("case"), record.get("concurrency"))
-        for record in records
-        if isinstance(record, dict)
-    } if isinstance(records, list) else set()
+    actual_points = (
+        {
+            (record.get("suite"), record.get("case"), record.get("concurrency"))
+            for record in records
+            if isinstance(record, dict)
+        }
+        if isinstance(records, list)
+        else set()
+    )
     if not isinstance(records, list) or len(records) != 4 or actual_points != expected_points:
         raise ValueError("capacity manifest does not contain exactly C=1,2,3,4")
     if len({record.get("report") for record in records}) != len(records):
@@ -213,7 +218,10 @@ def validate_matrix(
 
 
 def validate_campaign(
-    authority_path: Path, roots: Sequence[Path], *, executed: bool,
+    authority_path: Path,
+    roots: Sequence[Path],
+    *,
+    executed: bool,
 ) -> dict[str, Any]:
     if len(roots) != len(EXPECTED_IDENTITIES):
         raise ValueError("post-chunk capacity campaign requires exactly twelve matrix roots")
@@ -242,33 +250,33 @@ def validate_campaign(
     }
     if executed:
         failed_by_identity = dict(validated)
-        capacity_eligible = {
-            identity for identity, failed in validated if failed == 0
-        }
+        capacity_eligible = {identity for identity, failed in validated if failed == 0}
         asymmetric_pairs = [
             (recipe, group)
             for recipe in REQUIRED_RECIPES
             for group in REQUIRED_GROUPS
-            if len({
-                failed_by_identity[(recipe, group, profile)] == 0
-                for profile in REQUIRED_PROFILES
-            }) != 1
+            if len(
+                {failed_by_identity[(recipe, group, profile)] == 0 for profile in REQUIRED_PROFILES}
+            )
+            != 1
         ]
         if asymmetric_pairs:
             raise ValueError(
                 "post-chunk capacity eligibility differs across matched dense/XAttention "
                 f"profiles: {asymmetric_pairs!r}"
             )
-        result.update({
-            "successful_point_count": (
-                len(identities) * len(PRODUCT_CONCURRENCIES) - failed_points
-            ),
-            "failed_point_count": failed_points,
-            "capacity_eligible_matrix_count": len(capacity_eligible),
-            "capacity_eligible_identities": sorted(capacity_eligible),
-            "whole_eligible_matrix_count": len(capacity_eligible),
-            "whole_eligible_identities": sorted(capacity_eligible),
-        })
+        result.update(
+            {
+                "successful_point_count": (
+                    len(identities) * len(PRODUCT_CONCURRENCIES) - failed_points
+                ),
+                "failed_point_count": failed_points,
+                "capacity_eligible_matrix_count": len(capacity_eligible),
+                "capacity_eligible_identities": sorted(capacity_eligible),
+                "whole_eligible_matrix_count": len(capacity_eligible),
+                "whole_eligible_identities": sorted(capacity_eligible),
+            }
+        )
     return result
 
 
@@ -286,6 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, indent=2))
     else:
         from tools.bench.run_ninfer_bench_matrix import durable_replace_json
+
         durable_replace_json(args.out, result)
     return 0
 

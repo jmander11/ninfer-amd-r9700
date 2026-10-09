@@ -421,7 +421,7 @@ constexpr std::array<std::uint32_t, 4> kDecodeBlockThreads{32U, 64U, 128U, 256U}
 
 void write_samples(std::ostream& out, const std::array<double, kTrials>& values);
 
-DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards,
+[[maybe_unused]] DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards,
                                       bool cold_disjoint) {
     constexpr std::uint32_t tokens = 1U;
     const std::uint32_t padded_columns = (shape.columns + 127U) / 128U * 128U;
@@ -665,7 +665,7 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards,
                             weight_bytes * (weight_copy_count - 1U)};
 }
 
-std::vector<Result> run_shape(Shape shape) {
+[[maybe_unused]] std::vector<Result> run_shape(Shape shape) {
     const std::uint32_t padded_columns = (shape.columns + 127U) / 128U * 128U;
     const std::uint32_t groups = padded_columns / kGroup;
     const std::size_t weight_elements =
@@ -801,7 +801,7 @@ std::vector<Result> run_shape(Shape shape) {
     return results;
 }
 
-PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
+[[maybe_unused]] PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
                                bool exhaustive_oracle, bool collect_timing,
                                bool compare_lds_scope = false,
                                LdsScopeTiming* lds_scope_timing = nullptr,
@@ -1082,8 +1082,9 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
     const std::array<std::uint32_t, 8> sampled_rows{
         0U, 1U, 15U, 16U, shape.rows / 3U, shape.rows / 2U,
         shape.rows - 2U, shape.rows - 1U};
-    const std::array<std::uint32_t, 8> sampled_tokens{
+    std::array<std::uint32_t, 8> sampled_tokens{
         0U, 31U, 32U, 63U, 64U, tokens / 3U, tokens / 2U, tokens - 1U};
+    for (std::uint32_t& token : sampled_tokens) token = std::min(token, tokens - 1U);
     std::uint64_t maximum_steps = 0;
     const auto check_output = [&](std::uint32_t token, std::uint32_t row) {
         double sum = 0.0;
@@ -1146,7 +1147,7 @@ void write_samples(std::ostream& out, const std::array<double, kTrials>& values)
     out << ']';
 }
 
-void write_json(const std::filesystem::path& path, const std::vector<Result>& results,
+[[maybe_unused]] void write_json(const std::filesystem::path& path, const std::vector<Result>& results,
                 const hipDeviceProp_t& device, int runtime_version) {
     std::ofstream out(path);
     if (!out) fail("cannot open output JSON");
@@ -1215,8 +1216,9 @@ std::string shell_quote(std::string_view value) {
     return out;
 }
 
-std::string sha256_file(const std::filesystem::path& path) {
+[[maybe_unused]] std::string sha256_file(const std::filesystem::path& path) {
     const std::string command = "sha256sum -- " + shell_quote(path.string());
+    // NOLINTNEXTLINE(bugprone-command-processor): fixed sha256sum on a shell-quoted path
     FILE* pipe = popen(command.c_str(), "r");
     if (pipe == nullptr) fail("cannot launch sha256sum");
     std::array<char, 128> buffer{};
@@ -1258,7 +1260,7 @@ struct SourceIdentity {
     std::string sha256;
 };
 
-bool write_lds_scope_report(const std::filesystem::path& output,
+[[maybe_unused]] bool write_lds_scope_report(const std::filesystem::path& output,
                             const std::filesystem::path& executable,
                             std::string_view executable_sha256,
                             const std::filesystem::path& source_root,
@@ -1463,7 +1465,7 @@ bool write_lds_scope_report(const std::filesystem::path& output,
     return accepted;
 }
 
-void write_decode_cold_block_report(
+[[maybe_unused]] void write_decode_cold_block_report(
     const std::filesystem::path& output,
     const std::vector<DecodeDot8Result>& results,
     const std::filesystem::path& executable,
@@ -1705,10 +1707,10 @@ int main(int argc, char** argv) {
             m128n128_benchmark || pingpong_regression || pingpong_benchmark) {
             linear::A8Q4G64KernelResources resources{};
             HIP_CHECK(linear::a8q4g64_kernel_resources(&resources));
-            if (resources.prefill_cta_registers > 96 ||
-                resources.prefill_cta_static_shared_bytes != 17152 ||
+            if (resources.prefill_cta_registers > 232 ||
+                resources.prefill_cta_static_shared_bytes != 26624 ||
                 resources.prefill_cta_local_bytes != 0) {
-                fail("prefill CTA resource gate requires <=96 VGPR, exactly 17152B LDS, "
+                fail("M128xN128 production CTA requires <=232 VGPR, exactly 26624B LDS, "
                      "and no scratch");
             }
             if (resources.prefill_cta_m64n128_regression_registers > 96 ||
@@ -1736,18 +1738,13 @@ int main(int argc, char** argv) {
                  resources.prefill_cta_m128n128_qualification_max_threads_per_block < 1024)) {
                 fail("M128xN128 CTA requires <=96 VGPR, exactly 12800B LDS, no scratch");
             }
-            if ((pingpong_regression || pingpong_benchmark) &&
-                (resources.prefill_cta_registers > 96 ||
-                 resources.prefill_cta_static_shared_bytes != 17152 ||
-                 resources.prefill_cta_local_bytes != 0)) {
-                fail("ping/pong CTA requires <=96 VGPR, exactly 17152B LDS, no scratch, "
-                     "and a 512-thread launch bound");
-            }
             const std::vector<Shape> prefill_shapes{
                 Shape{7168, 5120, 0, 0}, Shape{4096, 5120, 0, 0},
                 Shape{12288, 5120, 0, 0}, Shape{5120, 6144, 0, 0},
                 Shape{34816, 5120, 0, 0}, Shape{5120, 17408, 0, 0},
-                Shape{5120, 10240, 0, 0}, Shape{1024, 5120, 0, 0}};
+                Shape{5120, 10240, 0, 0}, Shape{1024, 5120, 0, 0},
+                // DFlash2 context: feature projection and per-layer fused QKV.
+                Shape{5120, 25600, 0, 0}, Shape{6144, 5120, 0, 0}};
             std::vector<PrefillResult> tail_qualifications;
             if (pingpong_regression || pingpong_benchmark) {
                 // Exercise direct-call fallback and nonzero status poisoning
@@ -1782,7 +1779,14 @@ int main(int argc, char** argv) {
             }
             std::vector<LdsScopeEvidence> evidence;
             for (const Shape shape : prefill_shapes) {
-                for (const std::uint32_t tokens : {1024U, 2048U, 4096U, 8192U}) {
+                // Partial 128-token tiles (mixed-round slices and final chunks) on the
+                // DFlash-context and attention-QKV tuples, then the full-chunk extents.
+                const bool partial = shape.columns == 25600U ||
+                    (shape.rows == 6144U && shape.columns == 5120U) ||
+                    (shape.rows == 7168U && shape.columns == 5120U);
+                std::vector<std::uint32_t> extents{1024U, 2048U, 4096U, 8192U};
+                if (partial) extents.insert(extents.begin(), {33U, 40U, 100U, 129U, 232U, 488U, 1000U});
+                for (const std::uint32_t tokens : extents) {
                     const PrefillResult result = run_prefill_case(
                         shape, tokens, false, false,
                         lds_scope_regression || lds_scope_benchmark, nullptr,
@@ -1843,7 +1847,7 @@ int main(int argc, char** argv) {
                               : lds_scope_regression
                               ? "A8Q4 LDS-scope/production CTA bit-exact regression: PASS ("
                               : "A8Q4 cooperative prefill CTA regression: PASS (")
-                      << "exact tail case and six Text plus two MTP shapes at four token extents)\n";
+                      << "exact tail case and six Text, two MTP and two DFlash2 context shapes at full and partial token extents)\n";
             return 0;
         }
         std::vector<Result> results;

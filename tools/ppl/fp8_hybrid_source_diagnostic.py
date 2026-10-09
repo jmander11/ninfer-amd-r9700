@@ -11,31 +11,43 @@ persistent weight codec and is not product A8 execution evidence.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-import hashlib
 import json
 import math
-from pathlib import Path
 import sys
-from typing import Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.convert.qwen3.common.recipe import (
-    Concat, Expression, Reshape, Slice, SourceTensor, expression_shape,
+from tools.convert.qwen3.common.recipe import (  # noqa: E402  after sys.path setup
+    Concat,
+    Expression,
+    Reshape,
+    Slice,
+    SourceTensor,
+    expression_shape,
     expression_sources,
 )
-from tools.convert.qwen3_8_27b_r9700 import (
-    fp8_hybrid_decision, fp8_hybrid_inventory, source_inventory, source_recipe,
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
+    fp8_hybrid_decision,
+    fp8_hybrid_inventory,
+    source_inventory,
+    source_recipe,
 )
-from tools.ppl.q4_group_source_diagnostic import (
-    ROW_CHUNK, TERRIBLE_NLL, _atomic_new, _source_identity, _write_score,
-    quantize_decode_q4, sha256_file, validate_source_metadata,
+from tools.ppl.q4_group_source_diagnostic import (  # noqa: E402  after sys.path setup
+    ROW_CHUNK,
+    TERRIBLE_NLL,
+    _atomic_new,
+    _source_identity,
+    _write_score,
+    quantize_decode_q4,
+    sha256_file,
+    validate_source_metadata,
 )
-from tools.reference.qwen3_8_27b_bf16 import protocol
-
+from tools.reference.qwen3_8_27b_bf16 import protocol  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_qwen3_8_fp8_q4_hybrid_source_diagnostic"
 COMPARISON_TYPE = "ninfer_qwen3_8_fp8_q4_hybrid_source_comparison"
@@ -78,10 +90,13 @@ def _sublineage(source: _Lineage, begin: int, end: int) -> tuple[_RowSpan, ...]:
         overlap_end = min(end, cursor + length)
         if overlap_begin < overlap_end:
             offset = overlap_begin - cursor
-            result.append(_RowSpan(
-                span.source, span.begin + offset,
-                span.begin + offset + overlap_end - overlap_begin,
-            ))
+            result.append(
+                _RowSpan(
+                    span.source,
+                    span.begin + offset,
+                    span.begin + offset + overlap_end - overlap_begin,
+                )
+            )
         cursor += length
     if sum(span.end - span.begin for span in result) != end - begin:
         raise ValueError("selected hybrid recipe lineage interval is incomplete")
@@ -98,7 +113,8 @@ def _slice_lineage(source: _Lineage, axis: int, begin: int, end: int) -> _Lineag
         span
         for index in range(outer)
         for span in _sublineage(
-            source, index * period + begin * stride,
+            source,
+            index * period + begin * stride,
             index * period + end * stride,
         )
     )
@@ -133,8 +149,10 @@ def _row_lineage(expression: Expression) -> _Lineage:
         if expression.axis == len(source_shape) - 1:
             raise ValueError("selected hybrid recipe slices the K dimension")
         return _slice_lineage(
-            _row_lineage(expression.source), expression.axis,
-            expression.begin, expression.end,
+            _row_lineage(expression.source),
+            expression.axis,
+            expression.begin,
+            expression.end,
         )
     if isinstance(expression, Concat):
         if expression.axis != 0:
@@ -146,7 +164,9 @@ def _row_lineage(expression: Expression) -> _Lineage:
             (sum(part.shape[0] for part in parts),),
             tuple(span for part in parts for span in part.spans),
         )
-    raise ValueError(f"selected hybrid recipe uses unsupported transform {type(expression).__name__}")
+    raise ValueError(
+        f"selected hybrid recipe uses unsupported transform {type(expression).__name__}"
+    )
 
 
 def _source_rows(object_names: Iterable[str]) -> dict[str, tuple[tuple[int, int], ...]]:
@@ -159,8 +179,7 @@ def _source_rows(object_names: Iterable[str]) -> dict[str, tuple[tuple[int, int]
         except KeyError as error:
             raise ValueError(f"hybrid selection has no source recipe: {object_name}") from error
         lineage = _row_lineage(recipe.expression)
-        if (len(lineage.shape) != 1
-                or lineage.row_count != expression_shape(recipe.expression)[0]):
+        if len(lineage.shape) != 1 or lineage.row_count != expression_shape(recipe.expression)[0]:
             raise ValueError(f"{object_name}: source-row lineage differs from logical rows")
         for span in lineage.spans:
             rows.setdefault(span.source, []).append((span.begin, span.end))
@@ -178,9 +197,7 @@ def _source_rows(object_names: Iterable[str]) -> dict[str, tuple[tuple[int, int]
     return result
 
 
-TEXT_SPECS = fp8_hybrid_inventory.TENSOR_SPECS[:len(
-    source_inventory.TEXT_CORE_TENSOR_SPECS
-)]
+TEXT_SPECS = fp8_hybrid_inventory.TENSOR_SPECS[: len(source_inventory.TEXT_CORE_TENSOR_SPECS)]
 SELECTED_SOURCE_ROWS = _source_rows(fp8_hybrid_decision.DECISION.matrix_names)
 Q4_SOURCE_ROWS = _source_rows(
     spec.name for spec in TEXT_SPECS if spec.format == fp8_hybrid_inventory.Q4
@@ -215,9 +232,7 @@ for _name in SELECTED_SOURCE_ROWS.keys() | Q4_SOURCE_ROWS.keys():
         _cursor = _end
     if _cursor != _requirements[_name][0]:
         raise ValueError(f"hybrid codec source rows do not cover {_name}")
-_raw_rank_two_names = {
-    name for name, shape in _requirements.items() if len(shape) == 2
-}
+_raw_rank_two_names = {name for name, shape in _requirements.items() if len(shape) == 2}
 _direct_rank_two_source_names = {
     name for name in DIRECT_SOURCE_NAMES if len(_requirements[name]) == 2
 }
@@ -238,7 +253,7 @@ def quantize_decode_e4m3(weight, *, row_chunk: int = ROW_CHUNK):
         raise TypeError("E4M3 diagnostic input must be a rank-two BF16 tensor")
     if weight.device.type != "cpu":
         raise ValueError("exact source E4M3 coding requires a CPU BF16 tensor")
-    rows, columns = weight.shape
+    rows, _columns = weight.shape
     result = torch.empty_like(weight)
     for begin in range(0, rows, row_chunk):
         end = min(rows, begin + row_chunk)
@@ -285,14 +300,14 @@ class Fp8HybridCheckpoint:
             return quantize_decode_q4(tensor, 64)
         result = tensor.clone()
         if fp8_spans:
-            indices = torch.cat(tuple(
-                torch.arange(begin, end, dtype=torch.long) for begin, end in fp8_spans
-            ))
+            indices = torch.cat(
+                tuple(torch.arange(begin, end, dtype=torch.long) for begin, end in fp8_spans)
+            )
             result[indices] = quantize_decode_e4m3(tensor[indices])
         if q4_spans:
-            indices = torch.cat(tuple(
-                torch.arange(begin, end, dtype=torch.long) for begin, end in q4_spans
-            ))
+            indices = torch.cat(
+                tuple(torch.arange(begin, end, dtype=torch.long) for begin, end in q4_spans)
+            )
             result[indices] = quantize_decode_q4(tensor[indices], 64)
         return result
 
@@ -361,8 +376,13 @@ def preflight_payload(args: argparse.Namespace, weight_map: dict[str, str], ids:
         },
         "format_counts": fp8_hybrid_inventory.FORMAT_COUNTS,
         "source": _source_identity(args.weights, weight_map, ids),
-        "workload": {"tokens": len(ids), "skip": "half", "prefill_chunk": 4096,
-                     "schedule": "prefill", "device": args.device},
+        "workload": {
+            "tokens": len(ids),
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": args.device,
+        },
         "matrix_scope": _matrix_scope(),
         "implementation": {
             "diagnostic": sha256_file(Path(__file__).resolve()),
@@ -386,8 +406,10 @@ def run_score(args: argparse.Namespace) -> int:
     if args.preflight_only:
         _atomic_new(
             args.out,
-            (json.dumps(preflight_payload(args, weight_map, ids), indent=2,
-                        allow_nan=False) + "\n").encode(),
+            (
+                json.dumps(preflight_payload(args, weight_map, ids), indent=2, allow_nan=False)
+                + "\n"
+            ).encode(),
         )
         return 0
     source = _source_identity(args.weights, weight_map, ids)
@@ -398,8 +420,12 @@ def run_score(args: argparse.Namespace) -> int:
     checkpoint = Fp8HybridCheckpoint(SourceCheckpoint(args.weights, weight_map))
     checkpoint.validate_metadata()
     scorer = LayerMajorTextScorer(
-        checkpoint, device_index=args.device, prefill_chunk=4096, schedule="prefill",
-        skip_text="half", kv_value_group=None,
+        checkpoint,
+        device_index=args.device,
+        prefill_chunk=4096,
+        schedule="prefill",
+        skip_text="half",
+        kv_value_group=None,
     )
     vectors = scorer.score(ids)
     finite = [value for value in vectors.nlls if math.isfinite(value)]
@@ -424,14 +450,22 @@ def run_score(args: argparse.Namespace) -> int:
             "bf16_backend": sha256_file(REPO / "tools/reference/qwen3_8_27b_bf16/backend.py"),
             "bf16_protocol": sha256_file(REPO / "tools/reference/qwen3_8_27b_bf16/protocol.py"),
         },
-        "workload": {"tokens": TOKENS, "skip": "half", "prefill_chunk": 4096,
-                     "schedule": "prefill", "device": args.device},
+        "workload": {
+            "tokens": TOKENS,
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedule": "prefill",
+            "device": args.device,
+        },
         "result": {
-            "tokens_scored": len(vectors.nlls), "argmax_tokens": len(vectors.argmax),
+            "tokens_scored": len(vectors.nlls),
+            "argmax_tokens": len(vectors.argmax),
             "non_finite": len(vectors.nlls) - len(finite),
             "terrible_tokens": sum(value >= TERRIBLE_NLL for value in finite),
-            "sum_nll": sum(finite), "mean_nll": sum(finite) / len(finite),
-            "max_nll": max(finite), "ppl": math.exp(sum(finite) / len(finite)),
+            "sum_nll": sum(finite),
+            "mean_nll": sum(finite) / len(finite),
+            "max_nll": max(finite),
+            "ppl": math.exp(sum(finite) / len(finite)),
             "score_seconds": vectors.score_seconds,
         },
         "command": [str(Path(sys.argv[0])), *sys.argv[1:]],

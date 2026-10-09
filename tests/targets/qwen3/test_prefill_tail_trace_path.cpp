@@ -18,23 +18,20 @@ void require_rejected(Function&& function, const char* message) {
     bool rejected = false;
     try {
         function();
-    } catch (const std::runtime_error&) {
-        rejected = true;
-    }
+    } catch (const std::runtime_error&) { rejected = true; }
     require(rejected, message);
 }
 
 } // namespace
 
 int main() try {
-    namespace fs = std::filesystem;
+    namespace fs     = std::filesystem;
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
-    const fs::path root = fs::temp_directory_path() /
-                          ("ninfer-prefill-tail-path-" + std::to_string(nonce));
+    const fs::path root =
+        fs::temp_directory_path() / ("ninfer-prefill-tail-path-" + std::to_string(nonce));
     fs::create_directory(root);
     const fs::path fresh = root / "fresh.json";
-    ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
-        fresh.c_str());
+    ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(fresh.c_str());
 
     {
         std::ofstream output(fresh);
@@ -42,8 +39,7 @@ int main() try {
     }
     require_rejected(
         [&] {
-            ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
-                fresh.c_str());
+            ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(fresh.c_str());
         },
         "regular output was not rejected");
 
@@ -51,8 +47,7 @@ int main() try {
     fs::create_symlink(root / "absent-target.json", dangling);
     require_rejected(
         [&] {
-            ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
-                dangling.c_str());
+            ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(dangling.c_str());
         },
         "dangling output symlink was not rejected");
     fs::remove(dangling);
@@ -61,6 +56,7 @@ int main() try {
     std::cout << "prefill tail trace output path PASS\n";
     return 0;
 } catch (const std::exception& error) {
+
     std::cerr << "test_prefill_tail_trace_path: " << error.what() << '\n';
     return 1;
 }

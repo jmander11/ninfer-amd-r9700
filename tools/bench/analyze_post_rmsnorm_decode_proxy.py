@@ -21,8 +21,12 @@ SCRIPT_REPO = Path(__file__).resolve().parents[2]
 if str(SCRIPT_REPO) not in sys.path:
     sys.path.insert(0, str(SCRIPT_REPO))
 
-from tools.bench.prepare_post_rmsnorm_decode_proxy import PASSES, REPO, identity, sha
-
+from tools.bench.prepare_post_rmsnorm_decode_proxy import (  # noqa: E402  sys.path bootstrap
+    PASSES,
+    REPO,
+    identity,
+    sha,
+)
 
 ROUNDS = 256
 ONE_ROUND_DISPATCHES = 1806
@@ -65,39 +69,62 @@ def parse_stream_probe(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
     gpu = re.search(r"^GPU:\s+(.+)$", text, re.MULTILINE)
     arch = re.search(r"^Architecture:\s+(gfx1201) \(wave32\)$", text, re.MULTILINE)
-    working = re.search(r"^Working set:\s+([0-9.]+) GiB per buffer \(([0-9.]+)x L2\)$",
-                        text, re.MULTILINE)
+    working = re.search(
+        r"^Working set:\s+([0-9.]+) GiB per buffer \(([0-9.]+)x L2\)$", text, re.MULTILINE
+    )
     policy = re.search(r"^Trial policy:\s+(\d+) trials,", text, re.MULTILINE)
-    checksum = re.search(r"^Read checksum exact:\s+[0-9a-f]{8}(?::[0-9a-f]{8}){3}$",
-                         text, re.MULTILINE)
-    if (gpu is None or "R9700" not in gpu.group(1) or arch is None or working is None
-            or policy is None or int(policy.group(1)) != 5 or checksum is None
-            or float(working.group(1)) != 4.0 or float(working.group(2)) < 4.0):
+    checksum = re.search(
+        r"^Read checksum exact:\s+[0-9a-f]{8}(?::[0-9a-f]{8}){3}$", text, re.MULTILINE
+    )
+    if (
+        gpu is None
+        or "R9700" not in gpu.group(1)
+        or arch is None
+        or working is None
+        or policy is None
+        or int(policy.group(1)) != 5
+        or checksum is None
+        or float(working.group(1)) != 4.0
+        or float(working.group(2)) < 4.0
+    ):
         raise ValueError("stream probe lacks exact R9700/4-GiB/5-trial/checksum contract")
     methods = {}
-    row = re.compile(r"^(hipMemsetAsync \(write\)|kernel uint4 write|kernel uint4 read|"
-                     r"kernel uint4 copy|kernel uint4x4 copy|hipMemcpyAsync D2D)\s+"
-                     r"([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)%\s+([0-9.]+)$",
-                     re.MULTILINE)
+    row = re.compile(
+        r"^(hipMemsetAsync \(write\)|kernel uint4 write|kernel uint4 read|"
+        r"kernel uint4 copy|kernel uint4x4 copy|hipMemcpyAsync D2D)\s+"
+        r"([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)%\s+([0-9.]+)$",
+        re.MULTILINE,
+    )
     for match in row.finditer(text):
-        methods[match.group(1)] = {"payload_gbps": float(match.group(2)),
-                                   "best_bus_gbps": float(match.group(3)),
-                                   "median_bus_gbps": float(match.group(4)),
-                                   "reported_peak_percent": float(match.group(5)),
-                                   "best_ms": float(match.group(6))}
-    if len(methods) != 6 or any(not all(math.isfinite(value) and value > 0
-                                        for value in method.values()) for method in methods.values()):
+        methods[match.group(1)] = {
+            "payload_gbps": float(match.group(2)),
+            "best_bus_gbps": float(match.group(3)),
+            "median_bus_gbps": float(match.group(4)),
+            "reported_peak_percent": float(match.group(5)),
+            "best_ms": float(match.group(6)),
+        }
+    if len(methods) != 6 or any(
+        not all(math.isfinite(value) and value > 0 for value in method.values())
+        for method in methods.values()
+    ):
         raise ValueError("stream probe lacks six finite positive method rows")
-    return {"stdout": identity(path), "working_set_gib_per_buffer": float(working.group(1)),
-            "working_set_over_l2": float(working.group(2)), "trials_per_method": 5,
-            "methods": methods, "best_observed_bus_gbps": max(
-                method["best_bus_gbps"] for method in methods.values())}
+    return {
+        "stdout": identity(path),
+        "working_set_gib_per_buffer": float(working.group(1)),
+        "working_set_over_l2": float(working.group(2)),
+        "trials_per_method": 5,
+        "methods": methods,
+        "best_observed_bus_gbps": max(method["best_bus_gbps"] for method in methods.values()),
+    }
 
 
 def validate_closure(root: Path) -> None:
-    expected = {Path(__file__).resolve(),
-                (REPO / "tools/bench/prepare_post_rmsnorm_decode_proxy.py").resolve(),
-                (root / "plan.json").resolve(), (root / "commands.sh").resolve()}
+    expected = {
+        Path(__file__).resolve(),
+        (REPO / "tools/bench/prepare_post_rmsnorm_decode_proxy.py").resolve(),
+        (root / "plan.json").resolve(),
+        (root / "commands.sh").resolve(),
+    }
     observed = {}
     for line in (root / "prepared.sha256").read_text(encoding="utf-8").splitlines():
         digest, relative = line.split("  ", 1)
@@ -105,21 +132,27 @@ def validate_closure(root: Path) -> None:
         if len(digest) != 64 or path in observed:
             raise ValueError("prepared closure is malformed")
         observed[path] = digest
-    if set(observed) != expected or any(not path.is_file() or sha(path) != digest
-                                        for path, digest in observed.items()):
+    if set(observed) != expected or any(
+        not path.is_file() or sha(path) != digest for path, digest in observed.items()
+    ):
         raise ValueError("prepared closure bytes changed")
 
 
 def one_table(connection: sqlite3.Connection, prefix: str) -> str:
-    rows = [row[0] for row in connection.execute(
-        "select name from sqlite_master where type='table' and name like ?", (prefix + "%",))]
+    rows = [
+        row[0]
+        for row in connection.execute(
+            "select name from sqlite_master where type='table' and name like ?", (prefix + "%",)
+        )
+    ]
     if len(rows) != 1:
         raise ValueError(f"database lacks one {prefix} table")
     return rows[0]
 
 
-def read_marker_counts(connection: sqlite3.Connection, marker_regions: str,
-                       events: str, strings: str) -> dict[str, int]:
+def read_marker_counts(
+    connection: sqlite3.Connection, marker_regions: str, events: str, strings: str
+) -> dict[str, int]:
     counts: dict[str, int] = defaultdict(int)
     query = f'''select e.extdata from "{marker_regions}" m
                 join "{events}" e on e.id=m.event_id
@@ -152,14 +185,21 @@ def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict
         marker_regions = one_table(connection, "rocpd_region_")
         events = one_table(connection, "rocpd_event_")
         strings = one_table(connection, "rocpd_string_")
-        gpu = list(connection.execute(
-            f'''select name, product_name, extdata from "{agents}"
-                where type='GPU' and name='gfx1201' '''))
+        gpu = list(
+            connection.execute(
+                f'''select name, product_name, extdata from "{agents}"
+                where type='GPU' and name='gfx1201' '''
+            )
+        )
         if len(gpu) != 1 or gpu[0]["product_name"] != "AMD Radeon AI PRO R9700":
             raise ValueError("database lacks one R9700/gfx1201 agent")
         agent = json.loads(gpu[0]["extdata"])
-        if (agent.get("cu_count") != 64 or agent.get("max_waves_per_cu") != 32
-                or agent.get("wave_front_size") != 32 or agent.get("simd_count") != 128):
+        if (
+            agent.get("cu_count") != 64
+            or agent.get("max_waves_per_cu") != 32
+            or agent.get("wave_front_size") != 32
+            or agent.get("simd_count") != 128
+        ):
             raise ValueError("database R9700 execution resources differ")
         process = list(connection.execute(f'''select command, environment from "{processes}"'''))
         if len(process) != 1 or process[0]["command"] != " ".join(command):
@@ -183,8 +223,9 @@ def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict
                 "region": str(row["region"]) if row["region"] is not None else None,
                 "symbol": str(row["symbol"]),
                 "grid_size": int(row["grid_size_x"] * row["grid_size_y"] * row["grid_size_z"]),
-                "workgroup_size": int(row["workgroup_size_x"] * row["workgroup_size_y"]
-                                      * row["workgroup_size_z"]),
+                "workgroup_size": int(
+                    row["workgroup_size_x"] * row["workgroup_size_y"] * row["workgroup_size_z"]
+                ),
                 "static_lds_bytes": int(row["group_segment_size"]),
                 "scratch_bytes": int(row["private_segment_size"]),
                 "vgpr": int(row["arch_vgpr_count"] + row["accum_vgpr_count"]),
@@ -193,12 +234,18 @@ def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict
                 raise ValueError("database has inconsistent dispatch metadata")
             regions[dispatch] = metadata
         marker_counts = read_marker_counts(connection, marker_regions, events, strings)
-        return regions, {
-            "name": gpu[0]["name"], "product_name": gpu[0]["product_name"],
-            "cu_count": agent["cu_count"], "simd_count": agent["simd_count"],
-            "max_waves_per_cu": agent["max_waves_per_cu"],
-            "wave_front_size": agent["wave_front_size"],
-        }, marker_counts
+        return (
+            regions,
+            {
+                "name": gpu[0]["name"],
+                "product_name": gpu[0]["product_name"],
+                "cu_count": agent["cu_count"],
+                "simd_count": agent["simd_count"],
+                "max_waves_per_cu": agent["max_waves_per_cu"],
+                "wave_front_size": agent["wave_front_size"],
+            },
+            marker_counts,
+        )
     finally:
         connection.close()
 
@@ -215,47 +262,86 @@ def trace_graph_inventory(rows: object, qk_grid_contract: object) -> list[dict[s
     result = []
     qk_rows = 0
     for row in rows:
-        if (not isinstance(row, dict)
-                or not isinstance(row.get("symbol"), str) or not row["symbol"]
-                or any(type(row.get(name)) is not int or row[name] < 0 for name in (
-                    "grid_size", "workgroup_size", "static_lds_bytes", "scratch_bytes", "vgpr"))
-                or type(row.get("dispatch_count")) is not int or row["dispatch_count"] <= 0):
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("symbol"), str)
+            or not row["symbol"]
+            or any(
+                type(row.get(name)) is not int or row[name] < 0
+                for name in (
+                    "grid_size",
+                    "workgroup_size",
+                    "static_lds_bytes",
+                    "scratch_bytes",
+                    "vgpr",
+                )
+            )
+            or type(row.get("dispatch_count")) is not int
+            or row["dispatch_count"] <= 0
+        ):
             raise ValueError("selected-region trace inventory is malformed")
         grid_size = row["grid_size"]
         if QK_GRID_CONTRACT["kernel_symbol_fragment"] in row["symbol"]:
             qk_rows += 1
-            if (grid_size != source_grid
-                    or row["workgroup_size"] != QK_GRID_CONTRACT["workgroup_size"]
-                    or row["dispatch_count"] != 16):
+            if (
+                grid_size != source_grid
+                or row["workgroup_size"] != QK_GRID_CONTRACT["workgroup_size"]
+                or row["dispatch_count"] != 16
+            ):
                 raise ValueError("selected-region trace has unexpected QK geometry")
             grid_size = capture_grid
-        result.append({
-            "symbol": row["symbol"], "grid_size": grid_size,
-            "workgroup_size": row["workgroup_size"],
-            "static_lds_bytes": row["static_lds_bytes"],
-            "allocated_lds_bytes": (
-                0 if row["static_lds_bytes"] == 0
-                else ((row["static_lds_bytes"] + 511) // 512) * 512
-            ),
-            "scratch_bytes": row["scratch_bytes"], "vgpr": row["vgpr"],
-            "dispatch_count": row["dispatch_count"],
-        })
+        result.append(
+            {
+                "symbol": row["symbol"],
+                "grid_size": grid_size,
+                "workgroup_size": row["workgroup_size"],
+                "static_lds_bytes": row["static_lds_bytes"],
+                "allocated_lds_bytes": (
+                    0
+                    if row["static_lds_bytes"] == 0
+                    else ((row["static_lds_bytes"] + 511) // 512) * 512
+                ),
+                "scratch_bytes": row["scratch_bytes"],
+                "vgpr": row["vgpr"],
+                "dispatch_count": row["dispatch_count"],
+            }
+        )
     if sum(row["dispatch_count"] for row in rows) != ONE_ROUND_DISPATCHES:
         raise ValueError("selected-region trace is not the exact 1806-dispatch round")
     if qk_rows != 1:
         raise ValueError("selected-region trace lacks one Device Graph QK row")
-    return sorted(result, key=lambda row: (
-        row["symbol"], row["grid_size"], row["workgroup_size"], row["static_lds_bytes"],
-        row["allocated_lds_bytes"], row["scratch_bytes"], row["vgpr"],
-    ))
+    return sorted(
+        result,
+        key=lambda row: (
+            row["symbol"],
+            row["grid_size"],
+            row["workgroup_size"],
+            row["static_lds_bytes"],
+            row["allocated_lds_bytes"],
+            row["scratch_bytes"],
+            row["vgpr"],
+        ),
+    )
 
 
-def validate_region_inventories(regions: dict[int, dict], expected_markers: dict[str, int],
-                                expected_inventory: list[dict[str, object]]) -> set[int]:
-    expected = Counter((row["symbol"], row["grid_size"], row["workgroup_size"],
-                        row["static_lds_bytes"], row["allocated_lds_bytes"],
-                        row["scratch_bytes"], row["vgpr"])
-                       for row in expected_inventory for _ in range(row["dispatch_count"]))
+def validate_region_inventories(
+    regions: dict[int, dict],
+    expected_markers: dict[str, int],
+    expected_inventory: list[dict[str, object]],
+) -> set[int]:
+    expected = Counter(
+        (
+            row["symbol"],
+            row["grid_size"],
+            row["workgroup_size"],
+            row["static_lds_bytes"],
+            row["allocated_lds_bytes"],
+            row["scratch_bytes"],
+            row["vgpr"],
+        )
+        for row in expected_inventory
+        for _ in range(row["dispatch_count"])
+    )
     observed: dict[str, Counter] = defaultdict(Counter)
     selected = set()
     for dispatch, row in regions.items():
@@ -263,11 +349,20 @@ def validate_region_inventories(regions: dict[int, dict], expected_markers: dict
         if region not in expected_markers:
             continue
         selected.add(dispatch)
-        allocated = (0 if row["static_lds_bytes"] == 0 else
-                     ((row["static_lds_bytes"] + 511) // 512) * 512)
-        observed[region][(row["symbol"], row["grid_size"], row["workgroup_size"],
-                          row["static_lds_bytes"], allocated, row["scratch_bytes"],
-                          row["vgpr"])] += 1
+        allocated = (
+            0 if row["static_lds_bytes"] == 0 else ((row["static_lds_bytes"] + 511) // 512) * 512
+        )
+        observed[region][
+            (
+                row["symbol"],
+                row["grid_size"],
+                row["workgroup_size"],
+                row["static_lds_bytes"],
+                allocated,
+                row["scratch_bytes"],
+                row["vgpr"],
+            )
+        ] += 1
     if set(observed) != set(expected_markers):
         raise ValueError("database lacks an exact ordinary region set")
     for region in expected_markers:
@@ -277,43 +372,76 @@ def validate_region_inventories(regions: dict[int, dict], expected_markers: dict
 
 
 def validate_benchmark(path: Path, command: list[str], plan: dict) -> dict:
-    value = json.loads(path.read_text(encoding="utf-8"), parse_constant=lambda token:
-                       (_ for _ in ()).throw(ValueError(f"invalid JSON number {token}")))
+    value = json.loads(
+        path.read_text(encoding="utf-8"),
+        parse_constant=lambda token: (_ for _ in ()).throw(
+            ValueError(f"invalid JSON number {token}")
+        ),
+    )
     config, test = value.get("config", {}), value.get("tests", [{}])[0]
     rep = test.get("reps", [{}])[0]
     lanes = rep.get("generated_token_ids_by_lane")
-    if (value.get("artifact_type") != "ninfer_bench_report" or value.get("schema_version") != 20
-            or value.get("command") != " ".join(command)
-            or value.get("environment", {}).get("architecture_name") != "gfx1201"
-            or config.get("concurrency") != 1 or config.get("max_context") != 8448
-            or config.get("spec") != "none"
-            or config.get("draft_tokens") != 0 or config.get("prefill_chunk") != 4096
-            or config.get("kv_cache_format") != "fp8-k-int4-v" or config.get("kv_value_group") != 16
-            or config.get("xattention_qualification") is not False
-            or config.get("use_device_graph") is not True or config.get("decode_path") != "device_graph"
-            or test.get("kind") != "whole" or test.get("n_prompt") != 8192
-            or test.get("n_gen") != 256 or test.get("requested_output_tokens") != 257
-            or rep.get("generated_output_tokens") != 257 or rep.get("decode_output_tokens") != 256
-            or rep.get("decode_engine_tokens") != 256 or lanes != [plan["terminal_timing"]["generated_token_ids"]]):
+    if (
+        value.get("artifact_type") != "ninfer_bench_report"
+        or value.get("schema_version") != 20
+        or value.get("command") != " ".join(command)
+        or value.get("environment", {}).get("architecture_name") != "gfx1201"
+        or config.get("concurrency") != 1
+        or config.get("max_context") != 8448
+        or config.get("spec") != "none"
+        or config.get("draft_tokens") != 0
+        or config.get("prefill_chunk") != 4096
+        or config.get("kv_cache_format") != "fp8-k-int4-v"
+        or config.get("kv_value_group") != 16
+        or config.get("xattention_qualification") is not False
+        or config.get("use_device_graph") is not True
+        or config.get("decode_path") != "device_graph"
+        or test.get("kind") != "whole"
+        or test.get("n_prompt") != 8192
+        or test.get("n_gen") != 256
+        or test.get("requested_output_tokens") != 257
+        or rep.get("generated_output_tokens") != 257
+        or rep.get("decode_output_tokens") != 256
+        or rep.get("decode_engine_tokens") != 256
+        or lanes != [plan["terminal_timing"]["generated_token_ids"]]
+    ):
         raise ValueError("profile benchmark differs from exact terminal ordinary workload")
     return identity(path)
 
 
-def reduce_pass(csv_path: Path, database: Path, command: list[str], counters: tuple[str, ...],
-                expected_inventory: list[dict[str, object]] | None = None) -> dict:
+def reduce_pass(
+    csv_path: Path,
+    database: Path,
+    command: list[str],
+    counters: tuple[str, ...],
+    expected_inventory: list[dict[str, object]] | None = None,
+) -> dict:
     regions, agent, marker_counts = read_database(database, command)
-    expected_markers = {f"ninfer.decode.decode.ordinary_round payload={frontier}": 1
-                        for frontier in range(8192, 8448)}
-    observed = {name: count for name, count in marker_counts.items()
-                if ".decode.ordinary_round " in name}
+    expected_markers = {
+        f"ninfer.decode.decode.ordinary_round payload={frontier}": 1
+        for frontier in range(8192, 8448)
+    }
+    observed = {
+        name: count for name, count in marker_counts.items() if ".decode.ordinary_round " in name
+    }
     if observed != expected_markers:
         raise ValueError("capture lacks exact ordinary frontiers 8192..8447")
-    required = {"Dispatch_Id", "Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Block_Size",
-                "Scratch_Size", "VGPR_Count", "Counter_Name", "Counter_Value"}
-    selected = (validate_region_inventories(regions, expected_markers, expected_inventory)
-                if expected_inventory is not None else
-                {dispatch for dispatch, item in regions.items()
-                 if item["region"] in expected_markers})
+    required = {
+        "Dispatch_Id",
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Block_Size",
+        "Scratch_Size",
+        "VGPR_Count",
+        "Counter_Name",
+        "Counter_Value",
+    }
+    selected = (
+        validate_region_inventories(regions, expected_markers, expected_inventory)
+        if expected_inventory is not None
+        else {dispatch for dispatch, item in regions.items() if item["region"] in expected_markers}
+    )
     if not selected:
         raise ValueError("database has no selected ordinary dispatches")
     counter_bits = {counter: 1 << index for index, counter in enumerate(counters)}
@@ -321,7 +449,8 @@ def reduce_pass(csv_path: Path, database: Path, command: list[str], counters: tu
     seen_masks: dict[int, int] = {}
     totals = {counter: Decimal(0) for counter in counters}
     per_symbol: dict[str, dict[str, Decimal]] = defaultdict(
-        lambda: {counter: Decimal(0) for counter in counters})
+        lambda: {counter: Decimal(0) for counter in counters}
+    )
     with csv_path.open(newline="", encoding="utf-8") as source:
         reader = csv.DictReader(source)
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
@@ -331,20 +460,32 @@ def reduce_pass(csv_path: Path, database: Path, command: list[str], counters: tu
             db = regions.get(dispatch)
             if db is None:
                 raise ValueError("counter CSV has a dispatch absent from database")
-            item = (row["Kernel_Name"], int(row["Grid_Size"]), int(row["Workgroup_Size"]),
-                    int(row["LDS_Block_Size"]), int(row["Scratch_Size"]), int(row["VGPR_Count"]))
+            item = (
+                row["Kernel_Name"],
+                int(row["Grid_Size"]),
+                int(row["Workgroup_Size"]),
+                int(row["LDS_Block_Size"]),
+                int(row["Scratch_Size"]),
+                int(row["VGPR_Count"]),
+            )
             counter = row["Counter_Name"]
             bit = counter_bits.get(counter)
             if bit is None or seen_masks.get(dispatch, 0) & bit:
                 raise ValueError(f"line {line} has unexpected or duplicate counter")
             seen_masks[dispatch] = seen_masks.get(dispatch, 0) | bit
-            if (item[0] != db["symbol"] or item[1] != db["grid_size"]
-                    or item[2] != db["workgroup_size"] or item[4] != db["scratch_bytes"]
-                    or item[5] != db["vgpr"]
-                    or item[3] != (
-                        0 if db["static_lds_bytes"] == 0
-                        else ((db["static_lds_bytes"] + 511) // 512) * 512
-                    )):
+            if (
+                item[0] != db["symbol"]
+                or item[1] != db["grid_size"]
+                or item[2] != db["workgroup_size"]
+                or item[4] != db["scratch_bytes"]
+                or item[5] != db["vgpr"]
+                or item[3]
+                != (
+                    0
+                    if db["static_lds_bytes"] == 0
+                    else ((db["static_lds_bytes"] + 511) // 512) * 512
+                )
+            ):
                 raise ValueError("CSV/database per-dispatch resources differ")
             value = number(row["Counter_Value"], f"line {line}")
             if dispatch in selected:
@@ -354,22 +495,43 @@ def reduce_pass(csv_path: Path, database: Path, command: list[str], counters: tu
         raise ValueError("CSV/database measured dispatch inventories differ")
     if any(mask != full_counter_mask for mask in seen_masks.values()):
         raise ValueError("dispatch lacks exact pass counter inventory")
-    inventory = Counter((regions[d]["symbol"], regions[d]["grid_size"],
-                         regions[d]["workgroup_size"], regions[d]["static_lds_bytes"],
-                         (0 if regions[d]["static_lds_bytes"] == 0 else
-                          ((regions[d]["static_lds_bytes"] + 511) // 512) * 512),
-                         regions[d]["scratch_bytes"], regions[d]["vgpr"])
-                        for d in selected)
+    inventory = Counter(
+        (
+            regions[d]["symbol"],
+            regions[d]["grid_size"],
+            regions[d]["workgroup_size"],
+            regions[d]["static_lds_bytes"],
+            (
+                0
+                if regions[d]["static_lds_bytes"] == 0
+                else ((regions[d]["static_lds_bytes"] + 511) // 512) * 512
+            ),
+            regions[d]["scratch_bytes"],
+            regions[d]["vgpr"],
+        )
+        for d in selected
+    )
     return {
-        "ordinary_dispatch_count": len(selected), "agent": agent,
-        "dispatch_inventory": [{"symbol": key[0], "grid_size": key[1],
-                                "workgroup_size": key[2], "static_lds_bytes": key[3],
-                                "allocated_lds_bytes": key[4], "scratch_bytes": key[5],
-                                "vgpr": key[6], "dispatch_count": count}
-                               for key, count in sorted(inventory.items())],
+        "ordinary_dispatch_count": len(selected),
+        "agent": agent,
+        "dispatch_inventory": [
+            {
+                "symbol": key[0],
+                "grid_size": key[1],
+                "workgroup_size": key[2],
+                "static_lds_bytes": key[3],
+                "allocated_lds_bytes": key[4],
+                "scratch_bytes": key[5],
+                "vgpr": key[6],
+                "dispatch_count": count,
+            }
+            for key, count in sorted(inventory.items())
+        ],
         "counter_sums": {name: str(value) for name, value in totals.items()},
-        "per_symbol_counter_sums": {symbol: {name: str(value) for name, value in sums.items()}
-                                    for symbol, sums in sorted(per_symbol.items())},
+        "per_symbol_counter_sums": {
+            symbol: {name: str(value) for name, value in sums.items()}
+            for symbol, sums in sorted(per_symbol.items())
+        },
     }
 
 
@@ -378,10 +540,14 @@ def analyze(plan_path: Path, root: Path) -> dict:
     if plan_path != root / "plan.json":
         raise ValueError("plan must be package-root plan.json")
     validate_closure(root)
-    raw = plan_path.read_bytes(); plan = json.loads(raw)
-    if (plan.get("artifact_type") != "ninfer_r9700_post_rmsnorm_decode_proxy_plan"
-            or plan.get("schema_version") != 1 or plan.get("profile_timing_admissible") is not False
-            or set(plan.get("passes", {})) != set(PASSES)):
+    raw = plan_path.read_bytes()
+    plan = json.loads(raw)
+    if (
+        plan.get("artifact_type") != "ninfer_r9700_post_rmsnorm_decode_proxy_plan"
+        or plan.get("schema_version") != 1
+        or plan.get("profile_timing_admissible") is not False
+        or set(plan.get("passes", {})) != set(PASSES)
+    ):
         raise ValueError("profile plan contract differs")
     for field in ("report", "executable"):
         pinned = plan["terminal_timing"][field]
@@ -397,11 +563,13 @@ def analyze(plan_path: Path, root: Path) -> dict:
             raise ValueError(f"{field} changed")
     probe_contract = plan.get("stream_probe", {})
     probe_executable = probe_contract.get("executable", {})
-    if (identity(Path(str(probe_executable.get("path", "")))) != probe_executable
-            or probe_contract.get("arguments") != ["--size-gib", "4", "--trials", "5"]
-            or probe_contract.get("power_profile") != "auto"
-            or probe_contract.get("working_set_gib_per_buffer") != 4
-            or probe_contract.get("trials_per_method") != 5):
+    if (
+        identity(Path(str(probe_executable.get("path", "")))) != probe_executable
+        or probe_contract.get("arguments") != ["--size-gib", "4", "--trials", "5"]
+        or probe_contract.get("power_profile") != "auto"
+        or probe_contract.get("working_set_gib_per_buffer") != 4
+        or probe_contract.get("trials_per_method") != 5
+    ):
         raise ValueError("stream probe contract or executable changed")
     trace = plan.get("selected_region_trace", {})
     expected_inventory = trace_graph_inventory(
@@ -420,68 +588,112 @@ def analyze(plan_path: Path, root: Path) -> dict:
         command = record["benchmark_command"]
         benchmark = validate_benchmark(Path(record["benchmark_report"]), command, plan)
         raw_dir = Path(record["raw_directory"])
-        csvs = list(raw_dir.glob("*_counter_collection.csv")); dbs = list(raw_dir.glob("*_results.db"))
+        csvs = list(raw_dir.glob("*_counter_collection.csv"))
+        dbs = list(raw_dir.glob("*_results.db"))
         if len(csvs) != 1 or len(dbs) != 1:
             raise ValueError("pass lacks exactly one counter CSV and database")
         summary = reduce_pass(csvs[0], dbs[0], command, counters, expected_inventory)
         if summary["ordinary_dispatch_count"] != expected_dispatches:
             raise ValueError("PMC pass is not the exact 256x one-round dispatch count")
         summary["benchmark_report"] = benchmark
-        summary["counter_csv"] = identity(csvs[0]); summary["database"] = identity(dbs[0])
+        summary["counter_csv"] = identity(csvs[0])
+        summary["database"] = identity(dbs[0])
         summaries[label] = summary
-    if summaries["cache-wait"]["dispatch_inventory"] != summaries["issue-lds"]["dispatch_inventory"]:
+    if (
+        summaries["cache-wait"]["dispatch_inventory"]
+        != summaries["issue-lds"]["dispatch_inventory"]
+    ):
         raise ValueError("two PMC passes have different dispatch inventory multisets")
     a = {name: Decimal(value) for name, value in summaries["cache-wait"]["counter_sums"].items()}
     b = {name: Decimal(value) for name, value in summaries["issue-lds"]["counter_sums"].items()}
     agent = summaries["cache-wait"]["agent"]
     if summaries["issue-lds"]["agent"] != agent:
         raise ValueError("two PMC passes report different GPU execution geometry")
-    occupancy_denominator = (a["GRBM_GUI_ACTIVE"] * Decimal(agent["cu_count"])
-                             * Decimal(agent["max_waves_per_cu"]))
+    occupancy_denominator = (
+        a["GRBM_GUI_ACTIVE"] * Decimal(agent["cu_count"]) * Decimal(agent["max_waves_per_cu"])
+    )
     simd_quarters = Decimal(agent["simd_count"] // 4)
-    if (a["SQ_WAVE_CYCLES"] <= 0 or a["TCP_REQ"] <= 0
-            or a["GL2C_HIT"] + a["GL2C_MISS"] <= 0 or a["GRBM_GUI_ACTIVE"] <= 0):
+    if (
+        a["SQ_WAVE_CYCLES"] <= 0
+        or a["TCP_REQ"] <= 0
+        or a["GL2C_HIT"] + a["GL2C_MISS"] <= 0
+        or a["GRBM_GUI_ACTIVE"] <= 0
+    ):
         raise ValueError("cache/wait pass has nonpositive proxy denominators")
     if a["TCP_REQ_MISS"] > a["TCP_REQ"]:
         raise ValueError("cache/wait pass has more TCP misses than requests")
     issue = b["SQ_INST_CYCLES_VALU"] + b["SQ_INST_CYCLES_VMEM"]
-    if (issue <= 0 or b["SQC_LDS_IDX_ACTIVE"] <= 0 or b["SQ_WAVES"] <= 0
-            or b["GRBM_GUI_ACTIVE"] <= 0):
+    if (
+        issue <= 0
+        or b["SQC_LDS_IDX_ACTIVE"] <= 0
+        or b["SQ_WAVES"] <= 0
+        or b["GRBM_GUI_ACTIVE"] <= 0
+    ):
         raise ValueError("issue/LDS pass has nonpositive proxy denominators")
     for label in PASSES:
         summaries[label]["instance_reduction"] = (
             "rocprofiler emits one native hardware-instance-reduced value per dispatch/counter; "
-            "the analyzer sums those per-dispatch values, never takes one global maximum")
+            "the analyzer sums those per-dispatch values, never takes one global maximum"
+        )
     stream_before = (root / "power-stream-before.txt").read_text().strip()
     stream_after = (root / "power-stream-after.txt").read_text().strip()
     if stream_before != "auto" or stream_after != "auto":
         raise ValueError("stream probe lacks auto/auto endpoint evidence")
     probe = parse_stream_probe(root / "stream-probe.stdout")
     probe["stderr"] = identity(root / "stream-probe.stderr")
-    probe["power_before"] = "auto"; probe["power_after"] = "auto"
+    probe["power_before"] = "auto"
+    probe["power_after"] = "auto"
     result = {
-        "artifact_type": "ninfer_r9700_post_rmsnorm_decode_proxy_analysis", "schema_version": 1,
-        "status": "valid_diagnostic_proxy_only", "profile_timing_admissible": False,
-        "plan": identity(plan_path), "terminal_timing": plan["terminal_timing"],
-        "selected_region_trace": plan["selected_region_trace"], "passes": summaries,
+        "artifact_type": "ninfer_r9700_post_rmsnorm_decode_proxy_analysis",
+        "schema_version": 1,
+        "status": "valid_diagnostic_proxy_only",
+        "profile_timing_admissible": False,
+        "plan": identity(plan_path),
+        "terminal_timing": plan["terminal_timing"],
+        "selected_region_trace": plan["selected_region_trace"],
+        "passes": summaries,
         "proxy_metrics": {
             "gl2_hit_percent": percent(a["GL2C_HIT"], a["GL2C_HIT"] + a["GL2C_MISS"], "GL2 hit"),
             "tcp_hit_percent": percent(a["TCP_REQ"] - a["TCP_REQ_MISS"], a["TCP_REQ"], "TCP hit"),
-            "sq_wait_any_over_wave_cycles_percent": percent(a["SQ_WAIT_ANY"], a["SQ_WAVE_CYCLES"], "SQ wait"),
-            "sq_issue_wait_over_wave_cycles_percent": percent(a["SQ_WAIT_INST_ANY"], a["SQ_WAVE_CYCLES"], "SQ issue wait"),
-            "occupancy_proxy_percent": percent(a["SQ_WAVE_CYCLES"], occupancy_denominator, "occupancy"),
+            "sq_wait_any_over_wave_cycles_percent": percent(
+                a["SQ_WAIT_ANY"], a["SQ_WAVE_CYCLES"], "SQ wait"
+            ),
+            "sq_issue_wait_over_wave_cycles_percent": percent(
+                a["SQ_WAIT_INST_ANY"], a["SQ_WAVE_CYCLES"], "SQ issue wait"
+            ),
+            "occupancy_proxy_percent": percent(
+                a["SQ_WAVE_CYCLES"], occupancy_denominator, "occupancy"
+            ),
             "relative_gl2_read_requests_per_output_token": float(a["GL2C_EA_RDREQ"] / Decimal(256)),
-            "valu_busy_proxy_percent": percent(b["SQ_INST_CYCLES_VALU"], b["GRBM_GUI_ACTIVE"] * simd_quarters, "VALU busy"),
-            "valu_issue_cycle_share_percent": percent(b["SQ_INST_CYCLES_VALU"], issue, "VALU issue share"),
-            "vmem_issue_cycle_share_percent": percent(b["SQ_INST_CYCLES_VMEM"], issue, "VMEM issue share"),
-            "lds_bank_conflict_over_index_active": float(b["SQC_LDS_BANK_CONFLICT"] / b["SQC_LDS_IDX_ACTIVE"]),
-            "lds_utilization_proxy_percent": percent(b["SQC_LDS_IDX_ACTIVE"], b["GRBM_GUI_ACTIVE"] * simd_quarters, "LDS utilization"),
-            "ta_busy_instance_sum_per_grbm_active_cycle_cache_wait": quotient(a["TA_TA_BUSY"], a["GRBM_GUI_ACTIVE"], "TA pressure pass A"),
-            "ta_busy_instance_sum_per_grbm_active_cycle_issue_lds": quotient(b["TA_TA_BUSY"], b["GRBM_GUI_ACTIVE"], "TA pressure pass B"),
-            "gl2_write_stall_instance_sum_per_grbm_active_cycle": quotient(a["GL2C_MC_WRREQ_STALL"], a["GRBM_GUI_ACTIVE"], "GL2 write stall"),
+            "valu_busy_proxy_percent": percent(
+                b["SQ_INST_CYCLES_VALU"], b["GRBM_GUI_ACTIVE"] * simd_quarters, "VALU busy"
+            ),
+            "valu_issue_cycle_share_percent": percent(
+                b["SQ_INST_CYCLES_VALU"], issue, "VALU issue share"
+            ),
+            "vmem_issue_cycle_share_percent": percent(
+                b["SQ_INST_CYCLES_VMEM"], issue, "VMEM issue share"
+            ),
+            "lds_bank_conflict_over_index_active": float(
+                b["SQC_LDS_BANK_CONFLICT"] / b["SQC_LDS_IDX_ACTIVE"]
+            ),
+            "lds_utilization_proxy_percent": percent(
+                b["SQC_LDS_IDX_ACTIVE"], b["GRBM_GUI_ACTIVE"] * simd_quarters, "LDS utilization"
+            ),
+            "ta_busy_instance_sum_per_grbm_active_cycle_cache_wait": quotient(
+                a["TA_TA_BUSY"], a["GRBM_GUI_ACTIVE"], "TA pressure pass A"
+            ),
+            "ta_busy_instance_sum_per_grbm_active_cycle_issue_lds": quotient(
+                b["TA_TA_BUSY"], b["GRBM_GUI_ACTIVE"], "TA pressure pass B"
+            ),
+            "gl2_write_stall_instance_sum_per_grbm_active_cycle": quotient(
+                a["GL2C_MC_WRREQ_STALL"], a["GRBM_GUI_ACTIVE"], "GL2 write stall"
+            ),
             "lds_instructions_per_output_token": float(b["SQ_INSTS_LDS"] / Decimal(256)),
             "tex_load_instructions_per_output_token": float(b["SQ_INSTS_TEX_LOAD"] / Decimal(256)),
-            "tex_store_instructions_per_output_token": float(b["SQ_INSTS_TEX_STORE"] / Decimal(256)),
+            "tex_store_instructions_per_output_token": float(
+                b["SQ_INSTS_TEX_STORE"] / Decimal(256)
+            ),
         },
         "same_session_auto_stream_probe": probe,
         "represented_minimum_bytes_per_round": None,
@@ -489,7 +701,8 @@ def analyze(plan_path: Path, root: Path) -> dict:
         "represented_minimum_rate_fraction_of_stream_probe": None,
         "represented_rate_limitation": "The heterogeneous whole-round dispatch inventory does not carry an exact represented-byte contract for every kernel; no minimum byte rate or stream-ceiling fraction is inferred.",
         "roof_decision": "proxy_review_required_no_physical_roof_conclusion",
-        "physical_memory_bandwidth_bytes_per_second": None, "physical_peak_fraction": None,
+        "physical_memory_bandwidth_bytes_per_second": None,
+        "physical_peak_fraction": None,
         "stall_freedom": None,
         "conclusion_contract": "Per-dispatch native counters are reduced as ratio-of-sums within a co-collected pass. They can expose relative cache, request, wait, issue, or LDS pressure, but cannot prove physical GDDR6 bandwidth or absence of material stalls.",
     }
@@ -514,7 +727,8 @@ def main() -> int:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{args.out.name}.", dir=args.out.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-            json.dump(result, output, indent=2, sort_keys=True, allow_nan=False); output.write("\n")
+            json.dump(result, output, indent=2, sort_keys=True, allow_nan=False)
+            output.write("\n")
         os.link(temporary, args.out)
     finally:
         Path(temporary).unlink(missing_ok=True)

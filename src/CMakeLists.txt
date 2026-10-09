@@ -31,16 +31,20 @@ add_library(ninfer_r9700_core STATIC
   targets/qwen3/impl/state/decoder_state_transaction.hip
   targets/qwen3_8_27b/impl/r9700_full_attention.hip
   ops/r9700/eager/eager_tensor_ops.cpp
+  ops/r9700/eager/embedding_staging.cpp
   ops/r9700/eager/eager_ops.hip
   ops/r9700/gdn/causal_conv1d_silu.cpp
   ops/r9700/gdn/gdn_gating.cpp
   ops/r9700/gdn/gdn_ops.hip
   ops/r9700/gdn_recurrence/gated_delta_net.hip
-  ops/r9700/gdn_recurrence/gdn_prefill_scale_sidecar.hip
+  ops/r9700/gdn_recurrence/gdn_prefill_chunked.hip
   ops/r9700/gdn_recurrence/gdn_replay_fold.cpp
   ops/r9700/gdn_recurrence/gdn_replay_fold.hip
+  ops/r9700/sampling/token_logprobs.cpp
+  ops/r9700/sampling/token_logprobs.hip
   ops/r9700/sampling/sampling.hip
   ops/r9700/rope/rope.hip
+  ops/r9700/persistent/persistent_decode.hip
   ops/r9700/vision/vision_attention.hip
   ops/r9700/vision/vision_pos_embed.hip
   ops/r9700/attention_projection/attention_projection.hip
@@ -65,6 +69,8 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/kv/fp8_int4_kv_attention.hip
   ops/r9700/linear/linear_tensor_op.cpp
   ops/r9700/linear/fp8_activation.hip
+  ops/r9700/linear/fp8lut4_linear.hip
+  ops/r9700/linear/fp8_small_t_linear.hip
   ops/r9700/linear/linear_execution.hip
   ops/r9700/linear/r9700_linear.hip)
 target_sources(ninfer_r9700_core PRIVATE
@@ -83,9 +89,10 @@ set_target_properties(ninfer_r9700_core PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_compile_options(ninfer_r9700_core PRIVATE
   $<$<AND:$<COMPILE_LANGUAGE:HIP>,$<NOT:$<CONFIG:Release>>>:-gline-tables-only>)
+find_package(Threads REQUIRED)
 target_link_libraries(ninfer_r9700_core PUBLIC
   hip::host
-  roc::hipblaslt
+  Threads::Threads
   rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library)
 add_library(ninfer::r9700_core ALIAS ninfer_r9700_core)
 
@@ -110,7 +117,7 @@ add_library(ninfer_artifact STATIC
 ninfer_r9700_internal_includes(ninfer_artifact)
 target_link_libraries(ninfer_artifact PUBLIC ninfer_r9700_core hip::host)
 
-# The R9700 target binder is a closed compileable boundary over the registered evaluation
+# The R9700 target binder is a closed compilable boundary over the registered evaluation
 # inventories. It performs no runtime repacking: every matrix view points directly into artifact
 # storage.
 add_library(ninfer_r9700_target_bindings STATIC
@@ -177,12 +184,13 @@ add_library(ninfer_r9700_qwen3_8_27b_runtime STATIC
   targets/qwen3/impl/frontend/encoded_history_cache.cpp
   targets/qwen3/impl/frontend/frontend.cpp
   targets/qwen3/impl/frontend/generation_recovery.cpp
-  targets/qwen3/impl/frontend/tool_grammar.cpp
+  targets/qwen3/impl/frontend/token_grammar.cpp
   targets/qwen3/impl/frontend/processor.cpp
   targets/qwen3/impl/frontend/tokenizer.cpp
   targets/qwen3/impl/state/round_state.cpp
   targets/qwen3/impl/runtime/visual_scatter.cpp
-  targets/qwen3/impl/runtime/tool_masks.cpp
+  targets/qwen3/impl/runtime/token_masks.hip
+  targets/qwen3/impl/runtime/prompt_embedding_staging.cpp
   targets/qwen3/impl/vision/control.cpp)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
   target_compile_definitions(ninfer_r9700_qwen3_8_27b_runtime PUBLIC
@@ -194,7 +202,7 @@ ninfer_r9700_internal_includes(ninfer_r9700_qwen3_8_27b_runtime)
 set_target_properties(ninfer_r9700_qwen3_8_27b_runtime PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_qwen3_8_27b_runtime PUBLIC
-  ninfer_tool_grammar
+  ninfer_token_grammar
   ninfer_r9700_target_bindings
   ninfer_r9700_core
   ninfer_r9700_text
@@ -204,7 +212,7 @@ target_link_libraries(ninfer_r9700_qwen3_8_27b_runtime PUBLIC
 
 # Force every runtime archive member into one physical planner executable. This prevents an
 # unresolved schedule dependency from being hidden merely because a small main does not call that
-# Program method. The observable route then constructs/finalizes every C=1..4 ordinary, Vision,
+# Program method. The observable route then constructs/finalizes every C=1..8 ordinary, Vision,
 # MTP, and DFlash planner profile on the selected gfx1201 device.
 add_executable(ninfer_r9700_runtime_planner_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/runtime_planner_qual.cpp)
@@ -260,8 +268,11 @@ if(NINFER_BUILD_APPS)
     serve/console_log.cpp
     serve/generation_service.cpp
     serve/request_log.cpp
+    serve/metrics.cpp
     serve/http_server.cpp
     serve/responses_http.cpp
+    serve/score_schema.cpp
+    serve/score_http.cpp
     serve/serve_options.cpp)
   ninfer_r9700_internal_includes(ninfer_serve)
   target_include_directories(ninfer_serve PRIVATE
@@ -301,6 +312,21 @@ set_target_properties(ninfer_r9700_engine_cache_cancel_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
 target_link_libraries(ninfer_r9700_engine_cache_cancel_qual PRIVATE ninfer_engine)
 
+# Manual Program-level generation-recovery qualification on resident, retained, and RAM-restored
+# KV; requires an explicit artifact and a speculative backend argument.
+add_executable(ninfer_r9700_recovery_kv_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/recovery_kv_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_recovery_kv_qual)
+set_target_properties(ninfer_r9700_recovery_kv_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_recovery_kv_qual PRIVATE
+  ninfer_engine
+  ninfer_r9700_qwen3_8_27b_runtime
+  ninfer_r9700_target_bindings
+  ninfer_artifact
+  ninfer_r9700_core
+  hip::host)
+
 # Sole-target selection and startup device-memory/capacity planning. This compile-only object
 # boundary checks the registry against native HIP and the Qwen3.8-27B R9700 package identity
 # without claiming that the still excluded package schedule and Engine are linkable.
@@ -331,80 +357,15 @@ ninfer_r9700_internal_includes(ninfer_r9700_artifact_qual)
 target_include_directories(ninfer_r9700_artifact_qual PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(ninfer_r9700_artifact_qual PRIVATE ninfer_artifact hip::host)
 
-# Isolated first-slice row-scaled-E4M3 gate_up execution. It owns fixed descriptors and one
-# installed top heuristic but is deliberately absent from target/Program dispatch until its
-# physical numerical and speed gates pass.
-add_executable(ninfer_r9700_fp8_gate_up_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip)
-file(SHA256 ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip
-  NINFER_R9700_FP8_GATE_UP_QUAL_SOURCE_SHA256)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip)
-ninfer_r9700_internal_includes(ninfer_r9700_fp8_gate_up_qual)
-target_compile_definitions(ninfer_r9700_fp8_gate_up_qual PRIVATE
-  NINFER_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
-  NINFER_QUAL_SOURCE_SHA256="${NINFER_R9700_FP8_GATE_UP_QUAL_SOURCE_SHA256}")
-set_target_properties(ninfer_r9700_fp8_gate_up_qual PROPERTIES
+# Row-scaled E4M3 Linear (small-T and prefill routes) against an independent FP64 oracle of the
+# consumed codes.
+add_executable(ninfer_r9700_fp8_row_scaled_linear_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_row_scaled_linear_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_fp8_row_scaled_linear_qual)
+set_target_properties(ninfer_r9700_fp8_row_scaled_linear_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_fp8_gate_up_qual PRIVATE
-  ninfer_r9700_core hip::host roc::hipblaslt)
-add_custom_command(TARGET ninfer_r9700_fp8_gate_up_qual POST_BUILD
-  COMMAND ${CMAKE_COMMAND}
-          -DINPUT=$<TARGET_FILE:ninfer_r9700_fp8_gate_up_qual>
-          -DOUTPUT=$<TARGET_FILE:ninfer_r9700_fp8_gate_up_qual>.sha256
-          -P ${PROJECT_SOURCE_DIR}/tools/cmake/write_sha256.cmake
-  VERBATIM)
-
-# Real-artifact T128/T129 exact-prefix discriminator for the two production row-FP8 shapes.
-# It is diagnostic-only and has no target routing edge.
-add_executable(ninfer_r9700_fp8_linear_prefix_discriminator
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_linear_prefix_discriminator.hip)
-ninfer_r9700_internal_includes(ninfer_r9700_fp8_linear_prefix_discriminator)
-set_target_properties(ninfer_r9700_fp8_linear_prefix_discriminator PROPERTIES
-  HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_fp8_linear_prefix_discriminator PRIVATE
-  ninfer_artifact ninfer_r9700_core hip::host roc::hipblaslt)
-
-# Exact-shape catalog probe for the retained FP8 gate/up projection. This is intentionally
-# disconnected from production dispatch: it enumerates every installed hipBLASLt algorithm before
-# a bounded, independently checked timing qualifier admits any non-default algorithm.
-add_executable(ninfer_r9700_fp8_gate_up_catalog_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_catalog_qual.hip)
-set_target_properties(ninfer_r9700_fp8_gate_up_catalog_qual PROPERTIES
-  HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_fp8_gate_up_catalog_qual PRIVATE
-  hip::host roc::hipblaslt)
-
-# The two pending post-gate/up decisions instantiate the same hardened qualifier contract and
-# prepared Linear execution owner at two explicit Qwen shapes. Compile-time identities keep the
-# runnable source direct and avoid generated/source-rewritten variants.
-function(ninfer_add_r9700_fp8_projection_qual target qualification rows middle last)
-  add_executable(${target} ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip
-    ${PROJECT_SOURCE_DIR}/src/ops/r9700/linear/linear_execution.hip)
-  ninfer_r9700_internal_includes(${target})
-  target_compile_definitions(${target} PRIVATE
-    NINFER_FP8_FIXED_PROJECTION_ROWS=${rows}
-    NINFER_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
-    NINFER_QUAL_SOURCE_SHA256="${NINFER_R9700_FP8_GATE_UP_QUAL_SOURCE_SHA256}"
-    NINFER_QUAL_SCHEMA="ninfer.r9700.fp8_projection_qualification.v1"
-    NINFER_QUAL_ARTIFACT_TYPE="ninfer_r9700_fp8_projection_comparison"
-    NINFER_QUAL_SCHEMA_VERSION=1
-    NINFER_QUAL_HAS_ID=1
-    NINFER_QUALIFICATION_ID="${qualification}"
-    NINFER_ORACLE_MIDDLE_ROW=${middle}
-    NINFER_ORACLE_LAST_ROW=${last})
-  set_target_properties(${target} PROPERTIES HIP_ARCHITECTURES gfx1201)
-  target_link_libraries(${target} PRIVATE ninfer_r9700_core hip::host roc::hipblaslt)
-  add_custom_command(TARGET ${target} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -DINPUT=$<TARGET_FILE:${target}>
-            -DOUTPUT=$<TARGET_FILE:${target}>.sha256
-            -P ${PROJECT_SOURCE_DIR}/tools/cmake/write_sha256.cmake VERBATIM)
-endfunction()
-
-ninfer_add_r9700_fp8_projection_qual(
-  ninfer_r9700_fp8_attention_qk_gate_value_qual attention_qk_gate_value 7168 3584 7167)
-ninfer_add_r9700_fp8_projection_qual(
-  ninfer_r9700_fp8_gdn_query_key_qual gdn_query_key 4096 2048 4095)
+target_link_libraries(ninfer_r9700_fp8_row_scaled_linear_qual PRIVATE
+  ninfer_r9700_core hip::host)
 
 add_library(ninfer_r9700_hip_code_object_capture SHARED
   ${PROJECT_SOURCE_DIR}/tools/r9700/hip_code_object_capture.cpp)
@@ -495,6 +456,13 @@ set_target_properties(ninfer_r9700_grouped_dynamic_conv_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_grouped_dynamic_conv_qual PRIVATE ninfer_r9700_core hip::host)
 
+add_executable(ninfer_r9700_q4_activation_image_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/q4_activation_image_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_q4_activation_image_qual)
+set_target_properties(ninfer_r9700_q4_activation_image_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_q4_activation_image_qual PRIVATE ninfer_r9700_core hip::host)
+
 add_executable(ninfer_r9700_swa_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/swa_qual.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_swa_qual)
@@ -532,7 +500,7 @@ set_target_properties(ninfer_r9700_sampling_qual PROPERTIES
 target_link_libraries(ninfer_r9700_sampling_qual PRIVATE ninfer_r9700_core hip::host)
 
 # Full speculative-round transition qualification: exact preparation, chain/tree acceptance,
-# selector-q residuals, state publication, and hidden/token movement over the sole B<=4/W<=16
+# selector-q residuals, state publication, and hidden/token movement over the sole B<=8/W<=16
 # product domain.  The executable uses an independent host oracle and caller-owned workspace.
 add_executable(ninfer_r9700_speculative_round_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/speculative_round_qual.hip)
@@ -622,8 +590,13 @@ add_executable(ninfer_r9700_dflash_attention_route_discriminator
 ninfer_r9700_internal_includes(ninfer_r9700_dflash_attention_route_discriminator)
 set_target_properties(ninfer_r9700_dflash_attention_route_discriminator PROPERTIES
   HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_dflash_attention_route_discriminator
-  PRIVATE ninfer_r9700_core hip::host)
+target_link_libraries(ninfer_r9700_dflash_attention_route_discriminator PRIVATE ninfer_r9700_core hip::host)
+
+add_executable(ninfer_r9700_dense_prefill_attention_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dense_prefill_attention_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_dense_prefill_attention_qual)
+set_target_properties(ninfer_r9700_dense_prefill_attention_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_dense_prefill_attention_qual PRIVATE ninfer_r9700_core hip::host)
 
 # Retained numerical and physical regression harness for the admitted split-512 long-context
 # production route. It calls the semantic entry point directly to compare both implementations.
@@ -738,7 +711,16 @@ target_compile_definitions(ninfer_r9700_a8q4_normalized_linear_t1_qual PRIVATE
 target_link_libraries(ninfer_r9700_a8q4_normalized_linear_t1_qual PRIVATE
   ninfer_r9700_core hip::host)
 
-# Exact MTP next-round state transition for the complete fixed product domain K=1..5/B=1..4.
+# Public RMSNorm-to-Q4 projection at A8 prefill extents (normalization fused into the codec).
+add_executable(ninfer_r9700_a8q4_normalized_linear_prefill_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_normalized_linear_prefill_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_a8q4_normalized_linear_prefill_qual)
+set_target_properties(ninfer_r9700_a8q4_normalized_linear_prefill_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_a8q4_normalized_linear_prefill_qual PRIVATE
+  ninfer_r9700_core hip::host)
+
+# Exact MTP next-round state transition for the complete fixed product domain K=1..5/B=1..8.
 # The qualifier checks every output element, pitched padding, input immutability, and public
 # shape/stride rejection against an independent host integer oracle on physical gfx1201.
 add_executable(ninfer_r9700_mtp_round_qual
@@ -779,9 +761,81 @@ target_link_libraries(ninfer_r9700_mlp_width_discriminator PRIVATE ninfer_artifa
 # public Engine, and product applications above are native HIP link owners;
 # real-model execution is still gated on the complete BF16-derived R9700 artifact.
 
+# Qualify the verification-width GDN front (RMSNorm seam, controls, A8G64 planes, status).
+add_executable(ninfer_r9700_gdn_normalized_front_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/gdn_normalized_front_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_gdn_normalized_front_qual)
+set_target_properties(ninfer_r9700_gdn_normalized_front_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_gdn_normalized_front_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Qualify the fused small-width FP8 and Q4 attention input/output boundaries.
+add_executable(ninfer_r9700_attention_fused_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/attention_fused_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_attention_fused_qual)
+set_target_properties(ninfer_r9700_attention_fused_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_attention_fused_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Qualify the FP8LUT4 x per-token E4M3 Linear against its FP64 codebook oracle.
+add_executable(ninfer_r9700_fp8lut4_linear_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8lut4_linear_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_fp8lut4_linear_qual)
+set_target_properties(ninfer_r9700_fp8lut4_linear_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_fp8lut4_linear_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Qualify the per-token E4M3 activation producers against their FP64 oracle.
+add_executable(ninfer_r9700_fp8_producers_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_producers_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_fp8_producers_qual)
+set_target_properties(ninfer_r9700_fp8_producers_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_fp8_producers_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Qualify the FP8LUT4 GDN verification front and fused projection-convolution.
+add_executable(ninfer_r9700_gdn_fp8lut4_front_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/gdn_fp8lut4_front_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_gdn_fp8lut4_front_qual)
+set_target_properties(ninfer_r9700_gdn_fp8lut4_front_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_gdn_fp8lut4_front_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Qualify the persistent decode lowering: lowered Device Graph chains bitwise equal to their
+# captured production launches.
+add_executable(ninfer_r9700_persistent_decode_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/persistent_decode_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_persistent_decode_qual)
+set_target_properties(ninfer_r9700_persistent_decode_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_persistent_decode_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Qualify the fused DFlash drafter Q/K norm, RoPE and V split.
+add_executable(ninfer_r9700_dflash_qkv_norm_rope_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_qkv_norm_rope_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_dflash_qkv_norm_rope_qual)
+set_target_properties(ninfer_r9700_dflash_qkv_norm_rope_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_dflash_qkv_norm_rope_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Qualify the fused one-sequence GDN pair projection + recorded convolution.
+add_executable(ninfer_r9700_gdn_pair_conv_record_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/gdn_pair_conv_record_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_gdn_pair_conv_record_qual)
+set_target_properties(ninfer_r9700_gdn_pair_conv_record_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_gdn_pair_conv_record_qual PRIVATE ninfer_r9700_core hip::host)
+
 # Qualify the selected semantic projected-controls Op from the existing GDN module.
 add_executable(ninfer_r9700_gdn_projected_controls_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/gdn_projected_controls_qual.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_gdn_projected_controls_qual)
 set_target_properties(ninfer_r9700_gdn_projected_controls_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_gdn_projected_controls_qual PRIVATE ninfer_r9700_core hip::host)
+
+add_executable(ninfer_r9700_dflash_context_kv_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_context_kv_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_dflash_context_kv_qual)
+set_target_properties(ninfer_r9700_dflash_context_kv_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_compile_definitions(ninfer_r9700_dflash_context_kv_qual PRIVATE
+  NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_options(ninfer_r9700_dflash_context_kv_qual PRIVATE -Wno-unused-function)
+target_link_libraries(ninfer_r9700_dflash_context_kv_qual PRIVATE ninfer_r9700_core hip::host)
+
+add_executable(ninfer_r9700_token_logprobs_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/token_logprobs_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_token_logprobs_qual)
+set_target_properties(ninfer_r9700_token_logprobs_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_token_logprobs_qual PRIVATE ninfer_r9700_core hip::host)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exact gfx1201 static gate for the reused K5120 rows5/6 CTA challenger."""
+
 from __future__ import annotations
 
 import argparse
@@ -11,14 +12,15 @@ except ImportError:
     from check_rmsnorm_decode_static import check
 
 EXPECTED = {
-    "vgprs": 17,
-    "lds": 32,
+    "vgprs": 24,
+    "lds": 80,
     "occupancy": 16,
-    "maximum_workgroup": 256,
-    "global_loads": 15,
-    "shuffle_ops": 8,
-    "barrier_pairs": 2,
-    "global_invalidations": 2,
+    "maximum_workgroup": 640,
+    "global_loads": 2,
+    "global_stores": 1,
+    "shuffle_ops": 5,
+    "barrier_pairs": 1,
+    "global_invalidations": 1,
 }
 
 

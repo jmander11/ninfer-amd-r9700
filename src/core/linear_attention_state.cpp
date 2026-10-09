@@ -235,8 +235,7 @@ std::size_t LinearAttentionStatePool::conv_slot_bytes() const noexcept {
 }
 
 std::size_t LinearAttentionStatePool::recurrent_slot_bytes() const noexcept {
-    return Tensor(nullptr, DType::FP32,
-                  {spec.key_head_dim, spec.value_head_dim, spec.value_heads})
+    return Tensor(nullptr, DType::FP32, {spec.key_head_dim, spec.value_head_dim, spec.value_heads})
         .bytes();
 }
 
@@ -248,6 +247,10 @@ std::size_t LinearAttentionStatePool::recurrent_host_image_bytes() const noexcep
     return static_cast<std::size_t>(layer_count()) * recurrent_slot_bytes();
 }
 
+// Host images are layer-major and contiguous. Each layer's slot is one contiguous device range,
+// so the transfer is one linear copy per layer and component. Linear copies stay on the DMA
+// engine at full link bandwidth; ROCm's rect (2D) host copies instead pin the host range per call
+// and run a shader or line-staged path that reaches only a fraction of it.
 void LinearAttentionStatePool::pack_slot_to_host(std::int32_t slot, void* conv_dst,
                                                  void* recurrent_dst, hipStream_t stream) const {
     validate_layer_slot(*this, 0, slot, "LinearAttentionStatePool pack_slot_to_host");
@@ -255,23 +258,18 @@ void LinearAttentionStatePool::pack_slot_to_host(std::int32_t slot, void* conv_d
         (recurrent_dst == nullptr && recurrent_host_image_bytes() != 0)) {
         throw std::invalid_argument("LinearAttentionStatePool host pack destination is null");
     }
-    const std::uint32_t layers     = layer_count();
-    const std::size_t conv_bytes   = conv_slot_bytes();
-    const std::size_t rec_bytes    = recurrent_slot_bytes();
-    if (layers == 1) {
-        HIP_CHECK(hipMemcpyAsync(conv_dst, conv_slot(0, slot).data, conv_bytes,
-                                 hipMemcpyDeviceToHost, stream));
-        HIP_CHECK(hipMemcpyAsync(recurrent_dst, recurrent_slot(0, slot).data, rec_bytes,
-                                 hipMemcpyDeviceToHost, stream));
-        return;
+    const std::size_t conv_bytes = conv_slot_bytes();
+    const std::size_t rec_bytes  = recurrent_slot_bytes();
+    auto* conv_out               = static_cast<unsigned char*>(conv_dst);
+    auto* rec_out                = static_cast<unsigned char*>(recurrent_dst);
+    for (std::uint32_t layer = 0; layer < layer_count(); ++layer) {
+        HIP_CHECK(hipMemcpyAsync(rec_out + static_cast<std::size_t>(layer) * rec_bytes,
+                                 recurrent_slot(layer, slot).data, rec_bytes, hipMemcpyDeviceToHost,
+                                 stream));
+        HIP_CHECK(hipMemcpyAsync(conv_out + static_cast<std::size_t>(layer) * conv_bytes,
+                                 conv_slot(layer, slot).data, conv_bytes, hipMemcpyDeviceToHost,
+                                 stream));
     }
-    const std::size_t conv_pitch = static_cast<std::size_t>(layer_stride_bytes(conv, "conv"));
-    const std::size_t rec_pitch =
-        static_cast<std::size_t>(layer_stride_bytes(recurrent, "recurrent"));
-    HIP_CHECK(hipMemcpy2DAsync(conv_dst, conv_bytes, conv_slot(0, slot).data, conv_pitch,
-                               conv_bytes, layers, hipMemcpyDeviceToHost, stream));
-    HIP_CHECK(hipMemcpy2DAsync(recurrent_dst, rec_bytes, recurrent_slot(0, slot).data, rec_pitch,
-                               rec_bytes, layers, hipMemcpyDeviceToHost, stream));
 }
 
 void LinearAttentionStatePool::unpack_slot_from_host(std::int32_t slot, const void* conv_src,
@@ -282,23 +280,18 @@ void LinearAttentionStatePool::unpack_slot_from_host(std::int32_t slot, const vo
         (recurrent_src == nullptr && recurrent_host_image_bytes() != 0)) {
         throw std::invalid_argument("LinearAttentionStatePool host unpack source is null");
     }
-    const std::uint32_t layers   = layer_count();
     const std::size_t conv_bytes = conv_slot_bytes();
     const std::size_t rec_bytes  = recurrent_slot_bytes();
-    if (layers == 1) {
-        HIP_CHECK(hipMemcpyAsync(conv_slot(0, slot).data, conv_src, conv_bytes,
+    const auto* conv_in          = static_cast<const unsigned char*>(conv_src);
+    const auto* rec_in           = static_cast<const unsigned char*>(recurrent_src);
+    for (std::uint32_t layer = 0; layer < layer_count(); ++layer) {
+        HIP_CHECK(hipMemcpyAsync(recurrent_slot(layer, slot).data,
+                                 rec_in + static_cast<std::size_t>(layer) * rec_bytes, rec_bytes,
                                  hipMemcpyHostToDevice, stream));
-        HIP_CHECK(hipMemcpyAsync(recurrent_slot(0, slot).data, recurrent_src, rec_bytes,
+        HIP_CHECK(hipMemcpyAsync(conv_slot(layer, slot).data,
+                                 conv_in + static_cast<std::size_t>(layer) * conv_bytes, conv_bytes,
                                  hipMemcpyHostToDevice, stream));
-        return;
     }
-    const std::size_t conv_pitch = static_cast<std::size_t>(layer_stride_bytes(conv, "conv"));
-    const std::size_t rec_pitch =
-        static_cast<std::size_t>(layer_stride_bytes(recurrent, "recurrent"));
-    HIP_CHECK(hipMemcpy2DAsync(conv_slot(0, slot).data, conv_pitch, conv_src, conv_bytes,
-                               conv_bytes, layers, hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpy2DAsync(recurrent_slot(0, slot).data, rec_pitch, recurrent_src, rec_bytes,
-                               rec_bytes, layers, hipMemcpyHostToDevice, stream));
 }
 
 } // namespace ninfer

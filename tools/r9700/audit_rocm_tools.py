@@ -20,14 +20,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "ninfer.r9700.rocm-tool-capability-audit.v1"
 ROCM_ROOT = Path("/opt/rocm")
 
 
 def _run(command: list[str]) -> dict[str, Any]:
-    completed = subprocess.run(command, text=True, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, check=False)
+    completed = subprocess.run(
+        command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False
+    )
     return {
         "command": command,
         "returncode": completed.returncode,
@@ -55,14 +55,19 @@ def summarize_database(path: Path) -> dict[str, Any]:
         raise ValueError(f"profiler database does not exist: {path}")
     connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
     try:
-        tables = [row[0] for row in connection.execute(
-            "select name from sqlite_master where type='table' order by name")]
+        tables = [
+            row[0]
+            for row in connection.execute(
+                "select name from sqlite_master where type='table' order by name"
+            )
+        ]
         process = _one_table(tables, "rocpd_info_process_")
         agent = _one_table(tables, "rocpd_info_agent_")
         metadata = _one_table(tables, "rocpd_metadata_")
         dispatch = _one_table(tables, "rocpd_kernel_dispatch_")
-        commands = [row[0] for row in connection.execute(
-            f'select command from "{process}" order by id')]
+        commands = [
+            row[0] for row in connection.execute(f'select command from "{process}" order by id')
+        ]
         agents = [
             {
                 "type": row[0],
@@ -72,8 +77,9 @@ def summarize_database(path: Path) -> dict[str, Any]:
                 "product_name": row[4],
             }
             for row in connection.execute(
-                f'select type, logical_index, name, model_name, product_name '
-                f'from "{agent}" order by id')
+                f"select type, logical_index, name, model_name, product_name "
+                f'from "{agent}" order by id'
+            )
         ]
         row_counts: dict[str, int] = {}
         for prefix, label in (
@@ -82,8 +88,11 @@ def summarize_database(path: Path) -> dict[str, Any]:
             ("rocpd_region_", "runtime_region"),
         ):
             matches = [table for table in tables if table.startswith(prefix)]
-            row_counts[label] = (connection.execute(
-                f'select count(*) from "{matches[0]}"').fetchone()[0] if matches else 0)
+            row_counts[label] = (
+                connection.execute(f'select count(*) from "{matches[0]}"').fetchone()[0]
+                if matches
+                else 0
+            )
 
         counters: dict[str, dict[str, int | float]] = {}
         info_matches = [table for table in tables if table.startswith("rocpd_info_pmc_")]
@@ -110,47 +119,77 @@ def summarize_database(path: Path) -> dict[str, Any]:
             "path": str(path),
             "bytes": path.stat().st_size,
             "sha256": _sha256(path),
-            "schema_metadata": dict(connection.execute(
-                f'select tag, value from "{metadata}" order by id')),
+            "schema_metadata": dict(
+                connection.execute(f'select tag, value from "{metadata}" order by id')
+            ),
             "commands": commands,
             "agents": agents,
             "row_counts": row_counts,
             "counters": counters,
-            "dispatch_rows": connection.execute(
-                f'select count(*) from "{dispatch}"').fetchone()[0],
+            "dispatch_rows": connection.execute(f'select count(*) from "{dispatch}"').fetchone()[0],
         }
     finally:
         connection.close()
 
 
 def _require_r9700(summary: dict[str, Any]) -> None:
-    if not any(agent["type"] == "GPU" and agent["name"] == "gfx1201" and
-               agent["product_name"] == "AMD Radeon AI PRO R9700"
-               for agent in summary["agents"]):
+    if not any(
+        agent["type"] == "GPU"
+        and agent["name"] == "gfx1201"
+        and agent["product_name"] == "AMD Radeon AI PRO R9700"
+        for agent in summary["agents"]
+    ):
         raise ValueError(f"database is not an R9700/gfx1201 capture: {summary['path']}")
     if summary["dispatch_rows"] <= 0:
         raise ValueError(f"database has no kernel dispatches: {summary['path']}")
 
 
 def _compile_sanitizer_probes(hipcc: Path) -> dict[str, Any]:
-    source_text = "#include <hip/hip_runtime.h>\n__global__ void probe(int* p) { p[threadIdx.x] = 1; }\n"
+    source_text = (
+        "#include <hip/hip_runtime.h>\n__global__ void probe(int* p) { p[threadIdx.x] = 1; }\n"
+    )
     with tempfile.TemporaryDirectory(prefix="ninfer-rocm-audit-") as temporary:
         directory = Path(temporary)
         source = directory / "probe.hip"
         source.write_text(source_text, encoding="utf-8")
-        plain = _run([str(hipcc), "-std=c++20", "--offload-arch=gfx1201",
-                      "-fsanitize=address", "-c", str(source), "-o", str(directory / "plain.o")])
-        xnack = _run([str(hipcc), "-std=c++20", "--offload-arch=gfx1201:xnack+",
-                      "-fsanitize=address", "-c", str(source), "-o", str(directory / "xnack.o")])
+        plain = _run(
+            [
+                str(hipcc),
+                "-std=c++20",
+                "--offload-arch=gfx1201",
+                "-fsanitize=address",
+                "-c",
+                str(source),
+                "-o",
+                str(directory / "plain.o"),
+            ]
+        )
+        xnack = _run(
+            [
+                str(hipcc),
+                "-std=c++20",
+                "--offload-arch=gfx1201:xnack+",
+                "-fsanitize=address",
+                "-c",
+                str(source),
+                "-o",
+                str(directory / "xnack.o"),
+            ]
+        )
         temporary_prefix = str(directory)
         for result in (plain, xnack):
-            result["command"] = [part.replace(temporary_prefix, "<temporary>")
-                                 for part in result["command"]]
+            result["command"] = [
+                part.replace(temporary_prefix, "<temporary>") for part in result["command"]
+            ]
             result["output"] = result["output"].replace(temporary_prefix, "<temporary>")
-    plain_warning = "ignoring '-fsanitize=address' option for offload arch 'gfx1201'" in plain["output"]
+    plain_warning = (
+        "ignoring '-fsanitize=address' option for offload arch 'gfx1201'" in plain["output"]
+    )
     xnack_rejected = "invalid target ID 'gfx1201:xnack+'" in xnack["output"]
     if plain["returncode"] != 0 or not plain_warning:
-        raise ValueError("plain gfx1201 sanitizer probe did not produce the expected unsupported warning")
+        raise ValueError(
+            "plain gfx1201 sanitizer probe did not produce the expected unsupported warning"
+        )
     if xnack["returncode"] == 0 or not xnack_rejected:
         raise ValueError("gfx1201:xnack+ sanitizer probe was not rejected as an invalid target")
     return {
@@ -186,7 +225,9 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
     compute_help = _run([str(compute), "--help"])
     supported_architectures = _supported_compute_architectures(compute_help["output"])
     if "gfx1201" in supported_architectures:
-        raise ValueError("rocprof-compute now advertises gfx1201; unavailable classification is stale")
+        raise ValueError(
+            "rocprof-compute now advertises gfx1201; unavailable classification is stale"
+        )
 
     trace = summarize_database(arguments.trace_db)
     pmc = summarize_database(arguments.pmc_db)
@@ -195,11 +236,13 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
     if trace["commands"] != [arguments.expected_trace_command]:
         raise ValueError(
             f"trace workload command mismatch: expected {arguments.expected_trace_command!r}, "
-            f"found {trace['commands']!r}")
+            f"found {trace['commands']!r}"
+        )
     if pmc["commands"] != [arguments.expected_pmc_command]:
         raise ValueError(
             f"PMU workload command mismatch: expected {arguments.expected_pmc_command!r}, "
-            f"found {pmc['commands']!r}")
+            f"found {pmc['commands']!r}"
+        )
     if trace["row_counts"]["memory_copy"] <= 0 or trace["row_counts"]["runtime_region"] <= 0:
         raise ValueError("trace database lacks required memory-copy or runtime records")
     for symbol in ("SQ_BUSY_CYCLES", "SQ_WAVES"):
@@ -221,13 +264,19 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
         zero_probes[symbol] = summary
 
     unavailable_counters = sorted(zero_probes)
-    compute_soc_root = (ROCM_ROOT / "core-10.0/libexec/rocprofiler-compute/"
-                        "rocprof_compute_soc")
+    compute_soc_root = ROCM_ROOT / "core-10.0/libexec/rocprofiler-compute/rocprof_compute_soc"
     compute_soc_modules = sorted(path.name for path in compute_soc_root.glob("soc_gfx*.py"))
     optional_tools = {
         name: shutil.which(name)
-        for name in ("amd-smi", "compute-sanitizer", "rocprof", "rocprofv2", "rocm-gdb",
-                     "rocm-smi", "valgrind")
+        for name in (
+            "amd-smi",
+            "compute-sanitizer",
+            "rocprof",
+            "rocprofv2",
+            "rocm-gdb",
+            "rocm-smi",
+            "valgrind",
+        )
     }
     return {
         "schema": SCHEMA,
@@ -240,8 +289,9 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
         "optional_tool_paths": optional_tools,
         "host": {
             "kernel_release": os.uname().release,
-            "perf_event_paranoid": Path("/proc/sys/kernel/perf_event_paranoid").read_text(
-                encoding="utf-8").strip(),
+            "perf_event_paranoid": Path("/proc/sys/kernel/perf_event_paranoid")
+            .read_text(encoding="utf-8")
+            .strip(),
         },
         "rocprof_compute": {
             "supported_architectures": supported_architectures,

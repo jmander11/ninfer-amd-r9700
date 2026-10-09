@@ -29,7 +29,8 @@ def _descriptor_sha256(descriptor: int) -> str:
 
 
 def validate_prefill_chunk_authority(
-    path: Path, selected_chunk: int | None = None,
+    path: Path,
+    selected_chunk: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Validate one semantic selection record while holding its original inode open."""
 
@@ -39,7 +40,9 @@ def validate_prefill_chunk_authority(
     except OSError as error:
         if error.errno == errno.ELOOP:
             raise ValueError(f"prefill-chunk authority is not a regular file: {source}") from error
-        raise ValueError(f"prefill-chunk authority cannot be opened safely: {source}: {error}") from error
+        raise ValueError(
+            f"prefill-chunk authority cannot be opened safely: {source}: {error}"
+        ) from error
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
@@ -48,6 +51,7 @@ def validate_prefill_chunk_authority(
         before = _descriptor_sha256(descriptor)
         resolved = source.resolve(strict=True)
         from tools.bench.select_prefill_chunk import validate_selection_record
+
         selection = validate_selection_record(resolved)
         after = _descriptor_sha256(descriptor)
         if _identity(source) != owner or after != before:
@@ -61,14 +65,17 @@ def validate_prefill_chunk_authority(
         raise ValueError(
             "prefill-chunk authority selection differs from the requested matrix chunk"
         )
-    return ({
-        "path": str(resolved),
-        "sha256": before,
-        "artifact_type": selection.get("artifact_type"),
-        "schema_version": selection.get("schema_version"),
-        "base_chunk_profile": selection.get("base_chunk_profile"),
-        "selected_prefill_chunk": selected,
-    }, selection)
+    return (
+        {
+            "path": str(resolved),
+            "sha256": before,
+            "artifact_type": selection.get("artifact_type"),
+            "schema_version": selection.get("schema_version"),
+            "base_chunk_profile": selection.get("base_chunk_profile"),
+            "selected_prefill_chunk": selected,
+        },
+        selection,
+    )
 
 
 def inspect_prefill_chunk_authority(path: Path, selected_chunk: int) -> dict[str, Any]:

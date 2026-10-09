@@ -34,9 +34,8 @@ using Json = nlohmann::json;
     throw ApiException(std::move(error));
 }
 
-const Json& require_object(const Json& body) {
+void require_object(const Json& body) {
     if (!body.is_object()) { bad_request("request body must be a JSON object"); }
-    return body;
 }
 
 bool optional_bool(const Json& object, const char* key, bool fallback) {
@@ -513,17 +512,36 @@ void parse_tool_choice(const Json& body, ResponsesRequest& out) {
         } else if (value == "none") {
             out.generation.tool_choice.mode = ToolChoiceMode::None;
         } else if (value == "required") {
-            bad_request("tool_choice 'required' is not supported", "tool_choice",
-                        "tool_choice_not_supported");
+            out.generation.tool_choice.mode = ToolChoiceMode::Required;
         } else {
-            bad_request("tool_choice must be 'auto' or 'none'", "tool_choice");
+            bad_request("tool_choice must be 'auto', 'none', 'required', or a function choice",
+                        "tool_choice");
         }
         out.tool_choice = value;
     } else if (choice.is_object()) {
-        bad_request("named tool_choice is not supported", "tool_choice",
-                    "tool_choice_not_supported");
+        if (!choice.contains("type") || !choice.at("type").is_string() ||
+            choice.at("type") != "function") {
+            bad_request("only function tool_choice objects are supported", "tool_choice",
+                        "tool_choice_not_supported");
+        }
+        out.generation.tool_choice.mode = ToolChoiceMode::Named;
+        out.generation.tool_choice.name = require_function_name(choice, "tool_choice");
+        out.tool_choice = Json{{"type", "function"}, {"name", out.generation.tool_choice.name}};
     } else {
         bad_request("tool_choice must be a string or object", "tool_choice");
+    }
+    if ((out.generation.tool_choice.mode == ToolChoiceMode::Required ||
+         out.generation.tool_choice.mode == ToolChoiceMode::Named) &&
+        out.generation.tools.empty()) {
+        bad_request("tool_choice requires tools", "tool_choice");
+    }
+    if (out.generation.tool_choice.mode == ToolChoiceMode::Named &&
+        !std::any_of(out.generation.tools.begin(), out.generation.tools.end(),
+                     [&](const ToolDefinition& tool) {
+                         return tool.name == out.generation.tool_choice.name;
+                     })) {
+        bad_request("tool_choice references unknown function: " + out.generation.tool_choice.name,
+                    "tool_choice");
     }
 }
 
@@ -548,7 +566,7 @@ void parse_reasoning(const Json& body, ResponsesRequest& out) {
                     "max",
                     "reasoning");
     }
-    out.generation.reasoning_effort       = *effort;
+    out.generation.reasoning_effort       = effort;
     out.generation.reasoning_effort_param = "reasoning.effort";
 }
 
@@ -630,13 +648,6 @@ void reject_server_managed_features(const Json& body) {
                         "background_not_supported");
         }
     }
-    if (body.contains("include") && !body.at("include").is_null()) {
-        if (!body.at("include").is_array()) { bad_request("include must be an array", "include"); }
-        if (!body.at("include").empty()) {
-            bad_request("additional response fields are not supported", "include",
-                        "include_not_supported");
-        }
-    }
     if (body.contains("parallel_tool_calls") && !body.at("parallel_tool_calls").is_null()) {
         if (!body.at("parallel_tool_calls").is_boolean()) {
             bad_request("parallel_tool_calls must be a boolean", "parallel_tool_calls");
@@ -644,12 +655,6 @@ void reject_server_managed_features(const Json& body) {
         if (!body.at("parallel_tool_calls").get<bool>()) {
             bad_request("parallel_tool_calls=false cannot be enforced", "parallel_tool_calls",
                         "parallel_tool_calls_not_supported");
-        }
-    }
-    if (body.contains("top_logprobs") && !body.at("top_logprobs").is_null()) {
-        const std::optional<int> value = optional_int(body, "top_logprobs");
-        if (!value || *value != 0) {
-            bad_request("top_logprobs is not supported", "top_logprobs", "logprobs_not_supported");
         }
     }
     if (body.contains("truncation") && !body.at("truncation").is_null()) {
@@ -690,21 +695,29 @@ void reject_server_managed_features(const Json& body) {
                             "text_option_not_supported");
             }
         }
-        if (body.at("text").contains("format") && !body.at("text").at("format").is_null()) {
-            const Json& format = body.at("text").at("format");
-            if (!format.is_object() || !format.contains("type") || !format.at("type").is_string() ||
-                format.at("type").get<std::string>() != "text") {
-                bad_request("only text.format {type:'text'} is supported", "text",
-                            "structured_outputs_not_supported");
+    }
+}
+
+// Output-text logprobs are reported when `include` lists message.output_text.logprobs or
+// `top_logprobs` is positive; `top_logprobs` (0..20) is the alternatives per token.
+void parse_logprobs(const Json& body, ResponsesRequest& out) {
+    bool included = false;
+    if (body.contains("include") && !body.at("include").is_null()) {
+        if (!body.at("include").is_array()) { bad_request("include must be an array", "include"); }
+        for (const Json& field : body.at("include")) {
+            if (!field.is_string() || field.get<std::string>() != "message.output_text.logprobs") {
+                bad_request("only include 'message.output_text.logprobs' is supported", "include",
+                            "include_not_supported");
             }
-            for (auto it = format.begin(); it != format.end(); ++it) {
-                if (it.key() != "type") {
-                    bad_request("only text.format {type:'text'} is supported", "text",
-                                "structured_outputs_not_supported");
-                }
-            }
+            included = true;
         }
     }
+    const int alternatives = optional_int(body, "top_logprobs").value_or(0);
+    if (alternatives < 0 || alternatives > 20) {
+        bad_request("top_logprobs must be between 0 and 20", "top_logprobs");
+    }
+    out.top_logprobs = alternatives;
+    if (included || alternatives > 0) { out.generation.top_logprobs = alternatives; }
 }
 
 ResponsesRequest parse_request_impl(const Json& body, const RequestLimits& limits) {
@@ -713,6 +726,13 @@ ResponsesRequest parse_request_impl(const Json& body, const RequestLimits& limit
     reject_server_managed_features(body);
 
     ResponsesRequest out;
+    if (body.contains("text") && body.at("text").is_object() &&
+        body.at("text").contains("format") && !body.at("text").at("format").is_null()) {
+        out.text_format                        = body.at("text").at("format");
+        out.generation.output_constraint_param = "text.format";
+        out.generation.output_constraint =
+            parse_output_format(out.text_format, false, "text.format");
+    }
     if (!body.contains("model") || !body.at("model").is_string() ||
         body.at("model").get<std::string>().empty()) {
         bad_request("missing required field: model", "model");
@@ -741,7 +761,13 @@ ResponsesRequest parse_request_impl(const Json& body, const RequestLimits& limit
     validate_metadata(body, out);
     parse_tools(body, out);
     parse_tool_choice(body, out);
+    out.generation.output_constraint_param = "text.format";
+    if (out.generation.output_constraint && !out.generation.tools.empty()) {
+        bad_request("output constraints cannot be combined with tools", "text.format",
+                    "invalid_output_constraint");
+    }
     parse_reasoning(body, out);
+    parse_logprobs(body, out);
     out.generation.preserve_thinking = parse_openai_preserve_thinking(body);
     if (body.contains("ninfer") && !body.at("ninfer").is_null()) {
         apply_ninfer_object(body.at("ninfer"), out.generation);
@@ -751,11 +777,11 @@ ResponsesRequest parse_request_impl(const Json& body, const RequestLimits& limit
         if (*temperature < 0.0 || *temperature > 2.0) {
             bad_request("temperature must be in [0,2]", "temperature");
         }
-        out.generation.sampling.temperature = *temperature;
+        out.generation.sampling.temperature = temperature;
     }
     if (const std::optional<double> top_p = optional_number(body, "top_p")) {
         if (*top_p < 0.0 || *top_p > 1.0) { bad_request("top_p must be in [0,1]", "top_p"); }
-        out.generation.sampling.top_p = *top_p;
+        out.generation.sampling.top_p = top_p;
     }
 
     if (const std::optional<int> max_output = optional_int(body, "max_output_tokens")) {
@@ -834,12 +860,20 @@ Json response_common(const std::string& id, std::int64_t created_at,
         {"service_tier", "default"},
         {"store", request.store},
         {"temperature", runtime.temperature},
-        {"text", Json{{"format", Json{{"type", "text"}}}}},
+        {"text", Json{{"format", request.text_format}}},
         {"tool_choice", request.tool_choice},
         {"tools", request.tools},
-        {"top_logprobs", 0},
+        {"top_logprobs", request.top_logprobs},
         {"top_p", runtime.top_p},
         {"truncation", "disabled"}};
+}
+
+// The assistant output_text part; a request that asked for logprobs gets its token list.
+Json output_text_part(const ResponsesRequest& request, const std::string& text,
+                      std::span<const TokenLogprobEntry> logprobs) {
+    Json part = {{"type", "output_text"}, {"annotations", Json::array()}, {"text", text}};
+    if (request.generation.top_logprobs) { part["logprobs"] = token_logprobs_json(logprobs); }
+    return part;
 }
 
 BuiltResponse build_response(const std::string& id, std::int64_t created_at,
@@ -865,14 +899,13 @@ BuiltResponse build_response(const std::string& id, std::int64_t created_at,
 
     if (!outcome.text.empty() || outcome.tool_calls.empty()) {
         if (ids.message.empty()) { ids.message = new_response_item_id("msg"); }
-        built.output_items.push_back(
-            Json{{"id", ids.message},
-                 {"type", "message"},
-                 {"status", item_status},
-                 {"role", "assistant"},
-                 {"content", Json::array({Json{{"type", "output_text"},
-                                               {"annotations", Json::array()},
-                                               {"text", outcome.text}}})}});
+        built.output_items.push_back(Json{
+            {"id", ids.message},
+            {"type", "message"},
+            {"status", item_status},
+            {"role", "assistant"},
+            {"content",
+             Json::array({output_text_part(request, outcome.text, outcome.content_logprobs)})}});
     }
 
     ids.function_calls.resize(outcome.tool_calls.size());
@@ -1082,22 +1115,23 @@ public:
     }
 
     std::vector<std::string> close_message(const std::string& final_text,
+                                           std::span<const TokenLogprobEntry> logprobs,
                                            const char* item_status = "completed") {
         if (!message_started || message_done) { return {}; }
         message_done    = true;
         content_text    = final_text;
-        const Json part = {
-            {"type", "output_text"}, {"annotations", Json::array()}, {"text", content_text}};
+        const Json part = output_text_part(request, content_text, logprobs);
         const Json item = {{"id", ids.message},
                            {"type", "message"},
                            {"status", item_status},
                            {"role", "assistant"},
                            {"content", Json::array({part})}};
-        return {sse(event("response.output_text.done", Json{{"item_id", ids.message},
-                                                            {"output_index", message_index},
-                                                            {"content_index", 0},
-                                                            {"text", content_text},
-                                                            {"logprobs", Json::array()}})),
+        return {sse(event("response.output_text.done",
+                          Json{{"item_id", ids.message},
+                               {"output_index", message_index},
+                               {"content_index", 0},
+                               {"text", content_text},
+                               {"logprobs", token_logprobs_json(logprobs)}})),
                 sse(event("response.content_part.done", Json{{"item_id", ids.message},
                                                              {"output_index", message_index},
                                                              {"content_index", 0},
@@ -1159,22 +1193,24 @@ std::vector<std::string> ResponsesEventStream::reasoning_delta(const std::string
     return events;
 }
 
-std::vector<std::string> ResponsesEventStream::content_delta(const std::string& text) {
+std::vector<std::string>
+ResponsesEventStream::content_delta(const std::string& text,
+                                    std::span<const TokenLogprobEntry> logprobs) {
     if (!impl_->started || impl_->finish_built) {
         throw std::logic_error("invalid content delta event state");
     }
-    if (text.empty()) { return {}; }
+    if (text.empty() && logprobs.empty()) { return {}; }
     std::vector<std::string> events = impl_->close_reasoning(impl_->reasoning_text);
     std::vector<std::string> added  = impl_->ensure_message();
     events.insert(events.end(), std::make_move_iterator(added.begin()),
                   std::make_move_iterator(added.end()));
     impl_->content_text += text;
-    events.push_back(
-        sse(impl_->event("response.output_text.delta", Json{{"item_id", impl_->ids.message},
-                                                            {"output_index", impl_->message_index},
-                                                            {"content_index", 0},
-                                                            {"delta", text},
-                                                            {"logprobs", Json::array()}})));
+    events.push_back(sse(impl_->event("response.output_text.delta",
+                                      Json{{"item_id", impl_->ids.message},
+                                           {"output_index", impl_->message_index},
+                                           {"content_index", 0},
+                                           {"delta", text},
+                                           {"logprobs", token_logprobs_json(logprobs)}})));
     return events;
 }
 
@@ -1223,7 +1259,7 @@ ResponsesStreamFinish ResponsesEventStream::finish(const GenerationOutcome& outc
                                                        {"logprobs", Json::array()}})));
             }
         }
-        append(impl_->close_message(outcome.text, item_status));
+        append(impl_->close_message(outcome.text, outcome.content_logprobs, item_status));
     }
 
     impl_->ids.function_calls.reserve(outcome.tool_calls.size());

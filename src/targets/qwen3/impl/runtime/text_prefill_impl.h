@@ -11,37 +11,28 @@
 #include <stdexcept>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
-namespace {
-
 DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state) {
     if (!state.execution.io.dflash_decode || state.dflash_host_ingress == nullptr) {
         throw std::logic_error("DFlash prefill controls are unavailable");
     }
-    return dflash_feature_sink(
-        state, [&state](const Tensor& features, const Tensor& positions, bool rewrite_checkpoint) {
-            auto& frame  = *state.execution.io.dflash_decode;
-            Tensor count = frame.append_counts.slice(0, 0, 1);
-            Tensor lane  = frame.lanes.slice(0, 0, 1);
-            Tensor row   = frame.dflash_kv_table_rows.slice(0, 0, 1);
-            ops::set_i32_scalar(count, features.ne[1], state.execution.device.stream);
-            const auto exact = static_cast<std::uint32_t>(features.ne[1]);
-            dflash_append_context(state, features, positions, count, lane, row, {exact, exact});
-            if (rewrite_checkpoint) {
-                state.dflash->save_rewrite_checkpoint(state.dflash_host_ingress->lanes[0],
-                                                      state.execution.device.stream);
-            }
-        });
+    return dflash_feature_sink(state, [&state](const Tensor& features, const Tensor& positions) {
+        auto& frame     = *state.execution.io.dflash_decode;
+        const auto slot = frame.lanes.ne[0] - 1;
+        Tensor count    = frame.append_counts.slice(0, slot, 1);
+        Tensor lane     = frame.lanes.slice(0, slot, 1);
+        Tensor row      = frame.dflash_kv_table_rows.slice(0, slot, 1);
+        ops::set_i32_scalar(count, features.ne[1], state.execution.device.stream);
+        const auto exact = static_cast<std::uint32_t>(features.ne[1]);
+        dflash_append_context(state, features, positions, count, lane, row, {exact, exact});
+    });
 }
-
-} // namespace
 
 void configure_text_card(TextContext& card, const ExecutionCore& execution,
                          const ops::SamplingConfig* sampling, std::int32_t current_state_slot,
-                         std::int32_t rewrite_checkpoint_state_slot,
                          std::uint32_t mtp_proposal_extent) {
     card.set_sampling(sampling);
-    card.set_linear_state_slots(current_state_slot, rewrite_checkpoint_state_slot);
-    card.set_gdn_state_action(GdnStateAction::UpdateInPlace, nullptr);
+    card.set_linear_state_slot(current_state_slot);
+    card.set_gdn_state_action(GdnStateAction::UpdateInPlace, nullptr, nullptr);
     card.set_mtp_proposal_extent(mtp_proposal_extent);
     if (execution.proposal_head == ProposalHead::Full) {
         card.set_proposal_head(nullptr, nullptr, 0);
@@ -53,16 +44,12 @@ void configure_text_card(TextContext& card, const ExecutionCore& execution,
     }
 }
 
-PrefillChunkResult prefill_text_chunk(
-    PrefillContext& state, std::span<const TokenId> ids, std::uint32_t nominal_length,
-    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end) {
-    TextContext card(state.execution.device, state.execution.model,
-                     state.execution.linear_execution, state.execution.work,
-                     state.text_kv, state.execution.linear_attention, state.execution.io,
-                     state.execution.prefill_hidden, state.execution.prefill_chunk,
-                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+// Every prefill card commits through the same FP8-K/INT4-V transactions and captures the
+// same rewrite checkpoint outputs; the callers differ only in token and position inputs.
+void attach_prefill_state(TextContext& card, PrefillContext& state,
+                          std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier) {
     configure_text_card(card, state.execution, state.sampling, state.current_state_slot,
-                        state.rewrite_checkpoint_state_slot, state.mtp_proposal_extent);
+                        state.mtp_proposal_extent);
     if (state.text_kv_allocation == nullptr || state.text_kv_publication == nullptr ||
         state.text_kv_status == nullptr) {
         throw std::logic_error("Text prefill has no FP8-K/INT4-V transaction authority");
@@ -78,10 +65,22 @@ PrefillChunkResult prefill_text_chunk(
                                           *state.mtp_kv_publication, state.mtp_kv_status);
     }
     card.set_rewrite_checkpoint_hidden_output(state.rewrite_checkpoint_hidden);
+    card.set_prompt_embedding_staging(state.prompt_embedding);
     card.set_prefill_rewrite_checkpoint_frontier(
         rewrite_checkpoint_capture_frontier
             ? static_cast<std::int64_t>(*rewrite_checkpoint_capture_frontier)
             : -1);
+}
+
+PrefillChunkResult prefill_text_chunk(
+    PrefillContext& state, std::span<const TokenId> ids, std::uint32_t nominal_length,
+    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end) {
+    TextContext card(state.execution.device, state.execution.model,
+                     state.execution.linear_execution, state.execution.work, state.text_kv,
+                     state.execution.linear_attention, state.execution.io,
+                     state.execution.prefill_hidden, state.execution.prefill_chunk,
+                     state.text_kv_base, state.mtp_kv, state.mtp_cache);
+    attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
     const std::span<const int> prompt(ids.data(), ids.size());
     if (state.dflash != nullptr) {
         DFlashFeatureSink sink = make_dflash_prefill_sink(state);
@@ -91,38 +90,34 @@ PrefillChunkResult prefill_text_chunk(
     return card.prefill_chunk(prompt, state.text_kv_base, nominal_length, finalize_at_end);
 }
 
+PrefillChunkResult prefill_mrope_text_chunk(
+    PrefillContext& state, const PreparedPromptData& prompt, std::uint32_t nominal_length,
+    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end) {
+    TextContext card(state.execution.device, state.execution.model,
+                     state.execution.linear_execution, state.execution.work, state.text_kv,
+                     state.execution.linear_attention, state.execution.io,
+                     state.execution.prefill_hidden, state.execution.prefill_chunk,
+                     state.text_kv_base, state.mtp_kv, state.mtp_cache);
+    attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
+    if (state.dflash != nullptr) {
+        DFlashFeatureSink sink = make_dflash_prefill_sink(state);
+        return card.prefill_mrope_chunk(prompt, state.text_kv_base, nominal_length, finalize_at_end,
+                                        sink);
+    }
+    return card.prefill_mrope_chunk(prompt, state.text_kv_base, nominal_length, finalize_at_end);
+}
+
 PrefillChunkResult
 prefill_multimodal_chunk(PrefillContext& state, const PreparedPromptData& prompt,
                          VisionPrefillSession& vision, std::uint32_t nominal_length,
                          std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier,
                          bool finalize_at_end) {
     TextContext card(state.execution.device, state.execution.model,
-                     state.execution.linear_execution, state.execution.work,
-                     state.text_kv, state.execution.linear_attention, state.execution.io,
+                     state.execution.linear_execution, state.execution.work, state.text_kv,
+                     state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
-                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
-    configure_text_card(card, state.execution, state.sampling, state.current_state_slot,
-                        state.rewrite_checkpoint_state_slot, state.mtp_proposal_extent);
-    if (state.text_kv_allocation == nullptr || state.text_kv_publication == nullptr ||
-        state.text_kv_status == nullptr) {
-        throw std::logic_error("multimodal Text prefill has no FP8-K/INT4-V transaction authority");
-    }
-    card.set_prefill_text_kv_authority(state.text_cache, *state.text_kv_allocation,
-                                       *state.text_kv_publication, state.text_kv_status);
-    if (state.mtp_cache != nullptr) {
-        if (state.mtp_kv_allocation == nullptr || state.mtp_kv_publication == nullptr ||
-            state.mtp_kv_status == nullptr) {
-            throw std::logic_error(
-                "multimodal MTP prefill has no FP8-K/INT4-V transaction authority");
-        }
-        card.set_prefill_mtp_kv_authority(*state.mtp_cache, *state.mtp_kv_allocation,
-                                          *state.mtp_kv_publication, state.mtp_kv_status);
-    }
-    card.set_rewrite_checkpoint_hidden_output(state.rewrite_checkpoint_hidden);
-    card.set_prefill_rewrite_checkpoint_frontier(
-        rewrite_checkpoint_capture_frontier
-            ? static_cast<std::int64_t>(*rewrite_checkpoint_capture_frontier)
-            : -1);
+                     state.text_kv_base, state.mtp_kv, state.mtp_cache);
+    attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
     if (state.dflash != nullptr) {
         DFlashFeatureSink sink = make_dflash_prefill_sink(state);
         return card.prefill_chunk(prompt, state.text_kv_base, nominal_length, vision,
@@ -139,7 +134,7 @@ void mtp_bridge_multimodal(PrefillContext& state, const PreparedPromptData& prom
         throw std::logic_error("multimodal MTP bridge does not match the reusable frontier");
     }
 
-    Tensor bridge_token = state.execution.io.mtp->target_input_ids.slice(0, 0, 1);
+    Tensor bridge_token = state.execution.io.mtp.value().target_input_ids.slice(0, 0, 1);
     const TokenId token = prompt.token_ids[state.text_kv_base];
     HIP_CHECK(hipMemcpyAsync(bridge_token.data, &token, sizeof(token), hipMemcpyHostToDevice,
                              state.execution.device.stream));
@@ -190,6 +185,10 @@ void sample_from_hidden(PrefillContext& state, const Tensor& hidden, std::int32_
     ops::sample(logits, state.execution.io.token, TextConfig::token_domain, state.sampling,
                 state.execution.io.pos, purpose, state.execution.work,
                 state.execution.device.stream);
+    qwen3::record_round_logprobs(state.execution.io.prefill_logprobs,
+                                 Tensor(logits.data, DType::BF16, {logits.ne[0], 1, 1}),
+                                 Tensor(state.execution.io.token.data, DType::I32, {1, 1}), nullptr,
+                                 nullptr, TextConfig::token_domain, state.execution.device.stream);
     state.execution.work.reset();
 }
 

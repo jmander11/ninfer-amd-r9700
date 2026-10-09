@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import torch
 
-
 E4M3FN_MAX = 448.0
 VALUE_CODE_MAX = 7
 VALUE_GROUPS = (16, 32)
@@ -23,9 +22,7 @@ def dequantize_keys(codes: torch.Tensor) -> torch.Tensor:
     return codes.float()
 
 
-def quantize_values(
-    values: torch.Tensor, group_size: int
-) -> tuple[torch.Tensor, torch.Tensor]:
+def quantize_values(values: torch.Tensor, group_size: int) -> tuple[torch.Tensor, torch.Tensor]:
     """Store finite represented BF16 V as low-lane-first INT4 plus FP16 scales."""
     if group_size not in VALUE_GROUPS or values.shape[-1] % group_size:
         raise ValueError("KV values require a final dimension divisible by G16 or G32")
@@ -34,16 +31,16 @@ def quantize_values(
     if not bool(torch.isfinite(values).all()):
         raise ValueError("KV values must be finite")
 
-    groups = values.float().reshape(
-        *values.shape[:-1], values.shape[-1] // group_size, group_size
-    )
+    groups = values.float().reshape(*values.shape[:-1], values.shape[-1] // group_size, group_size)
     scales = (groups.abs().amax(dim=-1) / float(VALUE_CODE_MAX)).to(torch.float16)
     if not bool(torch.isfinite(scales).all()):
         raise OverflowError("KV value scale is not representable as finite FP16")
     safe_scales = torch.where(scales == 0, torch.ones_like(scales), scales).float()
-    codes = torch.round(groups / safe_scales.unsqueeze(-1)).clamp(
-        -VALUE_CODE_MAX, VALUE_CODE_MAX
-    ).to(torch.int8)
+    codes = (
+        torch.round(groups / safe_scales.unsqueeze(-1))
+        .clamp(-VALUE_CODE_MAX, VALUE_CODE_MAX)
+        .to(torch.int8)
+    )
     codes = torch.where((scales == 0).unsqueeze(-1), 0, codes).to(torch.int8)
     low = codes[..., 0::2].to(torch.int16) & 0x0F
     high = codes[..., 1::2].to(torch.int16) & 0x0F
@@ -76,9 +73,7 @@ def dequantize_values(
     codes = torch.where(codes >= 8, codes - 16, codes)
     if bool((codes == -8).any()):
         raise ValueError("reserved symmetric INT4 code -8")
-    groups = codes.float().reshape(
-        *codes.shape[:-1], dimension // group_size, group_size
-    )
+    groups = codes.float().reshape(*codes.shape[:-1], dimension // group_size, group_size)
     return (groups * scales.float().unsqueeze(-1)).reshape(*codes.shape)
 
 
@@ -114,9 +109,9 @@ def validate_codec_device(device: torch.device, group_size: int) -> None:
         -6.0,
         0.0,
     ) + (0.0,) * (group_size - 16)
-    value_source = torch.tensor(
-        values, device=device, dtype=torch.bfloat16
-    ).reshape(1, 1, group_size)
+    value_source = torch.tensor(values, device=device, dtype=torch.bfloat16).reshape(
+        1, 1, group_size
+    )
     packed, scales = quantize_values(value_source, group_size)
     expected_packed = bytes((0x20, 0x42, 0xE0, 0xCE, 0x97, 0x10, 0x6F, 0x0A)) + bytes(
         (group_size - 16) // 2
@@ -133,9 +128,9 @@ def validate_codec_device(device: torch.device, group_size: int) -> None:
         dtype=torch.bfloat16,
     )
     tiny_packed, tiny_scale = quantize_values(tiny, group_size)
-    if (
-        int(tiny_scale.view(torch.int16).cpu().item()) & 0xFFFF
-    ) != 0 or any(tiny_packed.flatten().cpu().tolist()):
+    if (int(tiny_scale.view(torch.int16).cpu().item()) & 0xFFFF) != 0 or any(
+        tiny_packed.flatten().cpu().tolist()
+    ):
         raise RuntimeError("PyTorch device does not canonicalize FP16 scale underflow")
 
 
@@ -190,9 +185,7 @@ class QuantizedFullAttentionCache:
             raise ValueError("KV cache read exceeds the represented prefix")
         return (
             dequantize_keys(self.key_codes[:end]),
-            dequantize_values(
-                self.value_codes[:end], self.value_scales[:end], self.group_size
-            ),
+            dequantize_values(self.value_codes[:end], self.value_scales[:end], self.group_size),
         )
 
 

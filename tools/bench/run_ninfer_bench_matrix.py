@@ -28,8 +28,8 @@ summary CSV/JSON that is easy to compare across runs.
 from __future__ import annotations
 
 import argparse
-import ctypes
 import csv
+import ctypes
 import dataclasses
 import datetime as dt
 import hashlib
@@ -43,23 +43,31 @@ import struct
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.matrix_contract import (
+from tools.bench.matrix_contract import (  # noqa: E402  sys.path bootstrap
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     PRODUCTION_PREFILL_CHUNKS,
     R9700_KV_PLANE_LAYOUTS,
 )
-from tools.bench.prefill_chunk_authority import inspect_prefill_chunk_authority
-from tools.ppl import run as ppl_run
-from tools.ppl.validate_fp8_hybrid_execution_gate import query_widths
-from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes, dflash2_q4_inventory
+from tools.bench.prefill_chunk_authority import (  # noqa: E402  sys.path bootstrap
+    inspect_prefill_chunk_authority,
+)
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  sys.path bootstrap
+    dflash2_matrix_recipes,
+    dflash2_q4_inventory,
+)
+from tools.ppl import run as ppl_run  # noqa: E402  sys.path bootstrap
+from tools.ppl.validate_fp8_hybrid_execution_gate import (  # noqa: E402  sys.path bootstrap
+    query_widths,
+)
 
 DEFAULT_BENCH = REPO_ROOT / "build-r9700/bench/ninfer_bench"
 DEFAULT_CORPUS = REPO_ROOT / "bench/fixtures/bench_corpus.ids"
@@ -69,9 +77,7 @@ PREFILL_LENGTHS_FULL_EXTRA = (32768, 65536)
 PREFILL_CHUNKS = (128, 256, 512, 1024, 2048, 4096)
 PRODUCTION_PREFILL_PROMPTS = (8192, 32768)
 LOW_CONTEXT_PREFILL_PROMPTS = (128, 512, 1024, 2048, 4096)
-R9700_POWER_PROFILE = Path(
-    "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level"
-)
+R9700_POWER_PROFILE = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
 PURE_DECODE_GENS = (16, 64, 128, 512, 2048)
 CONTEXT_CORE = ((512, 512), (2048, 512), (8192, 512))
 CONTEXT_FULL_EXTRA = ((32768, 256), (65536, 128))
@@ -87,9 +93,9 @@ DFLASH_PRODUCTION_PROFILES = ((4, 5), (5, 6))
 DFLASH_SHORTLIST_K_ORDER = (4, 5)
 MODEL_ID = "qwen3.8-27b"
 TARGET_ID = "qwen3_8_27b_r9700"
-FP8_QK_WMMA_PROFILE = "t1-ge64-t2-ge320-t3plus-stream-v1"
-FP8_QK_WMMA_T1_MIN_CONTEXT = 64
-FP8_QK_WMMA_T2_MIN_CONTEXT = 320
+DECODE_ATTENTION_PROFILE = "packed-t1to6-split512-t4tree-v1"
+PACKED_DECODE_MIN_CONTEXT = 64
+SPLIT512_MIN_CONTEXT = 8192
 XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
 BENCHMARK_PENDING_TIMEOUT_MS = 0xFFFFFFFF
 NINFER_MAGIC = b"NINFER\x00\x02"
@@ -101,18 +107,29 @@ MODEL_NATIVE_CONTEXT = 262144
 PUBLIC_TOKEN_DOMAIN = 248077
 DFLASH_COMPANIONS = {
     dflash2_q4_inventory.companion_weights_id(base, recipe.key): (base, recipe.key)
-    for base in (dflash2_q4_inventory.ALL_Q4_BASE_WEIGHTS_ID,
-                 dflash2_q4_inventory.MIXED_BASE_WEIGHTS_ID,
-                 dflash2_q4_inventory.HYBRID_BASE_WEIGHTS_ID)
+    for base in (
+        dflash2_q4_inventory.ALL_Q4_BASE_WEIGHTS_ID,
+        dflash2_q4_inventory.MIXED_BASE_WEIGHTS_ID,
+        dflash2_q4_inventory.HYBRID_BASE_WEIGHTS_ID,
+    )
     for recipe in dflash2_matrix_recipes.RECIPES
 }
 DFLASH_CAMPAIGN_WEIGHTS_IDS = frozenset(DFLASH_COMPANIONS)
-DFLASH_CAMPAIGN_PRESETS = frozenset({
-    "dflash-shortlist", "dflash-pareto", "dflash-feasibility", "dflash-capacity",
-})
-HYBRID_DFLASH_PRESETS = frozenset({
-    "dflash-shortlist", "dflash-pareto", "dflash-capacity",
-})
+DFLASH_CAMPAIGN_PRESETS = frozenset(
+    {
+        "dflash-shortlist",
+        "dflash-pareto",
+        "dflash-feasibility",
+        "dflash-capacity",
+    }
+)
+HYBRID_DFLASH_PRESETS = frozenset(
+    {
+        "dflash-shortlist",
+        "dflash-pareto",
+        "dflash-capacity",
+    }
+)
 HYBRID_BASE_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 DFLASH_SOURCE_RECEIPT = {
     "config_sha256": "873e3556509b0da06e29654ba00d4944888d4b5e8a33afde25f7eb27d321e980",
@@ -121,20 +138,37 @@ DFLASH_SOURCE_RECEIPT = {
     "safetensors_bytes": 3_848_817_896,
     "safetensors_sha256": "67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c",
 }
-PARETO_CAMPAIGN_PRESETS = frozenset({
-    "pareto", "pareto-whole", "pareto-feasibility", "pareto-capacity",
-})
+PARETO_CAMPAIGN_PRESETS = frozenset(
+    {
+        "pareto",
+        "pareto-whole",
+        "pareto-feasibility",
+        "pareto-capacity",
+    }
+)
 SELECTED_PREFILL_CHUNK_PRESETS = (
     PARETO_CAMPAIGN_PRESETS | DFLASH_CAMPAIGN_PRESETS | {"low-context-prefill"}
 )
-POWER_BOUND_PRESETS = frozenset({
-    "prefill-chunk", "low-context-prefill", "ordinary-diagnostic", "pareto-whole",
-    "dflash-shortlist", "dflash-pareto",
-})
-POWER_RECHECK_PRESETS = frozenset({
-    "ordinary-diagnostic", "pareto-whole", "prefill-chunk", "low-context-prefill",
-    "dflash-shortlist", "dflash-pareto",
-})
+POWER_BOUND_PRESETS = frozenset(
+    {
+        "prefill-chunk",
+        "low-context-prefill",
+        "ordinary-diagnostic",
+        "pareto-whole",
+        "dflash-shortlist",
+        "dflash-pareto",
+    }
+)
+POWER_RECHECK_PRESETS = frozenset(
+    {
+        "ordinary-diagnostic",
+        "pareto-whole",
+        "prefill-chunk",
+        "low-context-prefill",
+        "dflash-shortlist",
+        "dflash-pareto",
+    }
+)
 AT_FDCWD = -100
 RENAME_EXCHANGE = 2
 
@@ -182,8 +216,9 @@ def require_auto_power_profile(path: Path | None = None) -> str:
 def require_r9700_pci_identity(device_path: Path) -> None:
     """Bind this single-machine campaign to its physical R9700, independent of DRM numbering."""
     try:
-        identity = tuple((device_path / name).read_text().strip().lower()
-                         for name in ("vendor", "device"))
+        identity = tuple(
+            (device_path / name).read_text().strip().lower() for name in ("vendor", "device")
+        )
     except OSError as error:
         raise ValueError(f"cannot read R9700 PCI identity: {device_path}: {error}") from error
     if identity != ("0x1002", "0x7551"):
@@ -198,12 +233,15 @@ def require_hip_pci_device(device: int) -> None:
         "s=h.hipDeviceGetPCIBusId(b,len(b),int(sys.argv[1])); "
         "assert s==0, f'hipDeviceGetPCIBusId failed: {s}'; print(b.value.decode())"
     )
-    result = subprocess.run([sys.executable, "-c", probe, str(device)],
-                            capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [sys.executable, "-c", probe, str(device)], capture_output=True, text=True, check=False
+    )
     expected = R9700_POWER_PROFILE.parent.name.lower()
     if result.returncode != 0 or result.stdout.strip().lower() != expected:
-        raise ValueError(f"HIP device {device} does not bind R9700 PCI {expected}: "
-                         f"{result.stdout.strip()} {result.stderr.strip()}")
+        raise ValueError(
+            f"HIP device {device} does not bind R9700 PCI {expected}: "
+            f"{result.stdout.strip()} {result.stderr.strip()}"
+        )
 
 
 def mtp_args(k: int) -> tuple[str, ...]:
@@ -225,8 +263,8 @@ def dflash_args(k: int, verify_width: int) -> tuple[str, ...]:
 def resolved_dflash_verify_width(draft_tokens: int, requested_width: int) -> int:
     if draft_tokens == 0:
         return 0
-    if not 1 <= draft_tokens <= 5 or requested_width not in (0, draft_tokens + 1):
-        raise ValueError("DFlash requires chain K in [1, 5] and W=K+1")
+    if not 1 <= draft_tokens <= 7 or requested_width not in (0, draft_tokens + 1):
+        raise ValueError("DFlash requires chain K in [1, 7] and W=K+1")
     return draft_tokens + 1
 
 
@@ -240,13 +278,15 @@ def resolved_dflash_topology(draft_tokens: int, verify_width: int) -> str:
 def dflash_shortlist_profiles() -> list[dict[str, Any]]:
     profiles = []
     for k, width in DFLASH_PRODUCTION_PROFILES:
-        profiles.append({
-            "draft_tokens_requested": k,
-            "verify_width_requested": width,
-            "verify_width_resolved": width,
-            "topology": resolved_dflash_topology(k, width),
-            "proposal_head": "optimized",
-        })
+        profiles.append(
+            {
+                "draft_tokens_requested": k,
+                "verify_width_requested": width,
+                "verify_width_resolved": width,
+                "topology": resolved_dflash_topology(k, width),
+                "proposal_head": "optimized",
+            }
+        )
     return profiles
 
 
@@ -278,9 +318,7 @@ def dflash_shortlist_frontier(candidates: Sequence[dict[str, Any]]) -> list[dict
     return [
         candidate
         for candidate in eligible
-        if not any(
-            other is not candidate and dominates(other, candidate) for other in eligible
-        )
+        if not any(other is not candidate and dominates(other, candidate) for other in eligible)
     ]
 
 
@@ -464,7 +502,9 @@ def validate_manifest_output_ownership(root: Path, manifest: dict[str, Any]) -> 
         command = record.get("command")
         if not isinstance(command, list) or any(not isinstance(part, str) for part in command):
             raise ValueError(f"matrix manifest has an invalid commands[{index}].command")
-        output_indices = [position for position, part in enumerate(command) if part == "--output-file"]
+        output_indices = [
+            position for position, part in enumerate(command) if part == "--output-file"
+        ]
         if len(output_indices) != 1 or output_indices[0] + 1 >= len(command):
             raise ValueError(f"matrix manifest commands[{index}] has invalid --output-file")
         command_output = manifest_owned_path(
@@ -479,7 +519,8 @@ def validate_manifest_output_ownership(root: Path, manifest: dict[str, Any]) -> 
         environment = record.get("environment")
         if isinstance(environment, dict) and "NINFER_DFLASH_CANDIDATE_STATS_OUT" in environment:
             raw = manifest_owned_path(
-                root, environment["NINFER_DFLASH_CANDIDATE_STATS_OUT"],
+                root,
+                environment["NINFER_DFLASH_CANDIDATE_STATS_OUT"],
                 f"commands[{index}].environment diagnostic output",
             )
             if raw != manifest_owned_path(
@@ -513,9 +554,7 @@ def inspect_artifact(path: Path) -> dict[str, Any]:
         if magic != NINFER_MAGIC:
             raise SystemExit(f"artifact is not NInfer v2: {resolved}")
         if directory_bytes == 0 or directory_bytes > MAX_DIRECTORY_BYTES:
-            raise SystemExit(
-                f"artifact has invalid directory size {directory_bytes}: {resolved}"
-            )
+            raise SystemExit(f"artifact has invalid directory size {directory_bytes}: {resolved}")
         raw_directory = source.read(directory_bytes)
     try:
         directory = json.loads(raw_directory)
@@ -535,11 +574,12 @@ def inspect_artifact(path: Path) -> dict[str, Any]:
     if not isinstance(objects, list):
         raise SystemExit(f"artifact object inventory is invalid: {resolved}")
     for obj in objects:
-        if (isinstance(obj, dict) and obj.get("format") == "Q4G64_F16S" and
-                obj.get("layout") != "r9700-q4g64-n16-k16-v1"):
-            raise SystemExit(
-                f"artifact contains retired non-N16/K16 Q4 storage: {resolved}"
-            )
+        if (
+            isinstance(obj, dict)
+            and obj.get("format") == "Q4G64_F16S"
+            and obj.get("layout") != "r9700-q4g64-n16-k16-v1"
+        ):
+            raise SystemExit(f"artifact contains retired non-N16/K16 Q4 storage: {resolved}")
     return {
         "path": str(resolved),
         "file_size_bytes": resolved.stat().st_size,
@@ -575,7 +615,10 @@ def _receipt_path(value: object, label: str) -> Path:
 
 
 def require_dflash_companion(
-    path: Path, artifact: dict[str, Any], *, require_hybrid: bool = False,
+    path: Path,
+    artifact: dict[str, Any],
+    *,
+    require_hybrid: bool = False,
 ) -> dict[str, Any]:
     """Bind one registered append conversion to its exact base and matrix recipe."""
 
@@ -612,24 +655,45 @@ def require_dflash_companion(
     ):
         raise SystemExit("DFlash base inspection differs from benchmark provenance")
     receipt = inspected["conversion_receipt"]
-    fields = ("recipe_id", "object_plan_sha256", "source_artifact_sha256",
-              "source_receipt_sha256", "transcoder_sha256")
-    fields += (("selection_sha256", "source_index_sha256", "source_ranking_sha256")
-               if base_id == HYBRID_BASE_WEIGHTS_ID else ("receipt_producer_sha256",))
-    if any(not isinstance(receipt.get(key), str) or not receipt[key]
-           for key in ("path", "sha256", *fields)):
+    fields = (
+        "recipe_id",
+        "object_plan_sha256",
+        "source_artifact_sha256",
+        "source_receipt_sha256",
+        "transcoder_sha256",
+    )
+    fields += (
+        ("selection_sha256", "source_index_sha256", "source_ranking_sha256")
+        if base_id == HYBRID_BASE_WEIGHTS_ID
+        else ("receipt_producer_sha256",)
+    )
+    if any(
+        not isinstance(receipt.get(key), str) or not receipt[key]
+        for key in ("path", "sha256", *fields)
+    ):
         raise SystemExit("DFlash base lacks its exact conversion authority")
     expected_authority = {
         "receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
         **{key: receipt[key] for key in fields},
     }
     base_artifact = {**base_artifact, "conversion_receipt": receipt}
-    recipe_fields = ("key", "recipe_id", "matrix_format", "scale_objective",
-                     "represented_source", "selector_codebook_format", "format_counts",
-                     "format_encoded_bytes", "tensor_encoded_bytes", "runtime_repack")
-    expected_activation = ("compile_selected_W8G32"
-                           if expected_recipe["matrix_format"] == "W8G32_F16S"
-                           else "compile_selected_adaptive_A8G64")
+    recipe_fields = (
+        "key",
+        "recipe_id",
+        "matrix_format",
+        "scale_objective",
+        "represented_source",
+        "selector_codebook_format",
+        "format_counts",
+        "format_encoded_bytes",
+        "tensor_encoded_bytes",
+        "runtime_repack",
+    )
+    expected_activation = (
+        "compile_selected_W8G32"
+        if expected_recipe["matrix_format"] == "W8G32_F16S"
+        else "compile_selected_adaptive_A8G64"
+    )
     if (
         report.get("status") != "registered-evaluation-only"
         or report.get("target_key") != TARGET_ID
@@ -658,7 +722,8 @@ def require_dflash_companion(
     return {
         **artifact,
         "dflash_conversion_report": {
-            "path": str(report_path), "sha256": file_sha256(report_path),
+            "path": str(report_path),
+            "sha256": file_sha256(report_path),
         },
         "dflash_matrix_recipe": expected_recipe,
         "dflash_base_artifact": base_artifact,
@@ -666,14 +731,14 @@ def require_dflash_companion(
     }
 
 
-def require_fp8_hybrid_dflash_companion(
-    path: Path, artifact: dict[str, Any]
-) -> dict[str, Any]:
+def require_fp8_hybrid_dflash_companion(path: Path, artifact: dict[str, Any]) -> dict[str, Any]:
     return require_dflash_companion(path, artifact, require_hybrid=True)
 
 
 def require_fp8_hybrid_artifact(
-    path: Path, artifact: dict[str, Any], preset: str | None = None,
+    path: Path,
+    artifact: dict[str, Any],
+    preset: str | None = None,
 ) -> dict[str, Any]:
     """Attach the current authority-bound hybrid receipt to benchmark provenance."""
 
@@ -697,11 +762,19 @@ def bind_n16_migration_receipt(path: Path, artifact: dict[str, Any]) -> dict[str
     if artifact.get("weights_id") not in ppl_run.N16_MIGRATION_PROFILES:
         return artifact
     inspected = ppl_run.inspect_candidate_artifact(path, digest=artifact["sha256"])
-    if (inspected.get("path") != artifact.get("path")
-            or inspected.get("bytes") != artifact.get("file_size_bytes")
-            or any(inspected.get(key) != artifact.get(key) for key in (
-                "sha256", "model_id", "weights_id",
-            )) or not isinstance(inspected.get("conversion_receipt"), dict)):
+    if (
+        inspected.get("path") != artifact.get("path")
+        or inspected.get("bytes") != artifact.get("file_size_bytes")
+        or any(
+            inspected.get(key) != artifact.get(key)
+            for key in (
+                "sha256",
+                "model_id",
+                "weights_id",
+            )
+        )
+        or not isinstance(inspected.get("conversion_receipt"), dict)
+    ):
         raise SystemExit("N16 migration receipt inspection differs from benchmark provenance")
     return {**artifact, "conversion_receipt": inspected["conversion_receipt"]}
 
@@ -710,7 +783,10 @@ def validate_fp8_hybrid_performance_contract(args: argparse.Namespace) -> None:
     if not args.require_fp8_hybrid:
         return
     allowed = {
-        "prefill-chunk", "low-context-prefill", "pareto-whole", "pareto-capacity",
+        "prefill-chunk",
+        "low-context-prefill",
+        "pareto-whole",
+        "pareto-capacity",
         *HYBRID_DFLASH_PRESETS,
     }
     if args.preset not in allowed:
@@ -729,13 +805,18 @@ def validate_fp8_hybrid_performance_contract(args: argparse.Namespace) -> None:
     elif args.preset in ("low-context-prefill", "dflash-shortlist"):
         if args.concurrency != [1]:
             raise SystemExit(f"hybrid {args.preset} evidence requires exactly C=1")
-        if (not args.prefill_chunk or len(args.prefill_chunk) != 1
-                or args.prefill_chunk[0] not in PRODUCTION_PREFILL_CHUNKS):
+        if (
+            not args.prefill_chunk
+            or len(args.prefill_chunk) != 1
+            or args.prefill_chunk[0] not in PRODUCTION_PREFILL_CHUNKS
+        ):
             raise SystemExit(f"hybrid {args.preset} requires one selected prefill chunk")
     elif args.preset == "dflash-pareto":
-        if (not args.concurrency
-                or sorted(set(args.concurrency)) != args.concurrency
-                or any(c not in PRODUCT_CONCURRENCIES for c in args.concurrency)):
+        if (
+            not args.concurrency
+            or sorted(set(args.concurrency)) != args.concurrency
+            or any(c not in PRODUCT_CONCURRENCIES for c in args.concurrency)
+        ):
             raise SystemExit("hybrid DFlash Pareto requires a declared sorted product C subset")
         if (
             not args.prefill_chunk
@@ -756,7 +837,12 @@ def validate_fp8_hybrid_performance_contract(args: argparse.Namespace) -> None:
         raise SystemExit("hybrid performance evidence requires a product G16 or G32 build")
     if args.expected_xattention_profile not in ("dense", "b128-s16-tau900"):
         raise SystemExit("hybrid performance evidence requires a product attention profile")
-    if args.suite or args.limit is not None or args.repetitions is not None or args.warmup is not None:
+    if (
+        args.suite
+        or args.limit is not None
+        or args.repetitions is not None
+        or args.warmup is not None
+    ):
         raise SystemExit("hybrid performance evidence requires the complete fixed preset")
     if args.hybrid_width_tool is None:
         raise SystemExit("--require-fp8-hybrid requires --hybrid-width-tool")
@@ -789,7 +875,8 @@ def validate_post_chunk_capacity_contract(args: argparse.Namespace) -> None:
 
 
 def validate_hybrid_shared_workspace_authority(
-    authority: object, prefill_chunks: Sequence[int],
+    authority: object,
+    prefill_chunks: Sequence[int],
     dflash_widths: Sequence[int] = (),
 ) -> dict[str, Any]:
     """Validate exact host-planner shared-workspace widths for every measured chunk."""
@@ -803,8 +890,9 @@ def validate_hybrid_shared_workspace_authority(
             "ordinary": [1, 2, 3, 4, chunk],
             "mtp3": [1, 2, 3, 4, 8, 12, 16, chunk],
             **{
-                f"dflash-w{width}": sorted(set((1, 2, 3, 4, width, 2 * width,
-                                                  3 * width, 4 * width, chunk)))
+                f"dflash-w{width}": sorted(
+                    {1, 2, 3, 4, width, 2 * width, 3 * width, 4 * width, chunk}
+                )
                 for width in widths
             },
         }
@@ -812,8 +900,12 @@ def validate_hybrid_shared_workspace_authority(
     }
     if (
         not isinstance(authority, dict)
-        or set(authority) != {
-            "tool", "build", "maximum_concurrency", "prefill_chunks",
+        or set(authority)
+        != {
+            "tool",
+            "build",
+            "maximum_concurrency",
+            "prefill_chunks",
             "inventories_by_prefill_chunk",
         }
         or authority.get("maximum_concurrency") != 4
@@ -841,7 +933,9 @@ def validate_hybrid_shared_workspace_authority(
 
 
 def build_hybrid_shared_workspace_authority(
-    width_tool: Path, bench: Path, prefill_chunks: Sequence[int],
+    width_tool: Path,
+    bench: Path,
+    prefill_chunks: Sequence[int],
     dflash_widths: Sequence[int] = (),
 ) -> dict[str, Any]:
     chunks = sorted(set(prefill_chunks))
@@ -854,16 +948,16 @@ def build_hybrid_shared_workspace_authority(
             "ordinary": query_widths(width_tool, chunk, 4, 0),
             "mtp3": query_widths(width_tool, chunk, 4, 4),
             **{
-                f"dflash-w{width}": query_widths(width_tool, chunk, 4, 0, width)
-                for width in widths
+                f"dflash-w{width}": query_widths(width_tool, chunk, 4, 0, width) for width in widths
             },
         }
         expected = {
             "ordinary": [1, 2, 3, 4, chunk],
             "mtp3": [1, 2, 3, 4, 8, 12, 16, chunk],
             **{
-                f"dflash-w{width}": sorted(set((1, 2, 3, 4, width, 2 * width,
-                                                  3 * width, 4 * width, chunk)))
+                f"dflash-w{width}": sorted(
+                    {1, 2, 3, 4, width, 2 * width, 3 * width, 4 * width, chunk}
+                )
                 for width in widths
             },
         }
@@ -923,7 +1017,9 @@ def validate_dflash_campaign_artifact(
 
 
 def add_repetition_args(
-    base_args: list[str], case: BenchCase, repetitions_override: int | None,
+    base_args: list[str],
+    case: BenchCase,
+    repetitions_override: int | None,
     warmup_override: int | None,
 ) -> list[str]:
     repetitions = repetitions_override if repetitions_override is not None else case.repetitions
@@ -936,7 +1032,9 @@ def add_repetition_args(
 
 
 def build_cases(
-    preset: str, dflash_draft_tokens: int | None = None, dflash_verify_width: int = 0,
+    preset: str,
+    dflash_draft_tokens: int | None = None,
+    dflash_verify_width: int = 0,
     prefill_chunks: Sequence[int] = PRODUCTION_PREFILL_CHUNKS,
     prefill_prompt: int = 8192,
     production_prefill_chunk: int = 4096,
@@ -987,13 +1085,10 @@ def build_cases(
             BenchCase(
                 "production_prefill_chunk",
                 f"prefill_p{prefill_prompt}_chunk{chunk}_ordinary",
-                ("-p", str(prefill_prompt), "--prefill-chunk", str(chunk),
-                 "--draft-tokens", "0"),
+                ("-p", str(prefill_prompt), "--prefill-chunk", str(chunk), "--draft-tokens", "0"),
                 3,
                 1,
-                (
-                    "C1 spec-none ordinary Text-prefill chunk selection"
-                ),
+                ("C1 spec-none ordinary Text-prefill chunk selection"),
                 concurrency_one_only=True,
             )
             for chunk in prefill_chunks
@@ -1005,8 +1100,12 @@ def build_cases(
                 "low_context_prefill",
                 f"prefill_p{prompt}_dense_none",
                 (
-                    "-p", str(prompt), "--prefill-chunk", str(production_prefill_chunk),
-                    "--draft-tokens", "0",
+                    "-p",
+                    str(prompt),
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    "--draft-tokens",
+                    "0",
                 ),
                 3,
                 1,
@@ -1021,8 +1120,7 @@ def build_cases(
             BenchCase(
                 "ordinary_decode",
                 "whole_p8192_g256_none_graph",
-                ("--whole-pg", "8192,256", "--prefill-chunk", "4096",
-                 "--draft-tokens", "0"),
+                ("--whole-pg", "8192,256", "--prefill-chunk", "4096", "--draft-tokens", "0"),
                 3,
                 1,
                 "C1 8K ordinary non-speculative prefill/decode diagnostic",
@@ -1035,8 +1133,13 @@ def build_cases(
             BenchCase(
                 "pareto_prefill",
                 "prefill_p8192_p32768_k3",
-                ("-p", "8192,32768", "--prefill-chunk", str(production_prefill_chunk),
-                 *mtp_args(3)),
+                (
+                    "-p",
+                    "8192,32768",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    *mtp_args(3),
+                ),
                 3,
                 1,
                 "matched 8K/32K production-profile prefill throughput",
@@ -1044,9 +1147,13 @@ def build_cases(
             BenchCase(
                 "pareto_decode",
                 "context_p8192_p32768_g256_k3_graph",
-                ("-pg", "8192,256;32768,256", "--prefill-chunk",
-                 str(production_prefill_chunk),
-                 *mtp_args(3)),
+                (
+                    "-pg",
+                    "8192,256;32768,256",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    *mtp_args(3),
+                ),
                 3,
                 1,
                 "matched 8K/32K production-profile decode and MTP acceptance",
@@ -1058,8 +1165,15 @@ def build_cases(
             BenchCase(
                 "pareto_whole_inference",
                 "whole_p8192_p32768_g256_ordinary_graph",
-                ("--whole-pg", "8192,256;32768,256", "--prefill-chunk",
-                 str(production_prefill_chunk), "--draft-tokens", "0", "--retain-token-ids"),
+                (
+                    "--whole-pg",
+                    "8192,256;32768,256",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    "--draft-tokens",
+                    "0",
+                    "--retain-token-ids",
+                ),
                 3,
                 1,
                 "ranking spec-none ordinary fresh-prompt 8K/32K whole-inference throughput",
@@ -1073,9 +1187,17 @@ def build_cases(
             BenchCase(
                 "pareto_workload_feasibility",
                 "workload_feasibility_mtp3",
-                ("-p", "128", "--prefill-chunk", str(production_prefill_chunk),
-                 "--max-ctx", "33030", "--kv-capacity", "auto",
-                 *mtp_args(3)),
+                (
+                    "-p",
+                    "128",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    "--max-ctx",
+                    "33030",
+                    "--kv-capacity",
+                    "auto",
+                    *mtp_args(3),
+                ),
                 1,
                 0,
                 "required 32K workload feasibility with standard headroom and MTP3",
@@ -1087,9 +1209,18 @@ def build_cases(
             BenchCase(
                 "pareto_effective_capacity",
                 "effective_capacity_ordinary",
-                ("-p", "128", "--prefill-chunk", str(production_prefill_chunk),
-                 "--max-ctx", str(MODEL_NATIVE_CONTEXT),
-                 "--kv-capacity", "auto", "--draft-tokens", "0"),
+                (
+                    "-p",
+                    "128",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    "--max-ctx",
+                    str(MODEL_NATIVE_CONTEXT),
+                    "--kv-capacity",
+                    "auto",
+                    "--draft-tokens",
+                    "0",
+                ),
                 1,
                 0,
                 "resolved ordinary effective maximum at the model-native context ceiling",
@@ -1100,17 +1231,23 @@ def build_cases(
         if dflash_draft_tokens is None:
             raise ValueError("dflash-feasibility requires an explicit DFlash draft window")
         profile = dflash_args(dflash_draft_tokens, dflash_verify_width)
-        resolved_width = resolved_dflash_verify_width(
-            dflash_draft_tokens, dflash_verify_width
-        )
+        resolved_width = resolved_dflash_verify_width(dflash_draft_tokens, dflash_verify_width)
         capacity_context = 32768 + 256 + 2 * resolved_width
         return [
             BenchCase(
                 "dflash_workload_feasibility",
                 "workload_feasibility_dflash",
-                ("-p", "128", "--prefill-chunk", str(production_prefill_chunk),
-                 "--max-ctx", str(capacity_context),
-                 "--kv-capacity", "auto", *profile),
+                (
+                    "-p",
+                    "128",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    "--max-ctx",
+                    str(capacity_context),
+                    "--kv-capacity",
+                    "auto",
+                    *profile,
+                ),
                 1,
                 0,
                 "required 32K workload feasibility with standard headroom and selected DFlash",
@@ -1125,9 +1262,17 @@ def build_cases(
             BenchCase(
                 "dflash_effective_capacity",
                 "effective_capacity_dflash",
-                ("-p", "128", "--prefill-chunk", str(production_prefill_chunk),
-                 "--max-ctx", str(MODEL_NATIVE_CONTEXT),
-                 "--kv-capacity", "auto", *profile),
+                (
+                    "-p",
+                    "128",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    "--max-ctx",
+                    str(MODEL_NATIVE_CONTEXT),
+                    "--kv-capacity",
+                    "auto",
+                    *profile,
+                ),
                 1,
                 0,
                 "resolved effective maximum at the model-native ceiling with selected DFlash",
@@ -1138,8 +1283,14 @@ def build_cases(
         control = BenchCase(
             suite="dflash_shortlist_control",
             name="context_p8192_g256_ordinary_graph",
-            args=("-pg", "8192,256", "--prefill-chunk", str(production_prefill_chunk),
-                  *ordinary_args(), "--retain-token-ids"),
+            args=(
+                "-pg",
+                "8192,256",
+                "--prefill-chunk",
+                str(production_prefill_chunk),
+                *ordinary_args(),
+                "--retain-token-ids",
+            ),
             repetitions=2,
             warmup=1,
             notes="shared ordinary greedy control for every shortlisted K",
@@ -1157,8 +1308,14 @@ def build_cases(
                 BenchCase(
                     suite="dflash_shortlist_decode",
                     name=f"context_p8192_g256_dflash_k{k}_w{width}",
-                    args=("-pg", "8192,256", "--prefill-chunk",
-                          str(production_prefill_chunk), *profile, "--retain-token-ids"),
+                    args=(
+                        "-pg",
+                        "8192,256",
+                        "--prefill-chunk",
+                        str(production_prefill_chunk),
+                        *profile,
+                        "--retain-token-ids",
+                    ),
                     repetitions=2,
                     warmup=1,
                     notes=f"8K shortlist performance and acceptance; {topology}",
@@ -1171,12 +1328,19 @@ def build_cases(
                 BenchCase(
                     suite="dflash_shortlist_repair_diagnostic",
                     name=f"context_p8192_g256_dflash_k{k}_w{width}_diagnostic",
-                    args=("-pg", "8192,256", "--prefill-chunk",
-                          str(production_prefill_chunk), *profile, "--no-device-graph"),
+                    args=(
+                        "-pg",
+                        "8192,256",
+                        "--prefill-chunk",
+                        str(production_prefill_chunk),
+                        *profile,
+                        "--no-device-graph",
+                    ),
                     repetitions=1,
                     warmup=0,
-                    notes=(f"syncing first-reject/repair diagnostic; {topology}; "
-                           "timings are discarded"),
+                    notes=(
+                        f"syncing first-reject/repair diagnostic; {topology}; timings are discarded"
+                    ),
                     diagnostic=True,
                     concurrency_one_only=True,
                 )
@@ -1193,8 +1357,13 @@ def build_cases(
             BenchCase(
                 suite="dflash_pareto_prefill",
                 name="prefill_p8192_p32768_dflash",
-                args=("-p", "8192,32768", "--prefill-chunk",
-                      str(production_prefill_chunk), *profile),
+                args=(
+                    "-p",
+                    "8192,32768",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    *profile,
+                ),
                 repetitions=3,
                 warmup=1,
                 notes="matched 8K/32K DFlash-enabled prefill throughput",
@@ -1202,9 +1371,15 @@ def build_cases(
             BenchCase(
                 suite="dflash_pareto_decode",
                 name="context_p8192_p32768_g256_dflash_graph",
-                args=("-pg", "8192,256;32768,256", "--prefill-chunk",
-                      str(production_prefill_chunk), *profile, "--retain-token-ids",
-                      "--isolate-prompt-decode"),
+                args=(
+                    "-pg",
+                    "8192,256;32768,256",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    *profile,
+                    "--retain-token-ids",
+                    "--isolate-prompt-decode",
+                ),
                 repetitions=3,
                 warmup=1,
                 notes="matched 8K/32K DFlash decode, acceptance, and greedy outputs",
@@ -1214,9 +1389,15 @@ def build_cases(
             BenchCase(
                 suite="dflash_pareto_control",
                 name="context_p8192_p32768_g256_ordinary_graph",
-                args=("-pg", "8192,256;32768,256", "--prefill-chunk",
-                      str(production_prefill_chunk), *ordinary_args(), "--retain-token-ids",
-                      "--isolate-prompt-decode"),
+                args=(
+                    "-pg",
+                    "8192,256;32768,256",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    *ordinary_args(),
+                    "--retain-token-ids",
+                    "--isolate-prompt-decode",
+                ),
                 repetitions=3,
                 warmup=1,
                 notes="ordinary greedy control over the identical artifact and prompts",
@@ -1226,8 +1407,14 @@ def build_cases(
             BenchCase(
                 suite="dflash_pareto_whole_inference",
                 name="whole_p8192_p32768_g256_dflash_graph",
-                args=("--whole-pg", "8192,256;32768,256", "--prefill-chunk",
-                      str(production_prefill_chunk), *profile, "--retain-token-ids"),
+                args=(
+                    "--whole-pg",
+                    "8192,256;32768,256",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    *profile,
+                    "--retain-token-ids",
+                ),
                 repetitions=3,
                 warmup=1,
                 notes="matched fresh-prompt DFlash whole-inference makespan and output throughput",
@@ -1237,8 +1424,14 @@ def build_cases(
             BenchCase(
                 suite="dflash_pareto_whole_control",
                 name="whole_p8192_p32768_g256_ordinary_graph",
-                args=("--whole-pg", "8192,256;32768,256", "--prefill-chunk",
-                      str(production_prefill_chunk), *ordinary_args(), "--retain-token-ids"),
+                args=(
+                    "--whole-pg",
+                    "8192,256;32768,256",
+                    "--prefill-chunk",
+                    str(production_prefill_chunk),
+                    *ordinary_args(),
+                    "--retain-token-ids",
+                ),
                 repetitions=3,
                 warmup=1,
                 notes="exact spec-none ordinary fresh-prompt whole-inference control",
@@ -1249,13 +1442,21 @@ def build_cases(
                 BenchCase(
                     suite="dflash_selector_diagnostic",
                     name=f"context_p8192_g256_dflash_eager_diagnostic_{repeat}",
-                    args=("-pg", "8192,256", "--prefill-chunk",
-                          str(production_prefill_chunk), *profile, "--no-device-graph",
-                          "--retain-token-ids"),
+                    args=(
+                        "-pg",
+                        "8192,256",
+                        "--prefill-chunk",
+                        str(production_prefill_chunk),
+                        *profile,
+                        "--no-device-graph",
+                        "--retain-token-ids",
+                    ),
                     repetitions=1,
                     warmup=0,
-                    notes=("repeated syncing proposal/selector trace; exact proposal and target "
-                           "tokens are quality evidence; timings are discarded"),
+                    notes=(
+                        "repeated syncing proposal/selector trace; exact proposal and target "
+                        "tokens are quality evidence; timings are discarded"
+                    ),
                     retain_token_ids=True,
                     diagnostic=True,
                     concurrency_one_only=True,
@@ -1374,7 +1575,9 @@ def build_cases(
     return cases
 
 
-def filtered_cases(cases: list[BenchCase], suites: Sequence[str], limit: int | None) -> list[BenchCase]:
+def filtered_cases(
+    cases: list[BenchCase], suites: Sequence[str], limit: int | None
+) -> list[BenchCase]:
     selected = cases
     if suites:
         allowed = set(suites)
@@ -1416,8 +1619,7 @@ def expected_tests(case: BenchCase) -> list[dict[str, Any]]:
             for raw in args[args.index(flag) + 1].split(","):
                 generated = int(raw)
                 expected.append(
-                    {"label": f"tg{generated}", "kind": "tg", "n_prompt": 0,
-                     "n_gen": generated}
+                    {"label": f"tg{generated}", "kind": "tg", "n_prompt": 0, "n_gen": generated}
                 )
     for flag in ("-pg", "--prompt-gen", "--whole-pg"):
         if flag in args:
@@ -1426,10 +1628,16 @@ def expected_tests(case: BenchCase) -> list[dict[str, Any]]:
                 prompt, generated = int(prompt_text), int(generated_text)
                 whole = flag == "--whole-pg"
                 expected.append(
-                    {"label": (f"whole-pp{prompt}+tg{generated}" if whole else
-                               f"pp{prompt}+tg{generated}"),
-                     "kind": "whole" if whole else "pp+tg",
-                     "n_prompt": prompt, "n_gen": generated}
+                    {
+                        "label": (
+                            f"whole-pp{prompt}+tg{generated}"
+                            if whole
+                            else f"pp{prompt}+tg{generated}"
+                        ),
+                        "kind": "whole" if whole else "pp+tg",
+                        "n_prompt": prompt,
+                        "n_gen": generated,
+                    }
                 )
     if not expected:
         raise ValueError(f"benchmark case {case.name!r} declares no tests")
@@ -1444,9 +1652,7 @@ def _finite_number(value: object, *, positive: bool = False, nonnegative: bool =
         return False
     if positive and number <= 0.0:
         return False
-    if nonnegative and number < 0.0:
-        return False
-    return True
+    return not (nonnegative and number < 0.0)
 
 
 def _nonnegative_integer(value: object) -> bool:
@@ -1471,11 +1677,7 @@ def validate_automatic_feasibility(report: dict[str, Any]) -> dict[str, Any]:
     graph_observed = memory.get("device_graph_observed_bytes")
     if type(graph_allowance) is not int or graph_allowance <= 0:
         raise ValueError("automatic-capacity report has invalid Device Graph allowance")
-    if (
-        type(graph_observed) is not int
-        or graph_observed < 0
-        or graph_observed > graph_allowance
-    ):
+    if type(graph_observed) is not int or graph_observed < 0 or graph_observed > graph_allowance:
         raise ValueError("automatic-capacity report has invalid Device Graph observed allocation")
     max_context = config.get("max_context")
     concurrency = config.get("concurrency")
@@ -1524,7 +1726,9 @@ def validate_automatic_feasibility(report: dict[str, Any]) -> dict[str, Any]:
     if available_bytes - reservation_bytes != slack_bytes or slack_bytes < headroom_bytes:
         raise ValueError("automatic-capacity report headroom/slack accounting is inconsistent")
     if pages < expected_maximum and slack_bytes - headroom_bytes >= increment_bytes:
-        raise ValueError("automatic-capacity report did not resolve the maximum feasible page group")
+        raise ValueError(
+            "automatic-capacity report did not resolve the maximum feasible page group"
+        )
     effective_maximum = max_context == MODEL_NATIVE_CONTEXT
     if increment_bytes == 0:
         # C=1 has no expandable point inside the addressable curve: M_min == M_max. The
@@ -1532,7 +1736,8 @@ def validate_automatic_feasibility(report: dict[str, Any]) -> dict[str, Any]:
         # device-memory maximum could be established.
         return {
             "measurement_kind": (
-                "resolved_effective_maximum" if effective_maximum
+                "resolved_effective_maximum"
+                if effective_maximum
                 else "required_workload_feasibility"
             ),
             "binding_constraint": (
@@ -1546,9 +1751,9 @@ def validate_automatic_feasibility(report: dict[str, Any]) -> dict[str, Any]:
             "logical_capacity_tokens": pages * KV_PAGE_TOKENS,
         }
     else:
-        unconstrained_pages = minimum_pages + (
-            available_bytes - headroom_bytes - minimum_bytes
-        ) // increment_bytes
+        unconstrained_pages = (
+            minimum_pages + (available_bytes - headroom_bytes - minimum_bytes) // increment_bytes
+        )
     expected_pages = min(unconstrained_pages, expected_maximum)
     if pages != expected_pages:
         raise ValueError("automatic-capacity report does not match the resolver equation")
@@ -1585,7 +1790,8 @@ def validate_case_profile(config: dict[str, Any], case: BenchCase) -> None:
     requested_verify = int(_case_option(case, "--dflash-verify-width") or "0")
     expected_verify = (
         resolved_dflash_verify_width(requested_drafts, requested_verify)
-        if expected_spec == "dflash" else 0
+        if expected_spec == "dflash"
+        else 0
     )
     expected_head = "optimized" if "--lm-head-draft" in case.args else "full"
     expected_graph = "--no-device-graph" not in case.args
@@ -1604,12 +1810,8 @@ def validate_case_profile(config: dict[str, Any], case: BenchCase) -> None:
     requested_prefill_chunk = _case_option(case, "--prefill-chunk")
     if requested_prefill_chunk is not None:
         expected["prefill_chunk"] = int(requested_prefill_chunk)
-    if config.get("isolate_prompt_decode", False) is not (
-        "--isolate-prompt-decode" in case.args
-    ):
-        raise ValueError(
-            f"benchmark report isolate_prompt_decode differs for {case.name}"
-        )
+    if config.get("isolate_prompt_decode", False) is not ("--isolate-prompt-decode" in case.args):
+        raise ValueError(f"benchmark report isolate_prompt_decode differs for {case.name}")
     for key, value in expected.items():
         if config.get(key) != value:
             raise ValueError(
@@ -1637,7 +1839,8 @@ def validate_dflash_ordinary_command(case: BenchCase, command: Sequence[str] | N
     """Require DFlash parity controls to be ordinary, without a disabled MTP spelling."""
 
     if case.suite not in {
-        "dflash_shortlist_control", "dflash_pareto_control",
+        "dflash_shortlist_control",
+        "dflash_pareto_control",
         "dflash_pareto_whole_control",
     }:
         return
@@ -1652,9 +1855,15 @@ def validate_dflash_ordinary_command(case: BenchCase, command: Sequence[str] | N
         raise ValueError("DFlash ordinary control must be spec-none without a draft head")
 
 
-def _validate_speculative(spec: object, *, enabled: bool, draft_window: int,
-                          require_sample: bool, require_accepted: bool,
-                          label: str) -> None:
+def _validate_speculative(
+    spec: object,
+    *,
+    enabled: bool,
+    draft_window: int,
+    require_sample: bool,
+    require_accepted: bool,
+    label: str,
+) -> None:
     if not isinstance(spec, dict):
         raise ValueError(f"benchmark test {label} has no speculative statistics")
     for key in ("rounds", "drafted_tokens", "accepted_tokens", "fallback_steps"):
@@ -1691,7 +1900,9 @@ def _validate_speculative(spec: object, *, enabled: bool, draft_window: int,
         else:
             expected_rate = accepted / drafted
             expected_length = 1.0 + accepted / rounds
-            if not _finite_number(spec.get("acceptance_rate"), nonnegative=True) or not math.isclose(
+            if not _finite_number(
+                spec.get("acceptance_rate"), nonnegative=True
+            ) or not math.isclose(
                 float(spec["acceptance_rate"]), expected_rate, rel_tol=1e-9, abs_tol=1e-9
             ):
                 raise ValueError(f"benchmark test {label} has incoherent acceptance_rate")
@@ -1718,7 +1929,8 @@ def validate_report_tests(report: dict[str, Any], case: BenchCase) -> None:
         raise ValueError("benchmark report has no test rows")
     actual_geometry = [
         {key: test.get(key) for key in ("label", "kind", "n_prompt", "n_gen")}
-        if isinstance(test, dict) else None
+        if isinstance(test, dict)
+        else None
         for test in tests
     ]
     if actual_geometry != expected:
@@ -1750,7 +1962,9 @@ def validate_report_tests(report: dict[str, Any], case: BenchCase) -> None:
                     raise ValueError(f"benchmark test {label} has no positive {key}")
         if has_decode:
             for key in (
-                "decode_seconds_mean", "decode_output_tok_s_mean", "decode_engine_tok_s_mean"
+                "decode_seconds_mean",
+                "decode_output_tok_s_mean",
+                "decode_engine_tok_s_mean",
             ):
                 if not _finite_number(test.get(key), positive=True):
                     raise ValueError(f"benchmark test {label} has no positive {key}")
@@ -1806,8 +2020,11 @@ def prefill_timing_eligible(report: dict[str, Any], concurrency: int | None = No
     semantics = validate_report_phase_timing(report)
     if concurrency is None:
         concurrency = report.get("config", {}).get("concurrency")
-    return type(concurrency) is int and concurrency in PRODUCT_CONCURRENCIES and (
-        concurrency == 1 or semantics == PHASE_TIMING_SEMANTICS)
+    return (
+        type(concurrency) is int
+        and concurrency in PRODUCT_CONCURRENCIES
+        and (concurrency == 1 or semantics == PHASE_TIMING_SEMANTICS)
+    )
 
 
 def load_bench_report(
@@ -1836,7 +2053,11 @@ def load_bench_report(
         report.get("tool"),
     )
     validate_report_phase_timing(report)
-    expected = ("20 (legacy), 21 (phase sums), or 22 (wave timing)", REPORT_ARTIFACT_TYPE, REPORT_TOOL)
+    expected = (
+        "20 (legacy), 21 (phase sums), or 22 (wave timing)",
+        REPORT_ARTIFACT_TYPE,
+        REPORT_TOOL,
+    )
     if identity[1:] != expected[1:]:
         raise ValueError(
             "unsupported benchmark report identity: "
@@ -1860,30 +2081,20 @@ def load_bench_report(
         )
     activation_bits = config.get("q4_activation_bits")
     if activation_bits not in (4, 8):
-        raise ValueError(
-            f"benchmark report has invalid q4_activation_bits={activation_bits!r}"
-        )
-    if (
-        expected_q4_activation_bits is not None
-        and activation_bits != expected_q4_activation_bits
-    ):
+        raise ValueError(f"benchmark report has invalid q4_activation_bits={activation_bits!r}")
+    if expected_q4_activation_bits is not None and activation_bits != expected_q4_activation_bits:
         raise ValueError(
             f"benchmark report q4_activation_bits={activation_bits}; "
             f"expected compiled A{expected_q4_activation_bits}"
         )
     q4_prefill_cta_profile = config.get("q4_prefill_cta_profile")
-    if q4_prefill_cta_profile not in (
-        "m64n128-pingpong-n16-k16-scalar-base-production",
-    ):
+    if q4_prefill_cta_profile != "m64n128-pingpong-n16-k16-scalar-base-production":
         raise ValueError(
-            "benchmark report has invalid q4_prefill_cta_profile="
-            f"{q4_prefill_cta_profile!r}"
+            f"benchmark report has invalid q4_prefill_cta_profile={q4_prefill_cta_profile!r}"
         )
     w8_activation_bits = config.get("w8_activation_bits")
     if w8_activation_bits not in (8, 16):
-        raise ValueError(
-            f"benchmark report has invalid w8_activation_bits={w8_activation_bits!r}"
-        )
+        raise ValueError(f"benchmark report has invalid w8_activation_bits={w8_activation_bits!r}")
     if (
         expected_w8_activation_bits is not None
         and w8_activation_bits != expected_w8_activation_bits
@@ -1892,21 +2103,17 @@ def load_bench_report(
             f"benchmark report w8_activation_bits={w8_activation_bits}; "
             f"expected compiled A{expected_w8_activation_bits}"
         )
-    fp8_qk_wmma = config.get("fp8_qk_wmma_enabled")
+    fp8_qk_wmma = config.get("split512_enabled")
     if type(fp8_qk_wmma) is not bool:
-        raise ValueError(
-            "benchmark report has invalid fp8_qk_wmma_enabled="
-            f"{fp8_qk_wmma!r}"
-        )
+        raise ValueError(f"benchmark report has invalid split512_enabled={fp8_qk_wmma!r}")
     if expected_fp8_qk_wmma is not None and fp8_qk_wmma is not expected_fp8_qk_wmma:
         raise ValueError(
-            f"benchmark report fp8_qk_wmma_enabled={fp8_qk_wmma}; "
-            f"expected {expected_fp8_qk_wmma}"
+            f"benchmark report split512_enabled={fp8_qk_wmma}; expected {expected_fp8_qk_wmma}"
         )
     expected_attention_profile = {
-        "fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-        "fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-        "fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+        "decode_attention_profile": DECODE_ATTENTION_PROFILE,
+        "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+        "split512_min_context": SPLIT512_MIN_CONTEXT,
     }
     for key, value in expected_attention_profile.items():
         if config.get(key) != value:
@@ -1924,18 +2131,17 @@ def load_bench_report(
     )
     for key, value in expected_xattention.items():
         if config.get(key) != value:
-            raise ValueError(
-                f"benchmark report {key}={config.get(key)!r}; expected {value!r}"
-            )
+            raise ValueError(f"benchmark report {key}={config.get(key)!r}; expected {value!r}")
     if expected_xattention_profile == "dense":
         stale = {
-            "xattention_profile", "xattention_find_block", "xattention_stride",
+            "xattention_profile",
+            "xattention_find_block",
+            "xattention_stride",
             "xattention_tau_permille",
         }.intersection(config)
         if stale:
             raise ValueError(
-                "dense benchmark report retains XAttention fields: "
-                + ", ".join(sorted(stale))
+                "dense benchmark report retains XAttention fields: " + ", ".join(sorted(stale))
             )
     if config.get("pending_timeout_ms") != BENCHMARK_PENDING_TIMEOUT_MS:
         raise ValueError(
@@ -1973,7 +2179,9 @@ def load_bench_report(
             raise ValueError("benchmark report artifact size does not match selected bytes")
         load = report.get("load", {})
         if load.get("target") != TARGET_ID:
-            raise ValueError(f"benchmark report target={load.get('target')!r}; expected {TARGET_ID}")
+            raise ValueError(
+                f"benchmark report target={load.get('target')!r}; expected {TARGET_ID}"
+            )
         if load.get("weights_id") != expected_artifact["weights_id"]:
             raise ValueError("benchmark report weights_id does not match selected artifact")
     if expected_command is not None:
@@ -2032,9 +2240,7 @@ def report_rows(
     request_transient_memory = memory.get("request_transient", {})
     environment = report.get("environment", {})
     capacity_evidence = (
-        validate_automatic_feasibility(report)
-        if memory.get("kv_capacity_mode") == "auto"
-        else None
+        validate_automatic_feasibility(report) if memory.get("kv_capacity_mode") == "auto" else None
     )
     rows = []
     phase_timing_semantics = validate_report_phase_timing(report)
@@ -2092,7 +2298,8 @@ def report_rows(
             ),
             "resolved_effective_maximum_tokens": (
                 capacity_evidence["resolved_effective_maximum_tokens"]
-                if capacity_evidence else None
+                if capacity_evidence
+                else None
             ),
             "prefill_chunk": config.get("prefill_chunk"),
             "concurrency": config.get("concurrency"),
@@ -2103,10 +2310,10 @@ def report_rows(
             "q4_activation_bits": config.get("q4_activation_bits"),
             "q4_prefill_cta_profile": config.get("q4_prefill_cta_profile"),
             "w8_activation_bits": config.get("w8_activation_bits"),
-            "fp8_qk_wmma_enabled": config.get("fp8_qk_wmma_enabled"),
-            "fp8_qk_wmma_profile": config.get("fp8_qk_wmma_profile"),
-            "fp8_qk_wmma_t1_min_context": config.get("fp8_qk_wmma_t1_min_context"),
-            "fp8_qk_wmma_t2_min_context": config.get("fp8_qk_wmma_t2_min_context"),
+            "split512_enabled": config.get("split512_enabled"),
+            "decode_attention_profile": config.get("decode_attention_profile"),
+            "packed_decode_min_context": config.get("packed_decode_min_context"),
+            "split512_min_context": config.get("split512_min_context"),
             "xattention_qualification": config.get("xattention_qualification"),
             "xattention_profile": config.get("xattention_profile"),
             "xattention_find_block": config.get("xattention_find_block"),
@@ -2148,36 +2355,57 @@ def report_rows(
             "planned_slack_bytes": memory.get("planned_slack_bytes"),
             "workspace_peak_bytes": test.get("workspace_peak_bytes"),
             "workspace_allocator_peak_bytes": test.get("workspace_allocator_peak_bytes"),
-            "prefill_tok_s_mean": (test.get("prefill_tok_s_mean")
-                                   if performance_eligible and prefill_eligible else None),
-            "prefill_tok_s_stddev": (test.get("prefill_tok_s_stddev")
-                                      if performance_eligible and prefill_eligible else None),
-            "prefill_active_tok_s_mean": (test.get("prefill_active_tok_s_mean")
-                                         if performance_eligible and prefill_eligible else None),
-            "prefill_active_tok_s_stddev": (test.get("prefill_active_tok_s_stddev")
-                                           if performance_eligible and prefill_eligible else None),
-            "decode_output_tok_s_mean": (test.get("decode_output_tok_s_mean")
-                                          if performance_eligible else None),
-            "decode_output_tok_s_stddev": (test.get("decode_output_tok_s_stddev")
-                                            if performance_eligible else None),
-            "decode_engine_tok_s_mean": (test.get("decode_engine_tok_s_mean")
-                                          if performance_eligible else None),
-            "decode_engine_tok_s_stddev": (test.get("decode_engine_tok_s_stddev")
-                                            if performance_eligible else None),
-            "whole_output_tok_s_mean": (test.get("whole_output_tok_s_mean")
-                                          if performance_eligible else None),
-            "whole_output_tok_s_stddev": (test.get("whole_output_tok_s_stddev")
-                                            if performance_eligible else None),
-            "prepare_seconds_mean": (test.get("prepare_seconds_mean")
-                                      if performance_eligible else None),
-            "prefill_seconds_mean": (test.get("prefill_seconds_mean")
-                                      if performance_eligible else None),
-            "decode_seconds_mean": (test.get("decode_seconds_mean")
-                                     if performance_eligible else None),
-            "total_seconds_mean": (test.get("total_seconds_mean")
-                                    if performance_eligible else None),
-            "wave_seconds_mean": (test.get("wave_seconds_mean")
-                                   if performance_eligible else None),
+            "prefill_tok_s_mean": (
+                test.get("prefill_tok_s_mean")
+                if performance_eligible and prefill_eligible
+                else None
+            ),
+            "prefill_tok_s_stddev": (
+                test.get("prefill_tok_s_stddev")
+                if performance_eligible and prefill_eligible
+                else None
+            ),
+            "prefill_active_tok_s_mean": (
+                test.get("prefill_active_tok_s_mean")
+                if performance_eligible and prefill_eligible
+                else None
+            ),
+            "prefill_active_tok_s_stddev": (
+                test.get("prefill_active_tok_s_stddev")
+                if performance_eligible and prefill_eligible
+                else None
+            ),
+            "decode_output_tok_s_mean": (
+                test.get("decode_output_tok_s_mean") if performance_eligible else None
+            ),
+            "decode_output_tok_s_stddev": (
+                test.get("decode_output_tok_s_stddev") if performance_eligible else None
+            ),
+            "decode_engine_tok_s_mean": (
+                test.get("decode_engine_tok_s_mean") if performance_eligible else None
+            ),
+            "decode_engine_tok_s_stddev": (
+                test.get("decode_engine_tok_s_stddev") if performance_eligible else None
+            ),
+            "whole_output_tok_s_mean": (
+                test.get("whole_output_tok_s_mean") if performance_eligible else None
+            ),
+            "whole_output_tok_s_stddev": (
+                test.get("whole_output_tok_s_stddev") if performance_eligible else None
+            ),
+            "prepare_seconds_mean": (
+                test.get("prepare_seconds_mean") if performance_eligible else None
+            ),
+            "prefill_seconds_mean": (
+                test.get("prefill_seconds_mean") if performance_eligible else None
+            ),
+            "decode_seconds_mean": (
+                test.get("decode_seconds_mean") if performance_eligible else None
+            ),
+            "total_seconds_mean": (
+                test.get("total_seconds_mean") if performance_eligible else None
+            ),
+            "wave_seconds_mean": (test.get("wave_seconds_mean") if performance_eligible else None),
             "spec_acceptance_rate": speculative.get("acceptance_rate"),
             "spec_acceptance_length": speculative.get("acceptance_length"),
             "spec_rounds": speculative.get("rounds"),
@@ -2251,8 +2479,14 @@ def validate_dflash_diagnostic_raw(
     if not _finite_number(logits.get("finite_min")) or not _finite_number(logits.get("finite_max")):
         raise ValueError("DFlash diagnostic lacks a finite logits range")
     counter_keys = (
-        "hops", "hits", "in_tree", "in_top16", "in_top64", "in_top256",
-        "in_draft_head", "absent_from_draft_head",
+        "hops",
+        "hits",
+        "in_tree",
+        "in_top16",
+        "in_top64",
+        "in_top256",
+        "in_draft_head",
+        "absent_from_draft_head",
     )
     if any(not _nonnegative_integer(proposal.get(key)) for key in counter_keys):
         raise ValueError("DFlash diagnostic has invalid proposal counters")
@@ -2262,14 +2496,21 @@ def validate_dflash_diagnostic_raw(
         raise ValueError("DFlash diagnostic hits exceed hops")
     if not (
         proposal["hits"] <= proposal["in_tree"] <= proposal["hops"]
-        and proposal["in_top16"] <= proposal["in_top64"]
-        <= proposal["in_top256"] <= proposal["hops"]
+        and proposal["in_top16"]
+        <= proposal["in_top64"]
+        <= proposal["in_top256"]
+        <= proposal["hops"]
     ):
         raise ValueError("DFlash diagnostic proposal membership counters are incoherent")
     if proposal["in_draft_head"] + proposal["absent_from_draft_head"] != proposal["hops"]:
         raise ValueError("DFlash diagnostic draft-head membership is incoherent")
     reject_keys = (
-        "count", "in_tree", "in_top16", "in_top64", "in_top256", "in_draft_head",
+        "count",
+        "in_tree",
+        "in_top16",
+        "in_top64",
+        "in_top256",
+        "in_draft_head",
         "absent_from_draft_head",
     )
     if any(not _nonnegative_integer(reject.get(key)) for key in reject_keys):
@@ -2278,8 +2519,7 @@ def validate_dflash_diagnostic_raw(
         raise ValueError("DFlash diagnostic rejects exceed hops")
     if not (
         reject["in_tree"] <= reject["count"]
-        and reject["in_top16"] <= reject["in_top64"]
-        <= reject["in_top256"] <= reject["count"]
+        and reject["in_top16"] <= reject["in_top64"] <= reject["in_top256"] <= reject["count"]
     ):
         raise ValueError("DFlash diagnostic reject membership counters are incoherent")
     if reject["in_draft_head"] + reject["absent_from_draft_head"] != reject["count"]:
@@ -2316,17 +2556,23 @@ def validate_dflash_diagnostic_raw(
             not isinstance(proposal_ids, list)
             or not 2 <= len(proposal_ids) <= 16
             or (verify_width is not None and len(proposal_ids) != verify_width)
-            or any(type(token) is not int or not 0 <= token < PUBLIC_TOKEN_DOMAIN
-                   for token in proposal_ids)
+            or any(
+                type(token) is not int or not 0 <= token < PUBLIC_TOKEN_DOMAIN
+                for token in proposal_ids
+            )
             or not isinstance(parent_index, list)
             or len(parent_index) != len(proposal_ids)
             or parent_index[0] != -1
-            or any(type(parent) is not int or not 0 <= parent < child
-                   for child, parent in enumerate(parent_index[1:], start=1))
+            or any(
+                type(parent) is not int or not 0 <= parent < child
+                for child, parent in enumerate(parent_index[1:], start=1)
+            )
             or not isinstance(target_tokens, list)
             or not 1 <= len(target_tokens) <= len(proposal_ids)
-            or any(type(token) is not int or not 0 <= token < PUBLIC_TOKEN_DOMAIN
-                   for token in target_tokens)
+            or any(
+                type(token) is not int or not 0 <= token < PUBLIC_TOKEN_DOMAIN
+                for token in target_tokens
+            )
         ):
             raise ValueError("DFlash diagnostic has an invalid aligned round trace")
         traced_hops += len(target_tokens)
@@ -2353,10 +2599,15 @@ def bind_dflash_diagnostic(
     compiled_profile = {
         key: report_config.get(key)
         for key in (
-            "kv_cache_format", "kv_value_group", "q4_activation_bits",
-            "q4_prefill_cta_profile", "w8_activation_bits",
-            "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",
-            "fp8_qk_wmma_t1_min_context", "fp8_qk_wmma_t2_min_context",
+            "kv_cache_format",
+            "kv_value_group",
+            "q4_activation_bits",
+            "q4_prefill_cta_profile",
+            "w8_activation_bits",
+            "split512_enabled",
+            "decode_attention_profile",
+            "packed_decode_min_context",
+            "split512_min_context",
         )
     }
     if any(value is None for value in compiled_profile.values()):
@@ -2425,9 +2676,7 @@ def validate_bound_diagnostic(
     expected_profile = {
         "spec": "dflash",
         "draft_tokens": int(_case_option(case, "--draft-tokens") or "0"),
-        "dflash_verify_width_requested": int(
-            _case_option(case, "--dflash-verify-width") or "0"
-        ),
+        "dflash_verify_width_requested": int(_case_option(case, "--dflash-verify-width") or "0"),
         "dflash_verify_width": resolved_dflash_verify_width(
             int(_case_option(case, "--draft-tokens") or "0"),
             int(_case_option(case, "--dflash-verify-width") or "0"),
@@ -2438,10 +2687,15 @@ def validate_bound_diagnostic(
         "compiled": {
             key: json.loads(report_path.read_text(encoding="utf-8")).get("config", {}).get(key)
             for key in (
-                "kv_cache_format", "kv_value_group", "q4_activation_bits",
-                "q4_prefill_cta_profile", "w8_activation_bits",
-                "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",
-                "fp8_qk_wmma_t1_min_context", "fp8_qk_wmma_t2_min_context",
+                "kv_cache_format",
+                "kv_value_group",
+                "q4_activation_bits",
+                "q4_prefill_cta_profile",
+                "w8_activation_bits",
+                "split512_enabled",
+                "decode_attention_profile",
+                "packed_decode_min_context",
+                "split512_min_context",
             )
         },
     }
@@ -2469,7 +2723,9 @@ def write_dflash_determinism(
     )
     comparisons: list[dict[str, Any]] = []
     if len(diagnostics) != 2:
-        failures.append({"error": f"expected two repeated DFlash diagnostics, found {len(diagnostics)}"})
+        failures.append(
+            {"error": f"expected two repeated DFlash diagnostics, found {len(diagnostics)}"}
+        )
     else:
         loaded: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
         for record in diagnostics:
@@ -2481,13 +2737,11 @@ def write_dflash_determinism(
             raw_identity = evidence.get("raw_diagnostic")
             embedded_raw = evidence.get("raw_diagnostic", {}).get("report")
             if (
-                evidence.get("artifact_type")
-                != "ninfer_dflash_proposal_selector_evidence"
+                evidence.get("artifact_type") != "ninfer_dflash_proposal_selector_evidence"
                 or evidence.get("schema_version") != 2
                 or evidence.get("artifact") != artifact
                 or evidence.get("benchmark_executable") != bench
-                or report_identity
-                != {"path": str(report_path), "sha256": file_sha256(report_path)}
+                or report_identity != {"path": str(report_path), "sha256": file_sha256(report_path)}
                 or not isinstance(raw_identity, dict)
                 or not isinstance(embedded_raw, dict)
             ):
@@ -2496,7 +2750,8 @@ def write_dflash_determinism(
             if raw_identity.get("sha256") != file_sha256(raw_path):
                 raise ValueError("DFlash determinism raw diagnostic identity changed")
             raw = validate_dflash_diagnostic_raw(
-                raw_path, evidence["profile"]["draft_tokens"],
+                raw_path,
+                evidence["profile"]["draft_tokens"],
                 evidence["profile"].get("dflash_verify_width"),
             )
             if raw != embedded_raw:
@@ -2504,10 +2759,16 @@ def write_dflash_determinism(
             loaded.append((evidence, report, raw))
         first_evidence, first_report, first_raw = loaded[0]
         second_evidence, second_report, second_raw = loaded[1]
-        first_tokens = [rep["generated_token_ids_by_lane"]
-                        for test in first_report["tests"] for rep in test["reps"]]
-        second_tokens = [rep["generated_token_ids_by_lane"]
-                         for test in second_report["tests"] for rep in test["reps"]]
+        first_tokens = [
+            rep["generated_token_ids_by_lane"]
+            for test in first_report["tests"]
+            for rep in test["reps"]
+        ]
+        second_tokens = [
+            rep["generated_token_ids_by_lane"]
+            for test in second_report["tests"]
+            for rep in test["reps"]
+        ]
         profile_exact = first_evidence["profile"] == second_evidence["profile"]
         proposal_trace_exact = first_raw["trace"] == second_raw["trace"]
         target_output_exact = first_tokens == second_tokens
@@ -2517,8 +2778,7 @@ def write_dflash_determinism(
             "target_output_exact": target_output_exact,
             "round_count": len(first_raw["trace"]),
             "aligned_target_hops": sum(
-                len(round_trace["target_licensed_tokens"])
-                for round_trace in first_raw["trace"]
+                len(round_trace["target_licensed_tokens"]) for round_trace in first_raw["trace"]
             ),
             "first_evidence": {
                 "path": diagnostics[0]["bound_diagnostic"],
@@ -2532,7 +2792,9 @@ def write_dflash_determinism(
         }
         comparisons.append(comparison)
         if not comparison["exact"]:
-            failures.append({"error": "repeated DFlash proposal/target trace differs", **comparison})
+            failures.append(
+                {"error": "repeated DFlash proposal/target trace differs", **comparison}
+            )
     payload = {
         "artifact_type": "ninfer_dflash_proposal_determinism",
         "schema_version": 1,
@@ -2562,10 +2824,12 @@ def write_dflash_quality_evidence(
     """Assemble the generated-output DFlash quality gate from bound raw evidence."""
 
     required_concurrency = list(required_concurrency)
-    if (not required_concurrency or 1 not in required_concurrency
-            or sorted(set(required_concurrency)) != required_concurrency
-            or any(type(c) is not int or c not in PRODUCT_CONCURRENCIES
-                   for c in required_concurrency)):
+    if (
+        not required_concurrency
+        or 1 not in required_concurrency
+        or sorted(set(required_concurrency)) != required_concurrency
+        or any(type(c) is not int or c not in PRODUCT_CONCURRENCIES for c in required_concurrency)
+    ):
         raise ValueError("DFlash quality requires a declared sorted C subset including C1")
     failures: list[dict[str, Any]] = []
     if parity.get("artifact") != artifact or parity.get("benchmark_executable") != bench:
@@ -2577,11 +2841,13 @@ def write_dflash_quality_evidence(
     if not isinstance(parity_rows, list):
         parity_rows = []
     expected_parity_cells = {
-        (phase, concurrency) for phase in ("decode", "whole")
+        (phase, concurrency)
+        for phase in ("decode", "whole")
         for concurrency in required_concurrency
     }
     observed_parity_cells = {
-        (row.get("phase"), row.get("concurrency")) for row in parity_rows
+        (row.get("phase"), row.get("concurrency"))
+        for row in parity_rows
         if isinstance(row, dict) and row.get("exact") is True
     }
     parity_complete = (
@@ -2591,8 +2857,7 @@ def write_dflash_quality_evidence(
         and len(parity_rows) == 2 * len(required_concurrency)
         and observed_parity_cells == expected_parity_cells
         and all(
-            isinstance(row, dict)
-            and row.get("includes_seed") is (row.get("phase") == "whole")
+            isinstance(row, dict) and row.get("includes_seed") is (row.get("phase") == "whole")
             for row in parity_rows
         )
     )
@@ -2615,7 +2880,9 @@ def write_dflash_quality_evidence(
     )
     diagnostics: list[dict[str, Any]] = []
     if len(diagnostic_records) != 2:
-        failures.append({"error": f"expected two bound selector diagnostics, found {len(diagnostic_records)}"})
+        failures.append(
+            {"error": f"expected two bound selector diagnostics, found {len(diagnostic_records)}"}
+        )
     else:
         expected_profile: dict[str, Any] | None = None
         for record in diagnostic_records:
@@ -2653,17 +2920,22 @@ def write_dflash_quality_evidence(
                 )
                 if raw_identity.get("report") != raw:
                     raise ValueError("bound diagnostic embedded raw report differs")
-                diagnostics.append({
-                    "evidence": {"path": str(evidence_path), "sha256": file_sha256(evidence_path)},
-                    "raw": {"path": str(raw_path), "sha256": raw_identity["sha256"]},
-                    "profile": profile,
-                    "finite_logit_elements": raw["logits"]["elements"],
-                    "proposal_rounds": len(raw["trace"]),
-                    "aligned_target_hops": sum(
-                        len(round_trace["target_licensed_tokens"])
-                        for round_trace in raw["trace"]
-                    ),
-                })
+                diagnostics.append(
+                    {
+                        "evidence": {
+                            "path": str(evidence_path),
+                            "sha256": file_sha256(evidence_path),
+                        },
+                        "raw": {"path": str(raw_path), "sha256": raw_identity["sha256"]},
+                        "profile": profile,
+                        "finite_logit_elements": raw["logits"]["elements"],
+                        "proposal_rounds": len(raw["trace"]),
+                        "aligned_target_hops": sum(
+                            len(round_trace["target_licensed_tokens"])
+                            for round_trace in raw["trace"]
+                        ),
+                    }
+                )
             except (json.JSONDecodeError, KeyError, OSError, TypeError, ValueError) as error:
                 failures.append({"error": f"invalid bound selector diagnostic: {error}"})
 
@@ -2730,8 +3002,10 @@ def write_dflash_greedy_parity(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     failures: list[dict[str, Any]] = []
     comparisons: list[dict[str, Any]] = []
-    pairs = (("decode", "ordinary_decode", "dflash_decode"),
-             ("whole", "ordinary_whole", "dflash_whole"))
+    pairs = (
+        ("decode", "ordinary_decode", "dflash_decode"),
+        ("whole", "ordinary_whole", "dflash_whole"),
+    )
     if any(record.get("parity_role") == "ordinary" for record in records):
         pairs = (("decode", "ordinary", "dflash"),)
     for phase, ordinary_role, dflash_role in pairs:
@@ -2743,8 +3017,13 @@ def write_dflash_greedy_parity(
             failures.append({"phase": phase, "error": "duplicate parity route"})
         for concurrency in sorted(set(controls) | set(candidates)):
             if concurrency not in controls or concurrency not in candidates:
-                failures.append({"phase": phase, "concurrency": concurrency,
-                                 "error": "missing matched parity route"})
+                failures.append(
+                    {
+                        "phase": phase,
+                        "concurrency": concurrency,
+                        "error": "missing matched parity route",
+                    }
+                )
                 continue
             control_path = Path(controls[concurrency]["report"])
             candidate_path = Path(candidates[concurrency]["report"])
@@ -2762,10 +3041,12 @@ def write_dflash_greedy_parity(
                 for control_test, candidate_test in zip(
                     control["tests"], candidate["tests"], strict=True
                 ):
-                    geometry = tuple(control_test.get(key) for key in
-                                     ("label", "kind", "n_prompt", "n_gen"))
-                    other_geometry = tuple(candidate_test.get(key) for key in
-                                           ("label", "kind", "n_prompt", "n_gen"))
+                    geometry = tuple(
+                        control_test.get(key) for key in ("label", "kind", "n_prompt", "n_gen")
+                    )
+                    other_geometry = tuple(
+                        candidate_test.get(key) for key in ("label", "kind", "n_prompt", "n_gen")
+                    )
                     if geometry != other_geometry:
                         mismatch_count += 1
                         first_mismatch = first_mismatch or {"reason": "test geometry differs"}
@@ -2775,22 +3056,25 @@ def write_dflash_greedy_parity(
                         mismatch_count += 1
                         first_mismatch = first_mismatch or {"reason": "requested output differs"}
                         continue
-                    control_runs = [rep["generated_token_ids_by_lane"]
-                                    for rep in control_test["reps"]]
-                    candidate_runs = [rep["generated_token_ids_by_lane"]
-                                      for rep in candidate_test["reps"]]
+                    control_runs = [
+                        rep["generated_token_ids_by_lane"] for rep in control_test["reps"]
+                    ]
+                    candidate_runs = [
+                        rep["generated_token_ids_by_lane"] for rep in candidate_test["reps"]
+                    ]
                     expected = control_runs[0]
-                    for route, repetition, lanes in (
-                        [("ordinary", i, run) for i, run in enumerate(control_runs)]
-                        + [("dflash", i, run) for i, run in enumerate(candidate_runs)]
-                    ):
+                    for route, repetition, lanes in [
+                        ("ordinary", i, run) for i, run in enumerate(control_runs)
+                    ] + [("dflash", i, run) for i, run in enumerate(candidate_runs)]:
                         for lane, (wanted, actual) in enumerate(zip(expected, lanes, strict=True)):
                             compared_tokens += len(actual)
                             if len(actual) != requested:
                                 mismatch_count += 1
                                 first_mismatch = first_mismatch or {
                                     "reason": "retained generation has the wrong token count",
-                                    "route": route, "repetition": repetition, "lane": lane,
+                                    "route": route,
+                                    "repetition": repetition,
+                                    "lane": lane,
                                 }
                                 continue
                             for position, (left, right) in enumerate(
@@ -2799,21 +3083,29 @@ def write_dflash_greedy_parity(
                                 if left != right:
                                     mismatch_count += 1
                                     first_mismatch = first_mismatch or {
-                                        "test": geometry[0], "route": route,
-                                        "repetition": repetition, "lane": lane,
-                                        "position": position, "ordinary_token": left,
+                                        "test": geometry[0],
+                                        "route": route,
+                                        "repetition": repetition,
+                                        "lane": lane,
+                                        "position": position,
+                                        "ordinary_token": left,
                                         "observed_token": right,
                                     }
             comparison = {
-                "phase": phase, "concurrency": concurrency,
-                "draft_tokens": draft_tokens, "dflash_verify_width": verify_width,
+                "phase": phase,
+                "concurrency": concurrency,
+                "draft_tokens": draft_tokens,
+                "dflash_verify_width": verify_width,
                 "dflash_topology": resolved_dflash_topology(draft_tokens, verify_width),
-                "ordinary_report": {"path": str(control_path),
-                                    "sha256": file_sha256(control_path)},
-                "dflash_report": {"path": str(candidate_path),
-                                  "sha256": file_sha256(candidate_path)},
-                "compared_tokens": compared_tokens, "mismatch_count": mismatch_count,
-                "includes_seed": phase == "whole", "exact": mismatch_count == 0,
+                "ordinary_report": {"path": str(control_path), "sha256": file_sha256(control_path)},
+                "dflash_report": {
+                    "path": str(candidate_path),
+                    "sha256": file_sha256(candidate_path),
+                },
+                "compared_tokens": compared_tokens,
+                "mismatch_count": mismatch_count,
+                "includes_seed": phase == "whole",
+                "exact": mismatch_count == 0,
                 "first_mismatch": first_mismatch,
             }
             comparisons.append(comparison)
@@ -2870,11 +3162,15 @@ def write_dflash_shortlist(
         and record.get("concurrency") == 1
     }
     expected_ks = {k for k, _width in DFLASH_PRODUCTION_PROFILES}
-    if (set(parity_by_k) != expected_ks or set(performance_by_k) != expected_ks
-            or set(diagnostic_by_k) != expected_ks):
+    if (
+        set(parity_by_k) != expected_ks
+        or set(performance_by_k) != expected_ks
+        or set(diagnostic_by_k) != expected_ks
+    ):
         failures.append({"error": "shortlist evidence must cover exactly K4/W5 and K5/W6"})
     controls = [
-        row for row in rows
+        row
+        for row in rows
         if row.get("suite") == "dflash_shortlist_control"
         and row.get("concurrency") == 1
         and row.get("label") == "pp8192+tg256"
@@ -2912,8 +3208,7 @@ def write_dflash_shortlist(
                 evidence_path = Path(diagnostic_record["bound_diagnostic"])
                 evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
                 if (
-                    evidence.get("artifact_type")
-                    != "ninfer_dflash_proposal_selector_evidence"
+                    evidence.get("artifact_type") != "ninfer_dflash_proposal_selector_evidence"
                     or evidence.get("schema_version") != 2
                     or evidence.get("artifact") != artifact
                     or evidence.get("benchmark_executable") != bench
@@ -2941,9 +3236,7 @@ def write_dflash_shortlist(
                 raw_path = Path(raw_identity["path"])
                 if raw_identity.get("sha256") != file_sha256(raw_path):
                     raise ValueError("diagnostic raw bytes changed")
-                raw = validate_dflash_diagnostic_raw(
-                    raw_path, k, profile["verify_width_resolved"]
-                )
+                raw = validate_dflash_diagnostic_raw(raw_path, k, profile["verify_width_resolved"])
                 if raw_identity.get("report") != raw:
                     raise ValueError("diagnostic embedded report differs from raw bytes")
                 proposal_hops = raw["proposal"]["hops"]
@@ -2967,7 +3260,11 @@ def write_dflash_shortlist(
                     "by_depth": raw["by_depth"],
                 }
             except (
-                json.JSONDecodeError, KeyError, OSError, TypeError, ValueError,
+                json.JSONDecodeError,
+                KeyError,
+                OSError,
+                TypeError,
+                ValueError,
                 ZeroDivisionError,
             ):
                 reasons.append("invalid first-reject diagnostic")
@@ -2981,8 +3278,10 @@ def write_dflash_shortlist(
             fallback = row.get("spec_fallback_steps")
             speed = row.get("decode_engine_tok_s_mean")
             if (
-                not _nonnegative_integer(rounds) or rounds == 0
-                or not _nonnegative_integer(drafted) or drafted == 0
+                not _nonnegative_integer(rounds)
+                or rounds == 0
+                or not _nonnegative_integer(drafted)
+                or drafted == 0
                 or not _nonnegative_integer(accepted)
                 or accepted > drafted
                 or not _nonnegative_integer(fallback)
@@ -3000,7 +3299,8 @@ def write_dflash_shortlist(
                         "fallback_rate_per_attempt": fallback / attempts,
                         "first_reject_rate_per_proposal_hop": (
                             diagnostic_summary["first_reject_rate_per_proposal_hop"]
-                            if diagnostic_summary is not None else None
+                            if diagnostic_summary is not None
+                            else None
                         ),
                     }
                     performance = {
@@ -3012,9 +3312,7 @@ def write_dflash_shortlist(
                         "requested_generated_tokens": row["n_gen"],
                         "repetitions": row["repetitions"],
                         "warmup": row["warmup"],
-                        "accepted_tokens_per_round": scalar_metrics[
-                            "accepted_tokens_per_round"
-                        ],
+                        "accepted_tokens_per_round": scalar_metrics["accepted_tokens_per_round"],
                         "target_equivalent_generated_tok_s": speed,
                         "output_generated_tok_s": row["decode_output_tok_s_mean"],
                         "acceptance_rate": row["spec_acceptance_rate"],
@@ -3023,26 +3321,31 @@ def write_dflash_shortlist(
                         "drafted_tokens": drafted,
                         "accepted_tokens": accepted,
                         "fallback_steps": fallback,
-                        "fallback_rate_per_attempt": scalar_metrics[
-                            "fallback_rate_per_attempt"
-                        ],
+                        "fallback_rate_per_attempt": scalar_metrics["fallback_rate_per_attempt"],
                         "decode_seconds_mean": row["decode_seconds_mean"],
                         "total_seconds_mean": row["total_seconds_mean"],
                         "memory": {
                             key: row[key]
                             for key in (
-                                "kv_capacity", "kv_payload_bytes", "weights_capacity_bytes",
-                                "sequence_capacity_bytes", "workspace_capacity_bytes",
-                                "request_transient_capacity_bytes", "device_graph_allowance_bytes",
-                                "workspace_peak_bytes", "workspace_allocator_peak_bytes",
+                                "kv_capacity",
+                                "kv_payload_bytes",
+                                "weights_capacity_bytes",
+                                "sequence_capacity_bytes",
+                                "workspace_capacity_bytes",
+                                "request_transient_capacity_bytes",
+                                "device_graph_allowance_bytes",
+                                "workspace_peak_bytes",
+                                "workspace_allocator_peak_bytes",
                             )
                         },
                     }
 
         exact_parity = comparison is not None and comparison.get("exact") is True
         valid = (
-            exact_parity and not reasons
-            and diagnostic_summary is not None and performance is not None
+            exact_parity
+            and not reasons
+            and diagnostic_summary is not None
+            and performance is not None
         )
         candidate = {
             "profile": profile,
@@ -3074,8 +3377,10 @@ def write_dflash_shortlist(
             **{
                 key: candidate[key]
                 for key in (
-                    "target_equivalent_generated_tok_s", "accepted_tokens_per_round",
-                    "fallback_rate_per_attempt", "first_reject_rate_per_proposal_hop",
+                    "target_equivalent_generated_tok_s",
+                    "accepted_tokens_per_round",
+                    "fallback_rate_per_attempt",
+                    "first_reject_rate_per_proposal_hop",
                 )
             },
         }
@@ -3083,7 +3388,11 @@ def write_dflash_shortlist(
     ]
     frontier = dflash_shortlist_frontier(valid_candidates)
     frontier_rows = [
-        next(row for row in ranking if row["draft_tokens"] == candidate["profile"]["draft_tokens_requested"])
+        next(
+            row
+            for row in ranking
+            if row["draft_tokens"] == candidate["profile"]["draft_tokens_requested"]
+        )
         for candidate in frontier
     ]
     frontier_rows.sort(key=lambda row: row["draft_tokens"])
@@ -3131,20 +3440,26 @@ def write_dflash_shortlist(
                 "to one scalar"
             ),
         },
-        "pass": (not failures and provenance_stable
-                 and len(valid_candidates) == len(DFLASH_PRODUCTION_PROFILES)),
+        "pass": (
+            not failures
+            and provenance_stable
+            and len(valid_candidates) == len(DFLASH_PRODUCTION_PROFILES)
+        ),
     }
     durable_replace_json(out_dir / "dflash-shortlist.json", payload)
     return payload, failures
 
 
 def run_command(
-    command: Sequence[str], stdout_path: Path, stderr_path: Path,
+    command: Sequence[str],
+    stdout_path: Path,
+    stderr_path: Path,
     environment: dict[str, str] | None = None,
 ) -> int:
-    with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open(
-        "w", encoding="utf-8"
-    ) as stderr:
+    with (
+        stdout_path.open("w", encoding="utf-8") as stdout,
+        stderr_path.open("w", encoding="utf-8") as stderr,
+    ):
         process = subprocess.run(
             list(command),
             cwd=REPO_ROOT,
@@ -3170,21 +3485,18 @@ def write_manifest(
         "schema_version": MATRIX_SCHEMA_VERSION,
         "created_at_utc": dt.datetime.now(dt.UTC).isoformat(),
         "preset": args.preset,
-        "base_ranking_profile": (
-            "spec-none-ordinary" if args.preset == "pareto-whole" else None
-        ),
+        "base_ranking_profile": ("spec-none-ordinary" if args.preset == "pareto-whole" else None),
         "base_capacity_profile": (
             "spec-none-ordinary" if args.preset == "pareto-capacity" else None
         ),
-        "base_chunk_profile": (
-            "spec-none-ordinary" if args.preset == "prefill-chunk" else None
-        ),
+        "base_chunk_profile": ("spec-none-ordinary" if args.preset == "prefill-chunk" else None),
         "mtp_diagnostic_only": args.preset == "pareto",
         "dflash_draft_tokens": args.dflash_draft_tokens,
         "dflash_verify_width_requested": args.dflash_verify_width,
         "dflash_verify_width": (
             resolved_dflash_verify_width(args.dflash_draft_tokens, args.dflash_verify_width)
-            if args.dflash_draft_tokens is not None else 0
+            if args.dflash_draft_tokens is not None
+            else 0
         ),
         "dflash_shortlist_profiles": (
             dflash_shortlist_profiles() if args.preset == "dflash-shortlist" else []
@@ -3198,9 +3510,7 @@ def write_manifest(
         "hybrid_shared_workspace_authority": args.hybrid_width_authority,
         "corpus": str(args.corpus),
         "corpus_tokens": count_corpus_tokens(args.corpus),
-        "corpus_sha256": (
-            file_sha256(args.corpus) if args.preset in POWER_BOUND_PRESETS else None
-        ),
+        "corpus_sha256": (file_sha256(args.corpus) if args.preset in POWER_BOUND_PRESETS else None),
         "dry_run": args.dry_run,
         "prepare_only": args.prepare_only,
         "selected_prefill_chunk": (
@@ -3208,7 +3518,8 @@ def write_manifest(
         ),
         **(
             {"prefill_chunk_authority": args.prefill_chunk_authority_record}
-            if args.prefill_chunk_authority_record is not None else {}
+            if args.prefill_chunk_authority_record is not None
+            else {}
         ),
         **({"post_chunk_capacity_gate": True} if args.require_post_chunk_capacity else {}),
         "power_profile": (
@@ -3218,19 +3529,21 @@ def write_manifest(
                 "observed": args.power_profile_observed,
                 **(
                     {"rechecked_after": args.power_profile_rechecked_after}
-                    if args.preset in POWER_RECHECK_PRESETS else {}
+                    if args.preset in POWER_RECHECK_PRESETS
+                    else {}
                 ),
             }
-            if args.preset in POWER_BOUND_PRESETS else None
+            if args.preset in POWER_BOUND_PRESETS
+            else None
         ),
         "expected_kv_value_group": args.expected_kv_value_group,
         "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
         "expected_q4_activation_bits": args.expected_q4_activation_bits,
         "expected_w8_activation_bits": args.expected_w8_activation_bits,
-        "expected_fp8_qk_wmma_enabled": bool(args.expected_fp8_qk_wmma),
-        "expected_fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-        "expected_fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-        "expected_fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+        "expected_split512_enabled": bool(args.expected_fp8_qk_wmma),
+        "expected_decode_attention_profile": DECODE_ATTENTION_PROFILE,
+        "expected_packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+        "expected_split512_min_context": SPLIT512_MIN_CONTEXT,
         "expected_xattention_profile": args.expected_xattention_profile,
         "concurrency": list(args.concurrency),
         "resume": args.resume,
@@ -3254,11 +3567,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--preset",
         choices=(
-            "smoke", "prefill-chunk", "low-context-prefill", "pareto", "pareto-whole", "pareto-feasibility",
-            "pareto-capacity", "ordinary-diagnostic",
-            "dflash-shortlist", "dflash-pareto", "dflash-feasibility", "dflash-capacity",
+            "smoke",
+            "prefill-chunk",
+            "low-context-prefill",
+            "pareto",
+            "pareto-whole",
+            "pareto-feasibility",
+            "pareto-capacity",
+            "ordinary-diagnostic",
+            "dflash-shortlist",
+            "dflash-pareto",
+            "dflash-feasibility",
+            "dflash-capacity",
             "concurrency",
-            "core", "full",
+            "core",
+            "full",
         ),
         default="core",
     )
@@ -3275,8 +3598,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         choices=PRODUCTION_PREFILL_CHUNKS,
         metavar="TOKENS",
-        help=("chunk candidate for --preset prefill-chunk (default: 1024,2048,4096,8192); "
-              "every Pareto/DFlash campaign preset requires one selected value"),
+        help=(
+            "chunk candidate for --preset prefill-chunk (default: 1024,2048,4096,8192); "
+            "every Pareto/DFlash campaign preset requires one selected value"
+        ),
     )
     parser.add_argument(
         "--prefill-chunk-authority",
@@ -3291,11 +3616,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="prompt length for --preset prefill-chunk (default: 8192)",
     )
     parser.add_argument(
-        "--dflash-draft-tokens", type=int, choices=(4, 5),
+        "--dflash-draft-tokens",
+        type=int,
+        choices=(4, 5),
         help="required startup-fixed DFlash K for DFlash Pareto/capacity presets",
     )
     parser.add_argument(
-        "--dflash-verify-width", type=int, choices=(0, 5, 6), default=0,
+        "--dflash-verify-width",
+        type=int,
+        choices=(0, 5, 6),
+        default=0,
         help="DFlash verify W: exactly K4/W5 or K5/W6 (0 resolves to K+1)",
     )
     parser.add_argument(
@@ -3339,27 +3669,39 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="require the compile-bound dense or B128/S16/tau900 Text-prefill profile",
     )
     parser.add_argument("--suite", action="append", default=[], help="suite to run; repeatable")
-    parser.add_argument("--limit", type=int, default=None, help="run only the first N selected cases")
-    parser.add_argument("--repetitions", type=int, default=None, help="override all case repetitions")
-    parser.add_argument("--warmup", type=int, default=None, help="override all case warmup repetitions")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="run only the first N selected cases"
+    )
+    parser.add_argument(
+        "--repetitions", type=int, default=None, help="override all case repetitions"
+    )
+    parser.add_argument(
+        "--warmup", type=int, default=None, help="override all case warmup repetitions"
+    )
     parser.add_argument("--dry-run", action="store_true", help="write commands but do not execute")
     parser.add_argument(
-        "--prepare-only", action="store_true",
+        "--prepare-only",
+        action="store_true",
         help="inspect and hash real inputs and write the executable command matrix without running it",
     )
     parser.add_argument(
-        "--require-fp8-hybrid", action="store_true",
+        "--require-fp8-hybrid",
+        action="store_true",
         help="require the authority-bound hybrid artifact/receipt and fixed C1..4 gate geometry",
     )
     parser.add_argument(
-        "--require-post-chunk-capacity", action="store_true",
+        "--require-post-chunk-capacity",
+        action="store_true",
         help="require the exact receipt-bound twelve-matrix C1..4 capacity-gate contract",
     )
     parser.add_argument(
-        "--hybrid-width-tool", type=Path,
+        "--hybrid-width-tool",
+        type=Path,
         help="host-only runtime planner executable from the same shared-workspace build",
     )
-    parser.add_argument("--resume", action="store_true", help="skip cases with an existing valid JSON report")
+    parser.add_argument(
+        "--resume", action="store_true", help="skip cases with an existing valid JSON report"
+    )
     parser.add_argument(
         "--no-build", action="store_true", help="do not build build-r9700/bench/ninfer_bench"
     )
@@ -3382,11 +3724,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--require-fp8-hybrid needs --prepare-only or a real run")
     if args.prepare_only and args.resume:
         raise SystemExit("--prepare-only requires a fresh output directory")
-    if args.preset in ("dflash-pareto", "dflash-feasibility", "dflash-capacity") and args.dflash_draft_tokens is None:
+    if (
+        args.preset in ("dflash-pareto", "dflash-feasibility", "dflash-capacity")
+        and args.dflash_draft_tokens is None
+    ):
         raise SystemExit(f"--preset {args.preset} requires --dflash-draft-tokens")
     if args.preset in DFLASH_CAMPAIGN_PRESETS and args.dflash_draft_tokens is not None:
-        pair = (args.dflash_draft_tokens,
-                resolved_dflash_verify_width(args.dflash_draft_tokens, args.dflash_verify_width))
+        try:
+            pair = (
+                args.dflash_draft_tokens,
+                resolved_dflash_verify_width(args.dflash_draft_tokens, args.dflash_verify_width),
+            )
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
         if pair not in DFLASH_PRODUCTION_PROFILES:
             raise SystemExit("production DFlash campaigns require exactly K4/W5 or K5/W6")
     if args.preset not in ("dflash-pareto", "dflash-feasibility", "dflash-capacity") and (
@@ -3406,7 +3756,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.suite or args.limit is not None:
             raise SystemExit("--preset dflash-shortlist requires its complete fixed case set")
         if args.repetitions is not None or args.warmup is not None:
-            raise SystemExit("--preset dflash-shortlist uses fixed 2/1 performance and 1/0 diagnostic repetitions")
+            raise SystemExit(
+                "--preset dflash-shortlist uses fixed 2/1 performance and 1/0 diagnostic repetitions"
+            )
     if args.preset in SELECTED_PREFILL_CHUNK_PRESETS and (
         args.prefill_chunk is None or len(args.prefill_chunk) != 1
     ):
@@ -3422,9 +3774,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SystemExit("duplicate --prefill-chunk value")
         selected_chunks = args.prefill_chunk or list(PRODUCTION_PREFILL_CHUNKS)
         if args.prefill_prompt == 8192 and set(selected_chunks) != set(PRODUCTION_PREFILL_CHUNKS):
-            raise SystemExit(
-                "8K prefill-chunk screening requires exactly 1024,2048,4096,8192"
-            )
+            raise SystemExit("8K prefill-chunk screening requires exactly 1024,2048,4096,8192")
         if args.prefill_prompt == 32768 and len(selected_chunks) != 2:
             raise SystemExit("32K prefill-chunk confirmation requires exactly two finalists")
     elif args.preset == "low-context-prefill":
@@ -3454,7 +3804,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.prefill_chunk is not None or args.prefill_prompt != 8192:
             raise SystemExit("--preset ordinary-diagnostic has fixed 8K/chunk4096 geometry")
     elif args.preset in (
-        "pareto", "pareto-whole", "pareto-feasibility", "pareto-capacity",
+        "pareto",
+        "pareto-whole",
+        "pareto-feasibility",
+        "pareto-capacity",
         *DFLASH_CAMPAIGN_PRESETS,
     ):
         if args.prefill_chunk is not None and len(args.prefill_chunk) != 1:
@@ -3494,19 +3847,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if args.require_fp8_hybrid:
         if artifact_provenance.get("weights_id") == HYBRID_BASE_WEIGHTS_ID:
-            ppl_run.require_fp8_hybrid_candidate({
-                **artifact_provenance,
-                "bytes": artifact_provenance["file_size_bytes"],
-            })
+            ppl_run.require_fp8_hybrid_candidate(
+                {
+                    **artifact_provenance,
+                    "bytes": artifact_provenance["file_size_bytes"],
+                }
+            )
         else:
             artifact_provenance = require_fp8_hybrid_artifact(
                 args.weights, artifact_provenance, args.preset
             )
-    validate_dflash_campaign_artifact(
-        args.preset, artifact_provenance, dry_run=args.dry_run
-    )
-    if (not args.dry_run and args.preset in DFLASH_CAMPAIGN_PRESETS
-            and "dflash_conversion_report" not in artifact_provenance):
+    validate_dflash_campaign_artifact(args.preset, artifact_provenance, dry_run=args.dry_run)
+    if (
+        not args.dry_run
+        and args.preset in DFLASH_CAMPAIGN_PRESETS
+        and "dflash_conversion_report" not in artifact_provenance
+    ):
         artifact_provenance = require_dflash_companion(args.weights, artifact_provenance)
     corpus_tokens = count_corpus_tokens(args.corpus)
 
@@ -3526,8 +3882,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         all_cases = build_cases(
-            args.preset, args.dflash_draft_tokens, args.dflash_verify_width,
-            args.prefill_chunk or PRODUCTION_PREFILL_CHUNKS, args.prefill_prompt,
+            args.preset,
+            args.dflash_draft_tokens,
+            args.dflash_verify_width,
+            args.prefill_chunk or PRODUCTION_PREFILL_CHUNKS,
+            args.prefill_prompt,
             args.prefill_chunk[0] if args.prefill_chunk else 4096,
         )
     except ValueError as error:
@@ -3538,16 +3897,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.hybrid_width_authority = None
     if args.require_fp8_hybrid:
         width_tool = args.hybrid_width_tool.expanduser().resolve(strict=True)
-        dflash_widths = sorted({
-            resolved_dflash_verify_width(
-                int(_case_option(case, "--draft-tokens") or "0"),
-                int(_case_option(case, "--dflash-verify-width") or "0"),
-            )
-            for case in all_cases
-            if _case_option(case, "--spec") == "dflash"
-        })
+        dflash_widths = sorted(
+            {
+                resolved_dflash_verify_width(
+                    int(_case_option(case, "--draft-tokens") or "0"),
+                    int(_case_option(case, "--dflash-verify-width") or "0"),
+                )
+                for case in all_cases
+                if _case_option(case, "--spec") == "dflash"
+            }
+        )
         args.hybrid_width_authority = build_hybrid_shared_workspace_authority(
-            width_tool, args.bench, args.prefill_chunk or PRODUCTION_PREFILL_CHUNKS,
+            width_tool,
+            args.bench,
+            args.prefill_chunk or PRODUCTION_PREFILL_CHUNKS,
             dflash_widths,
         )
     max_prompt = max_prompt_in_cases(cases)
@@ -3577,7 +3940,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (FileNotFoundError, ValueError):
             raise SystemExit(
                 f"--resume requires the existing schema-v{MATRIX_SCHEMA_VERSION} matrix manifest"
-            )
+            ) from None
         try:
             prior_manifest = json.loads(prior_manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
@@ -3649,7 +4012,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         point_requested_width = int(_case_option(case, "--dflash-verify-width") or "0")
         point_resolved_width = (
             resolved_dflash_verify_width(point_draft_tokens, point_requested_width)
-            if _case_option(case, "--spec") == "dflash" else 0
+            if _case_option(case, "--spec") == "dflash"
+            else 0
         )
         command_records.append(
             {
@@ -3665,7 +4029,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "dflash_verify_width_resolved": point_resolved_width,
                 "dflash_topology": (
                     resolved_dflash_topology(point_draft_tokens, point_resolved_width)
-                    if point_resolved_width else None
+                    if point_resolved_width
+                    else None
                 ),
                 "environment": environment,
                 "raw_diagnostic": str(raw_diagnostic) if raw_diagnostic is not None else None,
@@ -3683,21 +4048,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             "dflash_verify_width_requested": args.dflash_verify_width,
             "dflash_verify_width": (
                 resolved_dflash_verify_width(args.dflash_draft_tokens, args.dflash_verify_width)
-                if args.dflash_draft_tokens is not None else 0
+                if args.dflash_draft_tokens is not None
+                else 0
             ),
             "expected_kv_value_group": args.expected_kv_value_group,
             "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
             "expected_q4_activation_bits": args.expected_q4_activation_bits,
             "expected_w8_activation_bits": args.expected_w8_activation_bits,
-            "expected_fp8_qk_wmma_enabled": bool(args.expected_fp8_qk_wmma),
+            "expected_split512_enabled": bool(args.expected_fp8_qk_wmma),
             "expected_xattention_profile": args.expected_xattention_profile,
             "required_candidate_identity": (
                 "fp8-hybrid-selection-authority" if args.require_fp8_hybrid else None
             ),
             "hybrid_shared_workspace_authority": args.hybrid_width_authority,
             "selected_prefill_chunk": (
-                args.prefill_chunk[0]
-                if args.preset in SELECTED_PREFILL_CHUNK_PRESETS else None
+                args.prefill_chunk[0] if args.preset in SELECTED_PREFILL_CHUNK_PRESETS else None
             ),
             "corpus_sha256": (
                 file_sha256(args.corpus) if args.preset in POWER_BOUND_PRESETS else None
@@ -3708,7 +4073,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "sysfs_path": str(R9700_POWER_PROFILE),
                     "observed": args.power_profile_observed,
                 }
-                if args.preset in POWER_BOUND_PRESETS else None
+                if args.preset in POWER_BOUND_PRESETS
+                else None
             ),
             "concurrency": list(args.concurrency),
             "commands": command_records,
@@ -3723,33 +4089,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             prior_value = prior_manifest.get(key)
             if key == "power_profile" and isinstance(prior_value, dict):
                 prior_value = {
-                    name: prior_value.get(name)
-                    for name in ("required", "sysfs_path", "observed")
+                    name: prior_value.get(name) for name in ("required", "sysfs_path", "observed")
                 }
             if prior_value != value:
                 raise SystemExit(f"--resume matrix contract changed: {key}")
 
     commands_preamble = "#!/usr/bin/env bash\nset -euo pipefail\n"
     if args.preset in POWER_BOUND_PRESETS:
-        commands_preamble += (
-            f"test \"$(cat {shlex.quote(str(R9700_POWER_PROFILE))})\" = auto\n"
-        )
+        commands_preamble += f'test "$(cat {shlex.quote(str(R9700_POWER_PROFILE))})" = auto\n'
     commands_epilogue = ""
     if args.preset in POWER_RECHECK_PRESETS:
-        commands_epilogue = (
-            f"\ntest \"$(cat {shlex.quote(str(R9700_POWER_PROFILE))})\" = auto\n"
-        )
-    commands_text = (
-        commands_preamble + "\n" + "\n\n".join(commands_sh) + "\n"
-        + commands_epilogue
-    )
+        commands_epilogue = f'\ntest "$(cat {shlex.quote(str(R9700_POWER_PROFILE))})" = auto\n'
+    commands_text = commands_preamble + "\n" + "\n\n".join(commands_sh) + "\n" + commands_epilogue
     durable_replace_text(out_dir / "commands.sh", commands_text)
 
     if args.dry_run:
         bench_provenance = {"path": str(args.bench), "exists": args.bench.is_file()}
-        write_manifest(
-            out_dir, args, artifact_provenance, bench_provenance, cases, command_records
-        )
+        write_manifest(out_dir, args, artifact_provenance, bench_provenance, cases, command_records)
         print(f"wrote dry-run matrix to {out_dir}")
         print(f"cases: {len(cases)}; points: {len(points)}")
         return 0
@@ -3758,9 +4114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.bench.is_file():
             raise SystemExit(f"benchmark executable not found: {args.bench}")
         bench_provenance = inspect_executable(args.bench)
-        write_manifest(
-            out_dir, args, artifact_provenance, bench_provenance, cases, command_records
-        )
+        write_manifest(out_dir, args, artifact_provenance, bench_provenance, cases, command_records)
         print(f"wrote provenance-bound command matrix to {out_dir}")
         print(f"cases: {len(cases)}; points: {len(points)}; no benchmark executed")
         return 0
@@ -3775,6 +4129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "--build",
                 str(REPO_ROOT / "build-r9700"),
                 "--parallel",
+                "8",
                 "--target",
                 "ninfer_bench",
             ],
@@ -3797,7 +4152,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.bench.is_file():
         raise SystemExit(f"bench binary not found after build: {args.bench}")
     bench_provenance = inspect_executable(args.bench)
-    if args.resume and prior_manifest is not None and prior_manifest.get("bench") != bench_provenance:
+    if (
+        args.resume
+        and prior_manifest is not None
+        and prior_manifest.get("bench") != bench_provenance
+    ):
         raise SystemExit("--resume benchmark executable bytes differ from the existing matrix")
     write_manifest(out_dir, args, artifact_provenance, bench_provenance, cases, command_records)
 
@@ -3833,10 +4192,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         case=case,
                         concurrency=concurrency,
                     )
-                print(
-                    f"[{index}/{len(points)}] skip {case.name} C={concurrency} "
-                    "(existing report)"
-                )
+                print(f"[{index}/{len(points)}] skip {case.name} C={concurrency} (existing report)")
                 continue
             except (json.JSONDecodeError, OSError, TypeError, ValueError):
                 remove_runner_owned_file(report_path)
@@ -3933,20 +4289,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
 
-    finished_artifact = bind_n16_migration_receipt(
-        args.weights, inspect_artifact(args.weights)
-    )
+    finished_artifact = bind_n16_migration_receipt(args.weights, inspect_artifact(args.weights))
     if args.require_fp8_hybrid:
         if finished_artifact.get("weights_id") == HYBRID_BASE_WEIGHTS_ID:
-            ppl_run.require_fp8_hybrid_candidate({
-                **finished_artifact, "bytes": finished_artifact["file_size_bytes"],
-            })
+            ppl_run.require_fp8_hybrid_candidate(
+                {
+                    **finished_artifact,
+                    "bytes": finished_artifact["file_size_bytes"],
+                }
+            )
         else:
             finished_artifact = require_fp8_hybrid_artifact(
                 args.weights, finished_artifact, args.preset
             )
-    if (args.preset in DFLASH_CAMPAIGN_PRESETS
-            and "dflash_conversion_report" not in finished_artifact):
+    if (
+        args.preset in DFLASH_CAMPAIGN_PRESETS
+        and "dflash_conversion_report" not in finished_artifact
+    ):
         finished_artifact = require_dflash_companion(args.weights, finished_artifact)
     if finished_artifact != artifact_provenance:
         failures.append(
@@ -3974,26 +4333,29 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.prefill_chunk_authority_record["selected_prefill_chunk"],
             )
         except (OSError, ValueError) as error:
-            failures.append({
-                "case": "prefill_chunk_authority",
-                "error": f"selected-chunk authority failed final revalidation: {error}",
-            })
+            failures.append(
+                {
+                    "case": "prefill_chunk_authority",
+                    "error": f"selected-chunk authority failed final revalidation: {error}",
+                }
+            )
         else:
             if finished_chunk_authority != args.prefill_chunk_authority_record:
-                failures.append({
-                    "case": "prefill_chunk_authority",
-                    "error": "selected-chunk authority changed during the matrix",
-                    "started": args.prefill_chunk_authority_record,
-                    "finished": finished_chunk_authority,
-                })
+                failures.append(
+                    {
+                        "case": "prefill_chunk_authority",
+                        "error": "selected-chunk authority changed during the matrix",
+                        "started": args.prefill_chunk_authority_record,
+                        "finished": finished_chunk_authority,
+                    }
+                )
     if args.preset in POWER_RECHECK_PRESETS:
         try:
             args.power_profile_rechecked_after = require_auto_power_profile()
         except ValueError as error:
             failures.append({"case": "power_profile", "error": str(error)})
             args.power_profile_rechecked_after = "not-auto-or-unreadable"
-        write_manifest(out_dir, args, artifact_provenance, bench_provenance,
-                       cases, command_records)
+        write_manifest(out_dir, args, artifact_provenance, bench_provenance, cases, command_records)
 
     parity_payload: dict[str, Any] | None = None
     if args.preset in ("dflash-pareto", "dflash-shortlist"):
@@ -4005,7 +4367,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 artifact=artifact_provenance,
                 bench=bench_provenance,
             )
-            failures.extend({"case": "dflash_greedy_parity", **failure} for failure in parity_failures)
+            failures.extend(
+                {"case": "dflash_greedy_parity", **failure} for failure in parity_failures
+            )
         except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
             failures.append(
                 {"case": "dflash_greedy_parity", "error": f"failed to compare tokens: {exc}"}
@@ -4022,10 +4386,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 for failure in determinism_failures
             )
         except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
-            failures.append({
-                "case": "dflash_proposal_determinism",
-                "error": f"failed to compare repeated proposal traces: {exc}",
-            })
+            failures.append(
+                {
+                    "case": "dflash_proposal_determinism",
+                    "error": f"failed to compare repeated proposal traces: {exc}",
+                }
+            )
 
     if (
         args.preset == "dflash-pareto"
@@ -4043,14 +4409,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 required_concurrency=args.concurrency,
             )
             failures.extend(
-                {"case": "dflash_generated_quality", **failure}
-                for failure in quality_failures
+                {"case": "dflash_generated_quality", **failure} for failure in quality_failures
             )
         except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
-            failures.append({
-                "case": "dflash_generated_quality",
-                "error": f"failed to assemble generated quality evidence: {exc}",
-            })
+            failures.append(
+                {
+                    "case": "dflash_generated_quality",
+                    "error": f"failed to assemble generated quality evidence: {exc}",
+                }
+            )
 
     if args.preset == "dflash-shortlist" and parity_payload is not None:
         try:
@@ -4062,13 +4429,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 artifact=artifact_provenance,
                 bench=bench_provenance,
                 provenance_stable=(
-                    finished_artifact == artifact_provenance
-                    and finished_bench == bench_provenance
+                    finished_artifact == artifact_provenance and finished_bench == bench_provenance
                 ),
             )
             failures.extend(
-                {"case": "dflash_shortlist", **failure}
-                for failure in shortlist_failures
+                {"case": "dflash_shortlist", **failure} for failure in shortlist_failures
             )
         except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
             failures.append(

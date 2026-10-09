@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
 import importlib
 import json
 import math
 import os
-from pathlib import Path
 import platform
 import struct
 import sys
-from typing import Iterable, Sequence
-
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 MODEL_ID = "qwen3.8-27b"
 WEIGHTS_ID = "bf16-source"
@@ -35,9 +34,7 @@ SHARD_COUNT = 18
 SOURCE_TENSOR_COUNT = 1199
 SOURCE_TOTAL_BYTES = 55_562_855_904
 GDN_QKV_RANGES = ((0, 2048), (2048, 4096), (4096, 10240))
-DETERMINISTIC_EXECUTION_PROFILE = (
-    "rocm-hipblas-no-atomics-strict-deterministic-pv-gdn-v3"
-)
+DETERMINISTIC_EXECUTION_PROFILE = "rocm-hipblas-no-atomics-strict-deterministic-pv-gdn-v3"
 ATTENTION_PV_SOURCE_ROW_CHUNK = 8192
 ATTENTION_PV_EXECUTION = {
     "implementation": "torch-mm-source-row-chunked-v1",
@@ -51,15 +48,13 @@ ATTENTION_PV_EXECUTION = {
 GDN_RECURRENCE_EXECUTION = {
     "dispatch": "T=1-project-explicit;T>1-fla-fused-recurrent",
     "single_token_implementation": "project-explicit-fp32-recurrence-v1",
-    "multi_token_implementation": (
-        "fla.ops.gated_delta_rule.fused_recurrent_gated_delta_rule"
-    ),
+    "multi_token_implementation": ("fla.ops.gated_delta_rule.fused_recurrent_gated_delta_rule"),
     "qkv_input_dtype": "bfloat16",
     "gate_state_input_dtype": "float32",
     "output_dtype": "bfloat16",
     "final_state_dtype": "float32",
     "output_final_state": True,
-    "scale": 128 ** -0.5,
+    "scale": 128**-0.5,
 }
 DETERMINISTIC_ENVIRONMENT = {
     "TORCH_BLAS_PREFER_HIPBLASLT": "0",
@@ -87,11 +82,16 @@ FORBIDDEN_EXECUTION_ENVIRONMENT = (
     "PYTORCH_CUDA_ALLOC_CONF",
 )
 EXECUTION_ENVIRONMENT_KEYS = (
-    "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "LD_LIBRARY_PATH",
+    "HIP_VISIBLE_DEVICES",
+    "ROCR_VISIBLE_DEVICES",
+    "LD_LIBRARY_PATH",
     *DETERMINISTIC_ENVIRONMENT,
     *FORBIDDEN_EXECUTION_ENVIRONMENT,
-    "FLA_CACHE_MODE", "FLA_CACHE_RESULTS", "FLA_CONFIG_DIR",
-    "FLA_DISABLE_BACKEND_DISPATCH", "FLA_DISABLE_TENSOR_CACHE",
+    "FLA_CACHE_MODE",
+    "FLA_CACHE_RESULTS",
+    "FLA_CONFIG_DIR",
+    "FLA_DISABLE_BACKEND_DISPATCH",
+    "FLA_DISABLE_TENSOR_CACHE",
     "TRITON_CACHE_DIR",
 )
 TRITON_CODEGEN_EXECUTION = {
@@ -168,8 +168,7 @@ def establish_deterministic_environment() -> dict[str, str]:
     forbidden = [key for key in FORBIDDEN_EXECUTION_ENVIRONMENT if key in os.environ]
     if forbidden:
         raise ValueError(
-            "deterministic BF16 execution forbids environment override(s): "
-            + ", ".join(forbidden)
+            "deterministic BF16 execution forbids environment override(s): " + ", ".join(forbidden)
         )
     for key, required in DETERMINISTIC_ENVIRONMENT.items():
         current = os.environ.get(key)
@@ -243,19 +242,16 @@ def resolved_triton_codegen(triton) -> dict:
         "amd_local_prefetch": knobs.amd.local_prefetch,
         "amd_use_async_copy": knobs.amd.use_async_copy,
         "amd_use_block_pingpong": (
-            arch in {"gfx942", "gfx950"}
-            if raw_block_pingpong is None else raw_block_pingpong
+            arch in {"gfx942", "gfx950"} if raw_block_pingpong is None else raw_block_pingpong
         ),
         "amd_use_in_thread_transpose": (
-            arch == "gfx942"
-            if raw_in_thread_transpose is None else raw_in_thread_transpose
+            arch == "gfx942" if raw_in_thread_transpose is None else raw_in_thread_transpose
         ),
         "amd_scalarize_packed_fops": knobs.amd.scalarize_packed_fops,
     }
     if result != TRITON_CODEGEN_EXECUTION:
         raise RuntimeError(
-            f"deterministic BF16 Triton codegen {result!r}; "
-            f"expected {TRITON_CODEGEN_EXECUTION!r}"
+            f"deterministic BF16 Triton codegen {result!r}; expected {TRITON_CODEGEN_EXECUTION!r}"
         )
     return result
 
@@ -331,9 +327,7 @@ def expected_text_tensors() -> tuple[TensorRequirement, ...]:
     ]
     for layer in range(LAYERS):
         prefix = f"model.language_model.layers.{layer}."
-        requirements.append(
-            TensorRequirement(prefix + "input_layernorm.weight", (HIDDEN_SIZE,))
-        )
+        requirements.append(TensorRequirement(prefix + "input_layernorm.weight", (HIDDEN_SIZE,)))
         if layer in FULL_ATTENTION_LAYERS:
             requirements.extend(
                 (
@@ -385,19 +379,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Score Qwen3.8-27B directly from its complete BF16 safetensors checkpoint."
     )
-    parser.add_argument("--weights", type=Path, required=True, help="complete BF16 source directory")
+    parser.add_argument(
+        "--weights", type=Path, required=True, help="complete BF16 source directory"
+    )
     parser.add_argument("--ids", type=Path, required=True, help="whitespace-separated token ids")
     parser.add_argument(
         "--scheme",
         default=BF16_SCHEME,
-        help=(
-            f"report/formula profile: {BF16_SCHEME}, {G16_CACHE_SCHEME}, or "
-            f"{G32_CACHE_SCHEME}"
-        ),
+        help=(f"report/formula profile: {BF16_SCHEME}, {G16_CACHE_SCHEME}, or {G32_CACHE_SCHEME}"),
     )
     parser.add_argument("--schedule", choices=("prefill", "decode"), default="prefill")
     parser.add_argument("--skip", default="half", help="half or a nonnegative token count")
-    parser.add_argument("--tokens", type=int, default=0, help="score the first N ids; zero means all")
+    parser.add_argument(
+        "--tokens", type=int, default=0, help="score the first N ids; zero means all"
+    )
     parser.add_argument("--prefill-chunk", type=int, default=4096)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--out-json", default="-", help="JSON path or - for stdout")
@@ -435,9 +430,7 @@ def parse_options(argv: Sequence[str] | None = None) -> ScorerOptions:
     elif args.draft_tokens != 0:
         raise ValueError("--draft-tokens requires --spec mtp")
     if args.device_graph:
-        raise ValueError(
-            "the independent BF16 scorer has no Device Graph; use --no-device-graph"
-        )
+        raise ValueError("the independent BF16 scorer has no Device Graph; use --no-device-graph")
     if args.trace_json is not None and args.out_json != "-":
         output = Path(args.out_json).resolve()
         result_paths = {
@@ -675,8 +668,7 @@ def validate_checkpoint_files(source: Path) -> dict[str, str]:
     if missing_names:
         raise ValueError(f"BF16 source index is missing text tensor {missing_names[0]}")
     expected_shards = {
-        f"model-{part:05d}-of-{SHARD_COUNT:05d}.safetensors"
-        for part in range(1, SHARD_COUNT + 1)
+        f"model-{part:05d}-of-{SHARD_COUNT:05d}.safetensors" for part in range(1, SHARD_COUNT + 1)
     }
     indexed_shards = set(weight_map.values())
     if indexed_shards != expected_shards:
@@ -700,10 +692,7 @@ def file_sha256(path: Path) -> str:
 
 def source_shard_sha256(source: Path, weight_map: dict[str, str]) -> tuple[tuple[str, str], ...]:
     """Hash the exact indexed checkpoint payload files in stable shard-name order."""
-    return tuple(
-        (name, file_sha256(source / name))
-        for name in sorted(set(weight_map.values()))
-    )
+    return tuple((name, file_sha256(source / name)) for name in sorted(set(weight_map.values())))
 
 
 def ids_sha256(ids: Sequence[int]) -> str:
@@ -751,9 +740,7 @@ def result_payload(
         "cache_diagnostic_scope": "full-attention-kv-only" if cache_diagnostic else None,
         "cache_key_codec": "ocp-e4m3fn-rne-satfinite" if cache_diagnostic else None,
         "cache_value_codec": (
-            "signed-int4-rne-symmetric-7-fp16-group-scale"
-            if cache_diagnostic
-            else None
+            "signed-int4-rne-symmetric-7-fp16-group-scale" if cache_diagnostic else None
         ),
         "cache_append_boundary": (
             "represented BF16 post-RoPE K and represented BF16 projected V"
@@ -761,9 +748,7 @@ def result_payload(
             else None
         ),
         "cache_use_boundary": (
-            "decode stored K/V to FP32 attention operands"
-            if cache_diagnostic
-            else None
+            "decode stored K/V to FP32 attention operands" if cache_diagnostic else None
         ),
         "schedule": options.schedule,
         "spec": options.spec,
@@ -794,9 +779,7 @@ def clear_result(options: ScorerOptions) -> None:
     targets = []
     if options.out_json != "-":
         path = Path(options.out_json)
-        targets.extend(
-            (path, _sidecar_path(path, ".nllf32"), _sidecar_path(path, ".argmaxi32"))
-        )
+        targets.extend((path, _sidecar_path(path, ".nllf32"), _sidecar_path(path, ".argmaxi32")))
     if options.trace_json is not None:
         targets.append(options.trace_json)
     for target in targets:
@@ -841,19 +824,19 @@ __all__ = [
     "EXECUTION_ENVIRONMENT_KEYS",
     "FORBIDDEN_EXECUTION_ENVIRONMENT",
     "FULL_ATTENTION_LAYERS",
-    "GDN_QKV_RANGES",
-    "GDN_RECURRENCE_EXECUTION",
     "G16_CACHE_SCHEME",
     "G32_CACHE_SCHEME",
+    "GDN_QKV_RANGES",
+    "GDN_RECURRENCE_EXECUTION",
     "MATMUL_REDUCTION_EXECUTION",
     "MODEL_ID",
+    "TOKEN_DOMAIN",
+    "TRITON_CODEGEN_EXECUTION",
+    "WEIGHTS_ID",
     "ScoreProvenance",
     "ScoreVectors",
     "ScorerOptions",
-    "TOKEN_DOMAIN",
-    "TRITON_CODEGEN_EXECUTION",
     "TensorRequirement",
-    "WEIGHTS_ID",
     "build_parser",
     "cache_value_group",
     "clear_result",
@@ -871,8 +854,8 @@ __all__ = [
     "resolve_decode_prefix",
     "resolve_score_begin",
     "resolve_skip",
-    "resolved_preferred_blas_library",
     "resolved_matmul_reduction",
+    "resolved_preferred_blas_library",
     "resolved_triton_codegen",
     "result_payload",
     "source_shard_sha256",

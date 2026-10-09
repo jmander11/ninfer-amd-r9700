@@ -25,7 +25,7 @@ def check(path: Path) -> dict[str, int]:
         raise ValueError(f"exact grouped-head symbol count is {len(selected)}, expected one")
     index = selected[0]
     end = begins[index + 1].start() if index + 1 < len(begins) else len(text)
-    body = text[begins[index].start():end]
+    body = text[begins[index].start() : end]
     lds = one(body, r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS size")
     private = one(body, r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)", "private size")
     vgpr = one(body, r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)", "VGPR count")
@@ -42,8 +42,13 @@ def check(path: Path) -> dict[str, int]:
         raise ValueError("grouped-head kernel must retain four workgroup barrier pairs")
     if re.search(r"\b(?:v_wmma|v_mfma|global_inv)\b", body):
         raise ValueError("grouped-head symbol contains a forbidden matrix/cache instruction")
-    return {"lds": lds, "vgpr": vgpr, "occupancy": occupancy,
-            "scratch": scratch, "barriers": signals}
+    return {
+        "lds": lds,
+        "vgpr": vgpr,
+        "occupancy": occupancy,
+        "scratch": scratch,
+        "barriers": signals,
+    }
 
 
 if __name__ == "__main__":

@@ -17,14 +17,14 @@ from tools.convert.qwen3.common.inventory import (
     DIRECT_FORMATS,
     FP32,
     I32,
+    W8,
     ResourceSpec,
     StoredObjectSpec,
     TensorSpec,
-    W8,
     tensor_spec,
 )
-from . import source_inventory
 
+from . import source_inventory
 
 MODEL_ID = "qwen3.8-27b"
 # This identity is provisional and cannot be mistaken for the final R9700
@@ -66,7 +66,7 @@ def validate_inventory() -> None:
     ):
         raise ValueError("R9700 candidate tensor shapes differ from Qwen3.8 source inventory")
     expected = {BF16: 582, FP32: 96, I32: 1, W8: 439}
-    if FORMAT_COUNTS != expected:
+    if expected != FORMAT_COUNTS:
         raise ValueError(
             f"R9700 candidate format counts differ: expected {expected}, got {FORMAT_COUNTS}"
         )

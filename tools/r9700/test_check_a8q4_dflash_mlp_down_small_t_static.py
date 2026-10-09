@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import subprocess
 import unittest
 from pathlib import Path
 
 from tools.r9700.check_a8q4_dflash_mlp_down_small_t_static import check
 
-
 ASSEMBLY = Path(__file__).resolve().parent / "build" / "a8q4_dflash_mlp_down_small_t.s"
+
+
+def setUpModule() -> None:
+    # Check the assembly of the current source, never a stale build product.
+    subprocess.run(
+        [
+            "make",
+            "-s",
+            "-C",
+            str(Path(__file__).resolve().parent),
+            "build/a8q4_dflash_mlp_down_small_t.s",
+        ],
+        check=True,
+    )
 
 
 class MlpDownSmallTStaticTest(unittest.TestCase):

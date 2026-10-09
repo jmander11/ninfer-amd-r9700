@@ -41,7 +41,7 @@ struct KVCacheAppendPrefixPagedView {
  * and the Op neither decides nor publishes a frontier. The paged K/V planes use the DFlash Full
  * head-major order [128,64,Nphysical,8].
  *
- * The registered request-batch domain is B=1..4. The caller guarantees positive W,
+ * The registered request-batch domain is B=1..8. The caller guarantees positive W,
  * 0 <= counts[b] <= W within the declared envelope, valid
  * sequential nonnegative positions, pairwise non-aliasing, and materialized block-table entries
  * for every represented position. The only registered geometry is D=128, Hkv=8, page size 64,

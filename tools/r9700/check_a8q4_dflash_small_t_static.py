@@ -8,14 +8,15 @@ import re
 from pathlib import Path
 
 WIDTHS = (4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 24)
-EXACT_VGPR = {4: 26, 5: 29, 6: 41, 8: 51, 10: 60, 12: 54,
-              15: 64, 16: 67, 18: 74, 20: 84, 24: 99}
+EXACT_VGPR = {4: 26, 5: 29, 6: 41, 8: 51, 10: 60, 12: 54, 15: 64, 16: 67, 18: 74, 20: 84, 24: 99}
 EXACT_OCCUPANCY = {tokens: (12 if tokens == 24 else 16) for tokens in WIDTHS}
 
 
 def _symbol(assembly: str, tokens: int) -> tuple[str, str]:
     marker = f"a8q4g64_linear_dflash_small_t_kernelILj{tokens}EE"
-    matches = list(re.finditer(r"; -- Begin function ([^\n]*" + re.escape(marker) + r"[^\n]*)", assembly))
+    matches = list(
+        re.finditer(r"; -- Begin function ([^\n]*" + re.escape(marker) + r"[^\n]*)", assembly)
+    )
     if len(matches) != 1:
         raise ValueError(f"T{tokens}: expected exactly one kernel symbol, found {len(matches)}")
     begin = matches[0].start()
@@ -68,7 +69,8 @@ def check(assembly: str) -> dict[int, dict[str, int]]:
         marker = f"a8q4g64_linear_dflash_small_t_kernelILj{tokens}EE"
         yaml = re.findall(
             r"\.max_flat_workgroup_size:\s*(\d+)\s*\n\s*\.name:\s*[^\n]*"
-            + re.escape(marker) + r"[^\n]*\n[\s\S]*?\.vgpr_count:\s*(\d+)"
+            + re.escape(marker)
+            + r"[^\n]*\n[\s\S]*?\.vgpr_count:\s*(\d+)"
             r"\s*\n\s*\.vgpr_spill_count:\s*(\d+)\s*\n\s*\.wavefront_size:\s*(\d+)",
             assembly,
         )
@@ -77,20 +79,34 @@ def check(assembly: str) -> dict[int, dict[str, int]]:
         maximum_workgroup, yaml_vgpr, vgpr_spills, yaml_wave = map(int, yaml[0])
         occupancy = int(occupancies[0])
         scratch_bytes = int(scratch[0])
-        if (vgpr != EXACT_VGPR[tokens] or int(yaml_vgpr) != vgpr or lds != 0 or
-                private != 0 or scratch_bytes != 0 or int(vgpr_spills) != 0 or
-                wave32 != 1 or int(yaml_wave) != 32 or maximum_workgroup != 256 or
-                occupancy != EXACT_OCCUPANCY[tokens]):
+        if (
+            vgpr != EXACT_VGPR[tokens]
+            or int(yaml_vgpr) != vgpr
+            or lds != 0
+            or private != 0
+            or scratch_bytes != 0
+            or int(vgpr_spills) != 0
+            or wave32 != 1
+            or int(yaml_wave) != 32
+            or maximum_workgroup != 256
+            or occupancy != EXACT_OCCUPANCY[tokens]
+        ):
             raise ValueError(
                 f"T{tokens}: resource identity mismatch: vgpr={vgpr}/{yaml_vgpr} "
                 f"lds={lds} private={private} scratch={scratch_bytes} spills={vgpr_spills} "
                 f"wave={wave32}/{yaml_wave} max_workgroup={maximum_workgroup} "
                 f"occupancy={occupancy}"
             )
-        result[tokens] = {"dot8": dot8, "weight_loads": weight_loads,
-                          "scale_loads": scale_loads, "vgpr": vgpr,
-                          "lds": lds, "private": private,
-                          "max_workgroup": maximum_workgroup, "occupancy": occupancy}
+        result[tokens] = {
+            "dot8": dot8,
+            "weight_loads": weight_loads,
+            "scale_loads": scale_loads,
+            "vgpr": vgpr,
+            "lds": lds,
+            "private": private,
+            "max_workgroup": maximum_workgroup,
+            "occupancy": occupancy,
+        }
     return result
 
 

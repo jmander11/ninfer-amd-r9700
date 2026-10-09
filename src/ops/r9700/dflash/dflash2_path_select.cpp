@@ -20,10 +20,10 @@ bool is_quantized_projection(QType qtype) {
 
 void require_sequence_extent(std::int32_t tokens, std::int32_t batch, const char* op) {
     if (tokens <= 0 || batch <= 0 || batch > kDflash2PathSelectMaxBatch) {
-        throw std::invalid_argument(std::string(op) + ": T and B must be positive with B<=4");
+        throw std::invalid_argument(std::string(op) + ": T and B must be positive with B<=8");
     }
     if (batch > 1 && tokens > kDflash2PathSelectMaxWidthWhenBatched) {
-        throw std::invalid_argument(std::string(op) + ": B=2..4 admits T=1..16");
+        throw std::invalid_argument(std::string(op) + ": B=2..8 admits T=1..16");
     }
 }
 
@@ -33,7 +33,8 @@ void require_hidden(const Tensor& hidden, std::int32_t tokens, std::int32_t batc
     }
     if (hidden.ne[0] != kDflash2PathSelectHidden || hidden.ne[1] != tokens ||
         hidden.ne[2] != batch || hidden.ne[3] != 1) {
-        throw std::invalid_argument("dflash2_path_select: hidden must be BF16 [5120,T] or [5120,T,B]");
+        throw std::invalid_argument(
+            "dflash2_path_select: hidden must be BF16 [5120,T] or [5120,T,B]");
     }
 }
 
@@ -43,7 +44,8 @@ void require_logits(const Tensor& logits) {
     }
     if (logits.ne[0] < kDflash2PathSelectTopK || logits.ne[1] <= 0 || logits.ne[2] <= 0 ||
         logits.ne[3] != 1) {
-        throw std::invalid_argument("dflash2_path_select: logits must be BF16 [V,T] or [V,T,B] with V>=16");
+        throw std::invalid_argument(
+            "dflash2_path_select: logits must be BF16 [V,T] or [V,T,B] with V>=16");
     }
     require_sequence_extent(logits.ne[1], logits.ne[2], "dflash2_path_select");
 }
@@ -104,7 +106,8 @@ void require_selector(const Tensor& ids, const Tensor& q, std::int32_t tokens, s
         throw std::invalid_argument(
             "dflash2_path_select: selector_ids must be I32 [16,T,1,1] or [16,T,B,1]");
     }
-    if (q.ne[0] != kDflash2PathSelectTopK || q.ne[1] != tokens || q.ne[2] != batch || q.ne[3] != 1) {
+    if (q.ne[0] != kDflash2PathSelectTopK || q.ne[1] != tokens || q.ne[2] != batch ||
+        q.ne[3] != 1) {
         throw std::invalid_argument(
             "dflash2_path_select: selector_q must be FP32 [16,T,1,1] or [16,T,B,1]");
     }
@@ -122,9 +125,8 @@ void require_projection_weight(const Weight& weight) {
         }
         return;
     }
-    const QuantLayout expected_layout = weight.qtype == QType::Q4G64_F16S
-                                            ? QuantLayout::Q4N16K16
-                                            : QuantLayout::RowSplit;
+    const QuantLayout expected_layout =
+        weight.qtype == QType::Q4G64_F16S ? QuantLayout::Q4N16K16 : QuantLayout::RowSplit;
     if (!is_quantized_projection(weight.qtype) || weight.layout != expected_layout) {
         throw std::invalid_argument(
             "dflash2_path_select: hidden_projection has the wrong quantized layout");
@@ -144,12 +146,9 @@ void project_hidden(const Tensor& hidden, const Weight& weight, Tensor& projecte
     // not switch this sequence's projection reduction or activation profile.
     for (std::int32_t sequence = 0; sequence < batch; ++sequence) {
         Tensor output = projected.slice(1, sequence * tokens, tokens);
-        ops::linear(flat.slice(1, sequence * tokens, tokens), weight, output,
-                    workspace, stream);
+        ops::linear(flat.slice(1, sequence * tokens, tokens), weight, output, workspace, stream);
     }
 }
-
-constexpr int kTopkSplits = 32;
 
 std::size_t align_workspace(std::size_t bytes) {
     constexpr std::size_t kAlign = 256;
@@ -158,31 +157,20 @@ std::size_t align_workspace(std::size_t bytes) {
 
 std::size_t topk_scratch_bytes(std::int32_t tokens, std::int32_t batch) {
     const std::size_t columns = static_cast<std::size_t>(tokens) * static_cast<std::size_t>(batch);
-    const std::size_t split =
-        columns * static_cast<std::size_t>(kTopkSplits) * kDflash2PathSelectTopK;
-    const std::size_t merged = columns * kDflash2PathSelectTopK;
-    return (split + merged) * (sizeof(float) + sizeof(std::int32_t));
+    return columns * kDflash2PathSelectTopK * (sizeof(float) + sizeof(std::int32_t));
 }
 
 struct TopkScratch {
-    float* split_val;
-    int* split_idx;
     float* cand_val;
     int* cand_idx;
 };
 
-TopkScratch alloc_topk_scratch(WorkspaceArena& workspace, std::int32_t tokens,
-                               std::int32_t batch) {
-    const std::size_t columns = static_cast<std::size_t>(tokens) * static_cast<std::size_t>(batch);
-    const std::size_t split =
-        columns * static_cast<std::size_t>(kTopkSplits) * kDflash2PathSelectTopK;
-    const std::size_t merged = columns * kDflash2PathSelectTopK;
-    auto* bytes = static_cast<std::byte*>(workspace.alloc_bytes(topk_scratch_bytes(tokens, batch)).data);
+TopkScratch alloc_topk_scratch(WorkspaceArena& workspace, std::int32_t tokens, std::int32_t batch) {
+    const std::size_t merged =
+        static_cast<std::size_t>(tokens) * static_cast<std::size_t>(batch) * kDflash2PathSelectTopK;
+    auto* bytes =
+        static_cast<std::byte*>(workspace.alloc_bytes(topk_scratch_bytes(tokens, batch)).data);
     TopkScratch out{};
-    out.split_val = reinterpret_cast<float*>(bytes);
-    bytes += split * sizeof(float);
-    out.split_idx = reinterpret_cast<int*>(bytes);
-    bytes += split * sizeof(std::int32_t);
     out.cand_val = reinterpret_cast<float*>(bytes);
     bytes += merged * sizeof(float);
     out.cand_idx = reinterpret_cast<int*>(bytes);
@@ -212,11 +200,11 @@ std::size_t dflash2_path_select_workspace_capacity_bytes(QType qtype, std::int32
 void dflash2_path_select(const Tensor& logits, const Tensor& hidden,
                          const Weight& hidden_projection, const Tensor& pred_code,
                          const Tensor& succ_code, const Tensor& anchors,
-                         const Tensor& logical_positions,
-                         const SamplingConfig* configs, Tensor& path, WorkspaceArena& workspace,
-                         hipStream_t stream, const Tensor* logit_token_ids, Tensor* selector_ids,
-                         Tensor* selector_q, unsigned long long seed_xor,
-                         std::int32_t position_offset, bool force_greedy) {
+                         const Tensor& logical_positions, const SamplingConfig* configs,
+                         Tensor& path, WorkspaceArena& workspace, hipStream_t stream,
+                         const Tensor* logit_token_ids, Tensor* selector_ids, Tensor* selector_q,
+                         unsigned long long seed_xor, std::int32_t position_offset,
+                         bool force_greedy) {
     require_logits(logits);
     const std::int32_t vocab  = logits.ne[0];
     const std::int32_t tokens = logits.ne[1];
@@ -251,18 +239,17 @@ void dflash2_path_select(const Tensor& logits, const Tensor& hidden,
         throw std::invalid_argument("dflash2_path_select: path must not alias inputs");
     }
 
-    auto scratch_scope           = workspace.scope();
-    const DeviceSpan proj_span   = workspace.alloc_bytes(hidden_proj_bytes(tokens, batch));
+    auto scratch_scope         = workspace.scope();
+    const DeviceSpan proj_span = workspace.alloc_bytes(hidden_proj_bytes(tokens, batch));
     Tensor hidden_proj(proj_span.data, DType::BF16, {kDflash2PathSelectRank, tokens * batch});
     project_hidden(hidden, hidden_projection, hidden_proj, tokens, batch, workspace, stream);
     const TopkScratch topk = alloc_topk_scratch(workspace, tokens, batch);
-    detail::dflash2_column_topk_launch(logits, topk.split_val, topk.split_idx, topk.cand_val,
-                                       topk.cand_idx, logit_token_ids, stream);
+    detail::dflash2_column_topk_launch(logits, topk.cand_val, topk.cand_idx, logit_token_ids,
+                                       stream);
     detail::dflash2_path_select_launch(topk.cand_val, topk.cand_idx, hidden_proj, pred_code,
-                                       succ_code,
-                                       anchors, logical_positions, path, tokens, batch, configs,
-                                       stream, selector_ids, selector_q, seed_xor, position_offset,
-                                       force_greedy);
+                                       succ_code, anchors, logical_positions, path, tokens, batch,
+                                       configs, stream, selector_ids, selector_q, seed_xor,
+                                       position_offset, force_greedy);
 }
 
 void dflash2_tree_select(const Tensor& logits, const Tensor& hidden,
@@ -309,8 +296,8 @@ void dflash2_tree_select(const Tensor& logits, const Tensor& hidden,
     require_wb(rope_positions, "rope_positions", DType::I32);
     require_wb(ancestor_mask, "ancestor_mask", DType::I32);
     if (valid_columns.dtype != DType::I32 || !valid_columns.is_contiguous() ||
-        valid_columns.data == nullptr || valid_columns.ne[0] != batch ||
-        valid_columns.ne[1] != 1 || valid_columns.ne[2] != 1 || valid_columns.ne[3] != 1) {
+        valid_columns.data == nullptr || valid_columns.ne[0] != batch || valid_columns.ne[1] != 1 ||
+        valid_columns.ne[2] != 1 || valid_columns.ne[3] != 1) {
         throw std::invalid_argument("dflash2_tree_select: valid_columns must be I32 [B]");
     }
     if (1 + kDflash2TreeFrontier * tokens > kDflash2TreeExpandWidth) {
@@ -322,11 +309,10 @@ void dflash2_tree_select(const Tensor& logits, const Tensor& hidden,
     Tensor hidden_proj(proj_span.data, DType::BF16, {kDflash2PathSelectRank, tokens * batch});
     project_hidden(hidden, hidden_projection, hidden_proj, tokens, batch, workspace, stream);
     const TopkScratch topk = alloc_topk_scratch(workspace, tokens, batch);
-    detail::dflash2_column_topk_launch(logits, topk.split_val, topk.split_idx, topk.cand_val,
-                                       topk.cand_idx, logit_token_ids, stream);
+    detail::dflash2_column_topk_launch(logits, topk.cand_val, topk.cand_idx, logit_token_ids,
+                                       stream);
     detail::dflash2_tree_select_launch(topk.cand_val, topk.cand_idx, hidden_proj, pred_code,
-                                       succ_code,
-                                       anchors, frontiers, verify_ids, parent_index,
+                                       succ_code, anchors, frontiers, verify_ids, parent_index,
                                        cache_positions, rope_positions, ancestor_mask,
                                        valid_columns, tokens, batch, width, stream);
 }

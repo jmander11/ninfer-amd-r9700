@@ -17,38 +17,45 @@
 #include <vector>
 
 namespace {
-constexpr std::uint32_t kFeatures = 5120U;
-constexpr float kModelEps = 1.0e-6F;
+constexpr std::uint32_t kFeatures    = 5120U;
+constexpr float kModelEps            = 1.0e-6F;
 constexpr std::size_t kGuardElements = 32U;
-constexpr std::uint16_t kGuardBits = 0x5555U;
+constexpr std::uint16_t kGuardBits   = 0x5555U;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
+
 void hip_check(hipError_t status, const char* expression, const char* file, int line) {
     if (status == hipSuccess) return;
     std::ostringstream message;
     message << file << ':' << line << ": " << expression << ": " << hipGetErrorString(status);
     fail(message.str());
 }
+
 #define HIP_CHECK(expression) hip_check((expression), #expression, __FILE__, __LINE__)
 
-template <class T> class DeviceBuffer {
+template <class T>
+class DeviceBuffer {
 public:
     explicit DeviceBuffer(std::size_t count) : count_(count) {
         HIP_CHECK(hipMalloc(&data_, count * sizeof(T)));
     }
+
     ~DeviceBuffer() { (void)hipFree(data_); }
-    DeviceBuffer(const DeviceBuffer&) = delete;
+
+    DeviceBuffer(const DeviceBuffer&)            = delete;
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
     [[nodiscard]] T* get() const noexcept { return data_; }
+
     [[nodiscard]] std::size_t size() const noexcept { return count_; }
 private:
-    T* data_ = nullptr;
+    T* data_           = nullptr;
     std::size_t count_ = 0;
 };
 
 struct Error {
-    double max_abs = 0.0;
-    double relative_l2 = 0.0;
+    double max_abs               = 0.0;
+    double relative_l2           = 0.0;
     std::uint32_t max_bf16_steps = 0;
 };
 
@@ -82,7 +89,7 @@ std::uint32_t bf16_steps(std::uint16_t lhs, std::uint16_t rhs) {
 std::uint64_t round_ties_even(double value) {
     const double base = std::floor(value);
     const double tail = value - base;
-    auto integer = static_cast<std::uint64_t>(base);
+    auto integer      = static_cast<std::uint64_t>(base);
     if (tail > 0.5 || (tail == 0.5 && (integer & 1U) != 0U)) ++integer;
     return integer;
 }
@@ -90,11 +97,11 @@ std::uint64_t round_ties_even(double value) {
 std::uint16_t bf16_bits_direct(double value) {
     if (!std::isfinite(value)) fail("nonfinite FP64 oracle value");
     const std::uint16_t sign = std::signbit(value) ? 0x8000U : 0U;
-    const double magnitude = std::abs(value);
+    const double magnitude   = std::abs(value);
     if (magnitude == 0.0) return sign;
-    int exponent = 0;
+    int exponent          = 0;
     const double fraction = std::frexp(magnitude, &exponent);
-    int biased = exponent - 1 + 127;
+    int biased            = exponent - 1 + 127;
     if (biased <= 0) {
         const auto mantissa = round_ties_even(std::ldexp(magnitude, 133));
         if (mantissa == 0U) return sign;
@@ -107,21 +114,22 @@ std::uint16_t bf16_bits_direct(double value) {
         ++biased;
     }
     if (biased >= 255) return static_cast<std::uint16_t>(sign | 0x7f80U);
-    return static_cast<std::uint16_t>(
-        sign | (static_cast<std::uint16_t>(biased) << 7U) |
-        static_cast<std::uint16_t>(significand - 128U));
+    return static_cast<std::uint16_t>(sign | (static_cast<std::uint16_t>(biased) << 7U) |
+                                      static_cast<std::uint16_t>(significand - 128U));
 }
 
-template <class T> void upload(DeviceBuffer<T>& destination, const std::vector<T>& source) {
+template <class T>
+void upload(DeviceBuffer<T>& destination, const std::vector<T>& source) {
     if (destination.size() < source.size()) fail("upload extent mismatch");
     HIP_CHECK(hipMemcpy(destination.get(), source.data(), source.size() * sizeof(T),
                         hipMemcpyHostToDevice));
 }
 
-template <class T> std::vector<T> download(const DeviceBuffer<T>& source) {
+template <class T>
+std::vector<T> download(const DeviceBuffer<T>& source) {
     std::vector<T> result(source.size());
-    HIP_CHECK(hipMemcpy(result.data(), source.get(), result.size() * sizeof(T),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(result.data(), source.get(), result.size() * sizeof(T), hipMemcpyDeviceToHost));
     return result;
 }
 
@@ -180,14 +188,14 @@ std::vector<hip_bfloat16> make_input(std::uint32_t rows, std::uint32_t fixture) 
         float value = 0.0F;
         if (fixture == 0U) {
             const auto code = static_cast<std::int32_t>((index * 37U + 53U) % 509U) - 254;
-            value = static_cast<float>(code) / 127.0F;
+            value           = static_cast<float>(code) / 127.0F;
         } else if (fixture == 1U) {
-            static constexpr std::array<float, 8> values{
-                0.0F, -0.0F, 0x1p-14F, -0x1p-14F, 0.03125F, -0.5F, 8.0F, -31.75F};
+            static constexpr std::array<float, 8> values{0.0F,     -0.0F, 0x1p-14F, -0x1p-14F,
+                                                         0.03125F, -0.5F, 8.0F,     -31.75F};
             value = values[index % values.size()];
         } else {
             const auto code = static_cast<std::int32_t>((index * 97U + 11U) % 8191U) - 4095;
-            value = static_cast<float>(code) / 64.0F;
+            value           = static_cast<float>(code) / 64.0F;
         }
         result[index] = bf16(value);
     }
@@ -198,22 +206,22 @@ std::vector<hip_bfloat16> make_weight() {
     std::vector<hip_bfloat16> result(kFeatures);
     for (std::size_t index = 0; index < result.size(); ++index) {
         const auto code = static_cast<std::int32_t>((index * 29U + 17U) % 257U) - 128;
-        result[index] = bf16(static_cast<float>(code) / 509.0F);
+        result[index]   = bf16(static_cast<float>(code) / 509.0F);
     }
     return result;
 }
 
 Error require_oracle(const std::vector<hip_bfloat16>& actual,
                      const std::vector<hip_bfloat16>& input,
-                     const std::vector<hip_bfloat16>& weight, std::uint32_t rows,
-                     double eps, bool unit_offset) {
+                     const std::vector<hip_bfloat16>& weight, std::uint32_t rows, double eps,
+                     bool unit_offset) {
     if (actual.size() != input.size()) fail("oracle extent mismatch");
     Error error;
-    double squared_error = 0.0;
+    double squared_error     = 0.0;
     double squared_reference = 0.0;
     for (std::uint32_t row = 0; row < rows; ++row) {
         const std::size_t base = static_cast<std::size_t>(row) * kFeatures;
-        double sumsq = 0.0;
+        double sumsq           = 0.0;
         for (std::uint32_t feature = 0; feature < kFeatures; ++feature) {
             const double value = static_cast<float>(input[base + feature]);
             sumsq += value * value;
@@ -221,20 +229,18 @@ Error require_oracle(const std::vector<hip_bfloat16>& actual,
         const double inverse = 1.0 / std::sqrt(sumsq / kFeatures + eps);
         for (std::uint32_t feature = 0; feature < kFeatures; ++feature) {
             const std::size_t index = base + feature;
-            const double gain = static_cast<float>(weight[feature]) +
-                                (unit_offset ? 1.0 : 0.0);
+            const double gain     = static_cast<float>(weight[feature]) + (unit_offset ? 1.0 : 0.0);
             const double expected = static_cast<float>(input[index]) * inverse * gain;
             const double observed = static_cast<float>(actual[index]);
             if (!std::isfinite(expected) || !std::isfinite(observed)) {
                 fail("nonfinite RMSNorm oracle value");
             }
             const double delta = observed - expected;
-            error.max_abs = std::max(error.max_abs, std::abs(delta));
+            error.max_abs      = std::max(error.max_abs, std::abs(delta));
             squared_error += delta * delta;
             squared_reference += expected * expected;
             error.max_bf16_steps = std::max(
-                error.max_bf16_steps,
-                bf16_steps(actual[index].data, bf16_bits_direct(expected)));
+                error.max_bf16_steps, bf16_steps(actual[index].data, bf16_bits_direct(expected)));
         }
     }
     error.relative_l2 = std::sqrt(squared_error / std::max(1.0e-30, squared_reference));
@@ -248,12 +254,11 @@ Error require_oracle(const std::vector<hip_bfloat16>& actual,
 }
 
 void launch_production(const DeviceBuffer<hip_bfloat16>& input,
-                       const DeviceBuffer<hip_bfloat16>& weight,
-                       DeviceBuffer<hip_bfloat16>& output, std::uint32_t rows, float eps,
-                       bool unit_offset, hipStream_t stream) {
-    HIP_CHECK(ninfer::ops::r9700::eager::rmsnorm_bf16(
-        input.get(), weight.get(), output.get() + kGuardElements, kFeatures, rows, eps,
-        unit_offset, stream));
+                       const DeviceBuffer<hip_bfloat16>& weight, DeviceBuffer<hip_bfloat16>& output,
+                       std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) {
+    HIP_CHECK(ninfer::ops::r9700::eager::rmsnorm_bf16(input.get(), weight.get(),
+                                                      output.get() + kGuardElements, kFeatures,
+                                                      rows, eps, unit_offset, stream));
 }
 
 void run_regression(hipStream_t stream) {
@@ -262,11 +267,13 @@ void run_regression(hipStream_t stream) {
     upload(d_weight, weight);
     Error maximum;
     std::uint32_t cases = 0;
-    constexpr std::uint32_t maximum_rows = 24U;
+    std::vector<std::uint32_t> widths;
+    for (std::uint32_t rows = 1U; rows <= 128U; ++rows) widths.push_back(rows);
+    for (const std::uint32_t rows : {255U, 256U, 2048U}) widths.push_back(rows);
     std::array<std::vector<hip_bfloat16>, 18> singleton_outputs;
     std::uint64_t crosswidth_mismatches = 0;
     std::string first_crosswidth_mismatch;
-    for (std::uint32_t rows = 1U; rows <= maximum_rows; ++rows) {
+    for (const std::uint32_t rows : widths) {
         for (const std::uint32_t fixture : {0U, 1U, 2U}) {
             auto input = make_input(rows, fixture);
             // Move the same represented column through every supported lane
@@ -284,12 +291,12 @@ void run_regression(hipStream_t stream) {
                     launch_production(d_input, d_weight, d_output, rows, eps, unit_offset, stream);
                     HIP_CHECK(hipStreamSynchronize(stream));
                     const auto actual = checked_output(d_output, input.size());
-                    const Error error = require_oracle(actual, input, weight, rows, eps,
-                                                       unit_offset);
+                    const Error error =
+                        require_oracle(actual, input, weight, rows, eps, unit_offset);
                     if (rows == 1U) {
                         singleton_outputs[reference_index] = actual;
                     } else {
-                        const auto& reference = singleton_outputs[reference_index];
+                        const auto& reference  = singleton_outputs[reference_index];
                         const std::size_t base = static_cast<std::size_t>(rows - 1U) * kFeatures;
                         for (std::uint32_t feature = 0; feature < kFeatures; ++feature) {
                             if (actual[base + feature].data == reference[feature].data) continue;
@@ -299,25 +306,24 @@ void run_regression(hipStream_t stream) {
                                 detail << "same-column vs T1 mismatch: rows=" << rows
                                        << " lane=" << rows - 1U << " fixture=" << fixture
                                        << " unit_offset=" << unit_offset << " eps=" << eps
-                                       << " feature=" << feature << " actual_bits="
-                                       << actual[base + feature].data << " singleton_bits="
-                                       << reference[feature].data;
+                                       << " feature=" << feature
+                                       << " actual_bits=" << actual[base + feature].data
+                                       << " singleton_bits=" << reference[feature].data;
                                 first_crosswidth_mismatch = detail.str();
                             }
                         }
                     }
                     ++reference_index;
-                    maximum.max_abs = std::max(maximum.max_abs, error.max_abs);
-                    maximum.relative_l2 = std::max(maximum.relative_l2, error.relative_l2);
-                    maximum.max_bf16_steps =
-                        std::max(maximum.max_bf16_steps, error.max_bf16_steps);
+                    maximum.max_abs        = std::max(maximum.max_abs, error.max_abs);
+                    maximum.relative_l2    = std::max(maximum.relative_l2, error.relative_l2);
+                    maximum.max_bf16_steps = std::max(maximum.max_bf16_steps, error.max_bf16_steps);
                     ++cases;
                 }
             }
         }
     }
 
-    for (const std::uint32_t graph_rows : {2U, 5U, 6U, 10U, 24U}) {
+    for (const std::uint32_t graph_rows : {2U, 5U, 6U, 10U, 24U, 64U, 127U}) {
         const auto graph_input = make_input(graph_rows, 0U);
         DeviceBuffer<hip_bfloat16> d_input(graph_input.size());
         DeviceBuffer<hip_bfloat16> d_output(graph_input.size() + 2U * kGuardElements);
@@ -327,7 +333,7 @@ void run_regression(hipStream_t stream) {
         HIP_CHECK(hipStreamSynchronize(stream));
         const auto eager = checked_output(d_output, graph_input.size());
         poison_output(d_output, stream);
-        hipGraph_t graph = nullptr;
+        hipGraph_t graph          = nullptr;
         hipGraphExec_t executable = nullptr;
         HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
         launch_production(d_input, d_weight, d_output, graph_rows, kModelEps, true, stream);
@@ -351,13 +357,13 @@ void run_regression(hipStream_t stream) {
     DeviceBuffer<hip_bfloat16> d_output(malformed_input.size() + 2U * kGuardElements);
     upload(d_input, malformed_input);
     auto reject_without_write = [&](const hip_bfloat16* in, const hip_bfloat16* gain,
-                                    hip_bfloat16* out, std::uint32_t features,
-                                    std::uint32_t rows, float eps, hipStream_t test_stream) {
+                                    hip_bfloat16* out, std::uint32_t features, std::uint32_t rows,
+                                    float eps, hipStream_t test_stream) {
         poison_output(d_output, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
         const auto before = output_bits(d_output);
-        if (ninfer::ops::r9700::eager::rmsnorm_bf16(
-                in, gain, out, features, rows, eps, true, test_stream) != hipErrorInvalidValue) {
+        if (ninfer::ops::r9700::eager::rmsnorm_bf16(in, gain, out, features, rows, eps, true,
+                                                    test_stream) != hipErrorInvalidValue) {
             fail("production boundary accepted malformed input");
         }
         HIP_CHECK(hipStreamSynchronize(stream));
@@ -377,15 +383,14 @@ void run_regression(hipStream_t stream) {
                          std::numeric_limits<float>::infinity(), stream);
     reject_without_write(d_input.get(), d_weight.get(), out, kFeatures, 1U, kModelEps, nullptr);
 
-    std::cout << "r9700 production RMSNorm K5120 rows1.." << maximum_rows
+    std::cout << "r9700 production RMSNorm K5120 rows1..128,255,256,2048"
               << ": oracle/graph/boundary PASS cases=" << cases
               << " max_bf16_steps=" << maximum.max_bf16_steps
-              << " graph_rows=2,5,6,10,24 graph_replays_per_row=2 graph_eager_exact=true"
+              << " graph_rows=2,5,6,10,24,64,127 graph_replays_per_row=2 graph_eager_exact=true"
               << " output_canaries=true malformed_cases=10 crosswidth_mismatches="
-              << crosswidth_mismatches
-              << '\n';
+              << crosswidth_mismatches << '\n';
     if (crosswidth_mismatches != 0U) fail(first_crosswidth_mismatch);
-    std::cout << "RMSNorm same-column T1..24 exact invariance: PASS\n";
+    std::cout << "RMSNorm same-column T1..128/255/256/2048 exact invariance: PASS\n";
 }
 } // namespace
 

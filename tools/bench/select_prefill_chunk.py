@@ -8,23 +8,25 @@ import json
 import math
 import statistics
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.matrix_contract import (
+from tools.bench.matrix_contract import (  # noqa: E402  sys.path bootstrap
     MATRIX_SCHEMA_VERSION,
     PRODUCTION_PREFILL_CHUNKS,
     R9700_KV_PLANE_LAYOUTS,
 )
-from tools.ppl.run import validate_n16_receipt_summary
+from tools.ppl.run import validate_n16_receipt_summary  # noqa: E402  sys.path bootstrap
 
 
 def _runner():
     from tools.bench import run_ninfer_bench_matrix
+
     return run_ninfer_bench_matrix
 
 
@@ -42,6 +44,7 @@ def load_bench_report(*args, **kwargs):
 
 def validate_hybrid_shared_workspace_authority(*args, **kwargs):
     return _runner().validate_hybrid_shared_workspace_authority(*args, **kwargs)
+
 
 ARTIFACT_TYPE = "ninfer_r9700_prefill_chunk_selection"
 SCREENING_ARTIFACT_TYPE = "ninfer_r9700_prefill_chunk_screening"
@@ -66,7 +69,9 @@ MEASUREMENT_SEMANTICS = {
 
 
 def _valid_sha256(value: object) -> bool:
-    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+    return (
+        isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+    )
 
 
 def _identity(manifest: dict[str, Any]) -> tuple[str, int, str]:
@@ -77,12 +82,10 @@ def _identity(manifest: dict[str, Any]) -> tuple[str, int, str]:
         or artifact.get("weights_id") not in REQUIRED_RECIPES
     ):
         raise ValueError("prefill-chunk manifest has an unsupported artifact recipe")
-    validate_n16_receipt_summary(
-        artifact.get("conversion_receipt"), artifact["weights_id"])
+    validate_n16_receipt_summary(artifact.get("conversion_receipt"), artifact["weights_id"])
     if (
         artifact.get("weights_id") == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
-        and manifest.get("required_candidate_identity")
-        != "fp8-hybrid-selection-authority"
+        and manifest.get("required_candidate_identity") != "fp8-hybrid-selection-authority"
     ):
         raise ValueError("prefill-chunk hybrid manifest lacks its selection authority")
     if (
@@ -126,9 +129,7 @@ def _validated_prefill_measurement(
     if not isinstance(speculative, dict) or any(
         speculative.get(key) != value for key, value in expected_speculative.items()
     ):
-        raise ValueError(
-            f"{report_path} is not the spec-none ordinary prefill protocol"
-        )
+        raise ValueError(f"{report_path} is not the spec-none ordinary prefill protocol")
     reps = test.get("reps")
     if not isinstance(reps, list) or len(reps) != 3:
         raise ValueError(f"{report_path} does not retain the exact three prefill repetitions")
@@ -153,9 +154,7 @@ def _validated_prefill_measurement(
             or not math.isfinite(reported)
             or not math.isclose(float(reported), recomputed, rel_tol=2e-6, abs_tol=1e-9)
         ):
-            raise ValueError(
-                f"{report_path} {field} is not derived from its retained repetitions"
-            )
+            raise ValueError(f"{report_path} {field} is not derived from its retained repetitions")
     workspace = test.get("workspace_peak_bytes")
     if type(workspace) is not int or workspace <= 0:
         raise ValueError(f"{report_path} has invalid workspace peak")
@@ -179,7 +178,9 @@ def _owned_path(root: Path, value: object, label: str) -> Path:
     return resolved
 
 
-def _manifest(root: Path, prompt: int, chunks: Sequence[int]) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
+def _manifest(
+    root: Path, prompt: int, chunks: Sequence[int]
+) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
     root = root.expanduser().resolve()
     path = root / "manifest.json"
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -195,7 +196,7 @@ def _manifest(root: Path, prompt: int, chunks: Sequence[int]) -> tuple[dict[str,
         or value.get("expected_kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
         or value.get("expected_q4_activation_bits") != 8
         or value.get("expected_w8_activation_bits") != 8
-        or value.get("expected_fp8_qk_wmma_enabled") is not True
+        or value.get("expected_split512_enabled") is not True
         or not isinstance(value.get("bench"), dict)
         or not _valid_sha256(value["bench"].get("sha256"))
         or type(value["bench"].get("file_size_bytes")) is not int
@@ -214,10 +215,15 @@ def _manifest(root: Path, prompt: int, chunks: Sequence[int]) -> tuple[dict[str,
     _validate_hybrid_authority(value, chunks)
     records = value.get("commands")
     expected = {("production_prefill_chunk", name, 1) for name in cases}
-    actual = {
-        (row.get("suite"), row.get("case"), row.get("concurrency"))
-        for row in records if isinstance(row, dict)
-    } if isinstance(records, list) else set()
+    actual = (
+        {
+            (row.get("suite"), row.get("case"), row.get("concurrency"))
+            for row in records
+            if isinstance(row, dict)
+        }
+        if isinstance(records, list)
+        else set()
+    )
     if not isinstance(records, list) or len(records) != len(expected) or actual != expected:
         raise ValueError(f"{root} does not retain the exact {prompt}-token chunk point set")
     reports: dict[int, dict[str, Any]] = {}
@@ -236,13 +242,24 @@ def _manifest(root: Path, prompt: int, chunks: Sequence[int]) -> tuple[dict[str,
         report_sha256 = file_sha256(report_path)
         report = load_bench_report(
             report_path,
-            value["expected_kv_value_group"], 8, 8, True, 1,
-            value["artifact"], row["command"], case, value["expected_xattention_profile"],
+            value["expected_kv_value_group"],
+            8,
+            8,
+            True,
+            1,
+            value["artifact"],
+            row["command"],
+            case,
+            value["expected_xattention_profile"],
         )
         if file_sha256(report_path) != report_sha256:
             raise ValueError(f"{report_path} bytes changed while validating the chunk matrix")
         tests = report.get("tests")
-        matches = [test for test in tests if test.get("label") == f"pp{prompt}"] if isinstance(tests, list) else []
+        matches = (
+            [test for test in tests if test.get("label") == f"pp{prompt}"]
+            if isinstance(tests, list)
+            else []
+        )
         if len(matches) != 1:
             raise ValueError(f"{report_path} lacks one pp{prompt} result")
         test = matches[0]
@@ -273,27 +290,30 @@ def _stable_manifest(
 
 
 def _report_sources(rows: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {"chunk": chunk, **rows[chunk]["report"]}
-        for chunk in sorted(rows)
-    ]
+    return [{"chunk": chunk, **rows[chunk]["report"]} for chunk in sorted(rows)]
 
 
 def _same_candidate(screen: dict[str, Any], final: dict[str, Any]) -> None:
     fields = (
-        "artifact", "bench", "corpus_sha256", "base_chunk_profile", "expected_kv_value_group",
-        "expected_kv_plane_layouts", "expected_q4_activation_bits",
-        "expected_w8_activation_bits", "expected_fp8_qk_wmma_enabled",
-        "expected_fp8_qk_wmma_profile", "expected_xattention_profile",
+        "artifact",
+        "bench",
+        "corpus_sha256",
+        "base_chunk_profile",
+        "expected_kv_value_group",
+        "expected_kv_plane_layouts",
+        "expected_q4_activation_bits",
+        "expected_w8_activation_bits",
+        "expected_split512_enabled",
+        "expected_decode_attention_profile",
+        "expected_xattention_profile",
     )
     if any(screen.get(field) != final.get(field) for field in fields):
         raise ValueError("8K and 32K chunk matrices do not bind one candidate identity")
-    if screen["artifact"]["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-        if (
-            screen["hybrid_shared_workspace_authority"]["tool"]
-            != final["hybrid_shared_workspace_authority"]["tool"]
-        ):
-            raise ValueError("8K and 32K hybrid matrices bind different planner bytes")
+    if screen["artifact"]["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval" and (
+        screen["hybrid_shared_workspace_authority"]["tool"]
+        != final["hybrid_shared_workspace_authority"]["tool"]
+    ):
+        raise ValueError("8K and 32K hybrid matrices bind different planner bytes")
 
 
 def _rank(
@@ -315,12 +335,16 @@ def _rank(
             "/".join(map(str, candidate)): values[chunk]["prefill_tok_s_mean"] / best[candidate]
             for candidate, values in rows.items()
         }
-        ranked.append({
-            "chunk": chunk,
-            "maximin_normalized_throughput": min(normalized.values()),
-            "maximum_workspace_peak_bytes": max(values[chunk]["workspace_peak_bytes"] for values in rows.values()),
-            "normalized_throughput": normalized,
-        })
+        ranked.append(
+            {
+                "chunk": chunk,
+                "maximin_normalized_throughput": min(normalized.values()),
+                "maximum_workspace_peak_bytes": max(
+                    values[chunk]["workspace_peak_bytes"] for values in rows.values()
+                ),
+                "normalized_throughput": normalized,
+            }
+        )
     return sorted(
         ranked,
         key=lambda row: (
@@ -339,7 +363,7 @@ def build_selection(candidate_roots: Sequence[tuple[Path, Path]]) -> dict[str, A
     sources = []
     sources_by_identity: dict[tuple[str, int, str], dict[str, Any]] = {}
     screen_manifests: dict[tuple[str, int, str], dict[str, Any]] = {}
-    for screen_root, final_root in candidate_roots:
+    for screen_root, _final_root in candidate_roots:
         screen, screen_rows, screen_manifest = _stable_manifest(
             screen_root, 8192, PRODUCTION_PREFILL_CHUNKS
         )
@@ -349,7 +373,8 @@ def build_selection(candidate_roots: Sequence[tuple[Path, Path]]) -> dict[str, A
         screens[identity] = screen_rows
         screen_manifests[identity] = screen
         source_record = {
-            "weights_id": identity[0], "kv_value_group": identity[1],
+            "weights_id": identity[0],
+            "kv_value_group": identity[1],
             "xattention_profile": identity[2],
             "artifact": screen["artifact"],
             "benchmark_executable": screen["bench"],
@@ -358,15 +383,20 @@ def build_selection(candidate_roots: Sequence[tuple[Path, Path]]) -> dict[str, A
         }
         sources.append(source_record)
         sources_by_identity[identity] = source_record
-    required = {(r, g, p) for r in REQUIRED_RECIPES for g in REQUIRED_GROUPS for p in REQUIRED_PROFILES}
+    required = {
+        (r, g, p) for r in REQUIRED_RECIPES for g in REQUIRED_GROUPS for p in REQUIRED_PROFILES
+    }
     if set(screens) != required:
-        raise ValueError("production chunk selection lacks the exact recipe/group/profile Cartesian set")
+        raise ValueError(
+            "production chunk selection lacks the exact recipe/group/profile Cartesian set"
+        )
     if len({manifest["corpus_sha256"] for manifest in screen_manifests.values()}) != 1:
         raise ValueError("production chunk screens do not share one corpus")
     for recipe in REQUIRED_RECIPES:
         artifacts = {
             json.dumps(manifest["artifact"], sort_keys=True, separators=(",", ":"))
-            for identity, manifest in screen_manifests.items() if identity[0] == recipe
+            for identity, manifest in screen_manifests.items()
+            if identity[0] == recipe
         }
         if len(artifacts) != 1:
             raise ValueError(f"production chunk screens bind multiple {recipe} artifacts")
@@ -389,14 +419,14 @@ def build_selection(candidate_roots: Sequence[tuple[Path, Path]]) -> dict[str, A
     # Re-normalizing 8K over only the finalists would erase a real deficit against an eliminated
     # per-objective leader and can change the global maximin winner.
     final_normalizers = {
-        (*identity, prompt): max(
-            row["prefill_tok_s_mean"] for row in collection[identity].values()
-        )
+        (*identity, prompt): max(row["prefill_tok_s_mean"] for row in collection[identity].values())
         for prompt, collection in ((8192, screens), (32768, finals))
         for identity in collection
     }
     final_ranking = _rank(finalists, combined, final_normalizers)
-    sources.sort(key=lambda row: (row["weights_id"], row["kv_value_group"], row["xattention_profile"]))
+    sources.sort(
+        key=lambda row: (row["weights_id"], row["kv_value_group"], row["xattention_profile"])
+    )
     return {
         "artifact_type": ARTIFACT_TYPE,
         "schema_version": SCHEMA_VERSION,
@@ -449,10 +479,7 @@ def validate_selection_record(path: Path) -> dict[str, Any]:
 def build_screening(screen_roots: Sequence[Path]) -> dict[str, Any]:
     if len(screen_roots) != 12:
         raise ValueError("screening requires exactly twelve screen directories")
-    loaded = [
-        _stable_manifest(path, 8192, PRODUCTION_PREFILL_CHUNKS)
-        for path in screen_roots
-    ]
+    loaded = [_stable_manifest(path, 8192, PRODUCTION_PREFILL_CHUNKS) for path in screen_roots]
     rows = {_identity(manifest): reports for manifest, reports, _source in loaded}
     if len(rows) != 12:
         raise ValueError("screening contains duplicate candidate identities")
@@ -497,39 +524,38 @@ def build_screening(screen_roots: Sequence[Path]) -> dict[str, Any]:
                 for manifest, reports, source in loaded
                 for identity in (_identity(manifest),)
             ),
-            key=lambda row: (
-                row["weights_id"], row["kv_value_group"], row["xattention_profile"]
-            ),
+            key=lambda row: (row["weights_id"], row["kv_value_group"], row["xattention_profile"]),
         ),
     }
 
 
-def validate_screening_record(
-    path: Path, screen_roots: Sequence[Path]
-) -> dict[str, Any]:
+def validate_screening_record(path: Path, screen_roots: Sequence[Path]) -> dict[str, Any]:
     before = file_sha256(path)
     value = json.loads(path.read_text(encoding="utf-8"))
     rebuilt = build_screening(screen_roots)
     if file_sha256(path) != before:
         raise ValueError("prefill-chunk screening record changed while validating")
     if rebuilt != value:
-        raise ValueError(
-            "prefill-chunk screening record does not match its source evidence"
-        )
+        raise ValueError("prefill-chunk screening record does not match its source evidence")
     return value
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--screen", action="append", type=Path, required=True, metavar="SCREEN_8K_DIR")
+    parser.add_argument(
+        "--screen", action="append", type=Path, required=True, metavar="SCREEN_8K_DIR"
+    )
     parser.add_argument("--finalist", action="append", type=Path, metavar="FINALIST_32K_DIR")
     parser.add_argument(
-        "--verify-screening", type=Path, metavar="SCREENING_JSON",
+        "--verify-screening",
+        type=Path,
+        metavar="SCREENING_JSON",
         help="rebuild an existing screening record and print its two finalists",
     )
     parser.add_argument("--out", type=Path)
     parser.add_argument(
-        "--create-only", action="store_true",
+        "--create-only",
+        action="store_true",
         help="atomically create --out and reject an existing namespace",
     )
     args = parser.parse_args(argv)
@@ -547,10 +573,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         finalists = [path.resolve() for path in args.finalist]
         if len(screens) != 12 or len(finalists) != 12:
-            raise SystemExit("final selection requires exactly twelve --screen and --finalist directories")
+            raise SystemExit(
+                "final selection requires exactly twelve --screen and --finalist directories"
+            )
         payload = build_selection(list(zip(screens, finalists, strict=True)))
     if args.create_only:
         from tools.bench.prefill_chunk_authority import durable_create_json
+
         durable_create_json(args.out, payload)
     else:
         args.out.parent.mkdir(parents=True, exist_ok=True)

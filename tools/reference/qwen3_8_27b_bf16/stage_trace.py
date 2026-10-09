@@ -23,7 +23,6 @@ from .protocol import (
     resolved_triton_codegen,
 )
 
-
 TYPE = "ninfer_qwen3_8_bf16_stage_trace"
 VERSION = 8
 TRACE_ROWS = 64
@@ -54,8 +53,17 @@ TRACE_ENVIRONMENT_KEYS = EXECUTION_ENVIRONMENT_KEYS
 
 
 class StageTrace:
-    def __init__(self, torch, path: Path, *, prompt_tokens: int, skip_tokens: int,
-                 prefill_chunk: int, device_index: int, provenance):
+    def __init__(
+        self,
+        torch,
+        path: Path,
+        *,
+        prompt_tokens: int,
+        skip_tokens: int,
+        prefill_chunk: int,
+        device_index: int,
+        provenance,
+    ):
         self.torch = torch
         self.path = path
         self.prompt_tokens = prompt_tokens
@@ -70,7 +78,7 @@ class StageTrace:
         width = min(TRACE_ROWS, rows)
         self.items += [
             (name + ".first", 0, width, value[:width].clone()),
-            (name + ".last", rows - width, rows, value[rows - width:].clone()),
+            (name + ".last", rows - width, rows, value[rows - width :].clone()),
         ]
 
     def capture_attention_detail(self, layer, stage, value, begin, end):
@@ -119,7 +127,7 @@ class StageTrace:
         if parts is None:
             parts = holder[name] = []
             self.items.append((name, tail_begin, hidden_rows, parts))
-        parts.append(value[capture_begin - begin:capture_end - begin].clone())
+        parts.append(value[capture_begin - begin : capture_end - begin].clone())
 
     def capture_logits(self, begin, end, value):
         if begin == self.skip or end == self.prompt_tokens - 1:
@@ -129,23 +137,24 @@ class StageTrace:
     def write(self, vectors):
         torch = self.torch
         rows = []
-        for name, begin, end, value in self.items:
-            if isinstance(value, list):
-                value = torch.cat(value, dim=0)
+        for name, begin, end, item in self.items:
+            value = torch.cat(item, dim=0) if isinstance(item, list) else item
             host = value.detach().contiguous().cpu()
             raw = host.view(torch.uint8).numpy().tobytes()
-            rows.append({
-                "name": name,
-                "begin": begin,
-                "end": end,
-                "dtype": str(value.dtype),
-                "shape": list(value.shape),
-                "sha256": hashlib.sha256(raw).hexdigest(),
-                "finite": bool(torch.isfinite(host).all()),
-                "nan": bool(torch.isnan(host).any()),
-                "positive_infinity": bool(torch.isposinf(host).any()),
-                "negative_infinity": bool(torch.isneginf(host).any()),
-            })
+            rows.append(
+                {
+                    "name": name,
+                    "begin": begin,
+                    "end": end,
+                    "dtype": str(value.dtype),
+                    "shape": list(value.shape),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                    "finite": bool(torch.isfinite(host).all()),
+                    "nan": bool(torch.isnan(host).any()),
+                    "positive_infinity": bool(torch.isposinf(host).any()),
+                    "negative_infinity": bool(torch.isneginf(host).any()),
+                }
+            )
 
         root = Path(__file__).resolve().parent
         executable = Path(sys.executable).resolve()
@@ -196,10 +205,7 @@ class StageTrace:
                     "warn_only": torch.is_deterministic_algorithms_warn_only_enabled(),
                 },
                 "matmul_reduction": resolved_matmul_reduction(torch),
-                "environment": {
-                    key: os.environ.get(key)
-                    for key in TRACE_ENVIRONMENT_KEYS
-                },
+                "environment": {key: os.environ.get(key) for key in TRACE_ENVIRONMENT_KEYS},
                 "scorer_python_tree_sha256": python_tree_sha256(root),
                 "fla_python_tree_sha256": python_tree_sha256(fla_root),
                 "distributions": {

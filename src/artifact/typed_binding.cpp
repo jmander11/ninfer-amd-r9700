@@ -23,6 +23,8 @@ StorageLayout storage_layout_for(NumericFormat format) {
         return StorageLayout::RowSplitK128V1;
     case NumericFormat::F8E4M3_ROW_F32S:
         return StorageLayout::RowScaledK128V1;
+    case NumericFormat::FP8LUT4:
+        return StorageLayout::R9700Fp8Lut4N16K64V1;
     }
     throw std::logic_error("unhandled numeric format");
 }
@@ -46,6 +48,8 @@ QType qtype_for(NumericFormat format) {
         return QType::W8G32_F16S;
     case NumericFormat::F8E4M3_ROW_F32S:
         return QType::F8E4M3_ROW_F32S;
+    case NumericFormat::FP8LUT4:
+        return QType::FP8LUT4;
     }
     throw std::logic_error("unhandled numeric format");
 }
@@ -121,16 +125,49 @@ Weight row_scaled_weight(const MaterializedArtifact& materialized, ObjectHandle 
     const auto* bytes = static_cast<const std::byte*>(materialized.device_data(handle));
 
     Weight out{};
+    out.payload         = bytes;
+    out.payload_bytes   = geometry.encoded_bytes;
+    out.qtype           = qtype_for(format);
+    out.layout          = QuantLayout::RowScaled;
+    out.qdata           = bytes;
+    out.qdata_bytes     = geometry.code_plane_bytes;
+    out.scales          = bytes + geometry.scale_plane_offset;
+    out.scale_bytes     = geometry.scale_plane_bytes;
+    out.n               = rows;
+    out.k               = columns;
+    out.scale_dtype     = DType::FP32;
+    out.scale_ne[0]     = rows;
+    out.scale_nb[0]     = sizeof(float);
+    out.ndim            = 2;
+    out.shape[0]        = rows;
+    out.shape[1]        = columns;
+    out.padded_shape[0] = rows;
+    out.padded_shape[1] = static_cast<std::int32_t>(geometry.padded_columns);
+    return out;
+}
+
+// Codes in qdata, group codes in qhigh, FP32 row multipliers in scales.
+Weight r9700_fp8lut4_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
+                            std::int32_t rows, std::int32_t columns) {
+    const std::array<std::uint64_t, 2> shape = {static_cast<std::uint64_t>(rows),
+                                                static_cast<std::uint64_t>(columns)};
+    const CodebookGeometry geometry          = r9700_fp8lut4_geometry(shape);
+    const auto* bytes = static_cast<const std::byte*>(materialized.device_data(handle));
+    Weight out{};
     out.payload          = bytes;
     out.payload_bytes    = geometry.encoded_bytes;
-    out.qtype            = qtype_for(format);
-    out.layout           = QuantLayout::RowScaled;
+    out.high_plane_bytes = geometry.group_plane_bytes;
+    out.qtype            = QType::FP8LUT4;
+    out.layout           = QuantLayout::Fp8Lut4N16K64;
+    out.group_size       = 32;
     out.qdata            = bytes;
     out.qdata_bytes      = geometry.code_plane_bytes;
+    out.qhigh            = bytes + geometry.group_plane_offset;
     out.scales           = bytes + geometry.scale_plane_offset;
     out.scale_bytes      = geometry.scale_plane_bytes;
     out.n                = rows;
     out.k                = columns;
+    out.group            = 32;
     out.scale_dtype      = DType::FP32;
     out.scale_ne[0]      = rows;
     out.scale_nb[0]      = sizeof(float);
@@ -146,15 +183,25 @@ Weight r9700_q4_n16k16_weight(const MaterializedArtifact& materialized, ObjectHa
                               std::int32_t rows, std::int32_t columns) {
     const std::array<std::uint64_t, 2> shape = {static_cast<std::uint64_t>(rows),
                                                 static_cast<std::uint64_t>(columns)};
-    const RowSplitGeometry geometry = r9700_q4g64_n16k16_geometry(shape);
+    const RowSplitGeometry geometry          = r9700_q4g64_n16k16_geometry(shape);
     const auto* bytes = static_cast<const std::byte*>(materialized.device_data(handle));
     Weight out{};
-    out.payload = bytes; out.payload_bytes = geometry.encoded_bytes;
-    out.qtype = QType::Q4G64_F16S; out.layout = QuantLayout::Q4N16K16;
-    out.group_size = 64; out.qdata = bytes; out.qdata_bytes = geometry.low_plane_bytes;
-    out.scales = bytes + geometry.scale_plane_offset; out.scale_bytes = geometry.scale_plane_bytes;
-    out.n = rows; out.k = columns; out.group = 64; out.scale_dtype = DType::FP16;
-    out.ndim = 2; out.shape[0] = rows; out.shape[1] = columns;
+    out.payload         = bytes;
+    out.payload_bytes   = geometry.encoded_bytes;
+    out.qtype           = QType::Q4G64_F16S;
+    out.layout          = QuantLayout::Q4N16K16;
+    out.group_size      = 64;
+    out.qdata           = bytes;
+    out.qdata_bytes     = geometry.low_plane_bytes;
+    out.scales          = bytes + geometry.scale_plane_offset;
+    out.scale_bytes     = geometry.scale_plane_bytes;
+    out.n               = rows;
+    out.k               = columns;
+    out.group           = 64;
+    out.scale_dtype     = DType::FP16;
+    out.ndim            = 2;
+    out.shape[0]        = rows;
+    out.shape[1]        = columns;
     out.padded_shape[0] = rows;
     out.padded_shape[1] = static_cast<std::int32_t>(geometry.padded_columns);
     return out;
@@ -164,11 +211,18 @@ Weight r9700_q4_n16k16_weight(const MaterializedArtifact& materialized, ObjectHa
 
 ObjectHandle bind_tensor(Binder& binder, std::string_view name, NumericFormat format,
                          std::initializer_list<std::uint64_t> shape, TensorPlacement placement) {
-    const ObjectHandle handle =
-        binder.require_tensor(name, format, storage_layout_for(format),
-                              std::span<const std::uint64_t>(shape.begin(), shape.size()));
+    return bind_tensor(binder, name, format, storage_layout_for(format), shape, placement);
+}
+
+ObjectHandle bind_tensor(Binder& binder, std::string_view name, NumericFormat format,
+                         StorageLayout layout, std::initializer_list<std::uint64_t> shape,
+                         TensorPlacement placement) {
+    const ObjectHandle handle = binder.require_tensor(
+        name, format, layout, std::span<const std::uint64_t>(shape.begin(), shape.size()));
     if (placement == TensorPlacement::Device) {
         binder.materialize_on_device(handle);
+    } else if (placement == TensorPlacement::MappedHost) {
+        binder.materialize_on_mapped_host(handle);
     } else {
         binder.validate_only(handle);
     }
@@ -194,17 +248,18 @@ Tensor materialized_tensor(const MaterializedArtifact& materialized, ObjectHandl
 
 Weight materialized_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
                            NumericFormat format, std::int32_t rows, std::int32_t columns) {
-    return materialized_weight(materialized, handle, format, rows, columns, storage_layout_for(format));
+    return materialized_weight(materialized, handle, format, rows, columns,
+                               storage_layout_for(format));
 }
 
 Weight materialized_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
                            NumericFormat format, std::int32_t rows, std::int32_t columns,
                            StorageLayout layout) {
-    const std::array<std::uint64_t,2> shape{static_cast<std::uint64_t>(rows),
-                                           static_cast<std::uint64_t>(columns)};
+    const std::array<std::uint64_t, 2> shape{static_cast<std::uint64_t>(rows),
+                                             static_cast<std::uint64_t>(columns)};
     (void)tensor_encoded_size(layout, format, shape);
     if (layout == StorageLayout::R9700W8G32N16K16V1) {
-        auto out = row_split_weight(materialized, handle, format, rows, columns);
+        auto out   = row_split_weight(materialized, handle, format, rows, columns);
         out.layout = QuantLayout::W8N16K16;
         return out;
     }
@@ -216,6 +271,9 @@ Weight materialized_weight(const MaterializedArtifact& materialized, ObjectHandl
     }
     if (layout == StorageLayout::R9700Q4G64N16K16V1) {
         return r9700_q4_n16k16_weight(materialized, handle, rows, columns);
+    }
+    if (layout == StorageLayout::R9700Fp8Lut4N16K64V1) {
+        return r9700_fp8lut4_weight(materialized, handle, rows, columns);
     }
     return row_split_weight(materialized, handle, format, rows, columns);
 }

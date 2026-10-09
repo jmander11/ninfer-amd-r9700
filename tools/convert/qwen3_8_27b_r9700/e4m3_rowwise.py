@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import math
-import struct
-from typing import Iterator
+from collections.abc import Iterator
 
 import numpy as np
 import torch
-
 
 K_ALIGNMENT = 128
 PLANE_ALIGNMENT = 256
@@ -50,10 +48,7 @@ def encode_e4m3_rowwise_chunks(
     for row_begin in range(0, rows, rows_per_chunk):
         row_end = min(row_begin + rows_per_chunk, rows)
         logical = (
-            weight[row_begin:row_end]
-            .detach()
-            .to(device="cpu", dtype=torch.float32)
-            .contiguous()
+            weight[row_begin:row_end].detach().to(device="cpu", dtype=torch.float32).contiguous()
         )
         if not bool(torch.isfinite(logical).all()):
             raise ValueError("E4M3 rowwise source contains NaN or infinity")
@@ -86,16 +81,12 @@ def encode_e4m3_rowwise(weight: torch.Tensor) -> bytes:
     return b"".join(encode_e4m3_rowwise_chunks(weight))
 
 
-def decode_e4m3_rowwise(
-    payload: bytes, rows: int, columns: int
-) -> torch.Tensor:
+def decode_e4m3_rowwise(payload: bytes, rows: int, columns: int) -> torch.Tensor:
     """Decode an E4M3 rowwise payload to its logical CPU FP32 matrix."""
 
     padded_columns, expected = _geometry(rows, columns)
     if len(payload) != expected:
-        raise ValueError(
-            f"E4M3 rowwise payload has {len(payload)} bytes, expected {expected}"
-        )
+        raise ValueError(f"E4M3 rowwise payload has {len(payload)} bytes, expected {expected}")
     code_bytes = rows * padded_columns
     code_array = np.frombuffer(payload, dtype=np.uint8, count=code_bytes).copy()
     if np.any((code_array & 0x7F) == 0x7F):

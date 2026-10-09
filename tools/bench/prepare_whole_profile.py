@@ -7,14 +7,15 @@ import argparse
 import hashlib
 import json
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tools.bench.run_ninfer_bench_matrix import (
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
-    validate_report_phase_timing,
     R9700_KV_PLANE_LAYOUTS,
+    validate_report_phase_timing,
 )
 from tools.bench.validate_low_context_prefill import validate_ladder
 
@@ -22,8 +23,14 @@ SUPPORTED_PRESETS = frozenset({"pareto-whole", "dflash-pareto"})
 SUPPORTED_XATTENTION_PROFILES = frozenset({"dense", "b128-s16-tau900"})
 SUPPORTED_PREFILL_CHUNKS = frozenset({1024, 2048, 4096, 8192})
 DISPATCH_COUNTERS = (
-    "GL2C_HIT", "GL2C_MISS", "L2CacheHit", "TCP_REQ", "TCP_REQ_MISS",
-    "GL2C_EA_RDREQ", "GL2C_EA_WRREQ", "SQ_WAVES",
+    "GL2C_HIT",
+    "GL2C_MISS",
+    "L2CacheHit",
+    "TCP_REQ",
+    "TCP_REQ_MISS",
+    "GL2C_EA_RDREQ",
+    "GL2C_EA_WRREQ",
+    "SQ_WAVES",
 )
 ROCPROFV3 = Path("/opt/rocm/bin/rocprofv3")
 
@@ -73,25 +80,35 @@ def _write_plan(
     kernel_include_regex: str | None,
     extra_provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    profile_data_dir = out_dir / (
-        "rocprof-trace" if kind == "trace" else "rocprof-dispatch-pmc"
-    )
+    profile_data_dir = out_dir / ("rocprof-trace" if kind == "trace" else "rocprof-dispatch-pmc")
     common = [str(ROCPROFV3), "--selected-regions", "-f", "rocpd", "-d", str(profile_data_dir)]
     if kind == "trace":
         if kernel_include_regex is not None:
             raise ValueError("kernel include regex applies only to dispatch-pmc")
         profiler_command = [
-            *common, "--marker-trace", "--kernel-trace", "--memory-copy-trace",
-            "--stats", "--summary", "--", *benchmark_command,
+            *common,
+            "--marker-trace",
+            "--kernel-trace",
+            "--memory-copy-trace",
+            "--stats",
+            "--summary",
+            "--",
+            *benchmark_command,
         ]
         required_power_profile = "auto"
     elif kind == "dispatch-pmc":
         if kernel_include_regex is None or not kernel_include_regex.strip():
             raise ValueError("dispatch-pmc requires a nonempty kernel include regex")
         profiler_command = [
-            *common, "--marker-trace", "--kernel-trace",
-            "--kernel-include-regex", kernel_include_regex.strip(),
-            "--pmc", *DISPATCH_COUNTERS, "--", *benchmark_command,
+            *common,
+            "--marker-trace",
+            "--kernel-trace",
+            "--kernel-include-regex",
+            kernel_include_regex.strip(),
+            "--pmc",
+            *DISPATCH_COUNTERS,
+            "--",
+            *benchmark_command,
         ]
         required_power_profile = "profile_standard"
     else:
@@ -137,20 +154,17 @@ def _write_plan(
     quoted_required_profile = shlex.quote(required_power_profile)
     quoted_before_path = shlex.quote(str(power_before_path))
     quoted_after_path = shlex.quote(str(power_after_path))
-    before_guard = (
-        f'test ! -e {quoted_before_path}\n'
-        f'test ! -e {quoted_after_path}\n'
-    )
+    before_guard = f"test ! -e {quoted_before_path}\ntest ! -e {quoted_after_path}\n"
     if kind == "dispatch-pmc":
         before_guard += (
             f'POWER_PROFILE_VALUE="$(cat {quoted_profile_path})"\n'
             f'test "$POWER_PROFILE_VALUE" = auto\n'
-            f'sudo -v\n'
-            f'restore_auto() {{\n'
+            f"sudo -v\n"
+            f"restore_auto() {{\n"
             f'  printf "%s\\n" auto | sudo tee {quoted_profile_path} >/dev/null\n'
             f'  test "$(cat {quoted_profile_path})" = auto\n'
-            f'}}\n'
-            f'trap restore_auto EXIT\n'
+            f"}}\n"
+            f"trap restore_auto EXIT\n"
             f'printf "%s\\n" profile_standard | sudo tee {quoted_profile_path} >/dev/null\n'
             f'POWER_PROFILE_VALUE="$(cat {quoted_profile_path})"\n'
             f'(set -C; printf "%s\\n" "$POWER_PROFILE_VALUE" > {quoted_before_path})\n'
@@ -163,12 +177,12 @@ def _write_plan(
             f'test "$POWER_PROFILE_VALUE" = {quoted_required_profile}'
         )
     after_guard = (
-        ('restore_auto\ntrap - EXIT\n' if kind == "dispatch-pmc" else '') +
-        f'POWER_PROFILE_VALUE="$(cat {quoted_profile_path})"\n'
-        f'POWER_PROFILE_READ_RC=$?\n'
+        ("restore_auto\ntrap - EXIT\n" if kind == "dispatch-pmc" else "")
+        + f'POWER_PROFILE_VALUE="$(cat {quoted_profile_path})"\n'
+        f"POWER_PROFILE_READ_RC=$?\n"
         f'(set -C; printf "%s\\n" "$POWER_PROFILE_VALUE" > {quoted_after_path})\n'
-        f'POWER_PROFILE_WRITE_RC=$?\n'
-        f'set -e\n'
+        f"POWER_PROFILE_WRITE_RC=$?\n"
+        f"set -e\n"
         f'if (( PROFILE_RC != 0 )); then exit "$PROFILE_RC"; fi\n'
         f'test "$POWER_PROFILE_READ_RC" -eq 0\n'
         f'test "$POWER_PROFILE_WRITE_RC" -eq 0\n'
@@ -176,11 +190,14 @@ def _write_plan(
     )
     (out_dir / "commands.sh").write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n\n"
-        + before_guard + "\n"
+        + before_guard
+        + "\n"
         + "set +e\n"
-        + shlex.join(profiler_command) + "\n"
+        + shlex.join(profiler_command)
+        + "\n"
         + "PROFILE_RC=$?\n"
-        + after_guard + "\n",
+        + after_guard
+        + "\n",
         encoding="utf-8",
     )
     return payload
@@ -244,8 +261,7 @@ def prepare(
         raise ValueError("source matrix is not bound to the selected prefill chunk")
     power_profile = manifest.get("power_profile")
     if not isinstance(power_profile, dict) or any(
-        power_profile.get(key) != "auto"
-        for key in ("required", "observed", "rechecked_after")
+        power_profile.get(key) != "auto" for key in ("required", "observed", "rechecked_after")
     ):
         raise ValueError("source whole-inference timing is not proven under auto power profile")
     power_profile_path = Path(str(power_profile.get("sysfs_path", "")))
@@ -262,7 +278,8 @@ def prepare(
     _identity_matches_file(bench, "benchmark executable")
 
     matches = [
-        row for row in manifest.get("commands", [])
+        row
+        for row in manifest.get("commands", [])
         if isinstance(row, dict)
         and row.get("concurrency") == concurrency
         and "whole_inference" in str(row.get("suite", ""))
@@ -290,16 +307,18 @@ def prepare(
         or source_report.get("load", {}).get("weights_id") != artifact.get("weights_id")
         or source_report.get("config", {}).get("kv_value_group") != expected_kv_value_group
         or source_report.get("config", {}).get("prefill_chunk") != expected_prefill_chunk
-        or source_report.get("config", {}).get("kv_plane_layouts")
-        != R9700_KV_PLANE_LAYOUTS
+        or source_report.get("config", {}).get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
     ):
         raise ValueError("source whole-inference report identity is invalid")
     config = source_report["config"]
     if any(config.get(key) != value for key, value in expected_xattention.items()):
         raise ValueError("source whole-inference XAttention profile is invalid")
     if xattention_profile == "dense" and any(
-        key in config for key in (
-            "xattention_profile", "xattention_find_block", "xattention_stride",
+        key in config
+        for key in (
+            "xattention_profile",
+            "xattention_find_block",
+            "xattention_stride",
             "xattention_tau_permille",
         )
     ):
@@ -309,8 +328,7 @@ def prepare(
             raise ValueError("selected DFlash K/W are required for a DFlash matrix")
         if (
             source_report["config"].get("draft_tokens") != expected_dflash_draft_tokens
-            or source_report["config"].get("dflash_verify_width")
-            != expected_dflash_verify_width
+            or source_report["config"].get("dflash_verify_width") != expected_dflash_verify_width
         ):
             raise ValueError("source matrix does not use the selected DFlash K/W")
     elif expected_dflash_draft_tokens is not None or expected_dflash_verify_width is not None:
@@ -328,7 +346,9 @@ def prepare(
     if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
         raise ValueError("source matrix command is invalid")
     benchmark_command = list(command)
-    chunk_index = benchmark_command.index("--prefill-chunk") if "--prefill-chunk" in benchmark_command else -1
+    chunk_index = (
+        benchmark_command.index("--prefill-chunk") if "--prefill-chunk" in benchmark_command else -1
+    )
     if chunk_index < 0 or chunk_index + 1 >= len(benchmark_command):
         raise ValueError("source benchmark command lacks --prefill-chunk")
     if benchmark_command[chunk_index + 1] != str(expected_prefill_chunk):
@@ -458,7 +478,8 @@ def prepare_low_context(
         raise ValueError("low-context authority is not the explicitly selected dense route")
 
     records = [
-        record for record in manifest.get("commands", [])
+        record
+        for record in manifest.get("commands", [])
         if isinstance(record, dict)
         and record.get("suite") == "low_context_prefill"
         and record.get("case") == "prefill_p2048_dense_none"
@@ -489,10 +510,15 @@ def prepare_low_context(
         or type(config.get("dflash_verify_width")) is not int
         or config["dflash_verify_width"] != 0
         or config.get("xattention_qualification") is not False
-        or any(key in config for key in (
-            "xattention_profile", "xattention_find_block", "xattention_stride",
-            "xattention_tau_permille",
-        ))
+        or any(
+            key in config
+            for key in (
+                "xattention_profile",
+                "xattention_find_block",
+                "xattention_stride",
+                "xattention_tau_permille",
+            )
+        )
         or type(config.get("repetitions")) is not int
         or config["repetitions"] != 3
         or type(config.get("warmup")) is not int
@@ -519,7 +545,9 @@ def prepare_low_context(
     if "--profile-measured" in benchmark_command:
         raise ValueError("low-context source command is already profiler-instrumented")
     _replace_option(benchmark_command, "-r", "1")
-    _replace_option(benchmark_command, "--output-file", str(out_dir.resolve() / "benchmark-report.json"))
+    _replace_option(
+        benchmark_command, "--output-file", str(out_dir.resolve() / "benchmark-report.json")
+    )
     benchmark_command.append("--profile-measured")
 
     manifest_hash = file_sha256(manifest_path)
@@ -529,7 +557,8 @@ def prepare_low_context(
     bound_manifest = recomputed.get("manifest")
     bound_terminal = recomputed.get("terminal_selection")
     bound_reports = [
-        row.get("report") for row in recomputed.get("ladder", [])
+        row.get("report")
+        for row in recomputed.get("ladder", [])
         if isinstance(row, dict) and row.get("prompt_tokens") == 2048
     ]
     if (
@@ -631,11 +660,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--expected-weights-id", required=True)
     parser.add_argument("--expected-kv-value-group", required=True, type=int, choices=(16, 32))
     parser.add_argument(
-        "--expected-xattention-profile", required=True,
+        "--expected-xattention-profile",
+        required=True,
         choices=tuple(sorted(SUPPORTED_XATTENTION_PROFILES)),
     )
     parser.add_argument(
-        "--expected-prefill-chunk", required=True, type=int,
+        "--expected-prefill-chunk",
+        required=True,
+        type=int,
         choices=tuple(sorted(SUPPORTED_PREFILL_CHUNKS)),
     )
     parser.add_argument("--kernel-include-regex")
@@ -644,10 +676,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.low_context_manifest is not None:
-            if any(value is None for value in (
-                args.low_context_evaluation, args.terminal_selection,
-                args.executable, args.artifact,
-            )):
+            if any(
+                value is None
+                for value in (
+                    args.low_context_evaluation,
+                    args.terminal_selection,
+                    args.executable,
+                    args.artifact,
+                )
+            ):
                 raise ValueError(
                     "low-context profiling requires --low-context-evaluation, "
                     "--terminal-selection, --executable, and --artifact"
@@ -678,15 +715,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 kernel_include_regex=args.kernel_include_regex,
             )
         else:
-            if any(value is not None for value in (
-                args.low_context_evaluation, args.terminal_selection,
-                args.executable, args.artifact,
-            )):
+            if any(
+                value is not None
+                for value in (
+                    args.low_context_evaluation,
+                    args.terminal_selection,
+                    args.executable,
+                    args.artifact,
+                )
+            ):
                 raise ValueError("low-context authority options require --low-context-manifest")
             payload = prepare(
-                args.matrix_dir, args.out, concurrency=args.concurrency,
-                prompt_tokens=args.prompt_tokens, generated_tokens=args.generated_tokens,
-                kind=args.kind, question=args.question,
+                args.matrix_dir,
+                args.out,
+                concurrency=args.concurrency,
+                prompt_tokens=args.prompt_tokens,
+                generated_tokens=args.generated_tokens,
+                kind=args.kind,
+                question=args.question,
                 expected_weights_id=args.expected_weights_id,
                 expected_kv_value_group=args.expected_kv_value_group,
                 expected_xattention_profile=args.expected_xattention_profile,

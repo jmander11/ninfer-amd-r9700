@@ -6,21 +6,34 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import torch
 
 from tools.artifact.container import (
-    Artifact, ArtifactIdentity, ArtifactWriter, TensorObject, TensorSpec as ArtifactTensorSpec,
-    ResourceSpec as ArtifactResourceSpec, encode_directory, plan_objects, PREFIX_BYTES,
     PAYLOAD_ALIGNMENT,
+    PREFIX_BYTES,
+    Artifact,
+    ArtifactIdentity,
+    ArtifactWriter,
+    TensorObject,
+    encode_directory,
+    plan_objects,
+)
+from tools.artifact.container import (
+    ResourceSpec as ArtifactResourceSpec,
+)
+from tools.artifact.container import (
+    TensorSpec as ArtifactTensorSpec,
 )
 from tools.artifact.layouts import align_up, encode_direct
 from tools.convert.common.quantize import quantize_and_encode
 from tools.convert.common.safetensors import ShardReader
 from tools.convert.qwen3.common.inventory import BF16, W8, TensorSpec
-from . import q4_inventory, source, source_recipe, selective_protected_inventory as inventory
+
+from . import q4_inventory, source, source_recipe
+from . import selective_protected_inventory as inventory
 from .convert_q4_w8_mse import _checkpoint_receipt
 from .e4m3_rowwise import encode_e4m3_rowwise_chunks
 
@@ -49,7 +62,10 @@ def _validate_objects(artifact, expected) -> None:
             raise ValueError("artifact object order differs")
         if isinstance(spec, TensorSpec):
             if not isinstance(obj, TensorObject) or (obj.shape, obj.format, obj.layout) != (
-                    spec.shape, spec.format, spec.layout):
+                spec.shape,
+                spec.format,
+                spec.layout,
+            ):
                 raise ValueError(f"artifact tensor contract differs: {spec.name}")
         elif isinstance(obj, TensorObject) or obj.encoding != spec.encoding:
             raise ValueError(f"artifact resource contract differs: {spec.name}")
@@ -58,9 +74,11 @@ def _validate_objects(artifact, expected) -> None:
 def _output_specs(base):
     tensors = {spec.name: spec for spec in inventory.TENSOR_SPECS}
     return tuple(
-        ArtifactTensorSpec(obj.name, tensors[obj.name].shape, tensors[obj.name].format,
-                           tensors[obj.name].layout)
-        if isinstance(obj, TensorObject) else ArtifactResourceSpec(obj.name, obj.encoding, obj.bytes)
+        ArtifactTensorSpec(
+            obj.name, tensors[obj.name].shape, tensors[obj.name].format, tensors[obj.name].layout
+        )
+        if isinstance(obj, TensorObject)
+        else ArtifactResourceSpec(obj.name, obj.encoding, obj.bytes)
         for obj in base.objects
     )
 
@@ -74,22 +92,36 @@ def preflight(base: Path, model: Path, output: Path) -> dict:
             raise FileExistsError(path)
     source.validate_config(json.loads((model / "config.json").read_text()))
     metadata = source_recipe.preflight_sources(model)
-    if (metadata.source_tensor_count != 1199 or metadata.source_shard_count != 18
-            or metadata.source_dtype_counts != {"BF16": 1199}):
+    if (
+        metadata.source_tensor_count != 1199
+        or metadata.source_shard_count != 18
+        or metadata.source_dtype_counts != {"BF16": 1199}
+    ):
         raise ValueError("requires the original complete 1199-tensor BF16 source")
     with Artifact(base) as artifact:
         if artifact.identity != ArtifactIdentity(inventory.MODEL_ID, q4_inventory.WEIGHTS_ID):
             raise ValueError("base must be the registered all-Q4 N16 evaluator")
         _validate_objects(artifact, q4_inventory.OBJECT_SPECS)
         objects = plan_objects(_output_specs(artifact))
-        directory = encode_directory(ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID), objects)
-        projected = align_up(PREFIX_BYTES + len(directory), PAYLOAD_ALIGNMENT) + objects[-1].offset + objects[-1].bytes
+        directory = encode_directory(
+            ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID), objects
+        )
+        projected = (
+            align_up(PREFIX_BYTES + len(directory), PAYLOAD_ALIGNMENT)
+            + objects[-1].offset
+            + objects[-1].bytes
+        )
     return {
-        "artifact_type": "ninfer_r9700_selective_protected_conversion", "schema_version": 1,
+        "artifact_type": "ninfer_r9700_selective_protected_conversion",
+        "schema_version": 1,
         "identity": {"model_id": inventory.MODEL_ID, "weights_id": inventory.WEIGHTS_ID},
-        "recipe_id": inventory.RECIPE_ID, "weight_recipe_selected": False,
-        "base": {"path": str(base.resolve()), "bytes": base.stat().st_size,
-                 "weights_id": q4_inventory.WEIGHTS_ID},
+        "recipe_id": inventory.RECIPE_ID,
+        "weight_recipe_selected": False,
+        "base": {
+            "path": str(base.resolve()),
+            "bytes": base.stat().st_size,
+            "weights_id": q4_inventory.WEIGHTS_ID,
+        },
         "source": {"model_path": str(model.resolve()), "checkpoint": _checkpoint_receipt(model)},
         "changed_formats": dict(sorted(inventory.CHANGED_FORMATS.items())),
         "format_counts": inventory.FORMAT_COUNTS,
@@ -101,7 +133,11 @@ def preflight(base: Path, model: Path, output: Path) -> dict:
 
 def encode_changed(tensor, spec):
     """Reuse canonical encoders; only chunk allocation, never quantization groups."""
-    if tensor.device.type != "cpu" or tensor.dtype != torch.bfloat16 or tuple(tensor.shape) != spec.shape:
+    if (
+        tensor.device.type != "cpu"
+        or tensor.dtype != torch.bfloat16
+        or tuple(tensor.shape) != spec.shape
+    ):
         raise ValueError("changed matrices require exact represented CPU BF16 source and shape")
     if spec.format == inventory.F8E4M3_ROW_F32S:
         yield from encode_e4m3_rowwise_chunks(tensor)
@@ -114,11 +150,11 @@ def encode_changed(tensor, spec):
         padded = align_up(columns, 128)
         scales = bytearray()
         for begin in range(0, rows, 256):
-            part = tensor[begin:begin + 256]
+            part = tensor[begin : begin + 256]
             payload = quantize_and_encode(part, W8, device="cpu")
             code_bytes = part.shape[0] * padded
             yield payload[:code_bytes]
-            scales.extend(payload[align_up(code_bytes, 256):])
+            scales.extend(payload[align_up(code_bytes, 256) :])
         yield bytes(align_up(rows * padded, 256) - rows * padded)
         yield bytes(scales)
     else:
@@ -136,7 +172,7 @@ def _recorded_chunks(chunks, record):
 def _copied_chunks(artifact, obj):
     with artifact.payload(obj) as payload:
         for begin in range(0, len(payload), 8 << 20):
-            yield payload[begin:begin + (8 << 20)]
+            yield payload[begin : begin + (8 << 20)]
 
 
 def write_payloads(base, writer, reader):
@@ -147,11 +183,16 @@ def write_payloads(base, writer, reader):
         record = {"name": obj.name, "operation": "copy-exact"}
         if obj.name in inventory.CHANGED_FORMATS:
             spec = specs[obj.name]
-            tensor = source_recipe.materialize_recipe(source_recipe.RECIPES_BY_NAME[obj.name], reader)
-            record.update(operation="source-bf16-reencode", format=spec.format,
-                          source_bf16_sha256=hashlib.sha256(
-                              memoryview(tensor.contiguous().view(torch.uint8).numpy()).cast("B")
-                          ).hexdigest())
+            tensor = source_recipe.materialize_recipe(
+                source_recipe.RECIPES_BY_NAME[obj.name], reader
+            )
+            record.update(
+                operation="source-bf16-reencode",
+                format=spec.format,
+                source_bf16_sha256=hashlib.sha256(
+                    memoryview(tensor.contiguous().view(torch.uint8).numpy()).cast("B")
+                ).hexdigest(),
+            )
             writer.write(obj.name, _recorded_chunks(encode_changed(tensor, spec), record))
             del tensor
         else:
@@ -164,12 +205,21 @@ def convert(base: Path, model: Path, output: Path) -> Path:
     report = preflight(base, model, output)
     output.parent.mkdir(parents=True, exist_ok=True)
     report["base"]["sha256"] = sha(base)
-    with Artifact(base) as artifact, ShardReader(model) as reader:
-        with ArtifactWriter(output, ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),
-                            _output_specs(artifact)) as writer:
-            report["objects"] = write_payloads(artifact, writer, reader)
-    report["artifact"] = {"path": str(output.resolve()), "bytes": output.stat().st_size,
-                          "sha256": sha(output)}
+    with (
+        Artifact(base) as artifact,
+        ShardReader(model) as reader,
+        ArtifactWriter(
+            output,
+            ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),
+            _output_specs(artifact),
+        ) as writer,
+    ):
+        report["objects"] = write_payloads(artifact, writer, reader)
+    report["artifact"] = {
+        "path": str(output.resolve()),
+        "bytes": output.stat().st_size,
+        "sha256": sha(output),
+    }
     report["converter"] = {"path": str(Path(__file__).resolve()), "sha256": sha(Path(__file__))}
     _atomic_json(Path(str(output) + ".conversion.json"), report)
     return output
@@ -177,23 +227,26 @@ def convert(base: Path, model: Path, output: Path) -> Path:
 
 def validate(path: Path, base: Path, model: Path) -> dict:
     report = json.loads(Path(str(path) + ".conversion.json").read_text())
-    if (report.get("artifact_type") != "ninfer_r9700_selective_protected_conversion"
-            or report.get("schema_version") != 1
-            or report.get("identity") != {"model_id": inventory.MODEL_ID, "weights_id": inventory.WEIGHTS_ID}
-            or report.get("recipe_id") != inventory.RECIPE_ID
-            or report.get("weight_recipe_selected") is not False
-            or report.get("changed_formats") != inventory.CHANGED_FORMATS
-            or report.get("format_counts") != inventory.FORMAT_COUNTS
-            or report.get("tensor_encoded_bytes") != inventory.TENSOR_ENCODED_BYTES
-            or report.get("device_arena_bytes") != inventory.DEVICE_ARENA_BYTES
-            or report.get("projected_file_bytes") != path.stat().st_size
-            or report.get("source", {}).get("model_path") != str(model.resolve())
-            or report.get("source", {}).get("checkpoint") != _checkpoint_receipt(model)
-            or report.get("base", {}).get("path") != str(base.resolve())
-            or report.get("base", {}).get("bytes") != base.stat().st_size
-            or report.get("base", {}).get("sha256") != sha(base)
-            or report.get("artifact") != {"path": str(path.resolve()), "bytes": path.stat().st_size,
-                                         "sha256": sha(path)}):
+    if (
+        report.get("artifact_type") != "ninfer_r9700_selective_protected_conversion"
+        or report.get("schema_version") != 1
+        or report.get("identity")
+        != {"model_id": inventory.MODEL_ID, "weights_id": inventory.WEIGHTS_ID}
+        or report.get("recipe_id") != inventory.RECIPE_ID
+        or report.get("weight_recipe_selected") is not False
+        or report.get("changed_formats") != inventory.CHANGED_FORMATS
+        or report.get("format_counts") != inventory.FORMAT_COUNTS
+        or report.get("tensor_encoded_bytes") != inventory.TENSOR_ENCODED_BYTES
+        or report.get("device_arena_bytes") != inventory.DEVICE_ARENA_BYTES
+        or report.get("projected_file_bytes") != path.stat().st_size
+        or report.get("source", {}).get("model_path") != str(model.resolve())
+        or report.get("source", {}).get("checkpoint") != _checkpoint_receipt(model)
+        or report.get("base", {}).get("path") != str(base.resolve())
+        or report.get("base", {}).get("bytes") != base.stat().st_size
+        or report.get("base", {}).get("sha256") != sha(base)
+        or report.get("artifact")
+        != {"path": str(path.resolve()), "bytes": path.stat().st_size, "sha256": sha(path)}
+    ):
         raise ValueError("selective-protected conversion receipt differs")
     with Artifact(path) as artifact, Artifact(base) as base_artifact:
         if base_artifact.identity != ArtifactIdentity(inventory.MODEL_ID, q4_inventory.WEIGHTS_ID):
@@ -216,9 +269,11 @@ def validate(path: Path, base: Path, model: Path) -> dict:
                     with base_artifact.payload(obj.name) as original:
                         if payload != original:
                             raise ValueError(f"unchanged payload is not byte-exact: {obj.name}")
-            if changed and (row.get("format") != inventory.CHANGED_FORMATS[obj.name]
-                            or not isinstance(row.get("source_bf16_sha256"), str)
-                            or len(row["source_bf16_sha256"]) != 64):
+            if changed and (
+                row.get("format") != inventory.CHANGED_FORMATS[obj.name]
+                or not isinstance(row.get("source_bf16_sha256"), str)
+                or len(row["source_bf16_sha256"]) != 64
+            ):
                 raise ValueError("changed object lacks represented BF16 provenance")
     return report
 
@@ -228,7 +283,9 @@ def main():
     parser.add_argument("--base", required=True, type=Path)
     parser.add_argument("--model", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--validate-only", action="store_true", help="CPU preflight only; create nothing")
+    parser.add_argument(
+        "--validate-only", action="store_true", help="CPU preflight only; create nothing"
+    )
     args = parser.parse_args()
     if args.validate_only:
         print(json.dumps(preflight(args.base, args.model, args.out), indent=2))

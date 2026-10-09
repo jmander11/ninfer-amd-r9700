@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import struct
 import tempfile
 import unittest
+from pathlib import Path
 
 from tools.convert.qwen3_8_27b_r9700 import build_draft_ranking as ranking
 
@@ -21,7 +21,11 @@ class DraftRankingTest(unittest.TestCase):
         self._temporary.cleanup()
 
     def corpus(
-        self, name: str, text: str, *, tokens: int | None = None,
+        self,
+        name: str,
+        text: str,
+        *,
+        tokens: int | None = None,
         extra: dict[str, object] | None = None,
     ) -> Path:
         ids = self.root / f"{name}.ids"
@@ -70,7 +74,8 @@ class DraftRankingTest(unittest.TestCase):
 
     def test_rejects_tiled_throughput_corpus(self) -> None:
         corpus = self.corpus(
-            "bench_corpus", "1 2 1 2",
+            "bench_corpus",
+            "1 2 1 2",
             extra={"note": "tiled and repeated only to fill throughput length"},
         )
         with self.assertRaisesRegex(ValueError, "bias draft frequency counts"):
@@ -97,7 +102,8 @@ class DraftRankingTest(unittest.TestCase):
 
     def test_rejects_conflicting_qwen_identity(self) -> None:
         corpus = self.corpus(
-            "conflict", "1 2",
+            "conflict",
+            "1 2",
             extra={
                 "model_id": "different-model",
                 "tokenizer_model_id": ranking.TOKENIZER_MODEL_ID,
@@ -112,9 +118,7 @@ class DraftRankingTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "artifact_type must be"):
             ranking.load_corpus(wrong_type)
-        wrong_schema = self.corpus(
-            "wrong_schema", "1 2", extra={"schema_version": 1}
-        )
+        wrong_schema = self.corpus("wrong_schema", "1 2", extra={"schema_version": 1})
         with self.assertRaisesRegex(ValueError, "schema_version must be"):
             ranking.load_corpus(wrong_schema)
         templated = self.corpus("templated", "1 2", extra={"chat_template": True})

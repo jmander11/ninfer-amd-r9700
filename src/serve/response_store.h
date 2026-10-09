@@ -1,6 +1,6 @@
 #pragma once
 
-// Process-local bounded storage for OpenAI Responses objects and their
+// Bounded storage, optionally restart-persistent, for OpenAI Responses objects and their
 // previous_response_id context DAG. The Engine remains stateless; stored
 // contexts are flattened only when a continuation is submitted.
 
@@ -39,7 +39,8 @@ struct StoredResponse {
 
 class ResponseStore {
 public:
-    ResponseStore(std::size_t max_records, std::size_t max_bytes);
+    ResponseStore(std::size_t max_records, std::size_t max_bytes, std::string location = {});
+    ~ResponseStore();
 
     // get() refreshes LRU recency. Returned immutable records remain valid if
     // another request evicts or deletes their public store entry.
@@ -51,13 +52,15 @@ public:
     [[nodiscard]] std::size_t bytes() const;
 
 private:
+    struct DiskStore;
+    std::unique_ptr<DiskStore> disk_;
+
     struct Entry {
         std::shared_ptr<const StoredResponse> response;
         std::list<std::string>::iterator lru;
     };
 
-    [[nodiscard]] std::size_t recompute_bytes_locked() const;
-    void erase_locked(const std::string& id);
+    void publish_locked(const std::vector<std::shared_ptr<const StoredResponse>>& ordered);
 
     std::size_t max_records_ = 0;
     std::size_t max_bytes_   = 0;

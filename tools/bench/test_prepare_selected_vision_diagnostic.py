@@ -27,8 +27,12 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
             output = root / "campaign"
             route = {
                 "terminal_selection": {"path": str(selection), "sha256": "a" * 64},
-                "artifact": {"path": str(artifact), "model_id": "qwen3.8-27b",
-                             "weights_id": "r9700-q4g64-n16k16-eval", "sha256": "b" * 64},
+                "artifact": {
+                    "path": str(artifact),
+                    "model_id": "qwen3.8-27b",
+                    "weights_id": "r9700-q4g64-n16k16-eval",
+                    "sha256": "b" * 64,
+                },
                 "source_matrices": {
                     "pareto-capacity": {"path": str(capacity), "sha256": "c" * 64},
                     "pareto-whole": {"path": str(whole), "sha256": "d" * 64},
@@ -44,9 +48,15 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
                 "maximum_runtime_concurrency": 4,
             }
             contract = {
-                "prompt_length": 428, "image_tokens": 384, "video_tokens": 0,
-                "image_grid_thw": [[1, 32, 48]], "pixel_values_shape": [1536, 1536],
-                "rope_delta": -360, "thinking": False, "images": 1, "videos": 0,
+                "prompt_length": 428,
+                "image_tokens": 384,
+                "video_tokens": 0,
+                "image_grid_thw": [[1, 32, 48]],
+                "pixel_values_shape": [1536, 1536],
+                "rope_delta": -360,
+                "thinking": False,
+                "images": 1,
+                "videos": 0,
             }
 
             def run(command, **_kwargs):
@@ -54,20 +64,28 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
                 out.write_bytes(b"prepared-input")
                 return subprocess.CompletedProcess(command, 0, json.dumps(contract) + "\n", "")
 
-            with mock.patch(
-                "tools.bench.prepare_selected_vision_diagnostic.SOURCE_RECEIPT", selection
-            ), mock.patch(
-                "tools.bench.prepare_selected_vision_diagnostic.resolve_route",
-                return_value=route,
-            ), mock.patch(
-                "tools.bench.prepare_selected_vision_diagnostic.validate_source_receipt",
-                return_value={"receipt": {"path": "receipt", "bytes": 1, "sha256": "1" * 64},
-                              "source": "/source"},
-            ), mock.patch(
-                "tools.bench.prepare_selected_vision_diagnostic.inspect_python",
-                side_effect=({"launcher": {"path": "front"}}, {"launcher": {"path": "gpu"}}),
-            ), mock.patch(
-                "tools.bench.prepare_selected_vision_diagnostic.subprocess.run", side_effect=run
+            with (
+                mock.patch(
+                    "tools.bench.prepare_selected_vision_diagnostic.SOURCE_RECEIPT", selection
+                ),
+                mock.patch(
+                    "tools.bench.prepare_selected_vision_diagnostic.resolve_route",
+                    return_value=route,
+                ),
+                mock.patch(
+                    "tools.bench.prepare_selected_vision_diagnostic.validate_source_receipt",
+                    return_value={
+                        "receipt": {"path": "receipt", "bytes": 1, "sha256": "1" * 64},
+                        "source": "/source",
+                    },
+                ),
+                mock.patch(
+                    "tools.bench.prepare_selected_vision_diagnostic.inspect_python",
+                    side_effect=({"launcher": {"path": "front"}}, {"launcher": {"path": "gpu"}}),
+                ),
+                mock.patch(
+                    "tools.bench.prepare_selected_vision_diagnostic.subprocess.run", side_effect=run
+                ),
             ):
                 plan = prepare(selection, output)
             self.assertEqual(plan["terminal_route"], route)

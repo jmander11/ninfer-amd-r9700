@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -97,15 +98,18 @@ KvDiskCompress parse_kv_disk_compress(const char* text) {
 std::string serve_usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> [--host H] [--port N] [--api-key KEY] "
-           "[--model-id ID] [--max-context N] [--kv-capacity N|auto] [--kv-ram-capacity off|N] "
+           "[--model-id ID] [--max-context N] [--kv-capacity N|auto] [--kv-capacity-headroom MiB] "
+           "[--kv-ram-capacity off|N] "
            "[--kv-disk-capacity off|N] [--kv-disk-location PATH] [--kv-disk-compress off|zstd] "
-           "[--max-concurrency 1..4] [--no-generation-recovery] "
+           "[--max-concurrency 1..8] [--no-generation-recovery] "
            "[--max-pending-requests N] [--pending-timeout-ms N] "
-           "[--prefill-chunk N] [--log-stats-interval-ms N] [--device N] "
+           "[--prefill-chunk N] [--mixed-forward auto|N] [--mixed-forward-rounds N] "
+           "[--log-stats-interval-ms N] [--device N] "
            "[--max-request-mib N] [--request-log-jsonl FILE] "
-           "[--response-store-max-records N] [--response-store-max-mib N] "
+           "[--response-store-location DIR] [--response-store-max-records N] "
+           "[--response-store-max-mib N] "
            "[--spec mtp|dflash --draft-tokens N] "
-           "[--adaptive-draft] [--dflash-verify-width N] "
+           "[--adaptive-draft] [--dflash-verify-width N] [--dflash-p-less-draft-temperature T] "
            "[--default-max-tokens N] "
            "[--vision] [--no-device-graph] [--no-prefix-reuse] "
            "[--context-checkpoints off|a,b,c] "
@@ -114,23 +118,30 @@ std::string serve_usage_text(const char* argv0) {
            "[--temperature F] [--top-p F] [--top-k N] [--min-p F] [--presence-penalty F] "
            "[--frequency-penalty F] [--seed N] [--greedy] [--no-p-less-sampling]\n"
            "       serves OpenAI Responses/Chat Completions and Anthropic Messages endpoints\n"
+           "       GET /health, GET /metrics, and GET /metrics.json stay unauthenticated\n"
            "       --default-max-tokens defaults to " +
            std::to_string(kDefaultMaxTokens) +
            " when omitted\n"
            "       --max-request-mib defaults to 384 and is enforced before JSON parsing\n"
            "       --request-log-jsonl appends full-precision server/request records\n"
            "       --model-id overrides the artifact identity.model_id reported by the server\n"
-           "       Responses state is process-local and bounded to 1024 records / 256 MiB by "
-           "default\n"
+           "       Responses history is memory-only by default; --response-store-location persists "
+           "it\n"
+           "       Response history defaults to 1024 records / 256 MiB\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
-           "       --kv-capacity auto leaves " +
+           "       --kv-capacity auto sizes KV from all free GPU memory except "
+           "--kv-capacity-headroom "
+           "MiB (default " +
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +
-           " MiB of sizing headroom\n"
-           "       --kv-ram-capacity sets pinned host KV prefix-cache capacity in MiB (default off)\n"
-           "       --kv-disk-capacity sets SSD KV prefix-cache unique-object capacity in MiB (default off)\n"
+           "); raise it when a desktop or other process shares the GPU\n"
+           "       --kv-ram-capacity sets pinned host KV prefix-cache capacity in MiB (default "
+           "off)\n"
+           "       --kv-disk-capacity sets SSD KV prefix-cache unique-object capacity in MiB "
+           "(default off)\n"
            "       --kv-disk-location is required iff --kv-disk-capacity is enabled\n"
-           "       --kv-disk-compress applies zstd-1 to new GDN/hidden/cyclic writes (default off)\n"
+           "       --kv-disk-compress applies zstd-1 to new GDN/hidden/cyclic writes (default "
+           "off)\n"
            "       --no-prefix-reuse disables compatible-prefix caching (enabled by default)\n"
            "       --context-checkpoints off disables the automatic prefill ladder; a,b,c replaces "
            "the default marks (requires --spec mtp or dflash). Marks at or above --max-context "
@@ -161,6 +172,7 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     }
     bool default_max_tokens_explicit = false;
     bool kv_capacity_explicit        = false;
+    std::optional<std::uint64_t> kv_capacity_headroom_mib;
     if (argc >= 2 && (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h")) {
         options.help_requested = true;
         return options;
@@ -190,6 +202,9 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--kv-capacity") {
             options.kv_capacity  = parse_kv_capacity(require_value("--kv-capacity"));
             kv_capacity_explicit = true;
+        } else if (arg == "--kv-capacity-headroom") {
+            kv_capacity_headroom_mib =
+                parse_u64(require_value("--kv-capacity-headroom"), "kv-capacity-headroom");
         } else if (arg == "--kv-ram-capacity") {
             options.kv_ram_capacity_bytes =
                 parse_kv_ram_capacity_bytes(require_value("--kv-ram-capacity"));
@@ -199,8 +214,7 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--kv-disk-location") {
             options.kv_disk_location = require_value("--kv-disk-location");
         } else if (arg == "--kv-disk-compress") {
-            options.kv_disk_compress =
-                parse_kv_disk_compress(require_value("--kv-disk-compress"));
+            options.kv_disk_compress = parse_kv_disk_compress(require_value("--kv-disk-compress"));
         } else if (arg == "--no-generation-recovery") {
             options.generation_recovery = false;
         } else if (arg == "--max-concurrency") {
@@ -215,6 +229,17 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--prefill-chunk") {
             options.prefill_chunk = static_cast<std::uint32_t>(
                 parse_nonnegative_int(require_value("--prefill-chunk"), "prefill-chunk"));
+        } else if (arg == "--mixed-forward") {
+            const char* forward = require_value("--mixed-forward");
+            if (std::string_view(forward) == "auto") {
+                options.mixed_forward.reset();
+            } else {
+                options.mixed_forward =
+                    static_cast<std::uint32_t>(parse_nonnegative_int(forward, "mixed-forward"));
+            }
+        } else if (arg == "--mixed-forward-rounds") {
+            options.mixed_forward_rounds = static_cast<std::uint32_t>(parse_nonnegative_int(
+                require_value("--mixed-forward-rounds"), "mixed-forward-rounds"));
         } else if (arg == "--log-stats-interval-ms") {
             options.log_stats_interval_ms = static_cast<std::uint32_t>(parse_nonnegative_int(
                 require_value("--log-stats-interval-ms"), "log-stats-interval-ms"));
@@ -229,6 +254,11 @@ ServeOptions parse_serve_options(int argc, char** argv) {
             options.request_log_jsonl = require_value("--request-log-jsonl");
             if (options.request_log_jsonl.empty()) {
                 throw std::invalid_argument("--request-log-jsonl must not be empty");
+            }
+        } else if (arg == "--response-store-location") {
+            options.response_store_location = require_value("--response-store-location");
+            if (options.response_store_location.empty()) {
+                throw std::invalid_argument("--response-store-location must not be empty");
             }
         } else if (arg == "--response-store-max-records") {
             const int records = parse_nonnegative_int(require_value("--response-store-max-records"),
@@ -254,10 +284,14 @@ ServeOptions parse_serve_options(int argc, char** argv) {
                 parse_nonnegative_int(require_value("--draft-tokens"), "draft-tokens"));
         } else if (arg == "--adaptive-draft") {
             options.speculative.adaptive_draft = true;
+        } else if (arg == "--dflash-p-less-draft-temperature") {
+            options.speculative.dflash_p_less_draft_temperature =
+                parse_float_in(require_value("--dflash-p-less-draft-temperature"),
+                               "dflash-p-less-draft-temperature", 0.0f, 2.0f);
         } else if (arg == "--dflash-verify-width") {
-            options.speculative.dflash_verify_width = static_cast<std::uint32_t>(
-                parse_nonnegative_int(require_value("--dflash-verify-width"),
-                                      "dflash-verify-width"));
+            options.speculative.dflash_verify_width =
+                static_cast<std::uint32_t>(parse_nonnegative_int(
+                    require_value("--dflash-verify-width"), "dflash-verify-width"));
         } else if (arg == "--default-max-tokens") {
             options.default_max_tokens =
                 parse_nonnegative_int(require_value("--default-max-tokens"), "default-max-tokens");
@@ -315,6 +349,17 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     if (!kv_capacity_explicit) {
         options.kv_capacity = KvCapacityPolicy::explicit_capacity(options.max_context);
     }
+    if (kv_capacity_headroom_mib) {
+        if (options.kv_capacity.mode != KvCapacityMode::Automatic) {
+            throw std::invalid_argument("--kv-capacity-headroom requires --kv-capacity auto");
+        }
+        constexpr std::uint64_t mib = 1024ULL * 1024ULL;
+        if (*kv_capacity_headroom_mib > std::numeric_limits<std::size_t>::max() / mib) {
+            throw std::invalid_argument("--kv-capacity-headroom is too large");
+        }
+        options.kv_capacity.automatic_headroom_bytes =
+            static_cast<std::size_t>(*kv_capacity_headroom_mib * mib);
+    }
     if (options.port <= 0 || options.port > 65535) {
         throw std::invalid_argument("--port must be in [1,65535]");
     }
@@ -326,7 +371,7 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     validate_kv_disk_options(options.kv_ram_capacity_bytes, options.kv_disk_capacity_bytes,
                              options.kv_disk_location);
     if (options.max_concurrency == 0 || options.max_concurrency > kMaximumConcurrency) {
-        throw std::invalid_argument("--max-concurrency must be in [1,4]");
+        throw std::invalid_argument("--max-concurrency must be in [1,8]");
     }
     if (options.max_pending_requests == 0) {
         throw std::invalid_argument("--max-pending-requests must be positive");
@@ -339,6 +384,12 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     }
     if (options.prefill_chunk == 0 || options.prefill_chunk % 128 != 0) {
         throw std::invalid_argument("--prefill-chunk must be a positive multiple of 128");
+    }
+    if (options.mixed_forward && *options.mixed_forward % 256 != 0) {
+        throw std::invalid_argument("--mixed-forward must be auto or a multiple of 256");
+    }
+    if (options.mixed_forward_rounds == 0) {
+        throw std::invalid_argument("--mixed-forward-rounds must be positive");
     }
     product::validate_speculative_cli_options(options.speculative);
     if (default_max_tokens_explicit) {

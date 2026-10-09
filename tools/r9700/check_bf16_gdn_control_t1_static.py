@@ -27,10 +27,12 @@ def main() -> int:
         symbol = matches[0]
         selected = [index for index, match in enumerate(starts) if match.group(1) == symbol]
         if len(selected) != 1:
-            raise SystemExit(f"{key}: expected one exact AMDGPU function body, found {len(selected)}")
+            raise SystemExit(
+                f"{key}: expected one exact AMDGPU function body, found {len(selected)}"
+            )
         index = selected[0]
         end = starts[index + 1].start() if index + 1 < len(starts) else len(text)
-        body = text[starts[index].start():end]
+        body = text[starts[index].start() : end]
         if f".amdhsa_kernel {symbol}" not in body:
             raise SystemExit(f"{key}: selected body lacks its AMDGPU kernel descriptor")
         kernels[key] = body
@@ -56,8 +58,12 @@ def main() -> int:
     metadata = {}
     for name, body in kernels.items():
         fields = []
-        for field in ("next_free_vgpr", "next_free_sgpr", "group_segment_fixed_size",
-                      "private_segment_fixed_size"):
+        for field in (
+            "next_free_vgpr",
+            "next_free_sgpr",
+            "group_segment_fixed_size",
+            "private_segment_fixed_size",
+        ):
             match = re.search(rf"\.amdhsa_{field}\s+(\d+)", body)
             if match is None:
                 raise SystemExit(f"{name}: missing {field} resource metadata")
@@ -65,8 +71,13 @@ def main() -> int:
         if len(fields) != 4:
             raise SystemExit(f"{name}: missing resource metadata")
         metadata[name] = tuple(fields)
-    print("PASS " + " ".join(f"{name}=vgpr{v}/sgpr{s}/lds{lds}/scratch{scratch}"
-                              for name, (v, s, lds, scratch) in metadata.items()))
+    print(
+        "PASS "
+        + " ".join(
+            f"{name}=vgpr{v}/sgpr{s}/lds{lds}/scratch{scratch}"
+            for name, (v, s, lds, scratch) in metadata.items()
+        )
+    )
     return 0
 
 

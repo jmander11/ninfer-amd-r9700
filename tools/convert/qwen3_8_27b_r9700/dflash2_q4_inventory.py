@@ -7,19 +7,23 @@ predecessor/successor codebooks and every non-matrix value remain source BF16.
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass, replace
 import hashlib
 import json
-from pathlib import Path
 import struct
+from collections import Counter
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 from tools.artifact.layouts import encoded_size
 from tools.convert.qwen3.common.inventory import BF16, Q4, TensorSpec, tensor_spec
 
-from . import (dflash2_matrix_recipes, fp8_hybrid_inventory, q4_inventory,
-              q4_w8_mse_inventory, selective_protected_inventory)
-
+from . import (
+    dflash2_matrix_recipes,
+    fp8_hybrid_inventory,
+    q4_inventory,
+    q4_w8_mse_inventory,
+    selective_protected_inventory,
+)
 
 MODEL_ID = "qwen3.8-27b"
 ALL_Q4_BASE_WEIGHTS_ID = q4_inventory.WEIGHTS_ID
@@ -37,13 +41,17 @@ RECIPE_ID = "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1"
 def companion_weights_id(base_weights_id: str, recipe: str) -> str:
     """Registered evaluation identity; never selects a production recipe."""
     if base_weights_id not in (
-        ALL_Q4_BASE_WEIGHTS_ID, MIXED_BASE_WEIGHTS_ID, HYBRID_BASE_WEIGHTS_ID,
+        ALL_Q4_BASE_WEIGHTS_ID,
+        MIXED_BASE_WEIGHTS_ID,
+        HYBRID_BASE_WEIGHTS_ID,
         SELECTIVE_BASE_WEIGHTS_ID,
     ):
         raise ValueError(f"unsupported DFlash2 base identity: {base_weights_id}")
     dflash2_matrix_recipes.get_recipe(recipe)
-    if (base_weights_id == SELECTIVE_BASE_WEIGHTS_ID
-            and recipe != dflash2_matrix_recipes.CANONICAL_Q4G64):
+    if (
+        base_weights_id == SELECTIVE_BASE_WEIGHTS_ID
+        and recipe != dflash2_matrix_recipes.CANONICAL_Q4G64
+    ):
         raise ValueError("selective-protected DFlash2 currently admits only canonical-q4g64")
     suffix = {
         dflash2_matrix_recipes.CANONICAL_Q4G64: "q4",
@@ -51,6 +59,7 @@ def companion_weights_id(base_weights_id: str, recipe: str) -> str:
         dflash2_matrix_recipes.SOURCE_MSE_W8G32: "w8-mse",
     }[recipe]
     return base_weights_id.removesuffix("-eval") + f"-dflash2-{suffix}-eval"
+
 
 DFLASH2_LAYERS = 5
 HIDDEN = 5120
@@ -97,39 +106,55 @@ def _bindings() -> tuple[SourceBinding, ...]:
                 ),
                 _direct(out + "attention/query_norm", (128,), src + "self_attn.q_norm.weight"),
                 _direct(out + "attention/key_norm", (128,), src + "self_attn.k_norm.weight"),
-                _matrix(out + "attention/output", (HIDDEN, QUERY_SIZE),
-                        src + "self_attn.o_proj.weight"),
-                _direct(out + "attention_conv/base_kernel", (HIDDEN, 2, 2),
-                        src + "attention_conv.base_kernel"),
-                _matrix(out + "attention_conv/kernel_projection",
-                        (CONV_PROJECTION_ROWS, HIDDEN),
-                        src + "attention_conv.kernel_projection.weight"),
-                _direct(out + "post_attention_norm", (HIDDEN,),
-                        src + "post_attention_layernorm.weight"),
+                _matrix(
+                    out + "attention/output", (HIDDEN, QUERY_SIZE), src + "self_attn.o_proj.weight"
+                ),
+                _direct(
+                    out + "attention_conv/base_kernel",
+                    (HIDDEN, 2, 2),
+                    src + "attention_conv.base_kernel",
+                ),
+                _matrix(
+                    out + "attention_conv/kernel_projection",
+                    (CONV_PROJECTION_ROWS, HIDDEN),
+                    src + "attention_conv.kernel_projection.weight",
+                ),
+                _direct(
+                    out + "post_attention_norm", (HIDDEN,), src + "post_attention_layernorm.weight"
+                ),
                 _matrix(
                     out + "mlp/gate_up",
                     (2 * INTERMEDIATE, HIDDEN),
                     src + "mlp.gate_proj.weight",
                     src + "mlp.up_proj.weight",
                 ),
-                _matrix(out + "mlp/down", (HIDDEN, INTERMEDIATE),
-                        src + "mlp.down_proj.weight"),
-                _direct(out + "mlp_conv/base_kernel", (HIDDEN, 2, 2),
-                        src + "mlp_conv.base_kernel"),
-                _matrix(out + "mlp_conv/kernel_projection",
-                        (CONV_PROJECTION_ROWS, HIDDEN),
-                        src + "mlp_conv.kernel_projection.weight"),
+                _matrix(out + "mlp/down", (HIDDEN, INTERMEDIATE), src + "mlp.down_proj.weight"),
+                _direct(out + "mlp_conv/base_kernel", (HIDDEN, 2, 2), src + "mlp_conv.base_kernel"),
+                _matrix(
+                    out + "mlp_conv/kernel_projection",
+                    (CONV_PROJECTION_ROWS, HIDDEN),
+                    src + "mlp_conv.kernel_projection.weight",
+                ),
             )
         )
     result.extend(
         (
             _direct("dflash/final_norm", (HIDDEN,), "norm.weight"),
-            _matrix("dflash/selector/hidden_projection", (SELECTOR_RANK, HIDDEN),
-                    "candidate_selector.hidden_projection.weight"),
-            _direct("dflash/selector/predecessor_codebook", (SELECTOR_RANK, VOCAB),
-                    "candidate_selector.predecessor_codebook"),
-            _direct("dflash/selector/successor_codebook", (SELECTOR_RANK, VOCAB),
-                    "candidate_selector.successor_codebook"),
+            _matrix(
+                "dflash/selector/hidden_projection",
+                (SELECTOR_RANK, HIDDEN),
+                "candidate_selector.hidden_projection.weight",
+            ),
+            _direct(
+                "dflash/selector/predecessor_codebook",
+                (SELECTOR_RANK, VOCAB),
+                "candidate_selector.predecessor_codebook",
+            ),
+            _direct(
+                "dflash/selector/successor_codebook",
+                (SELECTOR_RANK, VOCAB),
+                "candidate_selector.successor_codebook",
+            ),
         )
     )
     return tuple(result)
@@ -172,12 +197,16 @@ MATRIX_RECIPE_SUMMARIES = tuple(
 ALL_Q4_OBJECT_SPECS = q4_inventory.OBJECT_SPECS + TENSOR_SPECS
 MIXED_OBJECT_SPECS = q4_w8_mse_inventory.OBJECT_SPECS + TENSOR_SPECS
 HYBRID_OBJECT_SPECS = fp8_hybrid_inventory.OBJECT_SPECS + TENSOR_SPECS
-SELECTIVE_OBJECT_SPECS = tuple(
-    replace(spec, layout="r9700-w8g32-n16-k16-v1")
-    if spec.name == "text/output_head" else spec
-    for spec in selective_protected_inventory.OBJECT_SPECS
-) + TENSOR_SPECS
-SELECTIVE_DEVICE_ARENA_BYTES = selective_protected_inventory.DEVICE_ARENA_BYTES + TENSOR_ENCODED_BYTES
+SELECTIVE_OBJECT_SPECS = (
+    tuple(
+        replace(spec, layout="r9700-w8g32-n16-k16-v1") if spec.name == "text/output_head" else spec
+        for spec in selective_protected_inventory.OBJECT_SPECS
+    )
+    + TENSOR_SPECS
+)
+SELECTIVE_DEVICE_ARENA_BYTES = (
+    selective_protected_inventory.DEVICE_ARENA_BYTES + TENSOR_ENCODED_BYTES
+)
 ALL_Q4_TENSOR_BYTES = q4_inventory.TENSOR_ENCODED_BYTES + TENSOR_ENCODED_BYTES
 MIXED_TENSOR_BYTES = q4_w8_mse_inventory.TENSOR_ENCODED_BYTES + TENSOR_ENCODED_BYTES
 HYBRID_TENSOR_BYTES = fp8_hybrid_inventory.TENSOR_ENCODED_BYTES + TENSOR_ENCODED_BYTES
@@ -302,9 +331,10 @@ def validate_inventory() -> None:
         raise ValueError(f"DFlash2 encoded byte totals differ: {FORMAT_ENCODED_BYTES}")
     if TENSOR_ENCODED_BYTES != 1_209_469_440:
         raise ValueError("DFlash2 tensor byte total differs")
-    if RECIPE_ID != dflash2_matrix_recipes.get_recipe(
-        dflash2_matrix_recipes.CANONICAL_Q4G64
-    ).recipe_id:
+    if (
+        dflash2_matrix_recipes.get_recipe(dflash2_matrix_recipes.CANONICAL_Q4G64).recipe_id
+        != RECIPE_ID
+    ):
         raise ValueError("canonical DFlash2 recipe identity differs")
     for recipe in dflash2_matrix_recipes.RECIPES:
         candidate = source_bindings_for_recipe(recipe.key)
@@ -312,9 +342,15 @@ def validate_inventory() -> None:
             binding.sources for binding in SOURCE_BINDINGS
         ):
             raise ValueError(f"{recipe.key}: DFlash2 source topology differs")
-    if any(len(specs) != 1190 for specs in (
-        ALL_Q4_OBJECT_SPECS, MIXED_OBJECT_SPECS, HYBRID_OBJECT_SPECS, SELECTIVE_OBJECT_SPECS,
-    )):
+    if any(
+        len(specs) != 1190
+        for specs in (
+            ALL_Q4_OBJECT_SPECS,
+            MIXED_OBJECT_SPECS,
+            HYBRID_OBJECT_SPECS,
+            SELECTIVE_OBJECT_SPECS,
+        )
+    ):
         raise ValueError("DFlash2 combined object inventory is incomplete")
     if ALL_Q4_DEVICE_ARENA_BYTES != 16_369_285_120:
         raise ValueError("all-Q4 DFlash2 arena projection differs")
@@ -328,10 +364,6 @@ validate_inventory()
 
 
 __all__ = [
-    "SELECTIVE_BASE_WEIGHTS_ID",
-    "SELECTIVE_WEIGHTS_ID",
-    "SELECTIVE_OBJECT_SPECS",
-    "SELECTIVE_DEVICE_ARENA_BYTES",
     "ALL_Q4_BASE_WEIGHTS_ID",
     "ALL_Q4_DEVICE_ARENA_BYTES",
     "ALL_Q4_OBJECT_SPECS",
@@ -344,14 +376,18 @@ __all__ = [
     "HYBRID_OBJECT_SPECS",
     "HYBRID_TENSOR_BYTES",
     "HYBRID_WEIGHTS_ID",
+    "MATRIX_RECIPE_SUMMARIES",
     "MIXED_BASE_WEIGHTS_ID",
     "MIXED_DEVICE_ARENA_BYTES",
     "MIXED_OBJECT_SPECS",
     "MIXED_TENSOR_BYTES",
     "MIXED_WEIGHTS_ID",
-    "MATRIX_RECIPE_SUMMARIES",
     "MODEL_ID",
     "RECIPE_ID",
+    "SELECTIVE_BASE_WEIGHTS_ID",
+    "SELECTIVE_DEVICE_ARENA_BYTES",
+    "SELECTIVE_OBJECT_SPECS",
+    "SELECTIVE_WEIGHTS_ID",
     "SOURCE_BINDINGS",
     "SOURCE_NAMES",
     "TARGET_KEY",

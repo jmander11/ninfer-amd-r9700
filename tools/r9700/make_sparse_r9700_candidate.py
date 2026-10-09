@@ -9,17 +9,16 @@ from __future__ import annotations
 
 import argparse
 import json
-from math import prod
-from pathlib import Path
 import struct
 import sys
-
+from math import prod
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.convert.qwen3_8_27b_r9700 import (
+from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
     dflash2_q4_inventory,
     fp8_hybrid_inventory,
     inventory,
@@ -34,7 +33,6 @@ from tools.convert.qwen3_8_27b_r9700 import (
     w8_mse_inventory,
 )
 
-
 MAGIC = b"NINFER\x00\x02"
 PREFIX = struct.Struct("<8sQ")
 PREFIX_BYTES = PREFIX.size
@@ -48,6 +46,7 @@ def align_up(value: int, alignment: int) -> int:
 def encoded_size(layout: str, numeric_format: str, shape: tuple[int, ...]) -> int:
     if layout == "r9700-q4g64-n16-k16-v1":
         from tools.artifact.layouts import encoded_size as storage_encoded_size
+
         return storage_encoded_size(layout, numeric_format, shape)
     if layout == "contiguous-le-v1":
         word_bytes = {"BF16": 2, "FP32": 4, "I32": 4}[numeric_format]
@@ -75,26 +74,33 @@ def encoded_size(layout: str, numeric_format: str, shape: tuple[int, ...]) -> in
     return scale_offset + scale_bytes
 
 
-def build_objects(specs: tuple[object, ...], *, wrong_token_format: bool,
-                  wrong_selected_format: bool = False) -> tuple[dict[str, object], ...]:
+def build_objects(
+    specs: tuple[object, ...], *, wrong_token_format: bool, wrong_selected_format: bool = False
+) -> tuple[dict[str, object], ...]:
     objects: list[dict[str, object]] = []
     cursor = 0
-    for spec in specs:
+    for source_spec in specs:
+        spec = source_spec
         if wrong_selected_format and spec.name == "text/layers/63/mlp/down":
             from tools.convert.qwen3.common.inventory import tensor_spec
+
             spec = tensor_spec(spec.name, spec.shape, "Q4G64_F16S")
         if hasattr(spec, "format"):
             numeric_format = spec.format
+            layout = spec.layout
+            if spec.name == "text/token_embedding" and numeric_format != "BF16":
+                # The binder requires every quantized token embedding row-split (host gathers).
+                layout = "row-split-k128-v1"
             if wrong_token_format and spec.name == "text/token_embedding":
                 numeric_format = "Q6G64_F16S"
-            size = encoded_size(spec.layout, numeric_format, spec.shape)
+            size = encoded_size(layout, numeric_format, spec.shape)
             offset = align_up(cursor, 256)
             obj = {
                 "name": spec.name,
                 "kind": "tensor",
                 "shape": list(spec.shape),
                 "format": numeric_format,
-                "layout": spec.layout,
+                "layout": layout,
                 "offset": offset,
                 "bytes": size,
             }
@@ -112,16 +118,23 @@ def build_objects(specs: tuple[object, ...], *, wrong_token_format: bool,
     return tuple(objects)
 
 
-def write_sparse(path: Path, *, profile: str, wrong_token_format: bool,
-                 wrong_selected_format: bool = False) -> None:
+def write_sparse(
+    path: Path, *, profile: str, wrong_token_format: bool, wrong_selected_format: bool = False
+) -> None:
     if path.exists():
         raise FileExistsError(f"refusing to overwrite sparse qualifier artifact: {path}")
     model_id, weights_id, object_specs = {
-        "selective-protected": (selective_protected_inventory.MODEL_ID,
-            selective_protected_inventory.WEIGHTS_ID, selective_protected_inventory.OBJECT_SPECS),
+        "selective-protected": (
+            selective_protected_inventory.MODEL_ID,
+            selective_protected_inventory.WEIGHTS_ID,
+            selective_protected_inventory.OBJECT_SPECS,
+        ),
         "w8": (inventory.MODEL_ID, inventory.WEIGHTS_ID, inventory.OBJECT_SPECS),
-        "w8-mse": (w8_mse_inventory.MODEL_ID, w8_mse_inventory.WEIGHTS_ID,
-                    w8_mse_inventory.OBJECT_SPECS),
+        "w8-mse": (
+            w8_mse_inventory.MODEL_ID,
+            w8_mse_inventory.WEIGHTS_ID,
+            w8_mse_inventory.OBJECT_SPECS,
+        ),
         "w8-bf16-embedding": (
             w8_bf16_embedding_inventory.MODEL_ID,
             w8_bf16_embedding_inventory.WEIGHTS_ID,
@@ -142,15 +155,17 @@ def write_sparse(path: Path, *, profile: str, wrong_token_format: bool,
             w8_bf16_gdn_qk_inventory.WEIGHTS_ID,
             w8_bf16_gdn_qk_inventory.OBJECT_SPECS,
         ),
-        "q4": (q4_inventory.MODEL_ID, q4_inventory.WEIGHTS_ID,
-               q4_inventory.OBJECT_SPECS),
+        "q4": (q4_inventory.MODEL_ID, q4_inventory.WEIGHTS_ID, q4_inventory.OBJECT_SPECS),
         "fp8-q4-hybrid": (
             fp8_hybrid_inventory.MODEL_ID,
             fp8_hybrid_inventory.WEIGHTS_ID,
             fp8_hybrid_inventory.OBJECT_SPECS,
         ),
-        "q4-w8": (q4_w8_inventory.MODEL_ID, q4_w8_inventory.WEIGHTS_ID,
-                  q4_w8_inventory.OBJECT_SPECS),
+        "q4-w8": (
+            q4_w8_inventory.MODEL_ID,
+            q4_w8_inventory.WEIGHTS_ID,
+            q4_w8_inventory.OBJECT_SPECS,
+        ),
         "q4-w8-mse": (
             q4_w8_mse_inventory.MODEL_ID,
             q4_w8_mse_inventory.WEIGHTS_ID,
@@ -167,8 +182,11 @@ def write_sparse(path: Path, *, profile: str, wrong_token_format: bool,
             dflash2_q4_inventory.MIXED_OBJECT_SPECS,
         ),
     }[profile]
-    objects = build_objects(object_specs, wrong_token_format=wrong_token_format,
-                            wrong_selected_format=wrong_selected_format)
+    objects = build_objects(
+        object_specs,
+        wrong_token_format=wrong_token_format,
+        wrong_selected_format=wrong_selected_format,
+    )
     directory = json.dumps(
         {
             "identity": {
@@ -232,8 +250,12 @@ def main() -> None:
     args = parser.parse_args()
     if args.replace:
         args.out.unlink(missing_ok=True)
-    write_sparse(args.out, profile=args.profile, wrong_token_format=args.wrong_token_format,
-                 wrong_selected_format=args.wrong_selected_format)
+    write_sparse(
+        args.out,
+        profile=args.profile,
+        wrong_token_format=args.wrong_token_format,
+        wrong_selected_format=args.wrong_selected_format,
+    )
 
 
 if __name__ == "__main__":

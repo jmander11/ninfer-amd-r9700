@@ -1,99 +1,423 @@
 #include "a8q4_small_batch_projection.h"
 #include "a8q4_pipeline_impl.h"
-#include "a8q4_paired_tiles.h"
+#include "a8q4_token_tile_cta.h"
 
 namespace ninfer::ops::r9700::linear {
 namespace {
-template <unsigned N, unsigned K, unsigned T>
-__global__ __launch_bounds__(32) void small_batch_projection_kernel(
-    const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
-    const std::uint32_t* status, const std::uint8_t* codes,
-    const std::uint16_t* weight_scales, hip_bfloat16* output) {
-    if constexpr(N==12288 && T<=8)
-        detail::a8q4_scale_gather_body<N,K,T>(low,high,scales,status,codes,weight_scales,output);
+// Waves per CTA sharing one 16-row tile over contiguous K ranges. One wave per tile leaves too
+// few G64 payloads in flight to saturate DRAM on the narrower projections.
+template <unsigned N, unsigned K>
+constexpr unsigned k_split() {
+    if constexpr (N == 1280 || N == 256)
+        return 16;
+    else if constexpr (N == 5120 && (K == 4096 || K == 6144))
+        return 8;
+    else if constexpr (N == 12288)
+        return 1;
     else
-        detail::a8q4_pipeline_body<N,K,T>(low,high,scales,status,codes,weight_scales,output);
+        return 4;
 }
+
+template <unsigned N, unsigned K, unsigned T, bool Accumulate = false>
+__global__ __launch_bounds__((32 * k_split<N, K>())) void small_batch_projection_kernel(
+    const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
+    const std::uint32_t* status, const std::uint8_t* codes, const std::uint16_t* weight_scales,
+    hip_bfloat16* output) {
+    if constexpr (N == 12288 && T <= 8)
+        detail::a8q4_scale_gather_body<N, K, T>(low, high, scales, status, codes, weight_scales,
+                                                output);
+    else
+        detail::a8q4_pipeline_body<N, K, T, Accumulate, k_split<N, K>()>(
+            low, high, scales, status, codes, weight_scales, output, blockIdx.x);
+}
+
 template <unsigned N, unsigned K, unsigned T>
 hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
-    if constexpr (N == 34816 && K == 5120 && (T == 18 || T == 20 || T == 24)) {
-        hipLaunchKernelGGL((detail::gate_up_paired_tiles_kernel<T>),dim3(N/16),dim3(32),0,stream,
-            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
-            a.weight_codes,a.weight_scales,a.output);
-        return hipGetLastError();
-    } else {
-    hipLaunchKernelGGL((small_batch_projection_kernel<N,K,T>),dim3(N/16,(T+15)/16),dim3(32),0,stream,
-        a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
-        a.weight_codes,a.weight_scales,a.output);
-    return hipGetLastError();
+    // Only the N5120 residual-stream projections admit the in-place residual epilogue.
+    if constexpr (N == 5120) {
+        if (a.accumulate_output) {
+            hipLaunchKernelGGL((small_batch_projection_kernel<N, K, T, true>),
+                               dim3(N / 16, (T + 15) / 16), dim3(32 * k_split<N, K>()), 0, stream,
+                               a.activation_low_codes, a.activation_high_codes, a.activation_scales,
+                               a.activation_status, a.weight_codes, a.weight_scales, a.output);
+            return hipGetLastError();
+        }
     }
+    if (a.accumulate_output) return hipErrorInvalidValue;
+    hipLaunchKernelGGL((small_batch_projection_kernel<N, K, T>), dim3(N / 16, (T + 15) / 16),
+                       dim3(32 * k_split<N, K>()), 0, stream, a.activation_low_codes,
+                       a.activation_high_codes, a.activation_scales, a.activation_status,
+                       a.weight_codes, a.weight_scales, a.output);
+    return hipGetLastError();
 }
+
+// Token-tile wide routes (a8q4_token_tile_cta.h): one token fragment and four 16-row fragments
+// per wave; Rb row waves, Ks in-CTA K slices, Pd groups of loads in flight. The token tile is
+// ceil(T/16)x16 at run time; every admitted shape has an even G64 group count divisible by
+// Ks*Pd and rows divisible by 16*4*Rb. Scale planes are 256-byte aligned by the workspace and
+// storage contracts; the kernel reads each FP16 scale through its aligned 32-bit word.
+template <unsigned N, unsigned K, unsigned Mt, unsigned Rb, unsigned Ks, unsigned Pd>
+hipError_t launch_token_tile_class(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    using S = detail::TokenTileConfig<Mt, 1, 4, Rb, Ks, Pd>;
+    static_assert(N % S::Rows == 0 && K % 128 == 0 && (K / 64) % (Ks * Pd) == 0);
+    const auto launch = [&](auto kernel) {
+        hipLaunchKernelGGL(kernel, dim3(N / S::Rows), dim3(S::Threads), 0, stream,
+                           a.activation_low_codes, a.activation_high_codes, a.activation_scales,
+                           a.activation_status, a.weight_codes, a.weight_scales, a.output, a.tokens,
+                           N, K / 64U);
+        return hipGetLastError();
+    };
+    // Only the N5120 residual-stream projections admit the in-place residual epilogue.
+    if constexpr (N == 5120) {
+        if (a.accumulate_output) return launch(detail::a8q4_token_tile_kernel<S, true>);
+    }
+    if (a.accumulate_output) return hipErrorInvalidValue;
+    return launch(detail::a8q4_token_tile_kernel<S, false>);
+}
+
+// Only the token-tile classes [MinMt, MaxMt] a route is selected for are instantiated.
+template <unsigned N, unsigned K, unsigned Rb, unsigned Ks, unsigned Pd, unsigned MinMt,
+          unsigned MaxMt>
+hipError_t launch_token_tile(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    const unsigned mt = (a.tokens + 15U) / 16U;
+    if (mt < MinMt || mt > MaxMt ||
+        reinterpret_cast<std::uintptr_t>(a.activation_scales) % 4U != 0U ||
+        reinterpret_cast<std::uintptr_t>(a.weight_scales) % 4U != 0U)
+        return hipErrorInvalidValue;
+    if constexpr (MinMt <= 2 && MaxMt >= 2)
+        if (mt == 2U) return launch_token_tile_class<N, K, 2, Rb, Ks, Pd>(a, stream);
+    if constexpr (MinMt <= 3 && MaxMt >= 3)
+        if (mt == 3U) return launch_token_tile_class<N, K, 3, Rb, Ks, Pd>(a, stream);
+    if constexpr (MaxMt >= 4)
+        if (mt == 4U) return launch_token_tile_class<N, K, 4, Rb, Ks, Pd>(a, stream);
+    return hipErrorInvalidValue;
+}
+
+template <unsigned N, unsigned K>
+hipError_t launch_wide(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    using R              = detail::A8Q4WideRoute;
+    constexpr bool n64   = N == 34816 && K == 5120;
+    constexpr bool n128  = N == 131072 && K == 5120;
+    constexpr bool tiled = N == 1280 && K == 5120;
+    switch (
+        detail::select_a8q4_small_batch_wide_route(a.tokens, a.rows, a.columns, a.padded_columns)) {
+    case R::TokenTileN64SplitK:
+        if constexpr (tiled)
+            return launch_token_tile<N, K, 1, 2, 2, 4, 4>(a, stream);
+        else if constexpr (n64)
+            return launch_token_tile<N, K, 1, 2, 2, 3, 4>(a, stream);
+        else
+            return launch_token_tile<N, K, 1, 2, 2, 2, 4>(a, stream);
+    case R::TokenTileN64:
+        if constexpr (n64)
+            return launch_token_tile<N, K, 1, 1, 1, 2, 2>(a, stream);
+        else
+            break;
+    case R::TokenTileN128:
+        if constexpr (n128)
+            return launch_token_tile<N, K, 2, 1, 2, 2, 3>(a, stream);
+        else
+            break;
+    case R::TiledM:
+        if constexpr (tiled) {
+            switch (a.tokens) {
+            case 25:
+                return launch_width<N, K, 25>(a, stream);
+            case 30:
+                return launch_width<N, K, 30>(a, stream);
+            case 35:
+                return launch_width<N, K, 35>(a, stream);
+            case 36:
+                return launch_width<N, K, 36>(a, stream);
+            case 40:
+                return launch_width<N, K, 40>(a, stream);
+            case 42:
+                return launch_width<N, K, 42>(a, stream);
+            case 48:
+                return launch_width<N, K, 48>(a, stream);
+            default:
+                break;
+            }
+        }
+        break;
+    case R::None:
+        break;
+    }
+    return hipErrorInvalidValue;
+}
+
+template <unsigned N, unsigned K>
+constexpr bool has_wide_cells() {
+    return (N == 5120 && (K == 4096 || K == 17408 || K == 25600)) ||
+           ((N == 34816 || N == 6144 || N == 2048 || N == 1280 || N == 131072) && K == 5120);
+}
+
+// T>16 table cells (tiled body) of shapes whose T17..64 widths all take a token-tile route are
+// unreachable; only the remaining shapes instantiate them.
+template <unsigned N, unsigned K>
+constexpr bool has_t18_32_table() {
+    return (N == 5120 && K == 6144) ||
+           ((N == 12288 || N == 4096 || N == 7168 || N == 1280) && K == 5120);
+}
+
+// Two projections of one prepared activation in one launch: CTAs [0, N0/16) own the first
+// matrix's row tiles and the rest the second's, so the pair pays one launch ramp and tail.
+constexpr unsigned kPairSplit = 4;
+
+template <unsigned N0, unsigned N1, unsigned K, unsigned T>
+__global__ __launch_bounds__(32 * kPairSplit) void small_batch_projection_pair_kernel(
+    const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
+    const std::uint32_t* status, const std::uint8_t* codes0, const std::uint16_t* scales0,
+    hip_bfloat16* output0, const std::uint8_t* codes1, const std::uint16_t* scales1,
+    hip_bfloat16* output1) {
+    if (blockIdx.x < N0 / 16)
+        detail::a8q4_pipeline_body<N0, K, T, false, kPairSplit>(low, high, scales, status, codes0,
+                                                                scales0, output0, blockIdx.x);
+    else
+        detail::a8q4_pipeline_body<N1, K, T, false, kPairSplit>(
+            low, high, scales, status, codes1, scales1, output1, blockIdx.x - N0 / 16);
+}
+
+template <unsigned N0, unsigned N1, unsigned K, unsigned T>
+hipError_t launch_pair_width(const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b,
+                             hipStream_t stream) {
+    hipLaunchKernelGGL((small_batch_projection_pair_kernel<N0, N1, K, T>),
+                       dim3((N0 + N1) / 16, (T + 15) / 16), dim3(32 * kPairSplit), 0, stream,
+                       a.activation_low_codes, a.activation_high_codes, a.activation_scales,
+                       a.activation_status, a.weight_codes, a.weight_scales, a.output,
+                       b.weight_codes, b.weight_scales, b.output);
+    return hipGetLastError();
+}
+
+// The same pair at T <= 8 over two equal N-row matrices whose rows are split at `split`: each
+// row's BF16 values go to its leading [T,split] or trailing [T,N-split] output.
+template <unsigned N, unsigned K, unsigned T>
+__global__ __launch_bounds__(32 * kPairSplit) void small_batch_projection_pair_split_kernel(
+    const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
+    const std::uint32_t* status, const std::uint8_t* codes0, const std::uint16_t* scales0,
+    const std::uint8_t* codes1, const std::uint16_t* scales1,
+    detail::A8Q4PairSplitOutputs outputs) {
+    const bool second      = blockIdx.x >= N / 16;
+    hip_bfloat16* leading  = second ? outputs.second_leading : outputs.first_leading;
+    hip_bfloat16* trailing = second ? outputs.second_trailing : outputs.first_trailing;
+    const unsigned split   = outputs.split;
+    detail::a8q4_pipeline_rows<K, T, kPairSplit>(
+        low, high, scales, status, second ? codes1 : codes0, second ? scales1 : scales0,
+        second ? blockIdx.x - N / 16 : blockIdx.x,
+        [&](unsigned row, const hip_bfloat16(&values)[T]) {
+#pragma unroll
+            for (unsigned t = 0; t < T; ++t) {
+                if (row < split)
+                    leading[t * split + row] = values[t];
+                else
+                    trailing[t * (N - split) + row - split] = values[t];
+            }
+        });
+}
+
+template <unsigned N0, unsigned N1, unsigned K>
+hipError_t launch_pair(const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b, hipStream_t stream) {
+    switch (a.tokens) {
+    case 5:
+        return launch_pair_width<N0, N1, K, 5>(a, b, stream);
+    case 6:
+        return launch_pair_width<N0, N1, K, 6>(a, b, stream);
+    case 7:
+        return launch_pair_width<N0, N1, K, 7>(a, b, stream);
+    case 8:
+        return launch_pair_width<N0, N1, K, 8>(a, b, stream);
+    case 10:
+        return launch_pair_width<N0, N1, K, 10>(a, b, stream);
+    case 12:
+        return launch_pair_width<N0, N1, K, 12>(a, b, stream);
+    case 15:
+        return launch_pair_width<N0, N1, K, 15>(a, b, stream);
+    case 18:
+        return launch_pair_width<N0, N1, K, 18>(a, b, stream);
+    case 20:
+        return launch_pair_width<N0, N1, K, 20>(a, b, stream);
+    case 24:
+        return launch_pair_width<N0, N1, K, 24>(a, b, stream);
+    case 28:
+        return launch_pair_width<N0, N1, K, 28>(a, b, stream);
+    case 32:
+        return launch_pair_width<N0, N1, K, 32>(a, b, stream);
+    default:
+        break;
+    }
+    return hipErrorNotSupported;
+}
+
 template <unsigned N, unsigned K>
 hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
-    if constexpr ((N==34816 && K==5120) || (N==5120 && (K==17408 || K==6144))) {
-        switch(a.tokens) {
-        case 2: return launch_width<N,K,2>(a,stream);
-        case 3: return launch_width<N,K,3>(a,stream);
-        case 4: return launch_width<N,K,4>(a,stream);
-        }
+    if constexpr (has_wide_cells<N, K>()) {
+        if (detail::use_a8q4_small_batch_wide(a.tokens, a.rows, a.columns, a.padded_columns))
+            return launch_wide<N, K>(a, stream);
     }
-    {
-        switch(a.tokens) {
-        case 10: return launch_width<N,K,10>(a,stream);
-        case 12: return launch_width<N,K,12>(a,stream);
-        case 15: return launch_width<N,K,15>(a,stream);
-        case 18: return launch_width<N,K,18>(a,stream);
-        case 20: return launch_width<N,K,20>(a,stream);
-        case 24: return launch_width<N,K,24>(a,stream);
+    if constexpr (N == 131072) {
+        return hipErrorInvalidValue;
+    } else {
+        if constexpr ((N == 34816 && K == 5120) || (N == 5120 && (K == 17408 || K == 6144)) ||
+                      (N == 256 && K == 5120)) {
+            if (a.tokens == 1) return launch_width<N, K, 1>(a, stream);
         }
+        if constexpr ((N == 34816 && K == 5120) || (N == 5120 && (K == 17408 || K == 6144)) ||
+                      (N == 256 && K == 5120)) {
+            switch (a.tokens) {
+            case 2:
+                return launch_width<N, K, 2>(a, stream);
+            case 3:
+                return launch_width<N, K, 3>(a, stream);
+            case 4:
+                return launch_width<N, K, 4>(a, stream);
+            default:
+                break;
+            }
+        }
+        {
+            switch (a.tokens) {
+            case 10:
+                return launch_width<N, K, 10>(a, stream);
+            case 12:
+                return launch_width<N, K, 12>(a, stream);
+            case 14:
+                return launch_width<N, K, 14>(a, stream);
+            case 15:
+                return launch_width<N, K, 15>(a, stream);
+            case 16:
+                return launch_width<N, K, 16>(a, stream);
+            default:
+                break;
+            }
+        }
+        if constexpr (has_t18_32_table<N, K>()) {
+            switch (a.tokens) {
+            case 18:
+                return launch_width<N, K, 18>(a, stream);
+            case 20:
+                return launch_width<N, K, 20>(a, stream);
+            case 21:
+                return launch_width<N, K, 21>(a, stream);
+            case 24:
+                return launch_width<N, K, 24>(a, stream);
+            case 28:
+                return launch_width<N, K, 28>(a, stream);
+            case 32:
+                return launch_width<N, K, 32>(a, stream);
+            default:
+                break;
+            }
+        }
+        if (a.tokens == 4) return launch_width<N, K, 4>(a, stream);
+        if (a.tokens == 5) return launch_width<N, K, 5>(a, stream);
+        if (a.tokens == 6) return launch_width<N, K, 6>(a, stream);
+        if (a.tokens == 7) return launch_width<N, K, 7>(a, stream);
+        if (a.tokens == 8) return launch_width<N, K, 8>(a, stream);
+        return hipErrorInvalidValue;
     }
-    if(a.tokens==5)return launch_width<N,K,5>(a,stream);
-    if(a.tokens==6)return launch_width<N,K,6>(a,stream);
-    return hipErrorInvalidValue;
 }
+
 template <unsigned N, unsigned K>
 hipError_t launch(const A8Q4G64CandidateArgs& a, hipStream_t stream) {
-    const auto validation = detail::validate_a8q4_scale_gather<N,K>(a,stream);
+    const auto validation = detail::validate_a8q4_scale_gather<N, K>(a, stream);
     if (validation != hipSuccess) return validation;
     A8G64ActivationWorkspace scratch{};
-    auto result = a8q4g64_bind_activation_workspace(a.activation_workspace,
-        a.activation_workspace_bytes,a.tokens,K,&scratch);
+    auto result = a8q4g64_bind_activation_workspace(
+        a.activation_workspace, a.activation_workspace_bytes, a.tokens, K, &scratch);
     if (result != hipSuccess) return result;
-    result = a8g64_quantize_activation({a.input,scratch},stream);
+    result = a8g64_quantize_activation({a.input, scratch}, stream);
     if (result != hipSuccess) return result;
-    return launch_prepared<N,K>(
-        {scratch.low_codes,scratch.low_code_bytes,scratch.high_codes,scratch.high_code_bytes,
-         scratch.scales,scratch.scale_bytes,scratch.status,a.weight_codes,a.weight_code_bytes,
-         a.weight_scales,a.weight_scale_bytes,a.output,a.tokens,a.rows,a.columns,a.padded_columns},stream);
+    return launch_prepared<N, K>({scratch.low_codes, scratch.low_code_bytes, scratch.high_codes,
+                                  scratch.high_code_bytes, scratch.scales, scratch.scale_bytes,
+                                  scratch.status, a.weight_codes, a.weight_code_bytes,
+                                  a.weight_scales, a.weight_scale_bytes, a.output, a.tokens, a.rows,
+                                  a.columns, a.padded_columns},
+                                 stream);
 }
+} // namespace
+
+bool detail::use_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& a,
+                                                  const A8Q4G64LinearArgs& b) noexcept {
+    const bool same_activation = a.tokens == b.tokens && a.columns == 5120U && b.columns == 5120U &&
+                                 a.padded_columns == 5120U && b.padded_columns == 5120U &&
+                                 a.activation_low_codes == b.activation_low_codes &&
+                                 a.activation_high_codes == b.activation_high_codes &&
+                                 a.activation_scales == b.activation_scales &&
+                                 a.activation_status == b.activation_status &&
+                                 !a.accumulate_output && !b.accumulate_output;
+    const bool widths = (a.tokens >= 5U && a.tokens <= 8U) || a.tokens == 10U || a.tokens == 12U ||
+                        a.tokens == 15U || a.tokens == 18U || a.tokens == 20U || a.tokens == 24U ||
+                        a.tokens == 28U || a.tokens == 32U;
+    return same_activation && widths &&
+           ((a.rows == 4096U && b.rows == 12288U) || (a.rows == 7168U && b.rows == 7168U));
 }
-hipError_t detail::launch_a8q4_small_batch_projection(
-    const A8Q4G64LinearArgs& a, hipStream_t stream) noexcept {
-    if (a.rows == 34816) return launch_prepared<34816,5120>(a,stream);
-    if (a.rows == 5120 && a.columns == 17408) return launch_prepared<5120,17408>(a,stream);
-    if (a.rows == 5120 && a.columns == 25600) return launch_prepared<5120,25600>(a,stream);
-    if (a.rows == 5120 && a.columns == 4096) return launch_prepared<5120,4096>(a,stream);
-    if (a.rows == 5120) return launch_prepared<5120,6144>(a,stream);
-    if (a.rows == 7168) return launch_prepared<7168,5120>(a,stream);
-    if (a.rows == 6144) return launch_prepared<6144,5120>(a,stream);
-    if (a.rows == 1280) return launch_prepared<1280,5120>(a,stream);
-    if (a.rows == 12288) return launch_prepared<12288,5120>(a,stream);
-    return launch_prepared<4096,5120>(a,stream);
+
+hipError_t detail::launch_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& a,
+                                                           const A8Q4G64LinearArgs& b,
+                                                           hipStream_t stream) noexcept {
+    if (!use_a8q4_small_batch_projection_pair(a, b)) return hipErrorInvalidValue;
+    if (a.rows == 4096U) return launch_pair<4096, 12288, 5120>(a, b, stream);
+    return launch_pair<7168, 7168, 5120>(a, b, stream);
 }
-hipError_t a8q4_small_batch_projection(
-    const A8Q4G64CandidateArgs& a, hipStream_t stream) noexcept {
-    if (!detail::use_a8q4_small_batch_projection(a.tokens,a.rows,a.columns,a.padded_columns))
+
+bool detail::use_a8q4_small_batch_projection_pair_split(const A8Q4G64LinearArgs& a,
+                                                        const A8Q4G64LinearArgs& b,
+                                                        std::uint32_t split) noexcept {
+    return use_a8q4_small_batch_projection_pair(a, b) && a.rows == 7168U &&
+           (a.tokens == 5U || a.tokens == 6U) && split != 0U && split < a.rows;
+}
+
+hipError_t detail::launch_a8q4_small_batch_projection_pair_split(
+    const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b, const A8Q4PairSplitOutputs& outputs,
+    hipStream_t stream) noexcept {
+    if (!use_a8q4_small_batch_projection_pair_split(a, b, outputs.split) ||
+        outputs.first_leading == nullptr || outputs.first_trailing == nullptr ||
+        outputs.second_leading == nullptr || outputs.second_trailing == nullptr)
         return hipErrorInvalidValue;
-    if (a.rows == 34816 && a.columns == 5120) return launch<34816,5120>(a,stream);
-    if (a.rows == 5120 && a.columns == 17408) return launch<5120,17408>(a,stream);
-    if (a.rows == 5120 && a.columns == 25600) return launch<5120,25600>(a,stream);
-    if (a.rows == 5120 && a.columns == 4096) return launch<5120,4096>(a,stream);
-    if (a.rows == 5120 && a.columns == 6144) return launch<5120,6144>(a,stream);
-    if (a.rows == 7168 && a.columns == 5120) return launch<7168,5120>(a,stream);
-    if (a.rows == 6144 && a.columns == 5120) return launch<6144,5120>(a,stream);
-    if (a.rows == 1280 && a.columns == 5120) return launch<1280,5120>(a,stream);
-    if (a.rows == 12288 && a.columns == 5120) return launch<12288,5120>(a,stream);
-    if (a.rows == 4096 && a.columns == 5120) return launch<4096,5120>(a,stream);
+    const auto launch = [&](auto kernel) {
+        hipLaunchKernelGGL(kernel, dim3(2U * 7168U / 16U), dim3(32U * kPairSplit), 0, stream,
+                           a.activation_low_codes, a.activation_high_codes, a.activation_scales,
+                           a.activation_status, a.weight_codes, a.weight_scales, b.weight_codes,
+                           b.weight_scales, outputs);
+        return hipGetLastError();
+    };
+    return a.tokens == 5U ? launch(small_batch_projection_pair_split_kernel<7168, 5120, 5>)
+                          : launch(small_batch_projection_pair_split_kernel<7168, 5120, 6>);
+}
+
+hipError_t detail::launch_a8q4_small_batch_projection(const A8Q4G64LinearArgs& a,
+                                                      hipStream_t stream) noexcept {
+    if (a.rows == 131072) return launch_prepared<131072, 5120>(a, stream);
+    if (a.rows == 34816) return launch_prepared<34816, 5120>(a, stream);
+    if (a.rows == 5120 && a.columns == 17408) return launch_prepared<5120, 17408>(a, stream);
+    if (a.rows == 5120 && a.columns == 25600) return launch_prepared<5120, 25600>(a, stream);
+    if (a.rows == 5120 && a.columns == 4096) return launch_prepared<5120, 4096>(a, stream);
+    if (a.rows == 5120) return launch_prepared<5120, 6144>(a, stream);
+    if (a.rows == 7168) return launch_prepared<7168, 5120>(a, stream);
+    if (a.rows == 2048) return launch_prepared<2048, 5120>(a, stream);
+    if (a.rows == 6144) return launch_prepared<6144, 5120>(a, stream);
+    if (a.rows == 1280) return launch_prepared<1280, 5120>(a, stream);
+    if (a.rows == 12288) return launch_prepared<12288, 5120>(a, stream);
+    if (a.rows == 256) return launch_prepared<256, 5120>(a, stream);
+    return launch_prepared<4096, 5120>(a, stream);
+}
+
+hipError_t a8q4_small_batch_projection(const A8Q4G64CandidateArgs& a, hipStream_t stream) noexcept {
+    if (!detail::use_a8q4_small_batch_projection(a.tokens, a.rows, a.columns, a.padded_columns))
+        return hipErrorInvalidValue;
+    if (a.rows == 131072 && a.columns == 5120) return launch<131072, 5120>(a, stream);
+    if (a.rows == 34816 && a.columns == 5120) return launch<34816, 5120>(a, stream);
+    if (a.rows == 5120 && a.columns == 17408) return launch<5120, 17408>(a, stream);
+    if (a.rows == 5120 && a.columns == 25600) return launch<5120, 25600>(a, stream);
+    if (a.rows == 5120 && a.columns == 4096) return launch<5120, 4096>(a, stream);
+    if (a.rows == 5120 && a.columns == 6144) return launch<5120, 6144>(a, stream);
+    if (a.rows == 7168 && a.columns == 5120) return launch<7168, 5120>(a, stream);
+    if (a.rows == 2048 && a.columns == 5120) return launch<2048, 5120>(a, stream);
+    if (a.rows == 6144 && a.columns == 5120) return launch<6144, 5120>(a, stream);
+    if (a.rows == 1280 && a.columns == 5120) return launch<1280, 5120>(a, stream);
+    if (a.rows == 12288 && a.columns == 5120) return launch<12288, 5120>(a, stream);
+    if (a.rows == 4096 && a.columns == 5120) return launch<4096, 5120>(a, stream);
+    if (a.rows == 256 && a.columns == 5120) return launch<256, 5120>(a, stream);
     return hipErrorInvalidValue;
 }
-}
+} // namespace ninfer::ops::r9700::linear

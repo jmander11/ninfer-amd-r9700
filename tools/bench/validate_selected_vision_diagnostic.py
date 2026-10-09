@@ -15,8 +15,8 @@ from tools.bench.prepare_selected_vision_diagnostic import (
     GPU_PYTHON,
     MEDIA,
     MESSAGES,
-    REPO,
     REFERENCE_AUTHORITIES,
+    REPO,
     SOURCE,
     file_identity,
     inspect_python,
@@ -24,9 +24,16 @@ from tools.bench.prepare_selected_vision_diagnostic import (
     sha,
     validate_source_receipt,
 )
-
-
-from tools.parity.qwen3_8_27b.vision_contract import EXPECTED_TRACE_NAMES as CAPTURES, GATE, REPORT_FORMAT, CRITERIA, summarize, trace_shapes
+from tools.parity.qwen3_8_27b.vision_contract import (
+    CRITERIA,
+    GATE,
+    REPORT_FORMAT,
+    summarize,
+    trace_shapes,
+)
+from tools.parity.qwen3_8_27b.vision_contract import (
+    EXPECTED_TRACE_NAMES as CAPTURES,
+)
 
 
 def validate_closure(root: Path, plan_path: Path) -> dict[Path, str]:
@@ -52,7 +59,8 @@ def validate_closure(root: Path, plan_path: Path) -> dict[Path, str]:
         if not path.is_file() or sha(path) != digest:
             raise ValueError(f"prepared closure bytes changed: {path}")
     required = {
-        plan_path.resolve(), Path(__file__).resolve(),
+        plan_path.resolve(),
+        Path(__file__).resolve(),
         *[path.resolve(strict=True) for path in REFERENCE_AUTHORITIES],
     }
     if not required <= set(entries):
@@ -68,9 +76,7 @@ def _expected_source() -> dict[str, object]:
         "config_sha256": receipt["metadata"]["config"]["sha256"],
         "index_sha256": receipt["metadata"]["index"]["sha256"],
         "indexed_tensor_count": receipt["metadata"]["indexed_tensor_count"],
-        "shards": {
-            row["name"]: {"bytes": row["bytes"]} for row in receipt["shards"]["files"]
-        },
+        "shards": {row["name"]: {"bytes": row["bytes"]} for row in receipt["shards"]["files"]},
     }
 
 
@@ -109,9 +115,12 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     if prepared_name.is_symlink():
         raise ValueError("Vision prepared input must not be a symlink")
     prepared_path = prepared_name.resolve(strict=True)
-    if prepared_path != root / "prepared-input.safetensors" or file_identity(prepared_path) != {
-        key: prepared[key] for key in ("path", "bytes", "sha256")
-    } or prepared_path not in closure:
+    if (
+        prepared_path != root / "prepared-input.safetensors"
+        or file_identity(prepared_path)
+        != {key: prepared[key] for key in ("path", "bytes", "sha256")}
+        or prepared_path not in closure
+    ):
         raise ValueError("Vision prepared input differs from frozen plan")
     contract = prepared.get("contract")
     if (
@@ -127,22 +136,31 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     ):
         raise ValueError("Vision prepared input contract is not one committed image")
     grid = contract["image_grid_thw"][0]
-    if not isinstance(grid, list) or len(grid) != 3 or any(
-        not isinstance(value, int) or value <= 0 for value in grid
-    ) or grid[1] % 2 or grid[2] % 2:
+    if (
+        not isinstance(grid, list)
+        or len(grid) != 3
+        or any(not isinstance(value, int) or value <= 0 for value in grid)
+        or grid[1] % 2
+        or grid[2] % 2
+    ):
         raise ValueError("Vision prepared input grid is invalid")
     patches = math.prod(grid)
     tokens = patches // 4
     if contract["image_tokens"] != tokens or contract.get("pixel_values_shape") != [patches, 1536]:
         raise ValueError("Vision prepared input shapes differ from grid semantics")
     expected_workload = {
-        "maximum_concurrency": 1, "thinking": False, "prefix_reuse": False,
-        "speculative_decode": False, "images": 1, "videos": 0,
+        "maximum_concurrency": 1,
+        "thinking": False,
+        "prefix_reuse": False,
+        "speculative_decode": False,
+        "images": 1,
+        "videos": 0,
         "capture_names": list(CAPTURES),
         "gate": GATE,
     }
     expected_outputs = {
-        "raw": str(root / "vision.raw.json"), "admission": str(root / "admission.json")
+        "raw": str(root / "vision.raw.json"),
+        "admission": str(root / "admission.json"),
     }
     if (
         plan.get("artifact_type") != "ninfer_r9700_selected_vision_diagnostic_plan"
@@ -165,38 +183,53 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     expected_source = _expected_source()
     tracer = plan.get("trace_executable", {})
     tracer_path = Path(tracer.get("path", ""))
-    if (not tracer_path.is_file() or file_identity(tracer_path) != tracer or
-            tracer_path.resolve() not in closure):
+    if (
+        not tracer_path.is_file()
+        or file_identity(tracer_path) != tracer
+        or tracer_path.resolve() not in closure
+    ):
         raise ValueError("selected Vision tracer identity changed")
     if (
         raw.get("format") != REPORT_FORMAT
         or raw.get("passed") is not True
-        or artifact != {"path": route["artifact"]["path"],
-                        "sha256": route["artifact"]["sha256"],
-                        "identity": {"model_id": route["artifact"]["model_id"],
-                                     "weights_id": route["artifact"]["weights_id"]}}
+        or artifact
+        != {
+            "path": route["artifact"]["path"],
+            "sha256": route["artifact"]["sha256"],
+            "identity": {
+                "model_id": route["artifact"]["model_id"],
+                "weights_id": route["artifact"]["weights_id"],
+            },
+        }
         or raw.get("model_dir") != expected_source["path"]
         or raw.get("source_provenance") != {k: v for k, v in expected_source.items() if k != "path"}
         or raw.get("messages") != fixture["messages"]["path"]
         or raw.get("messages_sha256") != fixture["messages"]["sha256"]
-        or raw.get("prepared_input") != {
-            "path": prepared["path"], "sha256": prepared["sha256"], "contract": contract}
+        or raw.get("prepared_input")
+        != {"path": prepared["path"], "sha256": prepared["sha256"], "contract": contract}
         or raw.get("trace_executable") != {"path": tracer["path"], "sha256": tracer["sha256"]}
     ):
         raise ValueError("Vision raw identity or execution contract differs")
+
     def finite(value):
         if isinstance(value, float) and not math.isfinite(value):
             raise ValueError("Vision report contains nonfinite metrics")
         if isinstance(value, dict):
-            for member in value.values(): finite(member)
+            for member in value.values():
+                finite(member)
         elif isinstance(value, list):
-            for member in value: finite(member)
+            for member in value:
+                finite(member)
+
     finite(raw)
     if raw.get("criteria") != CRITERIA:
         raise ValueError("Vision numerical criteria differ from the active contract")
     shapes = trace_shapes(patches, tokens)
-    for section in ("production_vs_artifact_reference", "production_local_op_oracles",
-                    "artifact_vs_source_bf16"):
+    for section in (
+        "production_vs_artifact_reference",
+        "production_local_op_oracles",
+        "artifact_vs_source_bf16",
+    ):
         report = raw.get(section, {})
         rows = report.get("comparisons")
         if report.get("passed") is not True or not isinstance(rows, list):
@@ -204,24 +237,39 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
         if len(rows) != len(CAPTURES) or {row.get("name") for row in rows} != set(CAPTURES):
             raise ValueError(f"Vision {section} lacks exact capture inventory")
         for row in rows:
-            if (row.get("item") != 0 or row.get("shape") != shapes[row["name"]] or
-                    row.get("actual_finite") is not True or row.get("reference_finite") is not True):
-                raise ValueError(f"Vision capture {row.get('name')} has wrong shape or nonfinite data")
+            if (
+                row.get("item") != 0
+                or row.get("shape") != shapes[row["name"]]
+                or row.get("actual_finite") is not True
+                or row.get("reference_finite") is not True
+            ):
+                raise ValueError(
+                    f"Vision capture {row.get('name')} has wrong shape or nonfinite data"
+                )
             for key in ("rmse", "relative_rmse", "max_absolute", "actual_rms", "reference_rms"):
                 if not isinstance(row.get(key), (int, float)) or row[key] < 0:
                     raise ValueError("Vision capture has invalid metrics")
-            if not isinstance(row.get("cosine"), (int, float)) or not -1.000001 <= row["cosine"] <= 1.000001:
+            if (
+                not isinstance(row.get("cosine"), (int, float))
+                or not -1.000001 <= row["cosine"] <= 1.000001
+            ):
                 raise ValueError("Vision capture has invalid cosine")
-        profile = {"production_vs_artifact_reference": "production",
-                   "production_local_op_oracles": "local",
-                   "artifact_vs_source_bf16": "source"}[section]
+        profile = {
+            "production_vs_artifact_reference": "production",
+            "production_local_op_oracles": "local",
+            "artifact_vs_source_bf16": "source",
+        }[section]
         try:
             evaluated = summarize(rows, profile=profile)
         except (KeyError, TypeError, RuntimeError) as error:
             raise ValueError(f"Vision {section} has incomplete numerical metrics") from error
         if not evaluated["passed"]:
             raise ValueError(f"Vision {section} failed numerical criteria")
-    for section in ("preprocessing", "artifact_weights_vs_source_bf16", "source_manual_vs_hf_final"):
+    for section in (
+        "preprocessing",
+        "artifact_weights_vs_source_bf16",
+        "source_manual_vs_hf_final",
+    ):
         if raw.get(section, {}).get("passed") is not True:
             raise ValueError(f"Vision {section} did not pass")
     if sha(plan_path) != hashlib_sha(plan_raw) or sha(raw_path) != hashlib_sha(raw_bytes):
@@ -233,8 +281,10 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
         "terminal_route": route,
         "campaign": {
             "plan": {"path": str(plan_path), "sha256": sha(plan_path)},
-            "prepared_closure": {"path": str(root / "prepared.sha256"),
-                                 "sha256": sha(root / "prepared.sha256")},
+            "prepared_closure": {
+                "path": str(root / "prepared.sha256"),
+                "sha256": sha(root / "prepared.sha256"),
+            },
         },
         "evidence": {"path": str(raw_path), "sha256": sha(raw_path)},
         "source_checkpoint": source_identity,
@@ -244,6 +294,7 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
 
 def hashlib_sha(value: bytes) -> str:
     import hashlib
+
     return hashlib.sha256(value).hexdigest()
 
 

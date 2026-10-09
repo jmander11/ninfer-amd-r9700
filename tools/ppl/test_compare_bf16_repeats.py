@@ -24,8 +24,12 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             "reference_execution": {"profile": "deterministic"},
             "corpus": {"hash": "corpus"},
             "lengths": [run.DEFAULT_TOKENS, run.LONG_TOKENS],
-            "skip": "half", "prefill_chunk": 4096, "schedules": ["prefill"],
-            "spec": "none", "draft_tokens": 0, "terrible_nll": run.TERRIBLE_NLL,
+            "skip": "half",
+            "prefill_chunk": 4096,
+            "schedules": ["prefill"],
+            "spec": "none",
+            "draft_tokens": 0,
+            "terrible_nll": run.TERRIBLE_NLL,
             "scorers": {run.BASELINE: {"sha256": "a" * 64}},
         }
 
@@ -102,7 +106,9 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             first = self.cells(root / "first")
             second = self.cells(root / "second")
             for field in (
-                "formula_profile", "corpus_ids_sha256", "cache_append_boundary",
+                "formula_profile",
+                "corpus_ids_sha256",
+                "cache_append_boundary",
             ):
                 changed = copy.deepcopy(second)
                 changed[run.DEFAULT_TOKENS][0][field] = "changed"
@@ -113,8 +119,9 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             for field in ("terrible_tokens", "sum_nll", "mean_nll", "max_nll", "ppl"):
                 changed = copy.deepcopy(second)
                 changed[run.DEFAULT_TOKENS][0][field] = 2
-                with self.subTest(field=field), self.assertRaisesRegex(
-                    ValueError, "aggregates differ"
+                with (
+                    self.subTest(field=field),
+                    self.assertRaisesRegex(ValueError, "aggregates differ"),
                 ):
                     compare.compare(self.payload(), first, self.payload(), changed)
             for identity in ("attention_pv", "gdn_recurrence"):
@@ -159,8 +166,13 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             scorer.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             campaign = root / "results.json"
             command = [
-                str(scorer), "--weights", str(root / "weights"), "--ids",
-                str(root / "corpus.ids"), "--device", "0",
+                str(scorer),
+                "--weights",
+                str(root / "weights"),
+                "--ids",
+                str(root / "corpus.ids"),
+                "--device",
+                "0",
             ]
             value = {
                 "artifact_type": run.CAMPAIGN_ARTIFACT_TYPE,
@@ -168,11 +180,16 @@ class CompareBf16RepeatsTest(unittest.TestCase):
                 "pass": True,
                 "candidate_artifact": None,
                 "weights_inputs": {run.BASELINE: str(root / "weights")},
-                "scorers": {run.BASELINE: {
-                    "path": str(scorer.resolve()), "bytes": scorer.stat().st_size,
-                    "sha256": run.file_sha256(scorer),
-                }},
-                "schedules": ["prefill"], "spec": "none", "draft_tokens": 0,
+                "scorers": {
+                    run.BASELINE: {
+                        "path": str(scorer.resolve()),
+                        "bytes": scorer.stat().st_size,
+                        "sha256": run.file_sha256(scorer),
+                    }
+                },
+                "schedules": ["prefill"],
+                "spec": "none",
+                "draft_tokens": 0,
                 "lengths": [run.DEFAULT_TOKENS, run.LONG_TOKENS],
                 "corpus": {"forged": True},
                 "cells": [
@@ -181,8 +198,10 @@ class CompareBf16RepeatsTest(unittest.TestCase):
                 ],
             }
             campaign.write_text(json.dumps(value), encoding="utf-8")
-            with patch.object(run, "validate_corpus", return_value={"actual": True}), \
-                    self.assertRaisesRegex(ValueError, "corpus provenance differs"):
+            with (
+                patch.object(run, "validate_corpus", return_value={"actual": True}),
+                self.assertRaisesRegex(ValueError, "corpus provenance differs"),
+            ):
                 compare.load_campaign(campaign)
 
     def test_same_campaign_path_is_not_a_fresh_repeat(self) -> None:
@@ -209,39 +228,60 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             interpreter = root / "python3.11"
             interpreter.write_bytes(b"interpreter, not scorer")
             campaign = root / "results.json"
-            command = [str(interpreter), str(scorer), "--weights", str(root / "weights"),
-                       "--ids", str(root / "corpus.ids"), "--device", "0"]
+            command = [
+                str(interpreter),
+                str(scorer),
+                "--weights",
+                str(root / "weights"),
+                "--ids",
+                str(root / "corpus.ids"),
+                "--device",
+                "0",
+            ]
             value = self.payload()
-            value.update({
-                "artifact_type": run.CAMPAIGN_ARTIFACT_TYPE,
-                "schema_version": run.CAMPAIGN_SCHEMA_VERSION,
-                "pass": True, "candidate_artifact": None,
-                "weights_inputs": {run.BASELINE: str(root / "weights")},
-                "scorers": {run.BASELINE: {
-                    "path": str(scorer.resolve()), "bytes": scorer.stat().st_size,
-                    "sha256": run.file_sha256(scorer),
-                }},
-                "cells": [
-                    {"scheme": run.BASELINE, "command": command,
-                     "execution_provenance": {"python_executable": str(interpreter)}}
-                    for _ in value["lengths"]
-                ],
-            })
+            value.update(
+                {
+                    "artifact_type": run.CAMPAIGN_ARTIFACT_TYPE,
+                    "schema_version": run.CAMPAIGN_SCHEMA_VERSION,
+                    "pass": True,
+                    "candidate_artifact": None,
+                    "weights_inputs": {run.BASELINE: str(root / "weights")},
+                    "scorers": {
+                        run.BASELINE: {
+                            "path": str(scorer.resolve()),
+                            "bytes": scorer.stat().st_size,
+                            "sha256": run.file_sha256(scorer),
+                        }
+                    },
+                    "cells": [
+                        {
+                            "scheme": run.BASELINE,
+                            "command": command,
+                            "execution_provenance": {"python_executable": str(interpreter)},
+                        }
+                        for _ in value["lengths"]
+                    ],
+                }
+            )
             campaign.write_text(json.dumps(value), encoding="utf-8")
-            with patch.object(run, "validate_corpus", return_value=value["corpus"]), \
-                    patch.object(run, "load_reused_bf16_cells", return_value={}) as load:
+            with (
+                patch.object(run, "validate_corpus", return_value=value["corpus"]),
+                patch.object(run, "load_reused_bf16_cells", return_value={}) as load,
+            ):
                 compare.load_campaign(campaign)
                 self.assertEqual(load.call_args.kwargs["bf16_scorer"], scorer)
-                self.assertEqual(load.call_args.kwargs["scorer_identity"],
-                                 value["scorers"][run.BASELINE])
+                self.assertEqual(
+                    load.call_args.kwargs["scorer_identity"], value["scorers"][run.BASELINE]
+                )
                 # Interpreter and scorer identities must not be interchangeable.
                 for replacement in (str(root / "python-other"), str(root / "other.py")):
                     changed = copy.deepcopy(value)
                     index = 0 if "python-other" in replacement else 1
                     changed["cells"][0]["command"][index] = replacement
                     campaign.write_text(json.dumps(changed), encoding="utf-8")
-                    with self.subTest(replacement=replacement), self.assertRaisesRegex(
-                        ValueError, "scorer command differs"
+                    with (
+                        self.subTest(replacement=replacement),
+                        self.assertRaisesRegex(ValueError, "scorer command differs"),
                     ):
                         compare.load_campaign(campaign)
                 campaign.write_text(json.dumps(value), encoding="utf-8")
@@ -257,8 +297,9 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             first.write_text("first\n", encoding="utf-8")
             second.write_text("second\n", encoding="utf-8")
             for output in (first, second):
-                with self.subTest(output=output), self.assertRaisesRegex(
-                    ValueError, "must not alias"
+                with (
+                    self.subTest(output=output),
+                    self.assertRaisesRegex(ValueError, "must not alias"),
                 ):
                     compare._require_distinct_campaigns(first, second, output)
             hardlink = root / "output.json"
@@ -276,24 +317,33 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             (root / "first").mkdir()
             (root / "second").mkdir()
             result = compare.compare(
-                self.payload(), self.cells(root / "first"),
-                self.payload(), self.cells(root / "second"),
+                self.payload(),
+                self.cells(root / "first"),
+                self.payload(),
+                self.cells(root / "second"),
             )
-            result.update({
-                "artifact_type": run.BF16_REPEAT_ARTIFACT_TYPE,
-                "schema_version": run.BF16_REPEAT_SCHEMA_VERSION,
-                "quality_evidence": False,
-                "inputs": {
-                    "first": {"path": str(first_campaign),
-                              "sha256": run.file_sha256(first_campaign)},
-                    "second": {"path": str(second_campaign),
-                               "sha256": run.file_sha256(second_campaign)},
-                },
-            })
+            result.update(
+                {
+                    "artifact_type": run.BF16_REPEAT_ARTIFACT_TYPE,
+                    "schema_version": run.BF16_REPEAT_SCHEMA_VERSION,
+                    "quality_evidence": False,
+                    "inputs": {
+                        "first": {
+                            "path": str(first_campaign),
+                            "sha256": run.file_sha256(first_campaign),
+                        },
+                        "second": {
+                            "path": str(second_campaign),
+                            "sha256": run.file_sha256(second_campaign),
+                        },
+                    },
+                }
+            )
             comparison = root / "comparison.json"
             comparison.write_text(json.dumps(result) + "\n", encoding="utf-8")
-            with patch.object(compare, "load_campaign") as load_campaign, patch.object(
-                compare, "compare", return_value=result
+            with (
+                patch.object(compare, "load_campaign") as load_campaign,
+                patch.object(compare, "compare", return_value=result),
             ):
                 load_campaign.side_effect = [
                     (self.payload(), self.cells(root / "first")),
@@ -301,9 +351,7 @@ class CompareBf16RepeatsTest(unittest.TestCase):
                 ]
                 binding = run.validate_bf16_repeat_comparison(comparison, first_campaign)
             self.assertEqual(binding["authority_input"], "first")
-            self.assertEqual(
-                binding["authority_campaign_sha256"], run.file_sha256(first_campaign)
-            )
+            self.assertEqual(binding["authority_campaign_sha256"], run.file_sha256(first_campaign))
 
             changed = copy.deepcopy(result)
             changed["rows"][1]["exact"] = False
@@ -320,8 +368,10 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             for path in (first, second, unrelated):
                 path.write_text(path.name + "\n", encoding="utf-8")
             row = {
-                "prompt_tokens": run.DEFAULT_TOKENS, "exact": True,
-                "semantic_fields_exact": True, "semantic_fields": {},
+                "prompt_tokens": run.DEFAULT_TOKENS,
+                "exact": True,
+                "semantic_fields_exact": True,
+                "semantic_fields": {},
                 "nll_sha256": {"first": "1" * 64, "second": "1" * 64},
                 "argmax_sha256": {"first": "2" * 64, "second": "2" * 64},
             }
@@ -329,7 +379,8 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             payload = {
                 "artifact_type": run.BF16_REPEAT_ARTIFACT_TYPE,
                 "schema_version": run.BF16_REPEAT_SCHEMA_VERSION,
-                "quality_evidence": False, "exact": True,
+                "quality_evidence": False,
+                "exact": True,
                 "inputs": {
                     "first": {"path": str(first), "sha256": run.file_sha256(first)},
                     "second": {"path": str(second), "sha256": run.file_sha256(second)},

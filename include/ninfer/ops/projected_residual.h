@@ -11,8 +11,7 @@
 namespace ninfer::ops {
 
 // Exact caller-owned A8G64 scratch for the fixed T=1 boundary. Unsupported K is invalid.
-[[nodiscard]] std::size_t projected_residual_t1_workspace_capacity_bytes(
-    std::int32_t columns);
+[[nodiscard]] std::size_t projected_residual_t1_workspace_capacity_bytes(std::int32_t columns);
 
 /**
  * Applies the exact R9700 decode projection-plus-residual boundary.

@@ -4,14 +4,14 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter, defaultdict
 import hashlib
 import json
 import math
-from pathlib import Path
 import sqlite3
-from typing import Any, Sequence
-
+from collections import defaultdict
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 MEASURED = "ninfer_bench_measured"
 FULL_LAYERS = frozenset(range(3, 64, 4))
@@ -63,19 +63,29 @@ EXPECTED_CLAIMS = {
     ),
 }
 EXPECTED_LIMITATIONS = [
-    "The only exact local artifact/build pair is the retained legacy row-split canonical-Q4 "
-    "evaluator; current N16/K16 DFlash companions are absent.",
+    (
+        "The only exact local artifact/build pair is the retained legacy row-split canonical-Q4 "
+        "evaluator; current N16/K16 DFlash companions are absent."
+    ),
     "The all-Q4 base is an evaluation control and has not won terminal production selection.",
-    "Eager execution is required so per-layer ROCTX ranges remain attributable; its profiled "
-    "timing is not a Device-Graph performance result.",
-    "Empty or outer-round-associated dispatches are conservatively combined as "
-    "proposal/head/round service or unattributed; symbols refine operators but cannot invent "
-    "a missing semantic marker.",
-    "The trace contains no performance counters and makes no memory-bandwidth, cache-hit, or "
-    "stall claim.",
-    "A bounded terminal selected-region asynchronous GPU drain/reordering after the measured host "
-    "marker is retained rather than discarded; empty-region rows remain conservatively "
-    "unattributed service.",
+    (
+        "Eager execution is required so per-layer ROCTX ranges remain attributable; its profiled "
+        "timing is not a Device-Graph performance result."
+    ),
+    (
+        "Empty or outer-round-associated dispatches are conservatively combined as "
+        "proposal/head/round service or unattributed; symbols refine operators but cannot invent "
+        "a missing semantic marker."
+    ),
+    (
+        "The trace contains no performance counters and makes no memory-bandwidth, cache-hit, or "
+        "stall claim."
+    ),
+    (
+        "A bounded terminal selected-region asynchronous GPU drain/reordering after the measured host "
+        "marker is retained rather than discarded; empty-region rows remain conservatively "
+        "unattributed service."
+    ),
 ]
 MAX_TERMINAL_ASYNC_DRAIN_CALLS = 32
 MAX_TERMINAL_ASYNC_DRAIN_DISPATCH_WINDOW = 128
@@ -89,7 +99,10 @@ def _sha256(path: Path) -> str:
 
 
 def _json(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"), parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
+    value = json.loads(
+        path.read_text(encoding="utf-8"),
+        parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)),
+    )
     if not isinstance(value, dict):
         raise ValueError(f"expected JSON object: {path}")
     return value
@@ -139,9 +152,7 @@ def _matches_exact_fields(actual: Any, expected: dict[str, Any]) -> bool:
     return True
 
 
-def _validate_kernel_intervals(
-    rows: Sequence[Any], measured: tuple[int, int]
-) -> dict[str, Any]:
+def _validate_kernel_intervals(rows: Sequence[Any], measured: tuple[int, int]) -> dict[str, Any]:
     parsed: list[tuple[int, int, int, int]] = []
     tail: list[tuple[int, int, int, int]] = []
     for row in rows:
@@ -164,11 +175,13 @@ def _validate_kernel_intervals(
             "dispatch_ids": [],
         }
     maximum_dispatch = max(item[0] for item in parsed)
-    if (len(tail) > MAX_TERMINAL_ASYNC_DRAIN_CALLS or
-            maximum_dispatch - min(item[0] for item in tail) >
-            MAX_TERMINAL_ASYNC_DRAIN_DISPATCH_WINDOW or
-            max(item[2] for item in tail) - measured[1] > MAX_TERMINAL_ASYNC_DRAIN_TAIL_NS or
-            sum(item[3] for item in tail) > MAX_TERMINAL_ASYNC_DRAIN_SUM_NS):
+    if (
+        len(tail) > MAX_TERMINAL_ASYNC_DRAIN_CALLS
+        or maximum_dispatch - min(item[0] for item in tail)
+        > MAX_TERMINAL_ASYNC_DRAIN_DISPATCH_WINDOW
+        or max(item[2] for item in tail) - measured[1] > MAX_TERMINAL_ASYNC_DRAIN_TAIL_NS
+        or sum(item[3] for item in tail) > MAX_TERMINAL_ASYNC_DRAIN_SUM_NS
+    ):
         raise ValueError("terminal selected-region async drain exceeds bounded allowance")
     return {
         "calls": len(tail),
@@ -211,8 +224,7 @@ def _validate_verify_ranges(
         if [row[2] for row in actual] != expected_sequence:
             raise ValueError(f"{family}: layer payload order differs")
     by_family: dict[str, list[tuple[int, int]]] = {
-        family: [(begin, end) for begin, end, _ in rows]
-        for family, rows in grouped.items()
+        family: [(begin, end) for begin, end, _ in rows] for family, rows in grouped.items()
     }
     by_message: dict[tuple[str, int], list[tuple[int, int]]] = defaultdict(list)
     for family, rows in grouped.items():
@@ -221,10 +233,16 @@ def _validate_verify_ranges(
     previous_outer_end: int | None = None
     for round_index in range(rounds):
         for layer in range(64):
-            outer_family = ("ninfer.attention.verify.layer.full" if layer in FULL_LAYERS
-                            else "ninfer.gdn.verify.layer.gdn")
-            leaf_family = ("ninfer.attention.verify.attention" if layer in FULL_LAYERS
-                           else "ninfer.gdn.verify.gdn")
+            outer_family = (
+                "ninfer.attention.verify.layer.full"
+                if layer in FULL_LAYERS
+                else "ninfer.gdn.verify.layer.gdn"
+            )
+            leaf_family = (
+                "ninfer.attention.verify.attention"
+                if layer in FULL_LAYERS
+                else "ninfer.gdn.verify.gdn"
+            )
             outer = by_message[(outer_family, layer)][round_index]
             inner = by_message[(leaf_family, layer)][round_index]
             post = by_message[("ninfer.post-mixer.verify.post_mixer", layer)][round_index]
@@ -251,18 +269,28 @@ def _symbol_family(name: str) -> str:
     return next((family for needle, family in rules if needle in name), "other")
 
 
-def _validate_report(report: dict[str, Any], cell: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _validate_report(
+    report: dict[str, Any], cell: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if report.get("artifact_type") != "ninfer_bench_report" or report.get("schema_version") != 20:
         raise ValueError("benchmark report is not the exact retained-build schema v20")
     config = report.get("config")
     expected_config = {
-        "concurrency": 1, "spec": "dflash", "draft_tokens": cell["draft_tokens"],
+        "concurrency": 1,
+        "spec": "dflash",
+        "draft_tokens": cell["draft_tokens"],
         "dflash_verify_width_requested": cell["verify_width"],
-        "dflash_verify_width": cell["verify_width"], "proposal_head": "optimized",
-        "use_device_graph": False, "speculative_execution": True,
-        "decode_path": "dflash_eager", "prefill_chunk": 4096,
-        "kv_cache_format": "fp8-k-int4-v", "kv_value_group": 32,
-        "repetitions": 1, "warmup": 1, "max_context": 256,
+        "dflash_verify_width": cell["verify_width"],
+        "proposal_head": "optimized",
+        "use_device_graph": False,
+        "speculative_execution": True,
+        "decode_path": "dflash_eager",
+        "prefill_chunk": 4096,
+        "kv_cache_format": "fp8-k-int4-v",
+        "kv_value_group": 32,
+        "repetitions": 1,
+        "warmup": 1,
+        "max_context": 256,
     }
     if not _matches_exact_fields(config, expected_config):
         raise ValueError("benchmark report configuration differs")
@@ -270,15 +298,23 @@ def _validate_report(report: dict[str, Any], cell: dict[str, Any]) -> tuple[dict
     if not isinstance(tests, list) or len(tests) != 1 or not isinstance(tests[0], dict):
         raise ValueError("benchmark report must contain exactly one test")
     test = tests[0]
-    if (test.get("kind") != "whole" or not _exact_int(test.get("n_prompt")) or
-            test["n_prompt"] != 128 or not _exact_int(test.get("n_gen")) or
-            test["n_gen"] != 64 or not _exact_int(test.get("requested_output_tokens")) or
-            test["requested_output_tokens"] != 65):
+    if (
+        test.get("kind") != "whole"
+        or not _exact_int(test.get("n_prompt"))
+        or test["n_prompt"] != 128
+        or not _exact_int(test.get("n_gen"))
+        or test["n_gen"] != 64
+        or not _exact_int(test.get("requested_output_tokens"))
+        or test["requested_output_tokens"] != 65
+    ):
         raise ValueError("benchmark test is not exact P128/G64")
     speculative = test.get("speculative")
-    if (not isinstance(speculative, dict) or speculative.get("enabled") is not True or
-            speculative.get("draft_window") != cell["draft_tokens"] or
-            not _exact_int(speculative.get("rounds"), minimum=1)):
+    if (
+        not isinstance(speculative, dict)
+        or speculative.get("enabled") is not True
+        or speculative.get("draft_window") != cell["draft_tokens"]
+        or not _exact_int(speculative.get("rounds"), minimum=1)
+    ):
         raise ValueError("benchmark report lacks DFlash rounds")
     for key in ("drafted_tokens", "accepted_tokens", "fallback_steps"):
         if not _exact_int(speculative.get(key)):
@@ -290,8 +326,11 @@ def _validate_report(report: dict[str, Any], cell: dict[str, Any]) -> tuple[dict
     if not isinstance(reps, list) or len(reps) != 1 or not isinstance(reps[0], dict):
         raise ValueError("benchmark report must contain exactly one measured repetition")
     rep = reps[0]
-    if (rep.get("generated_output_tokens") != 65 or rep.get("decode_output_tokens") != 64 or
-            not _exact_int(rep.get("decode_engine_tokens"), minimum=1)):
+    if (
+        rep.get("generated_output_tokens") != 65
+        or rep.get("decode_output_tokens") != 64
+        or not _exact_int(rep.get("decode_engine_tokens"), minimum=1)
+    ):
         raise ValueError("measured repetition did not complete exact G64 output")
     rep_speculative = rep.get("speculative")
     if rep_speculative != speculative:
@@ -308,21 +347,30 @@ def _validate_report(report: dict[str, Any], cell: dict[str, Any]) -> tuple[dict
     ):
         raise ValueError("measured repetition lacks positive finite timings")
     vision_seconds = timings.get("vision_seconds")
-    if (not isinstance(vision_seconds, (int, float)) or isinstance(vision_seconds, bool) or
-            not math.isfinite(vision_seconds) or vision_seconds < 0):
+    if (
+        not isinstance(vision_seconds, (int, float))
+        or isinstance(vision_seconds, bool)
+        or not math.isfinite(vision_seconds)
+        or vision_seconds < 0
+    ):
         raise ValueError("measured repetition has invalid vision timing")
     return test, speculative
 
 
 def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
     plan = _json(plan_path)
-    if plan.get("artifact_type") != "ninfer_r9700_dflash_owner_trace_plan" or plan.get("schema_version") != 1:
+    if (
+        plan.get("artifact_type") != "ninfer_r9700_dflash_owner_trace_plan"
+        or plan.get("schema_version") != 1
+    ):
         raise ValueError("plan identity differs")
-    if (plan.get("status") != EXPECTED_STATUS or
-            plan.get("common_workload") != EXPECTED_COMMON_WORKLOAD or
-            plan.get("power_profile") != EXPECTED_POWER_PROFILE or
-            plan.get("claims") != EXPECTED_CLAIMS or
-            plan.get("limitations") != EXPECTED_LIMITATIONS):
+    if (
+        plan.get("status") != EXPECTED_STATUS
+        or plan.get("common_workload") != EXPECTED_COMMON_WORKLOAD
+        or plan.get("power_profile") != EXPECTED_POWER_PROFILE
+        or plan.get("claims") != EXPECTED_CLAIMS
+        or plan.get("limitations") != EXPECTED_LIMITATIONS
+    ):
         raise ValueError("plan workload, power, claims, or limitations differ")
     root = Path(plan["output_root"])
     if plan_path.resolve() != (root / "plan.json").resolve():
@@ -332,56 +380,103 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
         raise ValueError("plan must contain exactly K4/W5 and K5/W6")
     cell = cells[cell_name]
     if (cell_name, cell.get("draft_tokens"), cell.get("verify_width")) not in (
-        ("k4w5", 4, 5), ("k5w6", 5, 6)
+        ("k4w5", 4, 5),
+        ("k5w6", 5, 6),
     ):
         raise ValueError("cell K/W identity differs")
-    for label in ("benchmark_executable", "artifact", "corpus", "profiler", "inventory", "analyzer"):
+    for label in (
+        "benchmark_executable",
+        "artifact",
+        "corpus",
+        "profiler",
+        "inventory",
+        "analyzer",
+    ):
         identity = plan[label]
         path = Path(identity["path"])
-        if not path.is_file() or path.stat().st_size != identity["file_size_bytes"] or _sha256(path) != identity["sha256"]:
+        if (
+            not path.is_file()
+            or path.stat().st_size != identity["file_size_bytes"]
+            or _sha256(path) != identity["sha256"]
+        ):
             raise ValueError(f"{label} bytes differ from plan")
     for label in ("cmake_cache", "compile_commands"):
         identity = plan["build_configuration"][label]
         path = Path(identity["path"])
-        if not path.is_file() or path.stat().st_size != identity["file_size_bytes"] or _sha256(path) != identity["sha256"]:
+        if (
+            not path.is_file()
+            or path.stat().st_size != identity["file_size_bytes"]
+            or _sha256(path) != identity["sha256"]
+        ):
             raise ValueError(f"build {label} bytes differ from plan")
     receipt = plan["artifact"]["conversion_report"]
     receipt_path = Path(receipt["path"])
-    if not receipt_path.is_file() or receipt_path.stat().st_size != receipt["file_size_bytes"] or _sha256(receipt_path) != receipt["sha256"]:
+    if (
+        not receipt_path.is_file()
+        or receipt_path.stat().st_size != receipt["file_size_bytes"]
+        or _sha256(receipt_path) != receipt["sha256"]
+    ):
         raise ValueError("artifact conversion report bytes differ from plan")
     cell_root = root / cell_name
     report_path = cell_root / "benchmark-report.json"
     database = cell_root / "raw" / f"{cell_name}_results.db"
     before, after = cell_root / "power-before.txt", cell_root / "power-after.txt"
-    if before.read_text(encoding="utf-8").strip() != "auto" or after.read_text(encoding="utf-8").strip() != "auto":
+    if (
+        before.read_text(encoding="utf-8").strip() != "auto"
+        or after.read_text(encoding="utf-8").strip() != "auto"
+    ):
         raise ValueError("power endpoints are not both auto")
     report = _json(report_path)
     if report.get("command") != cell["benchmark_command_string"]:
         raise ValueError("benchmark report command differs")
     report_environment = report.get("environment")
-    if (not isinstance(report_environment, dict) or
-            set(report_environment) != {"gpu_name", "architecture_name", "hip_runtime_version",
-                                        "hip_driver_version", "device_id"} or
-            report_environment.get("gpu_name") != "AMD Radeon AI PRO R9700" or
-            report_environment.get("architecture_name") != "gfx1201" or
-            report_environment.get("device_id") != 0 or
-            any(not isinstance(report_environment.get(key), str) or not report_environment[key]
-                for key in ("hip_runtime_version", "hip_driver_version"))):
+    if (
+        not isinstance(report_environment, dict)
+        or set(report_environment)
+        != {
+            "gpu_name",
+            "architecture_name",
+            "hip_runtime_version",
+            "hip_driver_version",
+            "device_id",
+        }
+        or report_environment.get("gpu_name") != "AMD Radeon AI PRO R9700"
+        or report_environment.get("architecture_name") != "gfx1201"
+        or report_environment.get("device_id") != 0
+        or any(
+            not isinstance(report_environment.get(key), str) or not report_environment[key]
+            for key in ("hip_runtime_version", "hip_driver_version")
+        )
+    ):
         raise ValueError("benchmark report device identity differs")
     artifact_report = report.get("artifact")
     load_report = report.get("load")
-    if not isinstance(artifact_report, dict) or artifact_report.get("path") != plan["artifact"]["path"] or artifact_report.get("file_size_bytes") != plan["artifact"]["file_size_bytes"] or not isinstance(load_report, dict) or load_report.get("target") != "qwen3_8_27b_r9700" or load_report.get("weights_id") != plan["artifact"]["weights_id"]:
+    if (
+        not isinstance(artifact_report, dict)
+        or artifact_report.get("path") != plan["artifact"]["path"]
+        or artifact_report.get("file_size_bytes") != plan["artifact"]["file_size_bytes"]
+        or not isinstance(load_report, dict)
+        or load_report.get("target") != "qwen3_8_27b_r9700"
+        or load_report.get("weights_id") != plan["artifact"]["weights_id"]
+    ):
         raise ValueError("benchmark report artifact identity differs")
     test, speculative = _validate_report(report, cell)
 
     connection = sqlite3.connect(f"file:{database.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        tables = {row[0] for row in connection.execute("select name from sqlite_master where type in ('table','view')")}
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "select name from sqlite_master where type in ('table','view')"
+            )
+        }
         required = {"rocpd_info_process", "rocpd_info_agent", "regions", "kernels", "memory_copies"}
         if not required <= tables:
             raise ValueError("rocprof database lacks required views")
-        processes = list(connection.execute('select nid,pid,command,environment,extdata from rocpd_info_process'))
+        processes = list(
+            connection.execute("select nid,pid,command,environment,extdata from rocpd_info_process")
+        )
         if len(processes) != 1 or processes[0]["command"] != cell["benchmark_command_string"]:
             raise ValueError("trace process argv differs")
         process_nid, process_pid = processes[0]["nid"], processes[0]["pid"]
@@ -389,7 +484,8 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
         process_extdata = json.loads(processes[0]["extdata"])
         expected_raw = str(cell_root / "raw")
         if not isinstance(process_extdata, dict) or any(
-            process_extdata.get(key) != value for key, value in {
+            process_extdata.get(key) != value
+            for key, value in {
                 "output_path": expected_raw,
                 "output_file": cell_name,
                 "raw_output_path": expected_raw,
@@ -400,28 +496,64 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
         ):
             raise ValueError("trace process output identity differs")
         for key, value in {
-            "ROCPROF_OUTPUT_FORMAT": "rocpd", "ROCPROF_MARKER_API_TRACE": "1",
-            "ROCPROF_KERNEL_TRACE": "1", "ROCPROF_MEMORY_COPY_TRACE": "1",
+            "ROCPROF_OUTPUT_FORMAT": "rocpd",
+            "ROCPROF_MARKER_API_TRACE": "1",
+            "ROCPROF_KERNEL_TRACE": "1",
+            "ROCPROF_MEMORY_COPY_TRACE": "1",
             "ROCPROF_SELECTED_REGIONS": "1",
         }.items():
             if environment.get(key) != value:
                 raise ValueError("trace profiler environment differs")
-        agents = list(connection.execute("select * from rocpd_info_agent where type='GPU' order by absolute_index"))
+        agents = list(
+            connection.execute(
+                "select * from rocpd_info_agent where type='GPU' order by absolute_index"
+            )
+        )
         if any((row["nid"], row["pid"]) != (process_nid, process_pid) for row in agents):
             raise ValueError("GPU inventory ownership differs")
-        r9700 = [row for row in agents if row["name"] == "gfx1201" and row["product_name"] == "AMD Radeon AI PRO R9700"]
+        r9700 = [
+            row
+            for row in agents
+            if row["name"] == "gfx1201" and row["product_name"] == "AMD Radeon AI PRO R9700"
+        ]
         if len(r9700) != 1 or r9700[0]["logical_index"] != 1 or r9700[0]["type_index"] != 0:
             raise ValueError("trace lacks exact R9700 agent")
         topology = json.loads(r9700[0]["extdata"])
-        if (topology.get("cu_count"), topology.get("simd_count"), topology.get("wave_front_size")) != (64, 128, 32):
+        if (
+            topology.get("cu_count"),
+            topology.get("simd_count"),
+            topology.get("wave_front_size"),
+        ) != (64, 128, 32):
             raise ValueError("R9700 topology differs")
-        kernel_rows = list(connection.execute('select nid,pid,agent_abs_index,agent_log_index,agent_type_index,agent_type,dispatch_id,start,"end",duration,name,coalesce(region,"") region from kernels order by start'))
+        kernel_rows = list(
+            connection.execute(
+                'select nid,pid,agent_abs_index,agent_log_index,agent_type_index,agent_type,dispatch_id,start,"end",duration,name,coalesce(region,"") region from kernels order by start'
+            )
+        )
         if not kernel_rows or len({row["dispatch_id"] for row in kernel_rows}) != len(kernel_rows):
             raise ValueError("kernel dispatch inventory is empty or duplicated")
         expected_owner = (process_nid, process_pid, r9700[0]["absolute_index"], 1, 0, "GPU")
-        if any(tuple(row[k] for k in ("nid","pid","agent_abs_index","agent_log_index","agent_type_index","agent_type")) != expected_owner for row in kernel_rows):
+        if any(
+            tuple(
+                row[k]
+                for k in (
+                    "nid",
+                    "pid",
+                    "agent_abs_index",
+                    "agent_log_index",
+                    "agent_type_index",
+                    "agent_type",
+                )
+            )
+            != expected_owner
+            for row in kernel_rows
+        ):
             raise ValueError("selected kernel did not execute on exact R9700 agent")
-        range_rows = list(connection.execute('select nid,pid,category,name,start,"end",duration,extdata from regions order by start'))
+        range_rows = list(
+            connection.execute(
+                'select nid,pid,category,name,start,"end",duration,extdata from regions order by start'
+            )
+        )
         controls: list[tuple[int, int, str, dict[str, Any]]] = []
         ranges = []
         for row in range_rows:
@@ -434,29 +566,33 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
                 control_extdata = json.loads(row["extdata"])
                 if control_extdata != {}:
                     raise ValueError("profiler control marker extdata differs")
-                controls.append((begin, end, row["name"], control_extdata)); continue
+                controls.append((begin, end, row["name"], control_extdata))
+                continue
             if row["category"] != "MARKER_CORE_RANGE_API" or row["name"] != "roctxThreadRangeA":
                 raise ValueError("unexpected marker record")
             ranges.append((begin, end, _message(row["extdata"])))
         if [row[2] for row in controls] != ["roctxProfilerResume", "roctxProfilerPause"]:
             raise ValueError("profiler control markers differ")
-        measured = [(b,e) for b,e,m in ranges if m == MEASURED]
+        measured = [(b, e) for b, e, m in ranges if m == MEASURED]
         if len(measured) != 1:
             raise ValueError("trace lacks one measured range")
         if not (controls[0][1] <= measured[0][0] < measured[0][1] <= controls[1][0]):
             raise ValueError("resume, measured, and pause boundaries differ")
         verify_rounds, _ = _validate_verify_ranges(ranges, measured[0])
         fallback_steps = speculative.get("fallback_steps")
-        if not isinstance(fallback_steps, int) or fallback_steps < 0 or (
-            verify_rounds != speculative["rounds"] + fallback_steps
+        if (
+            not isinstance(fallback_steps, int)
+            or fallback_steps < 0
+            or (verify_rounds != speculative["rounds"] + fallback_steps)
         ):
             raise ValueError("64-layer target-verification count differs from DFlash rounds")
-        known_messages = {message for _,_,message in ranges}
+        known_messages = {message for _, _, message in ranges}
         ranges_by_message: dict[str, list[tuple[int, int]]] = defaultdict(list)
         for begin, end, message in ranges:
             ranges_by_message[message].append((begin, end))
         prefill = [
-            (begin, end) for begin, end, message in ranges
+            (begin, end)
+            for begin, end, message in ranges
             if message == "ninfer.prefill.prefill.chunk payload=128"
         ]
         if len(prefill) != 1:
@@ -475,22 +611,37 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
                 family, payload = _split_payload(message)
                 actual_prefill[family].append(payload)
         if dict(actual_prefill) != expected_prefill:
-            raise ValueError("prompt-prefill marker inventory differs from one exact 64-layer P128 pass")
+            raise ValueError(
+                "prompt-prefill marker inventory differs from one exact 64-layer P128 pass"
+            )
         previous_outer_end = None
         for layer in range(64):
-            outer_family = ("ninfer.attention.prefill.layer.full" if layer in FULL_LAYERS
-                            else "ninfer.gdn.prefill.layer.gdn")
-            leaf_family = ("ninfer.attention.prefill.attention" if layer in FULL_LAYERS
-                           else "ninfer.gdn.prefill.gdn")
+            outer_family = (
+                "ninfer.attention.prefill.layer.full"
+                if layer in FULL_LAYERS
+                else "ninfer.gdn.prefill.layer.gdn"
+            )
+            leaf_family = (
+                "ninfer.attention.prefill.attention"
+                if layer in FULL_LAYERS
+                else "ninfer.gdn.prefill.gdn"
+            )
             outer = ranges_by_message[f"{outer_family} payload={layer}"]
             leaf = ranges_by_message[f"{leaf_family} payload={layer}"]
             post = ranges_by_message[f"ninfer.post-mixer.prefill.post_mixer payload={layer}"]
             if len(outer) != 1 or len(leaf) != 1 or len(post) != 1:
                 raise ValueError("prompt-prefill marker occurrence count differs")
             outer_interval, leaf_interval, post_interval = outer[0], leaf[0], post[0]
-            if not (prefill[0][0] <= outer_interval[0] <= leaf_interval[0] < leaf_interval[1]
-                    <= post_interval[0] < post_interval[1] <= outer_interval[1]
-                    <= prefill[0][1]):
+            if not (
+                prefill[0][0]
+                <= outer_interval[0]
+                <= leaf_interval[0]
+                < leaf_interval[1]
+                <= post_interval[0]
+                < post_interval[1]
+                <= outer_interval[1]
+                <= prefill[0][1]
+            ):
                 raise ValueError("prefill leaf/post-mixer is not ordered inside chunk and layer")
             if previous_outer_end is not None and outer_interval[0] < previous_outer_end:
                 raise ValueError("prefill layer outer ranges overlap or differ in order")
@@ -504,50 +655,67 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
             region = row["region"]
             if region and region not in known_messages:
                 raise ValueError(f"kernel has unknown region association: {region}")
-            if region and region != MEASURED and not any(
-                marker_begin <= begin for marker_begin, _ in ranges_by_message[region]
+            if (
+                region
+                and region != MEASURED
+                and not any(marker_begin <= begin for marker_begin, _ in ranges_by_message[region])
             ):
                 raise ValueError("kernel is associated with a future marker occurrence")
             if region.startswith(tuple(TARGET_FAMILIES)):
                 stage = "target_64_layer_verification"
-            elif region.startswith(PREFILL_PREFIXES):
-                stage = "prompt_prefill"
-            elif not region and prefill[0][0] <= begin and end <= prefill[0][1]:
+            elif region.startswith(PREFILL_PREFIXES) or (
+                not region and prefill[0][0] <= begin and end <= prefill[0][1]
+            ):
                 stage = "prompt_prefill"
             elif region in ("", MEASURED) or any(
-                region.startswith(family + " payload=")
-                for family in DFLASH_SERVICE_FAMILIES
+                region.startswith(family + " payload=") for family in DFLASH_SERVICE_FAMILIES
             ):
                 stage = "proposal_head_and_round_service_or_unattributed"
             else:
                 raise ValueError(f"kernel region is not classified: {region}")
-            stage_stats[stage][0] += 1; stage_stats[stage][1] += duration
+            stage_stats[stage][0] += 1
+            stage_stats[stage][1] += duration
             family = _symbol_family(row["name"])
-            symbols[(stage, family)][0] += 1; symbols[(stage, family)][1] += duration
+            symbols[(stage, family)][0] += 1
+            symbols[(stage, family)][1] += duration
             if end > measured[0][1]:
-                async_drain_rows.append({
-                    "dispatch_id": int(row["dispatch_id"]),
-                    "duration_ns": duration,
-                    "completion_after_measured_ns": end - measured[0][1],
-                    "start_relation": ("crossing" if begin < measured[0][1]
-                                       else "wholly-post-marker"),
-                    "region": region,
-                    "symbol": row["name"],
-                    "attributed_stage": stage,
-                })
-        copy_rows = list(connection.execute('select nid,pid,start,"end",duration,size,name,coalesce(region_name,"") region from memory_copies order by start'))
+                async_drain_rows.append(
+                    {
+                        "dispatch_id": int(row["dispatch_id"]),
+                        "duration_ns": duration,
+                        "completion_after_measured_ns": end - measured[0][1],
+                        "start_relation": (
+                            "crossing" if begin < measured[0][1] else "wholly-post-marker"
+                        ),
+                        "region": region,
+                        "symbol": row["name"],
+                        "attributed_stage": stage,
+                    }
+                )
+        copy_rows = list(
+            connection.execute(
+                'select nid,pid,start,"end",duration,size,name,coalesce(region_name,"") region from memory_copies order by start'
+            )
+        )
         for row in copy_rows:
-            if ((row["nid"], row["pid"]) != (process_nid, process_pid) or
-                    int(row["duration"]) <= 0 or
-                    int(row["duration"]) != int(row["end"])-int(row["start"]) or
-                    int(row["start"]) < measured[0][0] or
-                    int(row["end"]) > measured[0][1] or int(row["size"]) < 0):
+            if (
+                (row["nid"], row["pid"]) != (process_nid, process_pid)
+                or int(row["duration"]) <= 0
+                or int(row["duration"]) != int(row["end"]) - int(row["start"])
+                or int(row["start"]) < measured[0][0]
+                or int(row["end"]) > measured[0][1]
+                or int(row["size"]) < 0
+            ):
                 raise ValueError("memory-copy ownership/interval differs")
             if row["region"] and row["region"] not in known_messages:
                 raise ValueError("memory copy has unknown region association")
-            if row["region"] and row["region"] != MEASURED and not any(
-                marker_begin <= int(row["start"])
-                for marker_begin, _ in ranges_by_message[row["region"]]
+            if (
+                row["region"]
+                and row["region"] != MEASURED
+                and not any(
+                    marker_begin <= int(row["start"])
+                    for marker_begin, _ in ranges_by_message[row["region"]]
+                )
             ):
                 raise ValueError("memory copy is associated with a future marker occurrence")
     finally:
@@ -557,12 +725,20 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
         "schema_version": 1,
         "status": "valid-evaluation-attribution-only",
         "cell": cell_name,
-        "workload": {"concurrency": 1, "prompt_tokens": 128, "generated_tokens": 64,
-                     "draft_tokens": cell["draft_tokens"], "verify_width": cell["verify_width"],
-                     "device_graph": False, "proposal_head": "optimized"},
-        "benchmark": {"decode_output_tok_s_profiled": test["decode_output_tok_s_mean"],
-                      "decode_engine_tok_s_profiled": test["decode_engine_tok_s_mean"],
-                      "profiled_timing_admissible_for_selection": False},
+        "workload": {
+            "concurrency": 1,
+            "prompt_tokens": 128,
+            "generated_tokens": 64,
+            "draft_tokens": cell["draft_tokens"],
+            "verify_width": cell["verify_width"],
+            "device_graph": False,
+            "proposal_head": "optimized",
+        },
+        "benchmark": {
+            "decode_output_tok_s_profiled": test["decode_output_tok_s_mean"],
+            "decode_engine_tok_s_profiled": test["decode_engine_tok_s_mean"],
+            "profiled_timing_admissible_for_selection": False,
+        },
         "target_verification_rounds": verify_rounds,
         "bounded_terminal_selected_region_async_drain": {
             **async_drain,
@@ -578,10 +754,17 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
             ),
             "rows": async_drain_rows,
         },
-        "stages": [{"stage": stage, "calls": values[0], "summed_duration_ms": values[1]/1e6}
-                   for stage, values in sorted(stage_stats.items())],
+        "stages": [
+            {"stage": stage, "calls": values[0], "summed_duration_ms": values[1] / 1e6}
+            for stage, values in sorted(stage_stats.items())
+        ],
         "operator_families": [
-            {"stage": stage, "family": family, "calls": values[0], "summed_duration_ms": values[1]/1e6}
+            {
+                "stage": stage,
+                "family": family,
+                "calls": values[0],
+                "summed_duration_ms": values[1] / 1e6,
+            }
             for (stage, family), values in sorted(symbols.items(), key=lambda item: -item[1][1])
         ],
         "limitations": EXPECTED_LIMITATIONS,

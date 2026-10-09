@@ -8,10 +8,7 @@ from tools.artifact.container import ArtifactIdentity, ArtifactWriter, Payload, 
 
 from . import e4m3_inventory
 
-
-FIXTURE_IDENTITY = ArtifactIdentity(
-    e4m3_inventory.MODEL_ID, "r9700-f8e4m3-row-gate-up-fixture"
-)
+FIXTURE_IDENTITY = ArtifactIdentity(e4m3_inventory.MODEL_ID, "r9700-f8e4m3-row-gate-up-fixture")
 FIXTURE_SPEC = TensorSpec(
     name="text/layers/0/mlp/gate_up",
     shape=(34816, 5120),

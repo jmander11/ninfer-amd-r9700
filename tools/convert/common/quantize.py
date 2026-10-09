@@ -12,9 +12,12 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from tools.artifact.layouts import encode_q4_n16k16, encode_row_split, row_split_geometry, q4_n16k16_geometry
+from tools.artifact.layouts import (
+    encode_q4_n16k16,
+    encode_row_split,
+    row_split_geometry,
+)
 from tools.artifact.numeric import QuantFormat, get_format
-
 
 _FP16_MIN_SUBNORMAL = 2.0**-24
 
@@ -55,9 +58,7 @@ def _canonical_scale_words(
 
     reciprocal = np.zeros(host_max.shape, dtype=np.float32)
     positive = scale > 0
-    reciprocal[positive] = (
-        1.0 / scale[positive].astype(np.float64)
-    ).astype(np.float32)
+    reciprocal[positive] = (1.0 / scale[positive].astype(np.float64)).astype(np.float32)
     return torch.from_numpy(scale), torch.from_numpy(reciprocal)
 
 
@@ -100,22 +101,18 @@ def quantize_matrix(
     target = pick_device() if device is None else pick_device(device)
     logical = weight.detach().to(device=target, dtype=torch.float32)
     if k_pad != k:
-        physical = torch.zeros(
-            (n, k_pad), dtype=torch.float32, device=target
-        )
+        physical = torch.zeros((n, k_pad), dtype=torch.float32, device=target)
         physical[:, :k].copy_(logical)
         logical = physical
 
-    grouped = logical.reshape(
-        n, groups_per_row, spec.group_size
-    )
+    grouped = logical.reshape(n, groups_per_row, spec.group_size)
     max_abs = grouped.abs().amax(dim=2)
     host_scales, host_reciprocal = _canonical_scale_words(max_abs, spec.qmax)
     scales = host_scales.to(target)
     reciprocal = host_reciprocal.to(target)
-    codes = torch.clamp(
-        torch.round(grouped * reciprocal.unsqueeze(-1)), spec.qmin, spec.qmax
-    ).to(torch.int8)
+    codes = torch.clamp(torch.round(grouped * reciprocal.unsqueeze(-1)), spec.qmin, spec.qmax).to(
+        torch.int8
+    )
     return QuantizedMatrix(codes=codes, scales=scales)
 
 

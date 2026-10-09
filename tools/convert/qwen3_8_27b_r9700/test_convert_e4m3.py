@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
-from pathlib import Path
-from types import SimpleNamespace
-from tempfile import TemporaryDirectory
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import mock
 
-from safetensors.torch import save_file
 import torch
+from safetensors.torch import save_file
 
 from tools.artifact.container import Artifact
 from tools.convert.qwen3.common import conversion as family_conversion
@@ -48,9 +48,7 @@ class E4M3ConverterTest(unittest.TestCase):
                 e4m3_inventory.ROW_SCALED_LAYOUT,
             ),
         )
-        plan = family_conversion.build_object_plan(
-            object_specs, {resource.name: resource.data}
-        )
+        plan = family_conversion.build_object_plan(object_specs, {resource.name: resource.data})
         ranking_provenance = SimpleNamespace(
             ranking_path=ranking,
             ranking_sha256="1" * 64,
@@ -77,16 +75,12 @@ class E4M3ConverterTest(unittest.TestCase):
             output = root / "candidate.ninfer"
 
             with (
-                mock.patch.object(
-                    convert_e4m3, "preflight_conversion", return_value=preflight
-                ),
-                mock.patch.object(
-                    e4m3_inventory, "OBJECT_SPECS", object_specs
-                ),
+                mock.patch.object(convert_e4m3, "preflight_conversion", return_value=preflight),
+                mock.patch.object(e4m3_inventory, "OBJECT_SPECS", object_specs),
                 mock.patch.object(
                     convert_e4m3.source,
                     "materialize_tensor",
-                    side_effect=lambda spec, reader, draft: reader.get(spec.name),
+                    side_effect=lambda spec, reader, _draft: reader.get(spec.name),
                 ),
                 redirect_stdout(io.StringIO()),
             ):
@@ -97,12 +91,8 @@ class E4M3ConverterTest(unittest.TestCase):
             represented = tensor.float().reshape(-1).tolist()
             expected = codec.encode_e4m3_rowwise_reference(represented, 2, 3)
             with Artifact.open(output) as artifact:
-                self.assertEqual(
-                    artifact.identity.model_id, e4m3_inventory.MODEL_ID
-                )
-                self.assertEqual(
-                    artifact.identity.weights_id, e4m3_inventory.WEIGHTS_ID
-                )
+                self.assertEqual(artifact.identity.model_id, e4m3_inventory.MODEL_ID)
+                self.assertEqual(artifact.identity.weights_id, e4m3_inventory.WEIGHTS_ID)
                 self.assertEqual(len(artifact.objects), 2)
                 self.assertEqual(
                     bytes(artifact.payload("frontend/tokenizer.json")),
@@ -127,9 +117,7 @@ class E4M3ConverterTest(unittest.TestCase):
             self.assertEqual(report["arguments"]["device"], "cpu")
 
             with self.assertRaisesRegex(FileExistsError, "refusing to overwrite"):
-                convert_e4m3.convert(
-                    root, output, draft_ranking=preflight.draft.ranking
-                )
+                convert_e4m3.convert(root, output, draft_ranking=preflight.draft.ranking)
 
     def test_preflight_only_writes_no_artifact_and_reports_evaluation_identity(self) -> None:
         summary = {

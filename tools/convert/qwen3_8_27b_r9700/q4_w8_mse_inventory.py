@@ -16,7 +16,6 @@ from tools.convert.qwen3.common.inventory import (
 
 from . import q4_w8_inventory
 
-
 MODEL_ID = "qwen3.8-27b"
 WEIGHTS_ID = "r9700-q4-w8-mse-n16k16-eval"
 TARGET_KEY = "qwen3_8_27b_r9700"
@@ -61,11 +60,11 @@ __all__ = [
     "OBJECT_SPECS",
     "RECIPE_ID",
     "RESOURCE_SPECS",
-    "ResourceSpec",
     "TARGET_KEY",
     "TENSOR_ENCODED_BYTES",
     "TENSOR_SPECS",
-    "TensorSpec",
     "WEIGHTS_ID",
+    "ResourceSpec",
+    "TensorSpec",
     "validate_inventory",
 ]

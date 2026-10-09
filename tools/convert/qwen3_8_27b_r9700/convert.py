@@ -9,11 +9,11 @@ performance evidence selects and names the production recipe.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import time
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
@@ -21,6 +21,7 @@ from tools.artifact.container import ArtifactIdentity, ArtifactWriter
 from tools.convert.common.quantize import pick_device
 from tools.convert.common.safetensors import ShardReader
 from tools.convert.qwen3.common import conversion as family_conversion
+
 from . import build_draft_ranking, draft_head, inventory, resources, source, source_recipe
 
 
@@ -39,16 +40,12 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def preflight_conversion(
-    model_dir: str | Path, draft_ranking: str | Path
-) -> ConversionPreflight:
+def preflight_conversion(model_dir: str | Path, draft_ranking: str | Path) -> ConversionPreflight:
     """Validate the whole source contract before creating an output artifact."""
 
     model = Path(model_dir)
     inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
@@ -66,15 +63,15 @@ def preflight_conversion(
     )
 
 
-def _materialize_tensor(spec: inventory.TensorSpec, reader: ShardReader,
-                        draft: draft_head.DraftHeadContext) -> torch.Tensor:
+def _materialize_tensor(
+    spec: inventory.TensorSpec, reader: ShardReader, draft: draft_head.DraftHeadContext
+) -> torch.Tensor:
     # This is the same direct BF16 source transform used by the registered
     # Qwen3.8 converter. Only the persistent output numeric format differs.
     return source.materialize_tensor(spec, reader, draft)
 
 
-def _encode_tensor(tensor: torch.Tensor, spec: inventory.TensorSpec,
-                   device: torch.device) -> bytes:
+def _encode_tensor(tensor: torch.Tensor, spec: inventory.TensorSpec, device: torch.device) -> bytes:
     if spec.format == "W8G32_F16S" and tensor.dtype != torch.bfloat16:
         raise TypeError(f"{spec.name}: W8 candidate source must be BF16, got {tensor.dtype}")
     return family_conversion.encode_tensor_payload(tensor, spec, device)
@@ -103,24 +100,26 @@ def convert(
     output.parent.mkdir(parents=True, exist_ok=True)
     resources = {resource.name: resource.data for resource in preflight.resources}
 
-    with ShardReader(preflight.model_dir) as reader:
-        with ArtifactWriter(
+    with (
+        ShardReader(preflight.model_dir) as reader,
+        ArtifactWriter(
             output,
             ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),
             preflight.object_plan.specs,
-        ) as writer:
-            if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError("candidate writer object plan differs from completed preflight")
-            for index, spec in enumerate(inventory.OBJECT_SPECS, start=1):
-                if isinstance(spec, inventory.ResourceSpec):
-                    payload = resources[spec.name]
-                else:
-                    tensor = _materialize_tensor(spec, reader, preflight.draft)
-                    payload = _encode_tensor(tensor, spec, resolved_device)
-                    del tensor
-                writer.write(spec.name, payload)
-                del payload
-                print(f"[{index}/{len(inventory.OBJECT_SPECS)}] {spec.name}", flush=True)
+        ) as writer,
+    ):
+        if writer.objects != preflight.object_plan.objects:
+            raise RuntimeError("candidate writer object plan differs from completed preflight")
+        for index, spec in enumerate(inventory.OBJECT_SPECS, start=1):
+            if isinstance(spec, inventory.ResourceSpec):
+                payload = resources[spec.name]
+            else:
+                tensor = _materialize_tensor(spec, reader, preflight.draft)
+                payload = _encode_tensor(tensor, spec, resolved_device)
+                del tensor
+            writer.write(spec.name, payload)
+            del payload
+            print(f"[{index}/{len(inventory.OBJECT_SPECS)}] {spec.name}", flush=True)
 
     report = family_conversion.build_conversion_report(
         identity=ArtifactIdentity(inventory.MODEL_ID, inventory.WEIGHTS_ID),
@@ -148,16 +147,10 @@ def convert(
         "weight_recipe_selected": False,
         "reason": "requires real-artifact HIP parity, PPL, exact-token, and performance selection",
     }
-    report["source"]["ranking_provenance_path"] = str(
-        preflight.draft_ranking.sidecar_path
-    )
-    report["source"]["ranking_provenance_sha256"] = (
-        preflight.draft_ranking.sidecar_sha256
-    )
+    report["source"]["ranking_provenance_path"] = str(preflight.draft_ranking.sidecar_path)
+    report["source"]["ranking_provenance_sha256"] = preflight.draft_ranking.sidecar_sha256
     report["source"]["ranking_tokens"] = preflight.draft_ranking.total_tokens
-    report["source"]["ranking_distinct_token_ids"] = (
-        preflight.draft_ranking.distinct_token_ids
-    )
+    report["source"]["ranking_distinct_token_ids"] = preflight.draft_ranking.distinct_token_ids
     report_path = Path(str(output) + ".conversion.json")
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report_path
@@ -176,8 +169,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             "because the retired-model counts are not valid candidate provenance"
         ),
     )
-    parser.add_argument("--device", required=True,
-                        help="Torch device, e.g. cpu or cuda for ROCm Torch")
+    parser.add_argument(
+        "--device", required=True, help="Torch device, e.g. cpu or cuda for ROCm Torch"
+    )
     args = parser.parse_args(argv)
     report = convert(
         args.model,

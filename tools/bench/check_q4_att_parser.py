@@ -14,8 +14,7 @@ def validate_parser(rocprof: Path, arguments: list[str]) -> None:
     conflict = "--selected-regions and --att-consecutive-kernels are mutually exclusive"
     if conflict not in source:
         raise ValueError("installed rocprofv3 conflict contract differs")
-    loader = importlib.machinery.SourceFileLoader(
-        "ninfer_installed_rocprofv3_parser", str(rocprof))
+    loader = importlib.machinery.SourceFileLoader("ninfer_installed_rocprofv3_parser", str(rocprof))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     if spec is None:
         raise ValueError("cannot load installed rocprofv3 parser")

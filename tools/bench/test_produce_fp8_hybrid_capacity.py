@@ -1,6 +1,6 @@
-import unittest
 import json
 import os
+import unittest
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,7 +16,6 @@ from tools.bench.produce_fp8_hybrid_capacity import (
     current_report,
     parse_planner,
 )
-
 
 CSV = """target,weights_profile,capacity_tokens,page_tokens,prefill_chunk,kv_value_group,speculative_backend,draft_tokens,proposal_head,device_graph,concurrency,minimum_groups,maximum_groups,minimum_sequence_bytes,workspace_bytes,graph_allowance_bytes,request_transient_bytes,minimum_reservation_bytes,kv_payload_bytes,kv_increment_bytes
 qwen3_8_27b_r9700,R9700Q4G64Fp8FourRoleN16K16Evaluation,262144,64,8192,16,mtp,3,optimized,1,1,4096,4096,100,20,10,0,130,80,1810432
@@ -56,8 +55,7 @@ def weights_source() -> dict[str, object]:
                 "value_scale": "feature-fastest-page-major",
             },
             "q4_activation_bits": 8,
-            "q4_prefill_cta_profile":
-                "m64n128-pingpong-n16-k16-scalar-base-production",
+            "q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-scalar-base-production",
             "xattention_qualification": False,
         },
         "environment": {

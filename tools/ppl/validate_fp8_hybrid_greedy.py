@@ -4,19 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
-import tempfile
 import sys
-from datetime import datetime, timezone
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl import run
+from tools.ppl import run  # noqa: E402  after sys.path setup
 
 OUTPUT_TYPE = "ninfer_qwen3_8_fp8_hybrid_greedy_diagnostic"
 OUTPUT_SCHEMA = 1
@@ -67,9 +68,8 @@ def _validate_scorer(value: object, label: str) -> tuple[Path, dict]:
 def _candidate_sidecars(cell: dict) -> tuple[Path, list[float], list[int]]:
     path = run._command_output_path(cell)
     raw = _read_json(path, "candidate scorer report")
-    if (
-        any(field not in raw for field in run.CANDIDATE_SCORER_REPORT_FIELDS)
-        or any(raw[field] != cell.get(field) for field in run.CANDIDATE_SCORER_REPORT_FIELDS)
+    if any(field not in raw for field in run.CANDIDATE_SCORER_REPORT_FIELDS) or any(
+        raw[field] != cell.get(field) for field in run.CANDIDATE_SCORER_REPORT_FIELDS
     ):
         raise SystemExit("candidate raw scorer fields differ from the hybrid campaign")
     nll_path = path.with_suffix(".nllf32")
@@ -118,7 +118,7 @@ def validate(
         "draft_tokens": 0,
         "q4_activation_bits": 8,
         "w8_activation_bits": 8,
-        "fp8_qk_wmma_enabled": True,
+        "split512_enabled": True,
         "xattention_profile": "dense",
         "baseline": run.BASELINE,
         "gates": {CANDIDATE: gate},
@@ -139,9 +139,7 @@ def validate(
     bf16_binding = _binding(bf16_campaign_path)
     repeat_binding = _binding(repeat_path)
     _require_binding(campaign.get("reused_bf16_campaign"), bf16_binding, "BF16 campaign")
-    validated_repeat = run.validate_bf16_repeat_comparison(
-        repeat_path, bf16_campaign_path
-    )
+    validated_repeat = run.validate_bf16_repeat_comparison(repeat_path, bf16_campaign_path)
     campaign_repeat = campaign.get("bf16_repeat_comparison")
     if campaign_repeat != validated_repeat:
         raise SystemExit("hybrid PPL campaign repeat proof differs from the live authority")
@@ -165,9 +163,7 @@ def validate(
     candidate_weights = Path(weights[CANDIDATE]).resolve(strict=True)
     if candidate_weights != artifact_path:
         raise SystemExit("hybrid PPL campaign candidate path differs from the required artifact")
-    bf16_scorer, bf16_scorer_identity = _validate_scorer(
-        scorers.get(run.BASELINE), "BF16"
-    )
+    bf16_scorer, bf16_scorer_identity = _validate_scorer(scorers.get(run.BASELINE), "BF16")
     candidate_scorer, _ = _validate_scorer(scorers.get(CANDIDATE), "candidate")
 
     reused = run.load_reused_bf16_cells(
@@ -189,14 +185,16 @@ def validate(
     if not isinstance(cells, list):
         raise SystemExit("hybrid PPL campaign cells must be an array")
     candidates = [
-        cell for cell in cells
+        cell
+        for cell in cells
         if isinstance(cell, dict)
         and cell.get("scheme") == CANDIDATE
         and cell.get("prompt_tokens") == tokens
         and cell.get("schedule") == "prefill"
     ]
     references = [
-        cell for cell in cells
+        cell
+        for cell in cells
         if isinstance(cell, dict)
         and cell.get("scheme") == run.BASELINE
         and cell.get("prompt_tokens") == tokens
@@ -243,7 +241,7 @@ def validate(
     return {
         "artifact_type": OUTPUT_TYPE,
         "schema_version": OUTPUT_SCHEMA,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "model_id": run.MODEL_ID,
         "workload": {
             "prompt_tokens": tokens,
@@ -287,10 +285,8 @@ def _write_new(path: Path, value: dict) -> None:
             os.fsync(output.fileno())
         os.replace(temporary, path)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
 
 
 def main() -> None:
@@ -299,7 +295,9 @@ def main() -> None:
     parser.add_argument("--artifact", type=Path, required=True)
     parser.add_argument("--bf16-campaign", type=Path, required=True)
     parser.add_argument("--bf16-repeat-comparison", type=Path, required=True)
-    parser.add_argument("--tokens", type=int, choices=(run.DEFAULT_TOKENS, run.LONG_TOKENS), required=True)
+    parser.add_argument(
+        "--tokens", type=int, choices=(run.DEFAULT_TOKENS, run.LONG_TOKENS), required=True
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     result = validate(

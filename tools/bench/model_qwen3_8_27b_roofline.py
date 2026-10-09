@@ -14,8 +14,9 @@ import hashlib
 import json
 import math
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tools.r9700.a8q4_prefill_traffic import (
     M64_N64,
@@ -24,7 +25,6 @@ from tools.r9700.a8q4_prefill_traffic import (
     requested_traffic,
     requested_w8_traffic,
 )
-
 
 TIMING_TYPE = "ninfer_qwen3_8_27b_dispatch_timing"
 INVENTORY_TYPE = "ninfer_qwen3_8_27b_dispatch_inventory"
@@ -90,9 +90,12 @@ def _verified_snapshot(value: Any, name: str) -> tuple[Path, dict[str, Any]]:
         raise ValueError(f"{name} is not a regular file")
     size = _integer(value.get("file_size_bytes"), f"{name}.file_size_bytes")
     digest = _sha_text(value.get("sha256"), f"{name}.sha256")
-    actual = {"path": str(path), "file_size_bytes": path.stat().st_size,
-              "sha256": _sha256(path)}
-    if value.get("path") != actual["path"] or size != actual["file_size_bytes"] or digest != actual["sha256"]:
+    actual = {"path": str(path), "file_size_bytes": path.stat().st_size, "sha256": _sha256(path)}
+    if (
+        value.get("path") != actual["path"]
+        or size != actual["file_size_bytes"]
+        or digest != actual["sha256"]
+    ):
         raise ValueError(f"{name} path, size, or SHA-256 changed")
     return path, actual
 
@@ -119,9 +122,11 @@ def _text(value: Any, name: str) -> str:
 
 
 def _schema(document: dict[str, Any], artifact_type: str, name: str) -> None:
-    if (document.get("artifact_type") != artifact_type
-            or type(document.get("schema_version")) is not int
-            or document.get("schema_version") != 1):
+    if (
+        document.get("artifact_type") != artifact_type
+        or type(document.get("schema_version")) is not int
+        or document.get("schema_version") != 1
+    ):
         raise ValueError(f"{name} must be {artifact_type} schema v1")
 
 
@@ -200,19 +205,21 @@ def _positive_parameters(params: dict[str, Any], *names: str) -> list[int]:
 def _linear(params: dict[str, Any], *, q4: bool) -> dict[str, Any]:
     tokens, rows, columns = _positive_parameters(params, "tokens", "rows", "columns")
     shape = Shape(tokens, rows, columns)
-    traffic = (requested_traffic(shape, M64_N64) if q4
-               else requested_w8_traffic(shape, W8_M64_N64))
+    traffic = requested_traffic(shape, M64_N64) if q4 else requested_w8_traffic(shape, W8_M64_N64)
     result = _base_counts()
-    result.update({
-        "logical_ops": traffic.logical_ops,
-        "issued_ops": {"iu4": traffic.issued_iu4_ops} if q4
-                      else {"iu8": traffic.issued_iu8_ops},
-        "represented_minimum_bytes": traffic.unique_tensor_bytes,
-        "source_requested_bytes": traffic.total_requested_bytes,
-        "accounting_note": (
-            "CTA M64xN64 source-request model; represented bytes are unique consumer tensors"
-        ),
-    })
+    result.update(
+        {
+            "logical_ops": traffic.logical_ops,
+            "issued_ops": {"iu4": traffic.issued_iu4_ops}
+            if q4
+            else {"iu8": traffic.issued_iu8_ops},
+            "represented_minimum_bytes": traffic.unique_tensor_bytes,
+            "source_requested_bytes": traffic.total_requested_bytes,
+            "accounting_note": (
+                "CTA M64xN64 source-request model; represented bytes are unique consumer tensors"
+            ),
+        }
+    )
     return result
 
 
@@ -223,30 +230,38 @@ def _quantize(params: dict[str, Any], *, group: int) -> dict[str, Any]:
     codes = tokens * padded
     scales = 2 * tokens * (padded // group)
     result = _base_counts()
-    result.update({
-        "represented_minimum_bytes": 2 * tokens * columns + codes + scales + 4,
-        "source_requested_bytes": 2 * tokens * columns + codes + scales + 4,
-        "accounting_note": (
-            f"BF16-to-A8G{group} conversion; no artificial FLOP/TOPS convention"
-        ),
-    })
+    result.update(
+        {
+            "represented_minimum_bytes": 2 * tokens * columns + codes + scales + 4,
+            "source_requested_bytes": 2 * tokens * columns + codes + scales + 4,
+            "accounting_note": (
+                f"BF16-to-A8G{group} conversion; no artificial FLOP/TOPS convention"
+            ),
+        }
+    )
     return result
 
 
 def _dense_attention(params: dict[str, Any]) -> dict[str, Any]:
     tokens, context_start, q_heads, kv_heads, dimension, value_group = [
         _integer(params.get(name), name, minimum=(0 if name == "context_start" else 1))
-        for name in ("tokens", "context_start", "query_heads", "kv_heads", "head_dimension",
-                     "value_group")
+        for name in (
+            "tokens",
+            "context_start",
+            "query_heads",
+            "kv_heads",
+            "head_dimension",
+            "value_group",
+        )
     ]
     if q_heads % kv_heads or dimension % value_group:
         raise ValueError("dense attention requires integral GQA and value-scale groups")
     pairs = tokens * context_start + tokens * (tokens + 1) // 2
     context = context_start + tokens
-    represented_metadata = _integer(params.get("represented_metadata_bytes"),
-                                    "represented_metadata_bytes")
-    source_metadata = _integer(params.get("source_metadata_bytes"),
-                               "source_metadata_bytes")
+    represented_metadata = _integer(
+        params.get("represented_metadata_bytes"), "represented_metadata_bytes"
+    )
+    source_metadata = _integer(params.get("source_metadata_bytes"), "source_metadata_bytes")
     logical_ops = 4 * q_heads * dimension * pairs
     represented = (
         2 * tokens * q_heads * dimension
@@ -269,86 +284,114 @@ def _dense_attention(params: dict[str, Any]) -> dict[str, Any]:
         + source_metadata
     )
     result = _base_counts()
-    result.update({
-        "logical_ops": logical_ops,
-        "issued_ops": {"fp32_vector_arithmetic": logical_ops},
-        "represented_minimum_bytes": represented,
-        "source_requested_bytes": requested,
-        "special_functions": {"softmax_exp_arguments": q_heads * pairs},
-        "accounting_note": (
-            "causal QK+PV arithmetic only; softmax/reduction/synchronization excluded from FLOPs"
-        ),
-    })
+    result.update(
+        {
+            "logical_ops": logical_ops,
+            "issued_ops": {"fp32_vector_arithmetic": logical_ops},
+            "represented_minimum_bytes": represented,
+            "source_requested_bytes": requested,
+            "special_functions": {"softmax_exp_arguments": q_heads * pairs},
+            "accounting_note": (
+                "causal QK+PV arithmetic only; softmax/reduction/synchronization excluded from FLOPs"
+            ),
+        }
+    )
     return result
 
 
 def _sparse_pack(params: dict[str, Any]) -> dict[str, Any]:
     context, kv_heads, dimension = _positive_parameters(
-        params, "context_tokens", "kv_heads", "head_dimension")
-    represented_metadata = _integer(params.get("represented_metadata_bytes"),
-                                    "represented_metadata_bytes")
-    source_metadata = _integer(params.get("source_metadata_bytes"),
-                               "source_metadata_bytes")
+        params, "context_tokens", "kv_heads", "head_dimension"
+    )
+    represented_metadata = _integer(
+        params.get("represented_metadata_bytes"), "represented_metadata_bytes"
+    )
+    source_metadata = _integer(params.get("source_metadata_bytes"), "source_metadata_bytes")
     payload = context * kv_heads * dimension
     result = _base_counts()
-    result.update({
-        "represented_minimum_bytes": payload + 2 * payload + represented_metadata,
-        "source_requested_bytes": payload + 2 * payload + source_metadata,
-        "accounting_note": "FP8-key read plus BF16 packed-key write; conversion is not FLOPs",
-    })
+    result.update(
+        {
+            "represented_minimum_bytes": payload + 2 * payload + represented_metadata,
+            "source_requested_bytes": payload + 2 * payload + source_metadata,
+            "accounting_note": "FP8-key read plus BF16 packed-key write; conversion is not FLOPs",
+        }
+    )
     return result
 
 
 def _sparse_rank(params: dict[str, Any]) -> dict[str, Any]:
     dimension, logical_pairs, wmma_tiles = _positive_parameters(
-        params, "head_dimension", "logical_qk_pairs", "issued_wmma_16x16_tiles")
+        params, "head_dimension", "logical_qk_pairs", "issued_wmma_16x16_tiles"
+    )
     represented_query, represented_keys, represented_scratch = [
         _integer(params.get(name), name)
-        for name in ("represented_query_elements", "represented_packed_key_elements",
-                     "represented_scratch_bytes")
+        for name in (
+            "represented_query_elements",
+            "represented_packed_key_elements",
+            "represented_scratch_bytes",
+        )
     ]
     source_query, source_keys, source_scratch_read, source_scratch_write = [
         _integer(params.get(name), name)
-        for name in ("source_query_elements", "source_packed_key_elements",
-                     "source_scratch_read_bytes", "source_scratch_write_bytes")
+        for name in (
+            "source_query_elements",
+            "source_packed_key_elements",
+            "source_scratch_read_bytes",
+            "source_scratch_write_bytes",
+        )
     ]
-    represented_metadata = _integer(params.get("represented_metadata_bytes"),
-                                    "represented_metadata_bytes")
-    source_metadata = _integer(params.get("source_metadata_bytes"),
-                               "source_metadata_bytes")
-    represented = (2 * represented_query + 2 * represented_keys + represented_scratch
-                   + represented_metadata)
-    requested = (2 * source_query + 2 * source_keys + source_scratch_read
-                 + source_scratch_write + source_metadata)
+    represented_metadata = _integer(
+        params.get("represented_metadata_bytes"), "represented_metadata_bytes"
+    )
+    source_metadata = _integer(params.get("source_metadata_bytes"), "source_metadata_bytes")
+    represented = (
+        2 * represented_query + 2 * represented_keys + represented_scratch + represented_metadata
+    )
+    requested = (
+        2 * source_query
+        + 2 * source_keys
+        + source_scratch_read
+        + source_scratch_write
+        + source_metadata
+    )
     result = _base_counts()
-    result.update({
-        "logical_ops": 2 * dimension * logical_pairs,
-        "issued_ops": {"bf16_matrix": 2 * 16 * 16 * dimension * wmma_tiles},
-        "represented_minimum_bytes": represented,
-        "source_requested_bytes": requested,
-        "special_functions": {
-            "estimator_exp_arguments": _integer(
-                params.get("estimator_exp_arguments", 0), "estimator_exp_arguments")
-        },
-        "accounting_note": (
-            "rank QK arithmetic and padded WMMA tiles only; sorting/control are not FLOPs"
-        ),
-    })
+    result.update(
+        {
+            "logical_ops": 2 * dimension * logical_pairs,
+            "issued_ops": {"bf16_matrix": 2 * 16 * 16 * dimension * wmma_tiles},
+            "represented_minimum_bytes": represented,
+            "source_requested_bytes": requested,
+            "special_functions": {
+                "estimator_exp_arguments": _integer(
+                    params.get("estimator_exp_arguments", 0), "estimator_exp_arguments"
+                )
+            },
+            "accounting_note": (
+                "rank QK arithmetic and padded WMMA tiles only; sorting/control are not FLOPs"
+            ),
+        }
+    )
     return result
 
 
-def _keep_record(keep_rows: dict[str, dict[str, Any]], dispatch_id: str,
-                 tokens: int, q_heads: int) -> tuple[int, int, list[tuple[int, int]]]:
+def _keep_record(
+    keep_rows: dict[str, dict[str, Any]], dispatch_id: str, tokens: int, q_heads: int
+) -> tuple[int, int, list[tuple[int, int]]]:
     row = keep_rows.get(dispatch_id)
     if row is None:
         raise ValueError(f"missing sparse keep-count record for {dispatch_id}")
     counts = row.get("retained_key_counts_per_query")
     tiles = row.get("consumer_tiles")
-    if (not isinstance(counts, list) or len(counts) != tokens * q_heads
-            or not all(isinstance(item, int) and not isinstance(item, bool) and item >= 0
-                       for item in counts)):
+    if (
+        not isinstance(counts, list)
+        or len(counts) != tokens * q_heads
+        or not all(
+            isinstance(item, int) and not isinstance(item, bool) and item >= 0 for item in counts
+        )
+    ):
         raise ValueError(
-            f"sparse keep counts for {dispatch_id} must contain tokens*query_heads integers")
+            f"sparse keep counts for {dispatch_id} must contain tokens*query_heads integers"
+        )
     tile_geometry: list[tuple[int, int]] = []
     if not isinstance(tiles, list) or not tiles:
         raise ValueError(f"sparse consumer tiles for {dispatch_id} must be a nonempty array")
@@ -360,29 +403,33 @@ def _keep_record(keep_rows: dict[str, dict[str, Any]], dispatch_id: str,
         if query_rows > 16 or key_rows > 16:
             raise ValueError(f"sparse consumer tile {dispatch_id}[{index}] exceeds B16")
         tile_geometry.append((query_rows, key_rows))
-    unique = _integer(row.get("represented_unique_kv_token_heads"),
-                      "represented_unique_kv_token_heads", minimum=1)
+    unique = _integer(
+        row.get("represented_unique_kv_token_heads"), "represented_unique_kv_token_heads", minimum=1
+    )
     return sum(counts), unique, tile_geometry
 
 
-def _sparse_consumer(params: dict[str, Any], dispatch_id: str,
-                     keep_rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _sparse_consumer(
+    params: dict[str, Any], dispatch_id: str, keep_rows: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     tokens, q_heads, kv_heads, dimension, value_group = _positive_parameters(
-        params, "tokens", "query_heads", "kv_heads", "head_dimension", "value_group")
+        params, "tokens", "query_heads", "kv_heads", "head_dimension", "value_group"
+    )
     if q_heads % kv_heads or dimension % value_group:
         raise ValueError("sparse consumer requires integral GQA and value-scale groups")
     retained_pairs, unique_kv, tiles = _keep_record(keep_rows, dispatch_id, tokens, q_heads)
-    represented_metadata = _integer(params.get("represented_metadata_bytes"),
-                                    "represented_metadata_bytes")
-    source_metadata = _integer(params.get("source_metadata_bytes"),
-                               "source_metadata_bytes")
+    represented_metadata = _integer(
+        params.get("represented_metadata_bytes"), "represented_metadata_bytes"
+    )
+    source_metadata = _integer(params.get("source_metadata_bytes"), "source_metadata_bytes")
     q_bytes = 2 * tokens * q_heads * dimension
     key_bytes = 2 * unique_kv * dimension
     value_bytes = unique_kv * dimension // 2
     scale_bytes = 2 * unique_kv * (dimension // value_group)
     output_bytes = 4 * tokens * q_heads * dimension
-    represented = (q_bytes + key_bytes + value_bytes + scale_bytes + output_bytes
-                   + represented_metadata)
+    represented = (
+        q_bytes + key_bytes + value_bytes + scale_bytes + output_bytes + represented_metadata
+    )
     # Wave zero reloads each valid Q row and packed-K row per B16 tile. All D
     # feature threads consume V and its scale once per key row and reuse it over
     # the tile's query rows. Repeated packed-byte/scale source expressions are
@@ -391,30 +438,34 @@ def _sparse_consumer(params: dict[str, Any], dispatch_id: str,
     key_source = sum(2 * key_rows * dimension for _, key_rows in tiles)
     value_source = sum(key_rows * dimension for _, key_rows in tiles)
     scale_source = sum(2 * key_rows * dimension for _, key_rows in tiles)
-    requested = (query_source + key_source + value_source + scale_source + output_bytes
-                 + source_metadata)
+    requested = (
+        query_source + key_source + value_source + scale_source + output_bytes + source_metadata
+    )
     qk_ops = 2 * dimension * retained_pairs
     pv_ops = 2 * dimension * retained_pairs
     result = _base_counts()
-    result.update({
-        "logical_ops": qk_ops + pv_ops,
-        "issued_ops": {
-            "bf16_matrix": 2 * 16 * 16 * dimension * len(tiles),
-            "fp32_vector_arithmetic": pv_ops,
-        },
-        "represented_minimum_bytes": represented,
-        "source_requested_bytes": requested,
-        "special_functions": {"softmax_exp_arguments": retained_pairs},
-        "accounting_note": (
-            "keep-sidecar-derived sparse QK+PV; WMMA includes every executed B16 key tile"
-        ),
-    })
+    result.update(
+        {
+            "logical_ops": qk_ops + pv_ops,
+            "issued_ops": {
+                "bf16_matrix": 2 * 16 * 16 * dimension * len(tiles),
+                "fp32_vector_arithmetic": pv_ops,
+            },
+            "represented_minimum_bytes": represented,
+            "source_requested_bytes": requested,
+            "special_functions": {"softmax_exp_arguments": retained_pairs},
+            "accounting_note": (
+                "keep-sidecar-derived sparse QK+PV; WMMA includes every executed B16 key tile"
+            ),
+        }
+    )
     return result
 
 
 def _gdn_recurrence(params: dict[str, Any]) -> dict[str, Any]:
     tokens, q_heads, value_heads, dimension, row_tiles = _positive_parameters(
-        params, "tokens", "query_heads", "value_heads", "dimension", "row_tiles")
+        params, "tokens", "query_heads", "value_heads", "dimension", "row_tiles"
+    )
     if value_heads % q_heads:
         raise ValueError("GDN recurrence requires integral query/value head grouping")
     logical_ops = tokens * value_heads * dimension * (7 * dimension + 4)
@@ -433,40 +484,43 @@ def _gdn_recurrence(params: dict[str, Any]) -> dict[str, Any]:
         + 2 * tokens * value_heads * dimension
     )
     result = _base_counts()
-    result.update({
-        "logical_ops": logical_ops,
-        "issued_ops": {"fp32_vector_arithmetic": logical_ops},
-        "represented_minimum_bytes": represented,
-        "source_requested_bytes": requested,
-        "special_functions": {
-            "semantic_exp_arguments": tokens * value_heads,
-            "issued_exp_arguments": tokens * value_heads * row_tiles,
-        },
-        "accounting_note": (
-            "state transition arithmetic only; normalization reductions/transcendentals excluded"
-        ),
-    })
+    result.update(
+        {
+            "logical_ops": logical_ops,
+            "issued_ops": {"fp32_vector_arithmetic": logical_ops},
+            "represented_minimum_bytes": represented,
+            "source_requested_bytes": requested,
+            "special_functions": {
+                "semantic_exp_arguments": tokens * value_heads,
+                "issued_exp_arguments": tokens * value_heads * row_tiles,
+            },
+            "accounting_note": (
+                "state transition arithmetic only; normalization reductions/transcendentals excluded"
+            ),
+        }
+    )
     return result
 
 
 def _gdn_control(params: dict[str, Any]) -> dict[str, Any]:
     tokens, value_heads = _positive_parameters(params, "tokens", "value_heads")
     count = tokens * value_heads
-    nonlinear = _integer(params.get("softplus_nonlinear_elements"),
-                         "softplus_nonlinear_elements")
+    nonlinear = _integer(params.get("softplus_nonlinear_elements"), "softplus_nonlinear_elements")
     if nonlinear > count:
         raise ValueError("softplus_nonlinear_elements exceeds tokens*value_heads")
     represented = 4 * count + 8 * count + 8 * value_heads
     result = _base_counts()
-    result.update({
-        "represented_minimum_bytes": represented,
-        "source_requested_bytes": 20 * count,
-        "special_functions": {
-            "exp_arguments": 2 * count + nonlinear,
-            "log1p_arguments": nonlinear,
-        },
-        "accounting_note": "GDN control reports bytes and SFU arguments, not artificial FLOPs",
-    })
+    result.update(
+        {
+            "represented_minimum_bytes": represented,
+            "source_requested_bytes": 20 * count,
+            "special_functions": {
+                "exp_arguments": 2 * count + nonlinear,
+                "log1p_arguments": nonlinear,
+            },
+            "accounting_note": "GDN control reports bytes and SFU arguments, not artificial FLOPs",
+        }
+    )
     return result
 
 
@@ -475,14 +529,16 @@ def _gdn_conv(params: dict[str, Any]) -> dict[str, Any]:
     logical_ops = 8 * tokens * channels
     represented = 4 * tokens * channels + 8 * channels + 12 * channels
     result = _base_counts()
-    result.update({
-        "logical_ops": logical_ops,
-        "issued_ops": {"fp32_vector_arithmetic": logical_ops},
-        "represented_minimum_bytes": represented,
-        "source_requested_bytes": represented,
-        "special_functions": {"exp_arguments": tokens * channels},
-        "accounting_note": "four-tap FMA arithmetic only; SiLU exponential reported separately",
-    })
+    result.update(
+        {
+            "logical_ops": logical_ops,
+            "issued_ops": {"fp32_vector_arithmetic": logical_ops},
+            "represented_minimum_bytes": represented,
+            "source_requested_bytes": represented,
+            "special_functions": {"exp_arguments": tokens * channels},
+            "accounting_note": "four-tap FMA arithmetic only; SiLU exponential reported separately",
+        }
+    )
     return result
 
 
@@ -490,17 +546,22 @@ def _elementwise(operation: str, params: dict[str, Any]) -> dict[str, Any]:
     elements = _integer(params.get("elements"), "elements", minimum=1)
     result = _base_counts()
     if operation == "residual_add":
-        result.update(logical_ops=elements, issued_ops={"fp32_vector_arithmetic": elements},
-                      represented_minimum_bytes=6 * elements,
-                      source_requested_bytes=6 * elements,
-                      accounting_note="one represented elementwise addition")
+        result.update(
+            logical_ops=elements,
+            issued_ops={"fp32_vector_arithmetic": elements},
+            represented_minimum_bytes=6 * elements,
+            source_requested_bytes=6 * elements,
+            accounting_note="one represented elementwise addition",
+        )
     elif operation == "silu_mul":
-        result.update(logical_ops=4 * elements,
-                      issued_ops={"fp32_vector_arithmetic": 4 * elements},
-                      represented_minimum_bytes=6 * elements,
-                      source_requested_bytes=6 * elements,
-                      special_functions={"exp_arguments": elements},
-                      accounting_note="four scalar arithmetic ops plus one exponential per element")
+        result.update(
+            logical_ops=4 * elements,
+            issued_ops={"fp32_vector_arithmetic": 4 * elements},
+            represented_minimum_bytes=6 * elements,
+            source_requested_bytes=6 * elements,
+            special_functions={"exp_arguments": elements},
+            accounting_note="four scalar arithmetic ops plus one exponential per element",
+        )
     elif operation in ("rmsnorm", "residual_rmsnorm", "gated_rmsnorm"):
         features = _integer(params.get("features"), "features", minimum=1)
         if elements % features:
@@ -514,30 +575,38 @@ def _elementwise(operation: str, params: dict[str, Any]) -> dict[str, Any]:
             requested = 8 * elements + 2 * features * rows
         else:
             logical_ops = 4 * elements
-            represented = (2 * elements + 2 * features + 2 * elements
-                           if operation == "rmsnorm"
-                           else 4 * elements + 2 * features + 4 * elements)
-            requested = (4 * elements + 2 * features * rows
-                         if operation == "rmsnorm"
-                         else 8 * elements + 2 * features * rows)
+            represented = (
+                2 * elements + 2 * features + 2 * elements
+                if operation == "rmsnorm"
+                else 4 * elements + 2 * features + 4 * elements
+            )
+            requested = (
+                4 * elements + 2 * features * rows
+                if operation == "rmsnorm"
+                else 8 * elements + 2 * features * rows
+            )
         special_functions = {"rsqrt_arguments": rows}
         if operation == "gated_rmsnorm":
             special_functions["exp_arguments"] = elements
-        result.update(logical_ops=logical_ops,
-                      issued_ops={"fp32_vector_arithmetic": logical_ops},
-                      represented_minimum_bytes=represented,
-                      source_requested_bytes=requested,
-                      special_functions=special_functions,
-                      accounting_note=(
-                          "sumsq, mean/epsilon, SiLU, and gated-output scalar arithmetic; "
-                          "reduction, exponential, and rsqrt reported separately"
-                          if operation == "gated_rmsnorm" else
-                          "sumsq/output arithmetic; reduction and rsqrt separate"))
+        result.update(
+            logical_ops=logical_ops,
+            issued_ops={"fp32_vector_arithmetic": logical_ops},
+            represented_minimum_bytes=represented,
+            source_requested_bytes=requested,
+            special_functions=special_functions,
+            accounting_note=(
+                "sumsq, mean/epsilon, SiLU, and gated-output scalar arithmetic; "
+                "reduction, exponential, and rsqrt reported separately"
+                if operation == "gated_rmsnorm"
+                else "sumsq/output arithmetic; reduction and rsqrt separate"
+            ),
+        )
     return result
 
 
-def _counts(operation: str, params: dict[str, Any], dispatch_id: str,
-            keep_rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _counts(
+    operation: str, params: dict[str, Any], dispatch_id: str, keep_rows: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     if operation == "q4_linear":
         return _linear(params, q4=True)
     if operation == "w8_linear":
@@ -560,28 +629,28 @@ def _counts(operation: str, params: dict[str, Any], dispatch_id: str,
         return _gdn_control(params)
     if operation == "gdn_conv":
         return _gdn_conv(params)
-    if operation in ("residual_add", "silu_mul", "rmsnorm", "residual_rmsnorm",
-                     "gated_rmsnorm"):
+    if operation in ("residual_add", "silu_mul", "rmsnorm", "residual_rmsnorm", "gated_rmsnorm"):
         return _elementwise(operation, params)
     raise ValueError(f"unsupported operation for {dispatch_id}: {operation}")
 
 
-def _rates(counts: dict[str, Any], duration_ns: int,
-           probe_copy_gbps: float | None = None) -> dict[str, Any]:
+def _rates(
+    counts: dict[str, Any], duration_ns: int, probe_copy_gbps: float | None = None
+) -> dict[str, Any]:
     seconds = duration_ns / 1e9
     logical_ops = counts["logical_ops"]
     represented = counts["represented_minimum_bytes"]
     requested = counts["source_requested_bytes"]
-    issued_rates = {name: value / seconds / 1e12
-                    for name, value in counts["issued_ops"].items()}
+    issued_rates = {name: value / seconds / 1e12 for name, value in counts["issued_ops"].items()}
     peak_key = {
         "iu4": "int4_matrix_tops",
         "iu8": "int8_matrix_tops",
         "bf16_matrix": "bf16_matrix_tflops",
         "fp32_vector_arithmetic": "fp32_vector_tflops",
     }
-    fractions = {name: issued_rates[name] / THEORETICAL_PEAKS[peak_key[name]]
-                 for name in issued_rates}
+    fractions = {
+        name: issued_rates[name] / THEORETICAL_PEAKS[peak_key[name]] for name in issued_rates
+    }
     represented_gbps = represented / seconds / 1e9
     requested_gbps = None if requested is None else requested / seconds / 1e9
     return {
@@ -589,38 +658,46 @@ def _rates(counts: dict[str, Any], duration_ns: int,
         "represented_minimum_gbps": represented_gbps,
         "source_requested_gbps": requested_gbps,
         "logical_arithmetic_intensity_ops_per_represented_byte": (
-            None if represented == 0 else logical_ops / represented),
+            None if represented == 0 else logical_ops / represented
+        ),
         "source_request_arithmetic_intensity_ops_per_byte": (
-            None if requested in (None, 0) else logical_ops / requested),
+            None if requested in (None, 0) else logical_ops / requested
+        ),
         "issued_tops_by_class": issued_rates,
         "theoretical_compute_peak_fraction_by_class": fractions,
         "represented_to_advertised_memory_ratio": (
-            represented_gbps / THEORETICAL_PEAKS["advertised_memory_gbps"]),
+            represented_gbps / THEORETICAL_PEAKS["advertised_memory_gbps"]
+        ),
         "represented_to_supplied_copy_probe_ratio": (
-            None if probe_copy_gbps is None else represented_gbps / probe_copy_gbps),
+            None if probe_copy_gbps is None else represented_gbps / probe_copy_gbps
+        ),
         "source_requested_to_supplied_copy_probe_ratio": (
-            None if probe_copy_gbps is None or requested_gbps is None
-            else requested_gbps / probe_copy_gbps),
+            None
+            if probe_copy_gbps is None or requested_gbps is None
+            else requested_gbps / probe_copy_gbps
+        ),
     }
 
 
-def _aggregate(rows: list[dict[str, Any]], key: str,
-               probe_copy_gbps: float | None = None) -> list[dict[str, Any]]:
+def _aggregate(
+    rows: list[dict[str, Any]], key: str, probe_copy_gbps: float | None = None
+) -> list[dict[str, Any]]:
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         groups[str(row[key])].append(row)
     result = []
     for name, members in sorted(groups.items()):
         duration = sum(item["duration_ns"] for item in members)
-        wall_union = _wall_union_ns([
-            (item["start_ns"], item["end_ns"]) for item in members])
+        wall_union = _wall_union_ns([(item["start_ns"], item["end_ns"]) for item in members])
         counts = _base_counts()
         counts["logical_ops"] = sum(item["counts"]["logical_ops"] for item in members)
         counts["represented_minimum_bytes"] = sum(
-            item["counts"]["represented_minimum_bytes"] for item in members)
+            item["counts"]["represented_minimum_bytes"] for item in members
+        )
         requested = [item["counts"]["source_requested_bytes"] for item in members]
-        counts["source_requested_bytes"] = (None if any(item is None for item in requested)
-                                               else sum(requested))
+        counts["source_requested_bytes"] = (
+            None if any(item is None for item in requested) else sum(requested)
+        )
         issued: dict[str, int] = defaultdict(int)
         special: dict[str, int] = defaultdict(int)
         for item in members:
@@ -630,21 +707,36 @@ def _aggregate(rows: list[dict[str, Any]], key: str,
                 special[kind] += value
         counts["issued_ops"] = dict(sorted(issued.items()))
         counts["special_functions"] = dict(sorted(special.items()))
-        result.append({key: name, "dispatches": len(members),
-                       "independent_device_service_time_ns": duration,
-                       "device_wall_union_ns": wall_union,
-                       "counts": counts,
-                       "rates": _rates(counts, duration, probe_copy_gbps)})
+        result.append(
+            {
+                key: name,
+                "dispatches": len(members),
+                "independent_device_service_time_ns": duration,
+                "device_wall_union_ns": wall_union,
+                "counts": counts,
+                "rates": _rates(counts, duration, probe_copy_gbps),
+            }
+        )
     return result
 
 
-def _reconciled_inputs(reconciliation_path: Path) -> tuple[
-        dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]],
-        dict[str, Any], dict[str, Any], list[tuple[Path, dict[str, Any]]]]:
+def _reconciled_inputs(
+    reconciliation_path: Path,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    list[dict[str, Any]],
+    dict[str, Any],
+    dict[str, Any],
+    list[tuple[Path, dict[str, Any]]],
+]:
     reconciliation = _load(reconciliation_path)
-    if (reconciliation.get("artifact_type") != RECONCILIATION_TYPE
-            or type(reconciliation.get("schema_version")) is not int
-            or reconciliation.get("schema_version") != 1):
+    if (
+        reconciliation.get("artifact_type") != RECONCILIATION_TYPE
+        or type(reconciliation.get("schema_version")) is not int
+        or reconciliation.get("schema_version") != 1
+    ):
         raise ValueError("reconciliation must be Qwen3.8-27B dispatch reconciliation schema v1")
     tracked: list[tuple[Path, dict[str, Any]]] = []
     for field in ("trace_authority", "static_schedule"):
@@ -652,15 +744,19 @@ def _reconciled_inputs(reconciliation_path: Path) -> tuple[
     sources = reconciliation.get("schedule_sources")
     if not isinstance(sources, list) or not sources:
         raise ValueError("reconciliation.schedule_sources must be a nonempty array")
-    tracked.extend(_verified_snapshot(value, f"schedule_sources[{index}]")
-                   for index, value in enumerate(sources))
+    tracked.extend(
+        _verified_snapshot(value, f"schedule_sources[{index}]")
+        for index, value in enumerate(sources)
+    )
 
     trace = _load(tracked[0][0])
-    if (trace.get("artifact_type") != TRACE_TYPE
-            or type(trace.get("schema_version")) is not int
-            or trace.get("schema_version") != 1
-            or trace.get("status") != "valid_attribution_only"
-            or trace.get("profile_timing_admissible") is not False):
+    if (
+        trace.get("artifact_type") != TRACE_TYPE
+        or type(trace.get("schema_version")) is not int
+        or trace.get("schema_version") != 1
+        or trace.get("status") != "valid_attribution_only"
+        or trace.get("profile_timing_admissible") is not False
+    ):
         raise ValueError("trace authority is not validated attribution-only schema v1")
     if reconciliation.get("workload") != reconciliation.get("timing_authority", {}).get("workload"):
         raise ValueError("reconciliation and timing workload identities differ")
@@ -668,84 +764,119 @@ def _reconciled_inputs(reconciliation_path: Path) -> tuple[
     if not isinstance(workload, dict):
         raise ValueError("reconciliation workload must be an object")
     _validate_workload(workload)
-    if (workload.get("kind"), workload.get("prompt_tokens"),
-            workload.get("concurrency"), workload.get("xattention_profile")) != (
-            "pp", 2048, 1, "dense"):
+    if (
+        workload.get("kind"),
+        workload.get("prompt_tokens"),
+        workload.get("concurrency"),
+        workload.get("xattention_profile"),
+    ) != ("pp", 2048, 1, "dense"):
         raise ValueError("roofline reconciliation must be the dense C1 P2048 selected route")
     route = trace.get("selected_route")
     if not isinstance(route, dict):
         raise ValueError("trace authority lacks selected_route")
     expected_route = {
-        "kind": workload["kind"], "prompt_tokens": workload["prompt_tokens"],
-        "concurrency": workload["concurrency"], "prefill_chunk": workload["prefill_chunk"],
+        "kind": workload["kind"],
+        "prompt_tokens": workload["prompt_tokens"],
+        "concurrency": workload["concurrency"],
+        "prefill_chunk": workload["prefill_chunk"],
         "kv_value_group": workload["kv_value_group"],
         "xattention_profile": workload["xattention_profile"],
     }
     if any(route.get(key) != value for key, value in expected_route.items()):
         raise ValueError("trace selected_route differs from reconciled workload")
     artifact, executable = route.get("artifact"), route.get("benchmark_executable")
-    if (not isinstance(artifact, dict) or not isinstance(executable, dict)
-            or artifact.get("path") != workload["artifact_path"]
-            or artifact.get("sha256") != workload["artifact_sha256"]
-            or artifact.get("weights_id") != workload["weights_id"]
-            or executable.get("path") != workload["executable_path"]
-            or executable.get("sha256") != workload["executable_sha256"]):
+    if (
+        not isinstance(artifact, dict)
+        or not isinstance(executable, dict)
+        or artifact.get("path") != workload["artifact_path"]
+        or artifact.get("sha256") != workload["artifact_sha256"]
+        or artifact.get("weights_id") != workload["weights_id"]
+        or executable.get("path") != workload["executable_path"]
+        or executable.get("sha256") != workload["executable_sha256"]
+    ):
         raise ValueError("trace selected artifact/executable differs from reconciled workload")
 
     unprofiled = reconciliation.get("unprofiled_performance")
     if not isinstance(unprofiled, dict) or unprofiled.get("prompt_tokens") != 2048:
         raise ValueError("reconciliation lacks exact unprofiled P2048 performance")
     evaluation_pair = _verified_snapshot(
-        unprofiled.get("low_context_evaluation"), "unprofiled low-context evaluation")
+        unprofiled.get("low_context_evaluation"), "unprofiled low-context evaluation"
+    )
     report_pair = _verified_snapshot(unprofiled.get("p2048_report"), "unprofiled P2048 report")
     tracked.extend((evaluation_pair, report_pair))
     trace_authorities = trace.get("authorities")
     selected_unprofiled = route.get("unprofiled_p2048")
-    if (not isinstance(trace_authorities, dict)
-            or trace_authorities.get("low_context_evaluation") != evaluation_pair[1]
-            or trace_authorities.get("source_report") != report_pair[1]
-            or not isinstance(selected_unprofiled, dict)
-            or selected_unprofiled.get("evaluation") != evaluation_pair[1]
-            or selected_unprofiled.get("report") != report_pair[1]):
+    if (
+        not isinstance(trace_authorities, dict)
+        or trace_authorities.get("low_context_evaluation") != evaluation_pair[1]
+        or trace_authorities.get("source_report") != report_pair[1]
+        or not isinstance(selected_unprofiled, dict)
+        or selected_unprofiled.get("evaluation") != evaluation_pair[1]
+        or selected_unprofiled.get("report") != report_pair[1]
+    ):
         raise ValueError("unprofiled P2048 snapshots differ from validated trace authority")
     evaluation, report = _load(evaluation_pair[0]), _load(report_pair[0])
-    if (evaluation.get("artifact_type") != LOW_CONTEXT_TYPE
-            or type(evaluation.get("schema_version")) is not int
-            or evaluation.get("schema_version") != 1):
+    if (
+        evaluation.get("artifact_type") != LOW_CONTEXT_TYPE
+        or type(evaluation.get("schema_version")) is not int
+        or evaluation.get("schema_version") != 1
+    ):
         raise ValueError("unprofiled low-context evaluation has the wrong schema")
     tests = report.get("tests")
-    rows = ([row for row in tests if isinstance(row, dict) and row.get("kind") == "pp"
-             and row.get("n_prompt") == 2048] if isinstance(tests, list) else [])
+    rows = (
+        [
+            row
+            for row in tests
+            if isinstance(row, dict) and row.get("kind") == "pp" and row.get("n_prompt") == 2048
+        ]
+        if isinstance(tests, list)
+        else []
+    )
     if len(rows) != 1 or len(tests) != 1:
         raise ValueError("unprofiled report must contain one exact P2048 row")
-    observed = _number(evaluation.get("observed_p2048_tok_s"),
-                       "evaluation.observed_p2048_tok_s", positive=True)
-    speed = _number(unprofiled.get("prefill_tok_s_mean"),
-                    "unprofiled.prefill_tok_s_mean", positive=True)
-    seconds = _number(unprofiled.get("prefill_seconds_mean"),
-                      "unprofiled.prefill_seconds_mean", positive=True)
-    if (speed != observed
-            or speed != _number(rows[0].get("prefill_tok_s_mean"),
-                                "report.prefill_tok_s_mean", positive=True)
-            or seconds != _number(rows[0].get("prefill_seconds_mean"),
-                                  "report.prefill_seconds_mean", positive=True)):
+    observed = _number(
+        evaluation.get("observed_p2048_tok_s"), "evaluation.observed_p2048_tok_s", positive=True
+    )
+    speed = _number(
+        unprofiled.get("prefill_tok_s_mean"), "unprofiled.prefill_tok_s_mean", positive=True
+    )
+    seconds = _number(
+        unprofiled.get("prefill_seconds_mean"), "unprofiled.prefill_seconds_mean", positive=True
+    )
+    if (
+        speed != observed
+        or speed
+        != _number(rows[0].get("prefill_tok_s_mean"), "report.prefill_tok_s_mean", positive=True)
+        or seconds
+        != _number(
+            rows[0].get("prefill_seconds_mean"), "report.prefill_seconds_mean", positive=True
+        )
+    ):
         raise ValueError("unprofiled P2048 throughput differs across bound authorities")
-    minimum = _number(evaluation.get("minimum_p2048_tok_s"),
-                      "evaluation.minimum_p2048_tok_s", positive=True)
+    minimum = _number(
+        evaluation.get("minimum_p2048_tok_s"), "evaluation.minimum_p2048_tok_s", positive=True
+    )
     passes = evaluation.get("passes_p2048_gate")
-    if (type(passes) is not bool
-            or selected_unprofiled.get("observed_tok_s") != speed
-            or selected_unprofiled.get("minimum_tok_s") != minimum
-            or type(selected_unprofiled.get("passes_gate")) is not bool
-            or selected_unprofiled.get("passes_gate") is not passes):
+    if (
+        type(passes) is not bool
+        or selected_unprofiled.get("observed_tok_s") != speed
+        or selected_unprofiled.get("minimum_tok_s") != minimum
+        or type(selected_unprofiled.get("passes_gate")) is not bool
+        or selected_unprofiled.get("passes_gate") is not passes
+    ):
         raise ValueError("validated trace selected P2048 gate differs from its authority")
     unprofiled_exact = {
-        "prompt_tokens": 2048, "prefill_tok_s_mean": speed,
+        "prompt_tokens": 2048,
+        "prefill_tok_s_mean": speed,
         "prefill_seconds_mean": seconds,
-        "low_context_evaluation": evaluation_pair[1], "p2048_report": report_pair[1],
+        "low_context_evaluation": evaluation_pair[1],
+        "p2048_report": report_pair[1],
     }
 
-    timing, inventory = reconciliation.get("timing_authority"), reconciliation.get("dispatch_inventory")
+    timing, inventory = (
+        reconciliation.get("timing_authority"),
+        reconciliation.get("dispatch_inventory"),
+    )
     if not isinstance(timing, dict) or not isinstance(inventory, dict):
         raise ValueError("reconciliation lacks embedded timing/inventory authorities")
     _schema(timing, TIMING_TYPE, "embedded timing authority")
@@ -758,8 +889,10 @@ def _reconciled_inputs(reconciliation_path: Path) -> tuple[
     if not isinstance(coverage_rows, list) or not coverage_rows or not isinstance(coverage, dict):
         raise ValueError("reconciliation lacks complete dispatch coverage")
     seen: set[str] = set()
-    totals = {name: {"dispatch_count": 0, "duration_ns": 0}
-              for name in ("modeled", "unmodeled", "unsupported")}
+    totals = {
+        name: {"dispatch_count": 0, "duration_ns": 0}
+        for name in ("modeled", "unmodeled", "unsupported")
+    }
     uncovered = []
     modeled_ids = set()
     trace_rows = trace.get("dispatches")
@@ -776,13 +909,19 @@ def _reconciled_inputs(reconciliation_path: Path) -> tuple[
         if not isinstance(trace_row, dict) or trace_row.get("dispatch_id") != dispatch_id:
             raise ValueError("reconciliation dispatch order/identity differs from validated trace")
         for trace_field, reconciliation_field in (
-                ("rocprof_dispatch_id", "rocprof_dispatch_id"), ("symbol", "symbol"),
-                ("roctx_region", "marker"), ("grid", "grid"), ("workgroup", "workgroup"),
-                ("start_ns", "start_ns"), ("end_ns", "end_ns"),
-                ("duration_ns", "duration_ns")):
+            ("rocprof_dispatch_id", "rocprof_dispatch_id"),
+            ("symbol", "symbol"),
+            ("roctx_region", "marker"),
+            ("grid", "grid"),
+            ("workgroup", "workgroup"),
+            ("start_ns", "start_ns"),
+            ("end_ns", "end_ns"),
+            ("duration_ns", "duration_ns"),
+        ):
             if trace_row.get(trace_field) != row.get(reconciliation_field):
                 raise ValueError(
-                    f"reconciliation dispatch {dispatch_id} differs from trace at {trace_field}")
+                    f"reconciliation dispatch {dispatch_id} differs from trace at {trace_field}"
+                )
         classification = row.get("classification")
         if classification not in totals:
             raise ValueError(f"reconciliation dispatch {dispatch_id} has invalid classification")
@@ -798,9 +937,11 @@ def _reconciled_inputs(reconciliation_path: Path) -> tuple[
             uncovered.append(dict(row))
     trace_aggregates = trace.get("aggregates")
     trace_service = sum(value["duration_ns"] for value in totals.values())
-    if (not isinstance(trace_aggregates, dict)
-            or trace_aggregates.get("dispatch_count") != len(coverage_rows)
-            or trace_aggregates.get("independent_device_service_time_ns") != trace_service):
+    if (
+        not isinstance(trace_aggregates, dict)
+        or trace_aggregates.get("dispatch_count") != len(coverage_rows)
+        or trace_aggregates.get("independent_device_service_time_ns") != trace_service
+    ):
         raise ValueError("validated trace aggregates differ from reconciliation coverage")
     expected_coverage = {
         "trace_dispatch_count": len(coverage_rows),
@@ -827,13 +968,17 @@ def _reconciled_inputs(reconciliation_path: Path) -> tuple[
     for dispatch_id in modeled_ids:
         covered = coverage_by_id[dispatch_id]
         timed, inventoried = timing_rows[dispatch_id], inventory_rows[dispatch_id]
-        if any(timed.get(field) != covered.get(field) for field in
-               ("symbol", "start_ns", "end_ns", "duration_ns")):
+        if any(
+            timed.get(field) != covered.get(field)
+            for field in ("symbol", "start_ns", "end_ns", "duration_ns")
+        ):
             raise ValueError(f"modeled timing row {dispatch_id} differs from trace coverage")
         if timed.get("stage") != covered.get("marker"):
             raise ValueError(f"modeled timing stage {dispatch_id} differs from trace marker")
-        if any(inventoried.get(field) != covered.get(field) for field in
-               ("symbol", "role", "operation", "format", "parameters")):
+        if any(
+            inventoried.get(field) != covered.get(field)
+            for field in ("symbol", "role", "operation", "format", "parameters")
+        ):
             raise ValueError(f"modeled inventory row {dispatch_id} differs from trace coverage")
         if inventoried.get("stage") != covered.get("marker"):
             raise ValueError(f"modeled inventory stage {dispatch_id} differs from trace marker")
@@ -847,13 +992,17 @@ def model(reconciliation_path: Path, *, probe_path: Path | None = None) -> dict[
         "sha256": _sha256(reconciliation_path.resolve(strict=True)),
     }
     timing, inventory, workload, uncovered, unprofiled, coverage, tracked = _reconciled_inputs(
-        reconciliation_path)
+        reconciliation_path
+    )
     _schema(timing, TIMING_TYPE, "timing authority")
     _schema(inventory, INVENTORY_TYPE, "dispatch inventory")
     power = timing.get("power_profile")
-    if (not isinstance(power, dict) or power.get("required") != "auto"
-            or power.get("observed") != "auto"
-            or power.get("rechecked_after") != "auto"):
+    if (
+        not isinstance(power, dict)
+        or power.get("required") != "auto"
+        or power.get("observed") != "auto"
+        or power.get("rechecked_after") != "auto"
+    ):
         raise ValueError("timing authority must record required/observed/rechecked_after auto")
     _text(power.get("sysfs_path"), "timing power_profile.sysfs_path")
     if not isinstance(workload, dict) or inventory.get("workload") != workload:
@@ -866,22 +1015,30 @@ def model(reconciliation_path: Path, *, probe_path: Path | None = None) -> dict[
         missing = sorted(set(timing_rows) - set(inventory_rows))
         extra = sorted(set(inventory_rows) - set(timing_rows))
         raise ValueError(f"dispatch identity mismatch; missing inventory={missing}, extra={extra}")
-    if (workload["xattention_profile"] == "dense"
-            and any(row.get("operation", "").startswith("sparse_")
-                    for row in inventory_rows.values())):
+    if workload["xattention_profile"] == "dense" and any(
+        row.get("operation", "").startswith("sparse_") for row in inventory_rows.values()
+    ):
         raise ValueError("dense workload cannot contain sparse XAttention dispatches")
 
     keep_rows: dict[str, dict[str, Any]] = {}
-    sparse_ids = {dispatch_id for dispatch_id, row in inventory_rows.items()
-                  if row.get("operation") == "sparse_consumer"}
+    sparse_ids = {
+        dispatch_id
+        for dispatch_id, row in inventory_rows.items()
+        if row.get("operation") == "sparse_consumer"
+    }
     if sparse_ids:
-        raise ValueError("schema-v1 selected-P2048 reconciliation must not contain sparse consumers")
+        raise ValueError(
+            "schema-v1 selected-P2048 reconciliation must not contain sparse consumers"
+        )
 
     probe = None
     probe_copy_gbps = None
     if probe_path is not None:
         probe = _load(probe_path)
-        if probe.get("artifact_type") != "ninfer_r9700_memory_probe" or probe.get("schema_version") != 1:
+        if (
+            probe.get("artifact_type") != "ninfer_r9700_memory_probe"
+            or probe.get("schema_version") != 1
+        ):
             raise ValueError("probe reference must be ninfer_r9700_memory_probe schema v1")
         for name in ("read_gbps", "write_gbps", "copy_gbps"):
             _number(probe.get(name), f"probe.{name}", positive=True)
@@ -904,11 +1061,11 @@ def model(reconciliation_path: Path, *, probe_path: Path | None = None) -> dict[
         expected_format = FORMATS.get(operation)
         if expected_format is None:
             raise ValueError(f"unsupported operation for {dispatch_id}: {operation}")
-        tensor_format = _text(inventory_row.get("format"),
-                              f"inventory {dispatch_id}.format")
+        tensor_format = _text(inventory_row.get("format"), f"inventory {dispatch_id}.format")
         if tensor_format != expected_format:
             raise ValueError(
-                f"inventory {dispatch_id}.format must be {expected_format} for {operation}")
+                f"inventory {dispatch_id}.format must be {expected_format} for {operation}"
+            )
         params = inventory_row.get("parameters")
         if not isinstance(params, dict):
             raise ValueError(f"inventory {dispatch_id}.parameters must be an object")
@@ -936,14 +1093,18 @@ def model(reconciliation_path: Path, *, probe_path: Path | None = None) -> dict[
         raise ValueError("timing authority contains no positive device service")
 
     for path, snapshot in tracked:
-        actual = {"path": str(path.resolve(strict=True)), "file_size_bytes": path.stat().st_size,
-                  "sha256": _sha256(path)}
+        actual = {
+            "path": str(path.resolve(strict=True)),
+            "file_size_bytes": path.stat().st_size,
+            "sha256": _sha256(path),
+        }
         if actual != snapshot:
             raise ValueError(f"bound authority changed while building roofline: {path}")
-    if ({"path": str(reconciliation_path.resolve(strict=True)),
-         "file_size_bytes": reconciliation_path.resolve(strict=True).stat().st_size,
-         "sha256": _sha256(reconciliation_path.resolve(strict=True))}
-            != reconciliation_snapshot):
+    if {
+        "path": str(reconciliation_path.resolve(strict=True)),
+        "file_size_bytes": reconciliation_path.resolve(strict=True).stat().st_size,
+        "sha256": _sha256(reconciliation_path.resolve(strict=True)),
+    } != reconciliation_snapshot:
         raise ValueError("reconciliation changed while building roofline")
 
     return {
@@ -959,8 +1120,11 @@ def model(reconciliation_path: Path, *, probe_path: Path | None = None) -> dict[
         "dispatch_coverage": coverage,
         "peak_references": {
             "theoretical_advertised": THEORETICAL_PEAKS,
-            "supplied_memory_probe_reference": None if probe_path is None else {
-                "path": str(probe_path.resolve()), "sha256": _sha256(probe_path),
+            "supplied_memory_probe_reference": None
+            if probe_path is None
+            else {
+                "path": str(probe_path.resolve()),
+                "sha256": _sha256(probe_path),
                 "report": probe,
             },
             "interpretation": (

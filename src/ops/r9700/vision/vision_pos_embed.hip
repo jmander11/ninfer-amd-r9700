@@ -39,7 +39,7 @@ __global__ __launch_bounds__(kWave) void vision_pos_embed_wave_kernel(
         corner_weights[corner] = __shfl(lane_weight, corner, kWave);
     }
 
-    const int first = tile * kWaveTile + lane;
+    const int first           = tile * kWaveTile + lane;
     const std::int64_t x_base = static_cast<std::int64_t>(patch) * dimensions;
 #pragma unroll
     for (int item = 0; item < kWaveTile / kWave; ++item) {
@@ -65,7 +65,7 @@ __global__ __launch_bounds__(kCtaThreads) void vision_pos_embed_cta_kernel(
     __shared__ std::int32_t corner_indices[4];
     __shared__ float corner_weights[4];
     if (threadIdx.x < 4) {
-        const std::int64_t control = static_cast<std::int64_t>(patch) * 4 + threadIdx.x;
+        const std::int64_t control  = static_cast<std::int64_t>(patch) * 4 + threadIdx.x;
         corner_indices[threadIdx.x] = indices[control];
         corner_weights[threadIdx.x] = weights[control];
     }
@@ -120,18 +120,16 @@ void vision_pos_embed_add(const Tensor& table, const Tensor& indices, const Tens
     if (dimensions == kProductDimensions && patches < 1024) {
         const int dimension_tiles = (dimensions + kWaveTile - 1) / kWaveTile;
         const int occupancy_tiles = std::max(1, (kSmallTargetBlocks + patches - 1) / patches);
-        const int tiles = std::min(dimension_tiles, occupancy_tiles);
+        const int tiles           = std::min(dimension_tiles, occupancy_tiles);
         vision_pos_embed_wave_kernel<<<static_cast<unsigned>(patches * tiles), kWave, 0, stream>>>(
             static_cast<const hip_bfloat16*>(table.data),
-            static_cast<const std::int32_t*>(indices.data),
-            static_cast<const float*>(weights.data), static_cast<hip_bfloat16*>(x.data),
-            dimensions, patches, tiles);
+            static_cast<const std::int32_t*>(indices.data), static_cast<const float*>(weights.data),
+            static_cast<hip_bfloat16*>(x.data), dimensions, patches, tiles);
     } else {
         vision_pos_embed_cta_kernel<<<static_cast<unsigned>(patches), kCtaThreads, 0, stream>>>(
             static_cast<const hip_bfloat16*>(table.data),
-            static_cast<const std::int32_t*>(indices.data),
-            static_cast<const float*>(weights.data), static_cast<hip_bfloat16*>(x.data),
-            dimensions, patches);
+            static_cast<const std::int32_t*>(indices.data), static_cast<const float*>(weights.data),
+            static_cast<hip_bfloat16*>(x.data), dimensions, patches);
     }
     HIP_CHECK(hipGetLastError());
 }

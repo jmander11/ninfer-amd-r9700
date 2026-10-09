@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,8 +20,10 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             selection.write_text("{}\n", encoding="utf-8")
             output = root / "prepared"
             output.symlink_to(root / "missing")
-            with patch("tools.ppl.prepare_selected_exact_token.resolve_route") as resolver, \
-                    self.assertRaisesRegex(ValueError, "already exists"):
+            with (
+                patch("tools.ppl.prepare_selected_exact_token.resolve_route") as resolver,
+                self.assertRaisesRegex(ValueError, "already exists"),
+            ):
                 prepare(selection, output)
             resolver.assert_not_called()
             self.assertTrue(output.is_symlink())
@@ -42,26 +44,55 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             quality = root / "quality.json"
-            cells = [{"scheme": "r9700-g16", "schedule": "prefill",
-                      "prompt_tokens": 8192, "quality_tier": "accuracy",
-                      "quality_eligible": True, "pass": True} for _ in range(2)]
-            quality.write_text(json.dumps({
-                "artifact_type": "ninfer_r9700_ppl_campaign", "schema_version": 6,
-                "pass": True, "prefill_chunk": 2048, "xattention_profile": "dense",
-                "candidate_artifact": {"weights_id": "weights", "sha256": "a" * 64},
-                "cells": cells,
-            }), encoding="utf-8")
-            authority = {"source_provenance": [{"candidate": "winner",
-                          "quality": {"path": str(quality), "sha256": sha(quality)}}]}
-            route = {"selected_prefill_chunk": 2048,
-                     "execution_profile": {"xattention_profile": "dense"},
-                     "artifact": {"weights_id": "weights", "sha256": "a" * 64}}
+            cells = [
+                {
+                    "scheme": "r9700-g16",
+                    "schedule": "prefill",
+                    "prompt_tokens": 8192,
+                    "quality_tier": "accuracy",
+                    "quality_eligible": True,
+                    "pass": True,
+                }
+                for _ in range(2)
+            ]
+            quality.write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "ninfer_r9700_ppl_campaign",
+                        "schema_version": 6,
+                        "pass": True,
+                        "prefill_chunk": 2048,
+                        "xattention_profile": "dense",
+                        "candidate_artifact": {"weights_id": "weights", "sha256": "a" * 64},
+                        "cells": cells,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            authority = {
+                "source_provenance": [
+                    {
+                        "candidate": "winner",
+                        "quality": {"path": str(quality), "sha256": sha(quality)},
+                    }
+                ]
+            }
+            route = {
+                "selected_prefill_chunk": 2048,
+                "execution_profile": {"xattention_profile": "dense"},
+                "artifact": {"weights_id": "weights", "sha256": "a" * 64},
+            }
             selection = root / "selection.json"
             selection.write_text("{}", encoding="utf-8")
-            with patch("tools.ppl.prepare_selected_exact_token.load_payload",
-                       return_value=authority), patch(
-                "tools.ppl.prepare_selected_exact_token.validate_terminal_production_authority"
-            ), self.assertRaisesRegex(ValueError, "exact admitted"):
+            with (
+                patch(
+                    "tools.ppl.prepare_selected_exact_token.load_payload", return_value=authority
+                ),
+                patch(
+                    "tools.ppl.prepare_selected_exact_token.validate_terminal_production_authority"
+                ),
+                self.assertRaisesRegex(ValueError, "exact admitted"),
+            ):
                 selected_quality(selection, "winner", 16, route)
 
     def test_prepares_only_selected_c1_decode_route(self) -> None:
@@ -79,29 +110,47 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             repeat = root / "repeat.json"
             reference.write_text("{}")
             repeat.write_text("{}")
-            quality.write_text(json.dumps({
-                "reused_bf16_campaign": {"path": str(reference), "sha256": sha(reference)},
-                "bf16_repeat_comparison": {"path": str(repeat), "sha256": sha(repeat)},
-            }))
+            quality.write_text(
+                json.dumps(
+                    {
+                        "reused_bf16_campaign": {"path": str(reference), "sha256": sha(reference)},
+                        "bf16_repeat_comparison": {"path": str(repeat), "sha256": sha(repeat)},
+                    }
+                )
+            )
             route = {
                 "winner": "selected-g32-dense",
-                "artifact": {"path": str(artifact), "weights_id": "r9700-q4g64-n16k16-eval",
-                             "sha256": "a" * 64},
-                "build_directory": str(build), "cache_profile": {"value_group": 32},
+                "artifact": {
+                    "path": str(artifact),
+                    "weights_id": "r9700-q4g64-n16k16-eval",
+                    "sha256": "a" * 64,
+                },
+                "build_directory": str(build),
+                "cache_profile": {"value_group": 32},
                 "execution_profile": {"xattention_profile": "dense"},
-                "selected_prefill_chunk": 2048, "hybrid_width_tool": None,
+                "selected_prefill_chunk": 2048,
+                "hybrid_width_tool": None,
             }
             output = root / "prepared"
             shards = {f"tensor{i}": f"model-{i:05d}-of-00018.safetensors" for i in range(1, 19)}
-            with patch("tools.ppl.prepare_selected_exact_token.validate_bf16_repeat_comparison"), patch("tools.ppl.prepare_selected_exact_token.resolve_route", return_value=route), patch(
-                "tools.ppl.prepare_selected_exact_token.selected_quality",
-                return_value=({"path": str(quality), "sha256": "b" * 64},
-                              {"tier": "capacity-speed", "profile": "r9700-g32"}),
-            ), patch("tools.ppl.prepare_selected_exact_token.inspect_executable",
-                     return_value={"path": str(scorer), "file_size_bytes": 1,
-                                   "sha256": "c" * 64}), patch(
-                "tools.ppl.prepare_selected_exact_token.validate_checkpoint_files",
-                return_value=shards,
+            with (
+                patch("tools.ppl.prepare_selected_exact_token.validate_bf16_repeat_comparison"),
+                patch("tools.ppl.prepare_selected_exact_token.resolve_route", return_value=route),
+                patch(
+                    "tools.ppl.prepare_selected_exact_token.selected_quality",
+                    return_value=(
+                        {"path": str(quality), "sha256": "b" * 64},
+                        {"tier": "capacity-speed", "profile": "r9700-g32"},
+                    ),
+                ),
+                patch(
+                    "tools.ppl.prepare_selected_exact_token.inspect_executable",
+                    return_value={"path": str(scorer), "file_size_bytes": 1, "sha256": "c" * 64},
+                ),
+                patch(
+                    "tools.ppl.prepare_selected_exact_token.validate_checkpoint_files",
+                    return_value=shards,
+                ),
             ):
                 plan = prepare(selection, output)
             self.assertEqual(plan["workload"]["concurrency"], 1)
@@ -109,17 +158,23 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             self.assertEqual(plan["candidate_profile"], "r9700-g32")
             self.assertIn("--execution-parity-max-abs-nll", plan["command"])
             self.assertEqual(plan["command"].count("--no-position-extras"), 1)
-            self.assertEqual(plan["command"][plan["command"].index("--reuse-bf16-campaign") + 1], str(reference))
+            self.assertEqual(
+                plan["command"][plan["command"].index("--reuse-bf16-campaign") + 1], str(reference)
+            )
             self.assertNotIn("--require-fp8-hybrid", plan["command"])
             self.assertTrue((output / "prepared.sha256").is_file())
             commands = (output / "commands.sh").read_text(encoding="utf-8")
             self.assertIn("-m tools.ppl.validate_selected_exact_token", commands)
-            self.assertEqual(plan["python"]["launcher_path"],
-                             "/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python")
+            self.assertEqual(
+                plan["python"]["launcher_path"],
+                "/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python",
+            )
             self.assertIn("export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib", commands)
             self.assertIn("unset PYTHONPATH PYTHONHOME", commands)
-            self.assertLess(commands.index("unset PYTHONPATH PYTHONHOME"),
-                            commands.index(plan["python"]["launcher_path"]))
+            self.assertLess(
+                commands.index("unset PYTHONPATH PYTHONHOME"),
+                commands.index(plan["python"]["launcher_path"]),
+            )
             self.assertIn("/sys/bus/pci/devices/0000:13:00.0/", commands)
             self.assertNotIn(str(REPO / "tools/ppl/validate_selected_exact_token.py"), commands)
 
@@ -129,23 +184,50 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             quality = root / "quality.json"
             selection = root / "selection.json"
             selection.write_text("{}")
-            route = {"selected_prefill_chunk": 2048,
-                     "execution_profile": {"xattention_profile": "dense"},
-                     "artifact": {"weights_id": "weights", "sha256": "a" * 64}}
-            campaign = {"artifact_type": "ninfer_r9700_ppl_campaign", "schema_version": 6,
-                        "pass": False, "prefill_chunk": 2048, "xattention_profile": "dense",
-                        "candidate_artifact": route["artifact"], "cells": [
-                            {"scheme": f"r9700-g{group}", "schedule": "prefill",
-                             "prompt_tokens": length, "quality_tier": "accuracy",
-                             "quality_eligible": group == 16, "pass": group == 16}
-                            for group in (16, 32) for length in (8192, 32768)]}
+            route = {
+                "selected_prefill_chunk": 2048,
+                "execution_profile": {"xattention_profile": "dense"},
+                "artifact": {"weights_id": "weights", "sha256": "a" * 64},
+            }
+            campaign = {
+                "artifact_type": "ninfer_r9700_ppl_campaign",
+                "schema_version": 6,
+                "pass": False,
+                "prefill_chunk": 2048,
+                "xattention_profile": "dense",
+                "candidate_artifact": route["artifact"],
+                "cells": [
+                    {
+                        "scheme": f"r9700-g{group}",
+                        "schedule": "prefill",
+                        "prompt_tokens": length,
+                        "quality_tier": "accuracy",
+                        "quality_eligible": group == 16,
+                        "pass": group == 16,
+                    }
+                    for group in (16, 32)
+                    for length in (8192, 32768)
+                ],
+            }
             quality.write_text(json.dumps(campaign))
-            authority = {"source_provenance": [{"candidate": "winner", "quality": {
-                "path": str(quality), "sha256": sha(quality)}}]}
+            authority = {
+                "source_provenance": [
+                    {
+                        "candidate": "winner",
+                        "quality": {"path": str(quality), "sha256": sha(quality)},
+                    }
+                ]
+            }
             # Terminal validation owns raw numerical replay; this test isolates the
             # selected-group join after that validation has succeeded.
-            with patch("tools.ppl.prepare_selected_exact_token.load_payload", return_value=authority), \
-                    patch("tools.ppl.prepare_selected_exact_token.validate_terminal_production_authority"):
+            with (
+                patch(
+                    "tools.ppl.prepare_selected_exact_token.load_payload", return_value=authority
+                ),
+                patch(
+                    "tools.ppl.prepare_selected_exact_token.validate_terminal_production_authority"
+                ),
+            ):
                 _, selected = selected_quality(selection, "winner", 16, route)
                 self.assertEqual(selected["profile"], "r9700-g16")
                 with self.assertRaisesRegex(ValueError, "exact admitted"):

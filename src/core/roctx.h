@@ -26,18 +26,14 @@ inline std::atomic<std::uint32_t> enabled_scopes{0};
 // ranges while another owner is still active. Ordinary product execution creates no owner.
 class ScopedEnable {
 public:
-    ScopedEnable() noexcept {
-        detail::enabled_scopes.fetch_add(1, std::memory_order_relaxed);
-    }
+    ScopedEnable() noexcept { detail::enabled_scopes.fetch_add(1, std::memory_order_relaxed); }
 
     ScopedEnable(const ScopedEnable&)            = delete;
     ScopedEnable& operator=(const ScopedEnable&) = delete;
     ScopedEnable(ScopedEnable&&)                 = delete;
     ScopedEnable& operator=(ScopedEnable&&)      = delete;
 
-    ~ScopedEnable() noexcept {
-        detail::enabled_scopes.fetch_sub(1, std::memory_order_relaxed);
-    }
+    ~ScopedEnable() noexcept { detail::enabled_scopes.fetch_sub(1, std::memory_order_relaxed); }
 };
 
 enum class Category : std::uint32_t {
@@ -78,6 +74,7 @@ enum class Name : std::size_t {
     PrefillGdn,
     VerifyGdn,
     PrefillChunk,
+    TokenMaskMatch,
     Count,
 };
 
@@ -133,6 +130,7 @@ enum class Name : std::size_t {
         "prefill.gdn",
         "verify.gdn",
         "prefill.chunk",
+        "token_mask.match",
     };
     const std::size_t index = static_cast<std::size_t>(name);
     return index < names.size() ? names[index] : "unknown";
@@ -220,9 +218,7 @@ public:
     explicit ScopedProfilerRegion(const char* label,
                                   ProfilerControl control = default_profiler_control())
         : control_(control) {
-        if (control_.resume(0) != 0) {
-            throw std::runtime_error("ROCtx profiler resume failed");
-        }
+        if (control_.resume(0) != 0) { throw std::runtime_error("ROCtx profiler resume failed"); }
         resumed_ = true;
         if (control_.push(label) < 0) {
             const int pause_status = control_.pause(0);
@@ -246,8 +242,8 @@ public:
     void finish() {
         if (!resumed_ && !pushed_) { return; }
         nested_ranges_.reset();
-        const int pop_status = pushed_ ? control_.pop() : 0;
-        pushed_              = false;
+        const int pop_status   = pushed_ ? control_.pop() : 0;
+        pushed_                = false;
         const int pause_status = resumed_ ? control_.pause(0) : 0;
         resumed_               = false;
         if (pop_status < 0 && pause_status != 0) {

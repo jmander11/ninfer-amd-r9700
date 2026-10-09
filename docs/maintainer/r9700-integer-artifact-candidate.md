@@ -52,8 +52,8 @@ to real-source quality and whole-inference comparison; it does not alter this pr
 W8 artifact's identity, inventory, converter, or unselected status.
 
 A8 is the baseline codec for every Q4-bearing identity and consumes those same
-Q4G64 artifact planes without changing their identity. The selected compile default overrides
-only large gate/up calls to A4 as described below. Uniform A4 requires an explicit
+Q4G64 artifact planes without changing their identity. The selected compile default is uniform
+A8; the mixed prefill A4 families below are evaluators. Uniform A4 requires an explicit
 evaluator build with activation bits4 and family0. A8 stores each signed A8G64 code as unsigned low and signed high nibbles,
 executes both with native IU4 WMMA, and recombines `low + 16 * high` exactly in I32 before FP32
 scale composition and one BF16 output rounding. Exact activation images and every independent
@@ -67,7 +67,7 @@ across the tested shapes. This admits A8 to matched real-model evaluation while 
 reproducible; it does not select a persistent Q4 recipe for production.
 
 The `NINFER_R9700_Q4_PREFILL_A4_FAMILIES` policy requires the global
-Q4 A8 build when nonzero: `0` is disabled, the selected default `1` selects only Q4 Linear N34816/K5120, `2` adds
+Q4 A8 build when nonzero: the selected default `0` disables it, `1` selects only Q4 Linear N34816/K5120, `2` adds
 MLP down N5120/K17408, and `3` adds Text projection shapes N4096/7168/12288 K5120
 and N5120/K6144. `4` selects only attention-input N7168/K5120; `5` combines that
 shape with gate/up, leaving down and GDN A8. All overrides require T>128 and unpadded K. The broader profiles
@@ -75,8 +75,10 @@ are quality-screen candidates, not admitted speedups. T1 decode, speculative wid
 endpoints, and FP8 matrices are unchanged. The public workspace keeps its A8 capacity while the A4 consumer binds
 its exact-sized prefix. `q4_activation_profile` and `q4_prefill_gate_up_a4` in PPL
 and benchmark reports identify this mixed execution; `q4_activation_bits: 8` alone
-does not describe it. The user selected gate/up-only A4 after the bounded NVFP4 comparison;
-this is not final BF16-source weight-recipe admission. The admitted cooperative consumer uses
+does not describe it. The user first selected gate/up-only A4 after the bounded NVFP4
+comparison, then restored uniform A8 on 2026-09-25 once the M128xN128 A8 prefill GEMM made A8
+at least as fast as the A4 route (see `docs/performance.md`); neither is final BF16-source
+weight-recipe admission. The admitted cooperative consumer uses
 signed IU4 ping/pong staging at full T64 tiles for this exact gate/up geometry, with
 the qualified single-bank tail consumer otherwise. On the selective-cap recipe,
 whole P4096/chunk2048 prefill measures1489–1498tok/s versus uniformA8's1431–1446;
@@ -199,18 +201,13 @@ the identical Q4/W8 formats, layouts, byte counts, and runtime arithmetic while 
 per-group source-weight squared error. Row-scaled E4M3 FP8 is conditional: it is admitted only if
 exact DFlash shapes show a physical speed/quality benefit, and it first needs DFlash-owned prepared
 FP8 Linear instances because the current execution owner registers only selected Text FP8 roles.
-The selected Text projections borrow one explicit device-bound `LinearExecutionContext` owned by
-the loaded target. It is created before the final free-memory capacity snapshot, so hipBLASLt's
-opaque device resources are already resident when automatic KV capacity is resolved. Actual
-per-weight descriptors and startup-width algorithms are also prepared and retained by the loaded
-target before that snapshot; Program construction only binds their caller-owned activation/matmul
-region. Unbound prepared instances cannot execute. The region and library context are used serially.
-There is no per-projection library handle or assumed opaque-memory constant. The hybrid reservation
+Each selected Text projection owns a loaded-target `LinearExecution` (repository FP8 kernels, no
+library handle or matmul workspace); Program construction only binds its caller-owned activation
+region, unbound instances cannot execute, and the region is used serially. The hybrid reservation
 adds a separate 4 MiB physical allocation bound: each of its two Program arenas can waste less than
 one measured 2 MiB hipMalloc allocation unit. The page-independent bound preserves the affine KV
 curve and leaves nonhybrid reservations unchanged. Fresh physical startup evidence must still
-verify actual remaining headroom; a library
-OOM after planning is not a structured capacity exclusion.
+verify actual remaining headroom.
 Rolewise W8 promotion follows only if Q4 acceptance or generated-quality evidence identifies a
 sensitive family. Both selector codebooks, norms, convolution base kernels, and private persistent
 DFlash state stay BF16 in every recipe.
@@ -360,8 +357,9 @@ tier uses paired mean-NLL delta at most 0.02 and at most
 uses at most `ln(1.05) = 0.048790164` mean-NLL delta and
 `ceil(0.0025 * scored positions)` new severe positions. BF16 greedy-token flip count and rate
 remain diagnostics. Selection then retains every non-dominated
-profile after matched 8K/32K and C=1..4 measurement: A dominates B only when it is no worse in
-mean-NLL delta, new-severe-position rate, resolved capacity, and every required whole-inference
+profile after matched 8K/32K and C=1..4 measurement (the former product cap): A dominates B only
+when it is no worse in mean-NLL delta, new-severe-position rate, resolved capacity, and every
+required whole-inference
 throughput cell, and is strictly better in at least one. PPL scorer wall time is never a throughput
 objective.
 
@@ -381,13 +379,14 @@ workload arbitrarily and follows the product priority of end-to-end performance 
 quality and capacity constraints are satisfied.
 
 The earlier layout-bearing all-Q4 capacity evidence is exact historical measurement but does not
-choose the cache group and is not current C=1..4 product evidence. The schema-v12 G16/G32 manifests
+choose the cache group and is not current product evidence. The schema-v12 G16/G32 manifests
 and schema-v19 reports, including C=1..8 maxima,
 binding constraints, artifact hash, executable hashes, and superseded-run boundary, are recorded
 in `paged-kv-cache.md` and `performance.md`. Matched phase and whole-inference evidence remains the
-missing input to the schema-v7 selection record. The restored mixed recipe likewise requires fresh
-C=1..4 capacity/whole evidence for dense and XAttention G16/G32 candidates, plus matched sparse
-quality, so the final comparison covers both weight recipes rather than only all-Q4.
+missing input to the schema-v7 selection record. Under the former C=1..4 cap,
+the restored mixed recipe likewise required fresh C=1..4 capacity/whole evidence for dense and
+XAttention G16/G32 candidates, plus matched sparse
+quality, so the final comparison covered both weight recipes rather than only all-Q4.
 
 The same-size `r9700-w8g32-mse-eval` candidate changes only the source-to-W8 scale objective.
 For each represented-BF16 G32 group, it includes the canonical FP16(absmax/127) baseline and

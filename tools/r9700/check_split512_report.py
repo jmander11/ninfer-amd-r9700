@@ -7,9 +7,9 @@ import argparse
 import hashlib
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
-
+from typing import Any
 
 SCHEMA = "ninfer_r9700_split512_attention_qualification"
 POWER_PATH = "/sys/class/drm/card2/device/power_dpm_force_performance_level"
@@ -83,8 +83,10 @@ def validate_report(
 ) -> None:
     _require(isinstance(report, dict), "report must be an object")
     _require(report.get("schema") == SCHEMA, "wrong split-512 report schema")
-    _require(type(report.get("schema_version")) is int and report["schema_version"] == 2,
-             "wrong split-512 report schema version")
+    _require(
+        type(report.get("schema_version")) is int and report["schema_version"] == 2,
+        "wrong split-512 report schema version",
+    )
     _require(report.get("architecture") == "gfx1201", "wrong architecture")
     _require(
         report.get("disposition") == "unpromoted-qualification-candidate",
@@ -132,21 +134,31 @@ def validate_report(
     _require(isinstance(expected_executable, Path), "expected executable is required")
     _require(expected_executable.is_file(), "bound executable is unavailable")
     executable_path = expected_executable.resolve(strict=True)
-    _require(Path(executable["path"]) == executable_path,
-             "reported executable path differs from expected executable")
-    _require(_file_sha256(executable_path) == executable["sha256"],
-             "bound executable bytes changed")
+    _require(
+        Path(executable["path"]) == executable_path,
+        "reported executable path differs from expected executable",
+    )
+    _require(
+        _file_sha256(executable_path) == executable["sha256"], "bound executable bytes changed"
+    )
     reported_root = report.get("source_root")
-    _require(isinstance(reported_root, str) and Path(reported_root).is_absolute(),
-             "source root is incomplete")
+    _require(
+        isinstance(reported_root, str) and Path(reported_root).is_absolute(),
+        "source root is incomplete",
+    )
     _require(expected_source_root.is_dir(), "expected source root is unavailable")
     canonical_expected_root = expected_source_root.resolve(strict=True)
     source_root = Path(reported_root)
-    _require(source_root.is_dir() and source_root.resolve(strict=True) == source_root
-             and source_root == canonical_expected_root,
-             "source root is not the expected exact canonical directory")
+    _require(
+        source_root.is_dir()
+        and source_root.resolve(strict=True) == source_root
+        and source_root == canonical_expected_root,
+        "source root is not the expected exact canonical directory",
+    )
     sources = report.get("sources")
-    _require(isinstance(sources, list) and len(sources) == len(SOURCE_PATHS), "source inventory differs")
+    _require(
+        isinstance(sources, list) and len(sources) == len(SOURCE_PATHS), "source inventory differs"
+    )
     observed_sources: set[str] = set()
     for index, source in enumerate(sources):
         _require(
@@ -159,13 +171,18 @@ def validate_report(
         role = source["role"]
         relative = Path(SOURCE_PATHS[role])
         source_path = Path(source["path"])
-        _require(role not in observed_sources and source_path == source_root / relative,
-                 f"sources[{index}] is not the exact required source")
+        _require(
+            role not in observed_sources and source_path == source_root / relative,
+            f"sources[{index}] is not the exact required source",
+        )
         _digest(source.get("sha256"), f"sources[{index}].sha256")
-        _require(source_path.is_file() and source_path.resolve(strict=True) == source_path,
-                 f"sources[{index}] source is unavailable or noncanonical")
-        _require(_file_sha256(source_path) == source["sha256"],
-                 f"sources[{index}] source bytes changed")
+        _require(
+            source_path.is_file() and source_path.resolve(strict=True) == source_path,
+            f"sources[{index}] source is unavailable or noncanonical",
+        )
+        _require(
+            _file_sha256(source_path) == source["sha256"], f"sources[{index}] source bytes changed"
+        )
         observed_sources.add(role)
     _require(observed_sources == set(SOURCE_PATHS), "source inventory is not exact")
     workspace = report.get("workspace_contract")
@@ -183,34 +200,46 @@ def validate_report(
         "t1_overflow_bytes": 0,
         "t4_overflow_bytes": 0,
     }
-    _require(isinstance(workspace, dict)
-             and all(type(workspace.get(key)) is int
-                     for key in expected_workspace if key != "status")
-             and workspace == expected_workspace,
-             "native workspace boundary evidence differs")
+    _require(
+        isinstance(workspace, dict)
+        and all(type(workspace.get(key)) is int for key in expected_workspace if key != "status")
+        and workspace == expected_workspace,
+        "native workspace boundary evidence differs",
+    )
     _require(report.get("sample_order") == "alternating-interleaved", "wrong sample order")
-    _require(type(report.get("warmup_iterations_per_route")) is int
-             and report["warmup_iterations_per_route"] == 3, "wrong warmup count")
+    _require(
+        type(report.get("warmup_iterations_per_route")) is int
+        and report["warmup_iterations_per_route"] == 3,
+        "wrong warmup count",
+    )
     _require(
         report.get("incumbent_scope") == "complete-production-semantic-attention-leaf"
-        and report.get("split_scope")
-        == "complete-qk-plus-partial-softmax-pv-plus-merge-leaf",
+        and report.get("split_scope") == "complete-qk-plus-partial-softmax-pv-plus-merge-leaf",
         "timed leaf scope differs",
     )
     measurements = report.get("measurements")
-    _require(isinstance(measurements, list) and len(measurements) == len(SHAPES), "measurement inventory differs")
+    _require(
+        isinstance(measurements, list) and len(measurements) == len(SHAPES),
+        "measurement inventory differs",
+    )
     observed_shapes: set[tuple[int, int, int, int]] = set()
     observed_iterations: int | None = None
     for index, row in enumerate(measurements):
         _require(isinstance(row, dict), f"measurements[{index}] must be an object")
         shape_values = (
-            row.get("value_group"), row.get("context"), row.get("query_rows"),
+            row.get("value_group"),
+            row.get("context"),
+            row.get("query_rows"),
             row.get("active_rows"),
         )
-        _require(all(type(value) is int for value in shape_values),
-                 f"measurements[{index}] shape types differ")
+        _require(
+            all(type(value) is int for value in shape_values),
+            f"measurements[{index}] shape types differ",
+        )
         shape = shape_values
-        _require(shape in SHAPES and shape not in observed_shapes, f"measurements[{index}] shape differs")
+        _require(
+            shape in SHAPES and shape not in observed_shapes, f"measurements[{index}] shape differs"
+        )
         observed_shapes.add(shape)
         iterations = row.get("iterations")
         _require(type(iterations) is int and iterations == 20, "iteration count is not exactly 20")
@@ -227,8 +256,12 @@ def validate_report(
             if shape[2] == 1
             else "bf16-q-score-streaming-online-fp32-softmax-int4-pv"
         )
-        _require(row.get("incumbent_route") == expected_route, f"measurements[{index}] route differs")
-        incumbent = _positive_samples(row.get("incumbent_samples_ms"), iterations, "incumbent samples")
+        _require(
+            row.get("incumbent_route") == expected_route, f"measurements[{index}] route differs"
+        )
+        incumbent = _positive_samples(
+            row.get("incumbent_samples_ms"), iterations, "incumbent samples"
+        )
         split = _positive_samples(row.get("split_samples_ms"), iterations, "split samples")
         incumbent_mean = sum(incumbent) / iterations
         split_mean = sum(split) / iterations
@@ -239,8 +272,7 @@ def validate_report(
         ):
             actual = row.get(key)
             _require(
-                _number(actual)
-                and math.isclose(actual, expected, rel_tol=2e-6, abs_tol=1e-9),
+                _number(actual) and math.isclose(actual, expected, rel_tol=2e-6, abs_tol=1e-9),
                 f"measurements[{index}].{key} differs from raw samples",
             )
     _require(observed_shapes == SHAPES, "measurement Cartesian set is incomplete")
@@ -249,13 +281,22 @@ def validate_report(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("report", type=Path)
-    parser.add_argument("--executable", type=Path, required=True,
-                        help="exact qualification executable recorded in the report")
-    parser.add_argument("--source-root", type=Path, default=REPO_ROOT,
-                        help="expected source tree (defaults to the current repository)")
+    parser.add_argument(
+        "--executable",
+        type=Path,
+        required=True,
+        help="exact qualification executable recorded in the report",
+    )
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        default=REPO_ROOT,
+        help="expected source tree (defaults to the current repository)",
+    )
     args = parser.parse_args()
-    validate_report(json.loads(args.report.read_text(encoding="utf-8")),
-                    args.executable, args.source_root)
+    validate_report(
+        json.loads(args.report.read_text(encoding="utf-8")), args.executable, args.source_root
+    )
     print("split-512 timing report passed")
 
 

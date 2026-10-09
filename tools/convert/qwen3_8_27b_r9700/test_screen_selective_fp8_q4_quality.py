@@ -19,20 +19,40 @@ def _records():
         role = ".".join(("text", *spec.name.split("/")[3:]))
         value = 0.02 + len(records) * 1e-7
         item = {
-            "name": spec.name, "role": role, "shape": list(spec.shape),
-            "sampled_row_indices": [0, spec.shape[0] - 1], "sampled_rows": 2,
-            "sampled_elements": 2 * spec.shape[1], "nonfinite_values": 0, "zero_rows": 0,
-            "e4m3": {"relative_l2": value, "max_abs": value * 2,
-                      "squared_error": value * value, "squared_reference": 1.0},
-            "q4g64": {"relative_l2": value * 2, "max_abs": value * 4,
-                       "squared_error": value * value * 4, "squared_reference": 1.0},
+            "name": spec.name,
+            "role": role,
+            "shape": list(spec.shape),
+            "sampled_row_indices": [0, spec.shape[0] - 1],
+            "sampled_rows": 2,
+            "sampled_elements": 2 * spec.shape[1],
+            "nonfinite_values": 0,
+            "zero_rows": 0,
+            "e4m3": {
+                "relative_l2": value,
+                "max_abs": value * 2,
+                "squared_error": value * value,
+                "squared_reference": 1.0,
+            },
+            "q4g64": {
+                "relative_l2": value * 2,
+                "max_abs": value * 4,
+                "squared_error": value * value * 4,
+                "squared_reference": 1.0,
+            },
             "e4m3_over_q4g64": {"relative_l2": 0.5, "max_abs": 0.5},
         }
         records.append(item)
-        full.append({"name": spec.name, "sampled_row_indices": item["sampled_row_indices"],
-                     "relative_l2": value, "max_abs": value * 2})
-    full.append({"name": "other", "sampled_row_indices": [0, 1],
-                 "relative_l2": 0.1, "max_abs": 0.2})
+        full.append(
+            {
+                "name": spec.name,
+                "sampled_row_indices": item["sampled_row_indices"],
+                "relative_l2": value,
+                "max_abs": value * 2,
+            }
+        )
+    full.append(
+        {"name": "other", "sampled_row_indices": [0, 1], "relative_l2": 0.1, "max_abs": 0.2}
+    )
     reference = {
         "identity": {"path": "all.json", "sha256": "a" * 64},
         "aggregate": {"relative_l2": 0.03, "max_abs": 0.2},
@@ -57,8 +77,12 @@ class SelectiveQualityScreenTest(unittest.TestCase):
     def test_report_is_role_aggregated_and_detects_no_global_worst(self) -> None:
         records, reference = _records()
         report = assemble_report(
-            rows_per_tensor=2, tensors=list(reversed(records)), source={}, implementation={},
-            all_matrix_reference=reference, worst_count=3,
+            rows_per_tensor=2,
+            tensors=list(reversed(records)),
+            source={},
+            implementation={},
+            all_matrix_reference=reference,
+            worst_count=3,
         )
         self.assertEqual(set(report["per_role"]), set(SELECTED_ROLES))
         self.assertEqual(report["aggregate"]["object_count"], 144)

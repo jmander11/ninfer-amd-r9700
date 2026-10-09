@@ -25,8 +25,8 @@ using TensorLayout = TensorRegion;
 
 struct DFlashPersistentLayout {
     CyclicKVCacheLayout local;
-    CyclicKVCacheLayout rewrite_checkpoint_local;
     CyclicKVCacheLayout staging_local;
+
     // DFlash Full attention is a distinct BF16 state contract. It must never inherit the Text/MTP
     // FP8-K/INT4-V codec merely because both states use physical pages.
     struct FullBF16Layout {
@@ -36,18 +36,19 @@ struct DFlashPersistentLayout {
         std::int32_t kv_heads     = 0;
         std::int32_t head_dim     = 0;
 
-        [[nodiscard]] std::size_t payload_bytes() const noexcept {
-            return storage.payload_bytes();
-        }
+        [[nodiscard]] std::size_t payload_bytes() const noexcept { return storage.payload_bytes(); }
     };
+
     std::optional<FullBF16Layout> full;
     TensorLayout prefill_features;
     TensorLayout prefill_positions;
     TensorLayout pending_features;
+    // The completion words of the drafter's fused Q4 activation-image producers.
+    TensorLayout image_completion;
 
     [[nodiscard]] std::size_t kv_payload_bytes() const noexcept {
-        return local.payload_bytes() + rewrite_checkpoint_local.payload_bytes() +
-               staging_local.payload_bytes() + (full ? full->payload_bytes() : 0);
+        return local.payload_bytes() + staging_local.payload_bytes() +
+               (full ? full->payload_bytes() : 0);
     }
 };
 
@@ -59,8 +60,8 @@ struct PersistentLayout {
     TensorLayout prefill_hidden;
     TensorLayout token_counts;
     TensorLayout sampling_config;
-    TensorLayout tool_token_masks;
-    TensorLayout tool_sampling_config;
+    TensorLayout grammar_masks;
+    TensorLayout grammar_sampling_config;
     TensorLayout tail_hidden;
     TensorLayout rewrite_checkpoint_hidden;
     std::optional<TensorLayout> staging_hidden;
@@ -68,8 +69,11 @@ struct PersistentLayout {
     // is deliberately outside WorkspaceArena so graph-captured activation addresses never alias
     // schedule scratch.
     std::optional<LayoutRegion> linear_execution;
-    std::size_t bytes            = 0;
-    std::size_t kv_payload_bytes = 0;
+    // Device copy of the host-staged prompt embedding rows of one prefill window.
+    LayoutRegion prompt_embedding_image;
+    std::int32_t prompt_embedding_ids = 0;
+    std::size_t bytes                 = 0;
+    std::size_t kv_payload_bytes      = 0;
 };
 
 struct WorkspacePlan {
@@ -79,24 +83,27 @@ struct WorkspacePlan {
     std::size_t mtp_round      = 0;
     std::size_t dflash_context = 0;
     std::size_t dflash_round   = 0;
+    std::size_t dflash_mixed   = 0; // a DFlash round carrying the prefill owner's slice
     std::size_t vision_encode  = 0;
     std::size_t capacity       = 0;
 };
 
 struct SequencePlanningInputs {
     WeightsProfile weights_profile;
-    std::uint32_t capacity                 = 0;
-    std::uint32_t max_concurrency          = 1;
-    std::uint32_t prefill_chunk            = 0;
-    std::uint32_t draft_window             = 0;
-    std::uint32_t dflash_verify_width      = 0;
-    bool adaptive_draft = false;
+    std::uint32_t capacity        = 0;
+    std::uint32_t max_concurrency = 1;
+    std::uint32_t prefill_chunk   = 0;
+    std::optional<std::uint32_t> mixed_forward;
+    std::uint32_t draft_window        = 0;
+    std::uint32_t dflash_verify_width = 0;
+    bool adaptive_draft               = false;
+    std::optional<float> p_less_draft_temperature;
     SpeculativeBackend speculative_backend = SpeculativeBackend::None;
     ProposalHead proposal_head             = ProposalHead::Full;
     StartupFeatures features;
-    bool use_device_graph = true;
-    int device          = 0;
-    std::size_t kv_ram_capacity_bytes = 0;
+    bool use_device_graph              = true;
+    int device                         = 0;
+    std::size_t kv_ram_capacity_bytes  = 0;
     std::size_t kv_disk_capacity_bytes = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
@@ -113,21 +120,23 @@ namespace ninfer::targets::qwen3::detail {
 template <>
 struct SequencePlanImpl<NINFER_QWEN3_VARIANT> {
     typename NINFER_QWEN3_VARIANT::WeightsProfile weights_profile;
-    std::uint32_t capacity                 = 0;
-    std::uint32_t kv_capacity              = 0;
-    std::uint32_t main_page_groups         = 0;
-    std::uint32_t max_concurrency          = 1;
-    std::uint32_t prefill_chunk            = 0;
-    std::uint32_t draft_window             = 0;
-    std::uint32_t dflash_verify_width      = 0;
-    bool adaptive_draft = false;
+    std::uint32_t capacity            = 0;
+    std::uint32_t kv_capacity         = 0;
+    std::uint32_t main_page_groups    = 0;
+    std::uint32_t max_concurrency     = 1;
+    std::uint32_t prefill_chunk       = 0;
+    std::uint32_t mixed_forward       = 0;
+    std::uint32_t draft_window        = 0;
+    std::uint32_t dflash_verify_width = 0;
+    bool adaptive_draft               = false;
+    std::optional<float> p_less_draft_temperature;
     std::vector<std::uint32_t> captured_ks;
     SpeculativeBackend speculative_backend = SpeculativeBackend::None;
     ProposalHead proposal_head             = ProposalHead::Full;
     StartupFeatures features;
-    bool use_device_graph = true;
-    int device          = 0;
-    std::size_t kv_ram_capacity_bytes = 0;
+    bool use_device_graph              = true;
+    int device                         = 0;
+    std::size_t kv_ram_capacity_bytes  = 0;
     std::size_t kv_disk_capacity_bytes = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
@@ -138,8 +147,8 @@ struct SequencePlanImpl<NINFER_QWEN3_VARIANT> {
     NINFER_QWEN3_RUNTIME_NS::PersistentLayout persistent;
     NINFER_QWEN3_RUNTIME_NS::WorkspacePlan workspace;
     std::size_t request_transient_capacity_bytes = 0;
-    std::size_t graph_definition_count            = 0;
-    std::size_t graph_executable_count            = 0;
+    std::size_t graph_definition_count           = 0;
+    std::size_t graph_executable_count           = 0;
     std::size_t graph_allowance_bytes            = 0;
     std::size_t device_reservation_bytes         = 0;
 };

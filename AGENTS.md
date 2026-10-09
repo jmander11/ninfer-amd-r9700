@@ -84,16 +84,21 @@ NInfer is a from-scratch C++/HIP inference engine for maximum single-GPU inferen
 compiled only for `gfx1201` and tuned on one AMD Radeon AI PRO R9700. The sole supported model is
 Qwen3.8-27B. Its growing Text/MTP cache has exactly three planes: FP8 E4M3FN keys, signed INT4
 values, and FP16 value scales; there is no cache dtype selector, K scale, alternate cache path, or
-retained compatibility backend. The provisional directly bound weight profile is W8G32 under
-`qwen3.8-27b/r9700-int-candidate`; it must be renamed and made final only after the real BF16-source
-PPL, exact-token, and whole-inference gates select the production integer recipe. DFlash2 keeps its
-model-specified BF16 selector codebook and private fixed BF16 state.
+retained compatibility backend. The production weights are `qwen3.8-27b/r9700-fp8lut4` (profile
+`R9700Fp8Lut4`): GPTQ-rounded FP8LUT4 Text projections and output head with 21 row-scaled FP8
+protections (2026-09-30), admitted by the BF16-source PPL, NIAH, exact-token, and whole-inference
+gates. The weight-precision bar is no worse than the 5090 NVFP4 build on every BF16-source cell
+(measured with the frozen 5090 scorer); protected attention query/key projections are not demoted
+below FP8. Other `-eval` identities
+remain evaluation and conversion-base artifacts. DFlash2 keeps its model-specified BF16 selector
+codebook and private fixed BF16 state.
 
-The workload is one R9700, one resident model instance, and a startup-fixed one to four active
+The workload is one R9700, one resident model instance, and a startup-fixed one to eight active
 requests. The Engine forms one compact decode batch per round boundary with bounded FIFO ingress
-and no preemption. Large-scale or preemptive continuous batching, priority/QoS scheduling,
-additional checkpoint targets, and retargeting to another execution platform are outside the
-current product. This is a trusted local, single-owner project, and requirements from a different
+and no preemption; one prefill owner at a time advances either prefill-first or in startup-fixed
+slices, which under DFlash share a decode round's target forward (mixed round). Large-scale or
+preemptive continuous batching, priority/QoS scheduling, additional checkpoint targets, and
+retargeting to another execution platform are outside the current product. This is a trusted local, single-owner project, and requirements from a different
 workload, trust model, or deployment model are out of scope until the contract is explicitly
 changed.
 
@@ -120,13 +125,16 @@ routing map, not a mandatory reading list:
   performance-evidence rules;
 - `docs/maintainer/kernel-iteration.md`: Layer 0-3 R9700 speed procedure (bound hypothesis,
   gfx1201 legality, qualified Op sweep, physical profiling, production path);
+- `docs/maintainer/merging-to-master.md`: full promotion gates and experimental-to-master workflow;
+- `docs/maintainer/code-quality.md`: compiler-warning, clang-tidy, formatter, and lint gates, and
+  the gfx1201 device checks (memcheck, initcheck, racecheck) that replace compute-sanitizer;
 - `include/ninfer/engine.h` and `include/ninfer/types.h`: in-tree C++ product interface.
 
 ## Upstream synchronization
 
-Upstream `experimental` is reconciled through `e04fad3728573a0109236929f5d473475a8657f2`
-via custom AMD ports (`7187d95d`, `2eab0a50`, `49c896dd`), not merged ancestry.
-Unsupported NVIDIA paths were excluded; decisions are in `plans/r9700-autonomous-todos.md`.
+Upstream `experimental` is reconciled through `d5c38cda2e875aad37f49889c1f03eda1540bf20`
+via custom AMD ports, not merged ancestry.
+Unsupported NVIDIA paths were excluded; decisions are in `docs/maintainer/upstream-sync.md`.
 For future syncs, review upstream changes after this baseline against current AMD behavior,
 not `HEAD..upstream`; re-establish the baseline if upstream history was rewritten. Record
 source commits and advance the baseline only after each change is ported, already equivalent,
@@ -249,6 +257,27 @@ Use the selected Python 3.11 interpreter explicitly; do not install or upgrade d
 the task requires it. Never select an artifact by glob, modification time, or an unqualified
 "latest" name; large artifacts, source checkpoints, and profiler outputs are local prerequisites,
 not things to download or regenerate unless in scope.
+
+## Local build and deployment workflow
+
+GPU work in both repos must hold `flock --exclusive /ssdpool2nvme/local_llm/.ninfer-coordination/gpu.lock <command>`
+through all child work. Never delete the lock; coordinate existing unleased GPU jobs/servers with their owner.
+Builds need no lock: one build per agent, at most 8 jobs (the CMake Ninja job pool enforces
+`NINFER_BUILD_JOBS`, default 8, whatever `-j` is passed). Overlap is allowed; reduce concurrency
+on memory/I/O pressure. This supersedes older shared-host rules.
+
+For source-only development, prefer incremental CMake/Ninja builds, with 8 jobs
+(the maximum). For Compose deployment, stop the server and run
+`bash scripts/hot-patch.sh --image-only`,
+then `docker compose up -d --no-build --wait server`. The helper retains build objects and
+updates the runtime image; run relevant tests separately. First-time builder setup may be slow.
+The helper automatically loads the trusted repo `.env` and exports its settings to the builder.
+Use full image builds for Dockerfile, toolchain or runtime dependency changes;
+`docker compose up -d --build` builds the image, not the incremental hot-patch path.
+The per-agent build cap above applies to the builder too; it has no memory limit;
+Compose's 24 GiB/no-swap limit applies only to the server. Host port defaults to 8001;
+disk prefixes persist under `/ssdpool2nvme/local_llm/cache_r9700/prefix`.
+See `docs/containers.md` for setup and validation details.
 
 ## Commits
 

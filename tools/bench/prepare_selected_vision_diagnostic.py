@@ -15,9 +15,8 @@ import tempfile
 from pathlib import Path
 
 from tools.bench.prepare_selected_niah import resolve_route
-from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
 from tools.parity.qwen3_8_27b.vision_contract import EXPECTED_TRACE_NAMES, GATE
-
+from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
 
 REPO = Path(__file__).resolve().parents[2]
 PREPARE_INPUT = REPO / "tools/parity/qwen3_8_27b/prepare_vision_input.py"
@@ -31,19 +30,22 @@ MEDIA = REPO / "examples/cli/media/visual_chart.png"
 FRONTEND_PYTHON = Path("/ssdpool2nvme/local_llm/ninfer-dylan2/eval/.venv/bin/python")
 GPU_PYTHON = Path("/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python")
 POWER = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
-REFERENCE_AUTHORITIES = tuple(REPO / path for path in (
-    "tools/parity/qwen3_8_27b/vision_contract.py",
-    "tests/targets/qwen3_8_27b/vision_trace_real.cpp",
-    "tools/reference/qwen3_8_27b/bindings.py",
-    "tools/reference/qwen3_8_27b/weights.py",
-    "tools/reference/qwen3_8_27b/vision.py",
-    "tools/reference/qwen3/common/frontend.py",
-    "tools/reference/qwen3/common/multimodal.py",
-    "tools/convert/qwen3_8_27b_r9700/inventory.py",
-    "tools/convert/qwen3_8_27b_r9700/q4_inventory.py",
-    "tools/convert/qwen3_8_27b_r9700/q4_w8_mse_inventory.py",
-    "tools/convert/qwen3_8_27b_r9700/fp8_hybrid_inventory.py",
-))
+REFERENCE_AUTHORITIES = tuple(
+    REPO / path
+    for path in (
+        "tools/parity/qwen3_8_27b/vision_contract.py",
+        "tests/targets/qwen3_8_27b/vision_trace_real.cpp",
+        "tools/reference/qwen3_8_27b/bindings.py",
+        "tools/reference/qwen3_8_27b/weights.py",
+        "tools/reference/qwen3_8_27b/vision.py",
+        "tools/reference/qwen3/common/frontend.py",
+        "tools/reference/qwen3/common/multimodal.py",
+        "tools/convert/qwen3_8_27b_r9700/inventory.py",
+        "tools/convert/qwen3_8_27b_r9700/q4_inventory.py",
+        "tools/convert/qwen3_8_27b_r9700/q4_w8_mse_inventory.py",
+        "tools/convert/qwen3_8_27b_r9700/fp8_hybrid_inventory.py",
+    )
+)
 AT_FDCWD = -100
 RENAME_NOREPLACE = 1
 
@@ -73,7 +75,10 @@ def inspect_python(path: Path, modules: tuple[str, ...]) -> dict[str, object]:
         "for name in names}}))"
     )
     completed = subprocess.run(
-        [str(path), "-c", script], check=True, capture_output=True, text=True,
+        [str(path), "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
         env={**os.environ, "LD_LIBRARY_PATH": "/opt/rocm/lib:/opt/rocm/core-10.0/lib"},
     )
     details = json.loads(completed.stdout)
@@ -98,9 +103,7 @@ def validate_source_receipt() -> dict[str, object]:
         for name in shards
     ):
         raise ValueError("BF16 source shards must be regular non-symlink files")
-    expected_files = [
-        {"name": name, "bytes": (SOURCE / name).stat().st_size} for name in shards
-    ]
+    expected_files = [{"name": name, "bytes": (SOURCE / name).stat().st_size} for name in shards]
     if (
         receipt.get("artifact_type") != "ninfer_qwen3_8_27b_bf16_checkpoint_preflight"
         or receipt.get("status") != "passed"
@@ -120,9 +123,12 @@ def validate_source_receipt() -> dict[str, object]:
 
 def rename_noreplace(source: Path, destination: Path) -> None:
     libc = ctypes.CDLL(None, use_errno=True)
-    if libc.renameat2(
-        AT_FDCWD, os.fsencode(source), AT_FDCWD, os.fsencode(destination), RENAME_NOREPLACE
-    ) != 0:
+    if (
+        libc.renameat2(
+            AT_FDCWD, os.fsencode(source), AT_FDCWD, os.fsencode(destination), RENAME_NOREPLACE
+        )
+        != 0
+    ):
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error), str(destination))
 
@@ -141,26 +147,44 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
     messages = file_identity(MESSAGES)
     media = file_identity(MEDIA)
     artifact = Path(route["artifact"]["path"])
-    tracer = Path(route["build_identity"]["cmake_cache"]["path"]).parent / "tests/ninfer_qwen3_8_27b_vision_trace"
+    tracer = (
+        Path(route["build_identity"]["cmake_cache"]["path"]).parent
+        / "tests/ninfer_qwen3_8_27b_vision_trace"
+    )
     tracer_identity = file_identity(tracer)
     if not os.access(tracer, os.X_OK):
-        raise ValueError("selected build Vision tracer is not executable; build its explicit target")
+        raise ValueError(
+            "selected build Vision tracer is not executable; build its explicit target"
+        )
     with tempfile.TemporaryDirectory(prefix=f".{output.name}.prepare-", dir=output.parent) as temp:
         staged = Path(temp) / output.name
         staged.mkdir()
         staged_input = staged / "prepared-input.safetensors"
         completed = subprocess.run(
-            [str(FRONTEND_PYTHON), "-m", "tools.parity.qwen3_8_27b.prepare_vision_input",
-             "--weights", str(artifact),
-             "--messages", str(MESSAGES), "--out", str(staged_input)],
-            cwd=REPO, check=True, capture_output=True, text=True,
+            [
+                str(FRONTEND_PYTHON),
+                "-m",
+                "tools.parity.qwen3_8_27b.prepare_vision_input",
+                "--weights",
+                str(artifact),
+                "--messages",
+                str(MESSAGES),
+                "--out",
+                str(staged_input),
+            ],
+            cwd=REPO,
+            check=True,
+            capture_output=True,
+            text=True,
             env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
         )
         input_contract = json.loads(completed.stdout.splitlines()[-1])
         final_input = output / staged_input.name
         prepared_input = {
-            "path": str(final_input), "bytes": staged_input.stat().st_size,
-            "sha256": sha(staged_input), "contract": input_contract,
+            "path": str(final_input),
+            "bytes": staged_input.stat().st_size,
+            "sha256": sha(staged_input),
+            "contract": input_contract,
         }
         plan = {
             "artifact_type": "ninfer_r9700_selected_vision_diagnostic_plan",
@@ -174,8 +198,12 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
             "prepared_input": prepared_input,
             "trace_executable": tracer_identity,
             "workload": {
-                "maximum_concurrency": 1, "thinking": False, "prefix_reuse": False,
-                "speculative_decode": False, "images": 1, "videos": 0,
+                "maximum_concurrency": 1,
+                "thinking": False,
+                "prefix_reuse": False,
+                "speculative_decode": False,
+                "images": 1,
+                "videos": 0,
                 "capture_names": list(EXPECTED_TRACE_NAMES),
                 "gate": GATE,
             },
@@ -199,17 +227,26 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
             "LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib "
             f"{shlex.quote(str(GPU_PYTHON))} -m tools.parity.qwen3_8_27b.vision "
             f"--weights {shlex.quote(str(artifact))} --model-dir {shlex.quote(str(SOURCE))} "
-            f"--messages {shlex.quote(str(MESSAGES))} --prepared-input \"$root/prepared-input.safetensors\" "
+            f'--messages {shlex.quote(str(MESSAGES))} --prepared-input "$root/prepared-input.safetensors" '
             f'--trace-exe {shlex.quote(str(tracer))} --device cuda:0 --output "$root/vision.raw.json"\n'
             'test "$(cat "$power")" = auto\n'
-            f"python3 -m tools.bench.validate_selected_vision_diagnostic --plan \"$root/plan.json\" "
+            f'python3 -m tools.bench.validate_selected_vision_diagnostic --plan "$root/plan.json" '
             '--root "$root" --out "$root/admission.json"\n',
             encoding="utf-8",
         )
         os.chmod(commands_path, 0o755)
         closure_sources = [
-            Path(__file__).resolve(), VALIDATOR, PREPARE_INPUT, VISION, PROTOCOL,
-            selection, artifact, tracer, MESSAGES, MEDIA, SOURCE_RECEIPT,
+            Path(__file__).resolve(),
+            VALIDATOR,
+            PREPARE_INPUT,
+            VISION,
+            PROTOCOL,
+            selection,
+            artifact,
+            tracer,
+            MESSAGES,
+            MEDIA,
+            SOURCE_RECEIPT,
             Path(route["source_matrices"]["pareto-capacity"]["path"]),
             Path(route["source_matrices"]["pareto-whole"]["path"]),
             Path(route["build_identity"]["cmake_cache"]["path"]),
@@ -219,13 +256,16 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
         if route["hybrid_width_tool"]:
             closure_sources.append(Path(route["hybrid_width_tool"]["path"]))
         closure = [
-            *( (path, path) for path in closure_sources ),
-            (staged_input, final_input), (plan_path, output / "plan.json"),
+            *((path, path) for path in closure_sources),
+            (staged_input, final_input),
+            (plan_path, output / "plan.json"),
             (commands_path, output / "commands.sh"),
         ]
         (staged / "prepared.sha256").write_text(
-            "".join(f"{sha(source_path)}  {published.relative_to(REPO)}\n"
-                    for source_path, published in closure),
+            "".join(
+                f"{sha(source_path)}  {published.relative_to(REPO)}\n"
+                for source_path, published in closure
+            ),
             encoding="utf-8",
         )
         rename_noreplace(staged, output)
@@ -239,8 +279,14 @@ def main() -> int:
     args = parser.parse_args()
     try:
         prepare(args.selection, args.out)
-    except (OSError, KeyError, TypeError, ValueError, subprocess.CalledProcessError,
-            json.JSONDecodeError) as error:
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        subprocess.CalledProcessError,
+        json.JSONDecodeError,
+    ) as error:
         raise SystemExit(str(error)) from error
     return 0
 

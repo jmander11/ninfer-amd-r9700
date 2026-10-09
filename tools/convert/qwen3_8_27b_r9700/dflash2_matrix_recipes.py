@@ -9,12 +9,11 @@ DFlash state retain their represented BF16 bytes.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from tools.artifact.layouts import encoded_size
 from tools.convert.qwen3.common.inventory import BF16, Q4, W8, TensorSpec, tensor_spec
-
 
 CANONICAL_Q4G64 = "canonical-q4g64"
 SOURCE_MSE_Q4G64 = "source-mse-q4g64"
@@ -101,9 +100,7 @@ def validate_specs(specs: Sequence[TensorSpec], recipe: MatrixRecipe | str) -> N
         raise ValueError("DFlash2 private convolution state must remain BF16")
 
 
-def summary(
-    canonical_specs: Sequence[TensorSpec], recipe: MatrixRecipe | str
-) -> dict[str, object]:
+def summary(canonical_specs: Sequence[TensorSpec], recipe: MatrixRecipe | str) -> dict[str, object]:
     selected = _resolve(recipe)
     specs = tensor_specs(canonical_specs, selected)
     counts = dict(sorted(Counter(spec.format for spec in specs).items()))
@@ -178,9 +175,7 @@ def encode_matrix_reference(
     if selected.key == CANONICAL_Q4G64:
         return codec.encode_q4g64_n16k16_reference(values, rows, columns)
     if selected.key == SOURCE_MSE_Q4G64:
-        return codec.encode_q4g64_n16k16_reference(
-            values, rows, columns, refined=True
-        )
+        return codec.encode_q4g64_n16k16_reference(values, rows, columns, refined=True)
     if selected.key == SOURCE_MSE_W8G32:
         return codec.encode_w8g32_mse_reference(values, rows, columns)
     raise AssertionError("unreachable DFlash2 recipe dispatch")
@@ -188,10 +183,10 @@ def encode_matrix_reference(
 
 __all__ = [
     "CANONICAL_Q4G64",
-    "MatrixRecipe",
     "RECIPES",
     "SOURCE_MSE_Q4G64",
     "SOURCE_MSE_W8G32",
+    "MatrixRecipe",
     "encode_matrix_payload",
     "encode_matrix_reference",
     "get_recipe",

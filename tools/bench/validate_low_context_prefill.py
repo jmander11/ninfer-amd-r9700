@@ -10,33 +10,37 @@ import math
 import os
 import stat
 import sys
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+from tools.bench.run_ninfer_bench_matrix import (  # noqa: E402  sys.path bootstrap
+    DECODE_ATTENTION_PROFILE,
     LOW_CONTEXT_PREFILL_PROMPTS,
     MATRIX_SCHEMA_VERSION,
+    PACKED_DECODE_MIN_CONTEXT,
     R9700_KV_PLANE_LAYOUTS,
     R9700_POWER_PROFILE,
+    SPLIT512_MIN_CONTEXT,
     add_repetition_args,
+    bind_n16_migration_receipt,
     build_cases,
     count_corpus_tokens,
     file_sha256,
     inspect_artifact,
-    bind_n16_migration_receipt,
     inspect_executable,
     load_bench_report,
     require_fp8_hybrid_artifact,
     validate_hybrid_shared_workspace_authority,
 )
-from tools.ppl.pareto import load_payload, validate_terminal_production_authority
+from tools.ppl.pareto import (  # noqa: E402  sys.path bootstrap
+    load_payload,
+    validate_terminal_production_authority,
+)
 
 
 def _sha256(value: object) -> bool:
@@ -126,7 +130,8 @@ def resolve_selected_dense_route(path: Path) -> dict[str, Any]:
     cache = terminal["winner_cache_profile"]
     chunk = value["selected_prefill_chunk"]
     candidates = [
-        candidate for candidate in value["candidates"]
+        candidate
+        for candidate in value["candidates"]
         if candidate.get("weight_recipe") == recipe
         and candidate.get("cache_profile", {}).get("value_group") == cache["value_group"]
         and candidate.get("execution_profile", {}).get("xattention_profile") == "dense"
@@ -135,7 +140,8 @@ def resolve_selected_dense_route(path: Path) -> dict[str, Any]:
         raise ValueError("terminal selection lacks one exact dense control for its winner")
     candidate = candidates[0]
     sources = [
-        source for source in value["source_provenance"]
+        source
+        for source in value["source_provenance"]
         if source.get("candidate") == candidate["name"]
     ]
     if len(sources) != 1:
@@ -191,15 +197,15 @@ def resolve_selected_dense_route(path: Path) -> dict[str, Any]:
             validate_hybrid_shared_workspace_authority(
                 matrix.get("hybrid_shared_workspace_authority"), [chunk]
             )
-        authorities = [
-            matrix["hybrid_shared_workspace_authority"] for matrix in manifests.values()
-        ]
+        authorities = [matrix["hybrid_shared_workspace_authority"] for matrix in manifests.values()]
         if authorities[0] != authorities[1]:
             raise ValueError("terminal dense-control matrices bind different hybrid planners")
         planner_path = Path(authorities[0]["tool"]["path"]).resolve(strict=True)
         if inspect_executable(planner_path) != authorities[0]["tool"]:
             raise ValueError("terminal dense-control hybrid planner bytes changed")
-    elif any(matrix.get("hybrid_shared_workspace_authority") is not None for matrix in manifests.values()):
+    elif any(
+        matrix.get("hybrid_shared_workspace_authority") is not None for matrix in manifests.values()
+    ):
         raise ValueError("non-hybrid terminal dense control carries hybrid planner authority")
     if hashlib.sha256(resolved.read_bytes()).hexdigest() != hashlib.sha256(raw).hexdigest():
         raise ValueError("terminal selection authority changed while resolving dense control")
@@ -207,7 +213,8 @@ def resolve_selected_dense_route(path: Path) -> dict[str, Any]:
         raise ValueError("terminal dense-control matrix manifest changed while resolving")
     return {
         "terminal_selection": {
-            "path": str(resolved), "bytes": len(raw),
+            "path": str(resolved),
+            "bytes": len(raw),
             "sha256": hashlib.sha256(raw).hexdigest(),
         },
         "winner": terminal["winner"],
@@ -220,7 +227,8 @@ def resolve_selected_dense_route(path: Path) -> dict[str, Any]:
         "hybrid_width_tool": str(planner_path) if planner_path is not None else None,
         "hybrid_width_tool_identity": (
             manifests["pareto-capacity"]["hybrid_shared_workspace_authority"]["tool"]
-            if planner_path is not None else None
+            if planner_path is not None
+            else None
         ),
     }
 
@@ -269,12 +277,12 @@ def validate_ladder(
         or manifest["expected_q4_activation_bits"] != 8
         or type(manifest.get("expected_w8_activation_bits")) is not int
         or manifest["expected_w8_activation_bits"] != 8
-        or manifest.get("expected_fp8_qk_wmma_enabled") is not True
-        or manifest.get("expected_fp8_qk_wmma_profile") != FP8_QK_WMMA_PROFILE
-        or type(manifest.get("expected_fp8_qk_wmma_t1_min_context")) is not int
-        or manifest["expected_fp8_qk_wmma_t1_min_context"] != FP8_QK_WMMA_T1_MIN_CONTEXT
-        or type(manifest.get("expected_fp8_qk_wmma_t2_min_context")) is not int
-        or manifest["expected_fp8_qk_wmma_t2_min_context"] != FP8_QK_WMMA_T2_MIN_CONTEXT
+        or manifest.get("expected_split512_enabled") is not True
+        or manifest.get("expected_decode_attention_profile") != DECODE_ATTENTION_PROFILE
+        or type(manifest.get("expected_packed_decode_min_context")) is not int
+        or manifest["expected_packed_decode_min_context"] != PACKED_DECODE_MIN_CONTEXT
+        or type(manifest.get("expected_split512_min_context")) is not int
+        or manifest["expected_split512_min_context"] != SPLIT512_MIN_CONTEXT
         or type(chunk) is not int
         or chunk not in (1024, 2048, 4096, 8192)
         or not isinstance(artifact, dict)
@@ -311,7 +319,8 @@ def validate_ladder(
     if bench != inspect_executable(executable):
         raise ValueError("benchmark executable identity differs")
     inspected_artifact = bind_n16_migration_receipt(
-        selected_artifact, inspect_artifact(selected_artifact))
+        selected_artifact, inspect_artifact(selected_artifact)
+    )
     hybrid = artifact["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
     if hybrid:
         inspected_artifact = require_fp8_hybrid_artifact(selected_artifact, inspected_artifact)
@@ -333,10 +342,8 @@ def validate_ladder(
         or selected_route.get("executable") != bench
         or selected_route.get("value_group") != manifest["expected_kv_value_group"]
         or selected_route.get("selected_prefill_chunk") != chunk
-        or Path(selected_route.get("artifact", {}).get("path", "")).resolve()
-        != selected_artifact
-        or Path(selected_route.get("executable", {}).get("path", "")).resolve()
-        != executable
+        or Path(selected_route.get("artifact", {}).get("path", "")).resolve() != selected_artifact
+        or Path(selected_route.get("executable", {}).get("path", "")).resolve() != executable
     ):
         raise ValueError("low-context ladder does not use the terminal winner's dense control")
     selected_planner = selected_route.get("hybrid_width_tool_identity")
@@ -363,17 +370,19 @@ def validate_ladder(
 
     cases = {
         case.name: case
-        for case in build_cases(
-            "low-context-prefill", production_prefill_chunk=chunk
-        )
+        for case in build_cases("low-context-prefill", production_prefill_chunk=chunk)
     }
     records = manifest.get("commands")
     expected = {("low_context_prefill", name, 1) for name in cases}
-    actual = {
-        (record.get("suite"), record.get("case"), record.get("concurrency"))
-        for record in records
-        if isinstance(record, dict)
-    } if isinstance(records, list) else set()
+    actual = (
+        {
+            (record.get("suite"), record.get("case"), record.get("concurrency"))
+            for record in records
+            if isinstance(record, dict)
+        }
+        if isinstance(records, list)
+        else set()
+    )
     if not isinstance(records, list) or len(records) != len(expected) or actual != expected:
         raise ValueError("manifest does not retain the exact five-point low-context ladder")
     if len({record.get("report") for record in records}) != len(records):
@@ -396,11 +405,27 @@ def validate_ladder(
             raise ValueError(f"low-context ladder report cannot be resolved: {error}") from error
         if not resolved_report.is_relative_to(root):
             raise ValueError("low-context ladder report resolves outside its campaign directory")
-        expected_command = add_repetition_args([
-            str(executable), "--weights", str(selected_artifact),
-            "--corpus", str(corpus), "--device", "0", "--concurrency", "1",
-            *case.args, "--output", "json", "--output-file", str(report_path),
-        ], case, None, None)
+        expected_command = add_repetition_args(
+            [
+                str(executable),
+                "--weights",
+                str(selected_artifact),
+                "--corpus",
+                str(corpus),
+                "--device",
+                "0",
+                "--concurrency",
+                "1",
+                *case.args,
+                "--output",
+                "json",
+                "--output-file",
+                str(report_path),
+            ],
+            case,
+            None,
+            None,
+        )
         if record.get("command") != expected_command:
             raise ValueError("low-context ladder command differs from the fixed protocol")
         before = file_sha256(resolved_report)
@@ -430,24 +455,24 @@ def validate_ladder(
         if not _positive_number(throughput):
             raise ValueError(f"P={prompt} report has invalid prefill throughput")
         reps = tests[0].get("reps")
-        prefill_seconds = [
-            rep.get("timings", {}).get("prefill_seconds")
-            for rep in reps
-            if isinstance(rep, dict)
-        ] if isinstance(reps, list) else []
+        prefill_seconds = (
+            [rep.get("timings", {}).get("prefill_seconds") for rep in reps if isinstance(rep, dict)]
+            if isinstance(reps, list)
+            else []
+        )
         if len(prefill_seconds) != 3 or not all(
             _positive_number(value) for value in prefill_seconds
         ):
             raise ValueError(f"P={prompt} report has invalid raw prefill timings")
         _require_statistic(tests[0], "prefill_seconds", prefill_seconds)
-        _require_statistic(
-            tests[0], "prefill_tok_s", [prompt / value for value in prefill_seconds]
+        _require_statistic(tests[0], "prefill_tok_s", [prompt / value for value in prefill_seconds])
+        ladder.append(
+            {
+                "prompt_tokens": prompt,
+                "prefill_tok_s_mean": float(throughput),
+                "report": {"path": str(report_path), "sha256": before},
+            }
         )
-        ladder.append({
-            "prompt_tokens": prompt,
-            "prefill_tok_s_mean": float(throughput),
-            "report": {"path": str(report_path), "sha256": before},
-        })
     ladder.sort(key=lambda row: row["prompt_tokens"])
     if [row["prompt_tokens"] for row in ladder] != list(LOW_CONTEXT_PREFILL_PROMPTS):
         raise ValueError("validated reports do not form the exact low-context ladder")
@@ -463,7 +488,8 @@ def validate_ladder(
     if inspect_executable(executable) != bench:
         raise ValueError("benchmark executable changed while validating")
     final_artifact = bind_n16_migration_receipt(
-        selected_artifact, inspect_artifact(selected_artifact))
+        selected_artifact, inspect_artifact(selected_artifact)
+    )
     if hybrid:
         final_artifact = require_fp8_hybrid_artifact(selected_artifact, final_artifact)
     if final_artifact != artifact:

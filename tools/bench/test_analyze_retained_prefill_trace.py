@@ -21,8 +21,12 @@ class AnalyzeRetainedPrefillTraceTest(unittest.TestCase):
         script = Path(__file__).with_name("analyze_retained_prefill_trace.py").resolve()
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(
-                [sys.executable, str(script), "--help"], cwd=directory,
-                capture_output=True, text=True, check=False)
+                [sys.executable, str(script), "--help"],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("ModuleNotFoundError", result.stderr)
 
@@ -53,50 +57,113 @@ class AnalyzeRetainedPrefillTraceTest(unittest.TestCase):
         """)
         environment = {
             "ROCPROF_OUTPUT_FILE_NAME": "retained-production-p2048",
-            "ROCPROF_OUTPUT_PATH": str(raw), "ROCPROF_OUTPUT_FORMAT": "rocpd",
-            "ROCPROF_MARKER_API_TRACE": "1", "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_MEMORY_COPY_TRACE": "1", "ROCPROF_SELECTED_REGIONS": "1",
-            "ROCPROFILER_REGISTER_LIBRARY":
-                "/opt/rocm/core-10.0/lib/librocprofiler-sdk.so.1.3.5",
+            "ROCPROF_OUTPUT_PATH": str(raw),
+            "ROCPROF_OUTPUT_FORMAT": "rocpd",
+            "ROCPROF_MARKER_API_TRACE": "1",
+            "ROCPROF_KERNEL_TRACE": "1",
+            "ROCPROF_MEMORY_COPY_TRACE": "1",
+            "ROCPROF_SELECTED_REGIONS": "1",
+            "ROCPROFILER_REGISTER_LIBRARY": "/opt/rocm/core-10.0/lib/librocprofiler-sdk.so.1.3.5",
         }
         extdata = {
-            "output_path": str(raw), "output_file": "retained-production-p2048",
-            "raw_output_path": str(raw), "raw_output_file": "retained-production-p2048",
-            "rocpd_output": True, "kernel_rename": False,
+            "output_path": str(raw),
+            "output_file": "retained-production-p2048",
+            "raw_output_path": str(raw),
+            "raw_output_file": "retained-production-p2048",
+            "rocpd_output": True,
+            "kernel_rename": False,
         }
-        connection.execute("insert into rocpd_info_process_x values(?,?,?,?,?,?)", (
-            7, 8, 9, " ".join(command), json.dumps(environment), json.dumps(extdata)))
-        connection.execute("insert into rocpd_info_agent_x values(?,?,?,?,?,?,?,?,?,?)", (
-            1, 8, 9, "GPU", 1, 1, 0, "gfx1201", "AMD Radeon AI PRO R9700",
-            json.dumps({"cu_count": 64, "simd_count": 128, "wave_front_size": 32})))
-        connection.execute("insert into rocpd_info_agent_x values(?,?,?,?,?,?,?,?,?,?)", (
-            2, 8, 9, "GPU", 2, 2, 1, "gfx1036", "AMD Radeon Graphics",
-            json.dumps({"cu_count": 2, "simd_count": 4, "wave_front_size": 32})))
-        connection.execute("insert into regions values(?,?,?,?,?,?,?,?)", (
-            8, 9, "MARKER_CONTROL_API", "roctxProfilerResume", 0, 10, 10, "{}"))
+        connection.execute(
+            "insert into rocpd_info_process_x values(?,?,?,?,?,?)",
+            (7, 8, 9, " ".join(command), json.dumps(environment), json.dumps(extdata)),
+        )
+        connection.execute(
+            "insert into rocpd_info_agent_x values(?,?,?,?,?,?,?,?,?,?)",
+            (
+                1,
+                8,
+                9,
+                "GPU",
+                1,
+                1,
+                0,
+                "gfx1201",
+                "AMD Radeon AI PRO R9700",
+                json.dumps({"cu_count": 64, "simd_count": 128, "wave_front_size": 32}),
+            ),
+        )
+        connection.execute(
+            "insert into rocpd_info_agent_x values(?,?,?,?,?,?,?,?,?,?)",
+            (
+                2,
+                8,
+                9,
+                "GPU",
+                2,
+                2,
+                1,
+                "gfx1036",
+                "AMD Radeon Graphics",
+                json.dumps({"cu_count": 2, "simd_count": 4, "wave_front_size": 32}),
+            ),
+        )
+        connection.execute(
+            "insert into regions values(?,?,?,?,?,?,?,?)",
+            (8, 9, "MARKER_CONTROL_API", "roctxProfilerResume", 0, 10, 10, "{}"),
+        )
+
         def region(begin: int, end: int, message: str) -> None:
-            connection.execute("insert into regions values(?,?,?,?,?,?,?,?)", (
-                8, 9, "MARKER_CORE_RANGE_API", "roctxThreadRangeA", begin, end,
-                end - begin, json.dumps({"message": message})))
+            connection.execute(
+                "insert into regions values(?,?,?,?,?,?,?,?)",
+                (
+                    8,
+                    9,
+                    "MARKER_CORE_RANGE_API",
+                    "roctxThreadRangeA",
+                    begin,
+                    end,
+                    end - begin,
+                    json.dumps({"message": message}),
+                ),
+            )
+
         region(20, 1_000_000_000, "ninfer_bench_measured")
         region(30, 900_000_000, "ninfer.prefill.prefill.chunk payload=2048")
         cursor = 100
         for layer in range(64):
-            outer = (f"ninfer.attention.prefill.layer.full payload={layer}"
-                     if layer % 4 == 3 else f"ninfer.gdn.prefill.layer.gdn payload={layer}")
-            leaf = (f"ninfer.attention.prefill.attention payload={layer}"
-                    if layer % 4 == 3 else f"ninfer.gdn.prefill.gdn payload={layer}")
+            outer = (
+                f"ninfer.attention.prefill.layer.full payload={layer}"
+                if layer % 4 == 3
+                else f"ninfer.gdn.prefill.layer.gdn payload={layer}"
+            )
+            leaf = (
+                f"ninfer.attention.prefill.attention payload={layer}"
+                if layer % 4 == 3
+                else f"ninfer.gdn.prefill.gdn payload={layer}"
+            )
             region(cursor, cursor + 90, outer)
             region(cursor + 1, cursor + 40, leaf)
-            region(cursor + 50, cursor + 89,
-                   f"ninfer.post-mixer.prefill.post_mixer payload={layer}")
+            region(
+                cursor + 50, cursor + 89, f"ninfer.post-mixer.prefill.post_mixer payload={layer}"
+            )
             cursor += 100
-        connection.execute("insert into regions values(?,?,?,?,?,?,?,?)", (
-            8, 9, "MARKER_CONTROL_API", "roctxProfilerPause", 1_000_000_010,
-            1_000_000_020, 10, "{}"))
-        connection.execute("insert into kernels values(?,?,?,?,?,?,?,?,?,?,?,?)", (
-            8, 9, 1, "kernel", "ninfer.gdn.prefill.gdn payload=0", 200, 300, 100,
-            1, 1, 0, "GPU"))
+        connection.execute(
+            "insert into regions values(?,?,?,?,?,?,?,?)",
+            (
+                8,
+                9,
+                "MARKER_CONTROL_API",
+                "roctxProfilerPause",
+                1_000_000_010,
+                1_000_000_020,
+                10,
+                "{}",
+            ),
+        )
+        connection.execute(
+            "insert into kernels values(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (8, 9, 1, "kernel", "ninfer.gdn.prefill.gdn payload=0", 200, 300, 100, 1, 1, 0, "GPU"),
+        )
         connection.commit()
         connection.close()
         return database, command
@@ -116,7 +183,8 @@ class AnalyzeRetainedPrefillTraceTest(unittest.TestCase):
             database, command = self.fixture(root)
             connection = sqlite3.connect(database)
             connection.execute("update kernels set agent_log_index=2")
-            connection.commit(); connection.close()
+            connection.commit()
+            connection.close()
             with self.assertRaisesRegex(ValueError, "did not execute on the R9700"):
                 _validate_database_contract(database, command, root)
         with tempfile.TemporaryDirectory() as directory:
@@ -126,9 +194,12 @@ class AnalyzeRetainedPrefillTraceTest(unittest.TestCase):
             row = connection.execute(
                 "select rowid,extdata from regions where extdata like '%layer.full payload=3%'"
             ).fetchone()
-            connection.execute("update regions set extdata=? where rowid=?", (
-                row[1].replace("payload=3", "payload=4"), row[0]))
-            connection.commit(); connection.close()
+            connection.execute(
+                "update regions set extdata=? where rowid=?",
+                (row[1].replace("payload=3", "payload=4"), row[0]),
+            )
+            connection.commit()
+            connection.close()
             with self.assertRaisesRegex(ValueError, "payload sets"):
                 _validate_database_contract(database, command, root)
 
@@ -138,19 +209,36 @@ class AnalyzeRetainedPrefillTraceTest(unittest.TestCase):
             database, command = self.fixture(root)
             connection = sqlite3.connect(database)
             connection.execute(
-                "update regions set start=450, \"end\"=510, duration=60 "
-                "where extdata like '%attention payload=3%'")
-            connection.commit(); connection.close()
+                'update regions set start=450, "end"=510, duration=60 '
+                "where extdata like '%attention payload=3%'"
+            )
+            connection.commit()
+            connection.close()
             with self.assertRaisesRegex(ValueError, "order or nesting"):
                 _validate_database_contract(database, command, root)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             database, command = self.fixture(root)
             connection = sqlite3.connect(database)
-            connection.execute("insert into kernels values(?,?,?,?,?,?,?,?,?,?,?,?)", (
-                8, 9, 2, "__amd_rocclr_fillBufferUnAligned", "", 1000, 22001, 21001,
-                1, 1, 0, "GPU"))
-            connection.commit(); connection.close()
+            connection.execute(
+                "insert into kernels values(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    8,
+                    9,
+                    2,
+                    "__amd_rocclr_fillBufferUnAligned",
+                    "",
+                    1000,
+                    22001,
+                    21001,
+                    1,
+                    1,
+                    0,
+                    "GPU",
+                ),
+            )
+            connection.commit()
+            connection.close()
             with self.assertRaisesRegex(ValueError, "infrastructure allowance"):
                 _validate_database_contract(database, command, root)
 
@@ -160,7 +248,8 @@ class AnalyzeRetainedPrefillTraceTest(unittest.TestCase):
             database, command = self.fixture(root)
             connection = sqlite3.connect(database)
             connection.execute("update kernels set region='ninfer.gdn.prefill.fake payload=0'")
-            connection.commit(); connection.close()
+            connection.commit()
+            connection.close()
             with self.assertRaisesRegex(ValueError, "unexpected ROCTX"):
                 _validate_database_contract(database, command, root)
         with tempfile.TemporaryDirectory() as directory:
@@ -169,8 +258,10 @@ class AnalyzeRetainedPrefillTraceTest(unittest.TestCase):
             connection = sqlite3.connect(database)
             connection.execute(
                 "update kernels set region='ninfer.gdn.prefill.gdn payload=1', "
-                "start=150, \"end\"=250, duration=100")
-            connection.commit(); connection.close()
+                'start=150, "end"=250, duration=100'
+            )
+            connection.commit()
+            connection.close()
             with self.assertRaisesRegex(ValueError, "starts before"):
                 _validate_database_contract(database, command, root)
         with tempfile.TemporaryDirectory() as directory:

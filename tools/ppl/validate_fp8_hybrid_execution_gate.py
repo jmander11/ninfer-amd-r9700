@@ -21,7 +21,7 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools.ppl import run as ppl
+from tools.ppl import run as ppl  # noqa: E402  after sys.path setup
 
 
 def sha256(path: Path) -> str:
@@ -58,7 +58,8 @@ def validate_execution_coverage(payload: dict) -> dict[str, dict]:
     found: dict[str, dict] = {}
     for label, (spec, draft, graph, parity_key) in wanted.items():
         matches = [
-            cell for cell in candidates
+            cell
+            for cell in candidates
             if cell.get("prompt_tokens") == ppl.DEFAULT_TOKENS
             and cell.get("schedule") == "decode"
             and cell.get("spec") == spec
@@ -74,9 +75,11 @@ def validate_execution_coverage(payload: dict) -> dict[str, dict]:
             parity = cell.get(parity_key)
             if not isinstance(parity, dict) or parity.get("pass") is not True:
                 raise ValueError(f"execution campaign {label} lacks passing {parity_key}")
-            if (parity.get("max_abs_nll_gate") != 0.0
-                    or parity.get("complete_finite_aligned") is not True
-                    or parity.get("argmax_exact") is not True):
+            if (
+                parity.get("max_abs_nll_gate") != 0.0
+                or parity.get("complete_finite_aligned") is not True
+                or parity.get("argmax_exact") is not True
+            ):
                 raise ValueError(f"execution campaign {label} parity is not exact and complete")
         found[label] = cell
     return found
@@ -88,11 +91,13 @@ def parse_width_inventory(raw: str, expected: tuple[int, int, int, int]) -> list
         raise ValueError("compiled prepared-width inventory is empty")
     widths: list[int] = []
     for row in rows:
-        observed = tuple(int(row[name]) for name in (
-            "prefill", "max_concurrency", "mtp_width", "dflash_width"
-        ))
+        observed = tuple(
+            int(row[name]) for name in ("prefill", "max_concurrency", "mtp_width", "dflash_width")
+        )
         if observed != expected:
-            raise ValueError(f"compiled prepared-width inventory profile {observed}; expected {expected}")
+            raise ValueError(
+                f"compiled prepared-width inventory profile {observed}; expected {expected}"
+            )
         widths.append(int(row["prepared_width"]))
     if widths != sorted(set(widths)):
         raise ValueError("compiled prepared-width inventory is not sorted and unique")
@@ -100,17 +105,26 @@ def parse_width_inventory(raw: str, expected: tuple[int, int, int, int]) -> list
 
 
 def query_widths(
-    tool: Path, prefill: int, concurrency: int, mtp_width: int,
+    tool: Path,
+    prefill: int,
+    concurrency: int,
+    mtp_width: int,
     dflash_width: int = 0,
 ) -> list[int]:
     process = subprocess.run(
-        [str(tool), "--host-hybrid-widths-csv", str(prefill), str(concurrency),
-         str(mtp_width), str(dflash_width)],
-        check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        [
+            str(tool),
+            "--host-hybrid-widths-csv",
+            str(prefill),
+            str(concurrency),
+            str(mtp_width),
+            str(dflash_width),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
     )
-    return parse_width_inventory(
-        process.stdout, (prefill, concurrency, mtp_width, dflash_width)
-    )
+    return parse_width_inventory(process.stdout, (prefill, concurrency, mtp_width, dflash_width))
 
 
 def validate_current_identity(payload: dict) -> tuple[dict, dict]:

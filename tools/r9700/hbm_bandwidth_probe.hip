@@ -25,23 +25,23 @@
 #include <utility>
 #include <vector>
 
-#define HIP_CHECK(expr)                                                                           \
+#define HIP_CHECK(expr)                                                                            \
     do {                                                                                           \
-        const hipError_t error__ = (expr);                                                        \
-        if (error__ != hipSuccess) {                                                              \
-            std::fprintf(stderr, "HIP error at %s:%d: %s\n", __FILE__, __LINE__,                  \
-                         hipGetErrorString(error__));                                             \
+        const hipError_t error__ = (expr);                                                         \
+        if (error__ != hipSuccess) {                                                               \
+            std::fprintf(stderr, "HIP error at %s:%d: %s\n", __FILE__, __LINE__,                   \
+                         hipGetErrorString(error__));                                              \
             std::exit(EXIT_FAILURE);                                                               \
         }                                                                                          \
     } while (false)
 
 namespace {
 
-constexpr int kThreads                 = 256;
-constexpr double kDefaultPeakGBps      = 640.0;
-constexpr double kDefaultTrialSeconds  = 0.25;
-constexpr int kDefaultTrials           = 5;
-constexpr std::size_t kDefaultMaxBytes = std::size_t{4} << 30;
+constexpr int kThreads                   = 256;
+constexpr double kDefaultPeakGBps        = 640.0;
+constexpr double kDefaultTrialSeconds    = 0.25;
+constexpr int kDefaultTrials             = 5;
+constexpr std::size_t kDefaultMaxBytes   = std::size_t{4} << 30;
 constexpr std::string_view kRequiredArch = "gfx1201";
 constexpr std::string_view kAmdVendor    = "0x1002";
 constexpr std::string_view kR9700Device  = "0x7551";
@@ -79,9 +79,8 @@ std::string read_text_file(const std::string& path) {
 }
 
 std::string normalize_pci_bus_id(std::string id) {
-    std::transform(id.begin(), id.end(), id.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
+    std::transform(id.begin(), id.end(), id.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     if (id.size() == 7 && id[2] == ':' && id[5] == '.') { id = "0000:" + id; }
     return id;
 }
@@ -98,13 +97,13 @@ int select_r9700() {
         HIP_CHECK(hipGetDeviceProperties(&props, ordinal));
         char pci_buffer[32]{};
         HIP_CHECK(hipDeviceGetPCIBusId(pci_buffer, sizeof(pci_buffer), ordinal));
-        const std::string pci = normalize_pci_bus_id(pci_buffer);
-        const std::string sysfs = "/sys/bus/pci/devices/" + pci;
+        const std::string pci     = normalize_pci_bus_id(pci_buffer);
+        const std::string sysfs   = "/sys/bus/pci/devices/" + pci;
         const bool exact_identity = read_text_file(sysfs + "/vendor") == kAmdVendor &&
                                     read_text_file(sysfs + "/device") == kR9700Device;
-        const bool exact_device = exact_identity && props.integrated == 0 &&
-                                  std::string_view(props.gcnArchName) == kRequiredArch &&
-                                  props.warpSize == 32;
+        const bool exact_device   = exact_identity && props.integrated == 0 &&
+                                    std::string_view(props.gcnArchName) == kRequiredArch &&
+                                    props.warpSize == 32;
         if (exact_device && (requested.empty() || requested == pci)) { matches.push_back(ordinal); }
     }
     if (matches.size() != 1) {
@@ -341,8 +340,8 @@ Result benchmark(const char* name, std::size_t payload_bytes, double traffic_mul
 template <typename Kernel>
 int resident_grid(Kernel kernel, int processor_count) {
     int blocks_per_processor = 0;
-    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_processor, kernel, kThreads,
-                                                            0));
+    HIP_CHECK(
+        hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_processor, kernel, kThreads, 0));
     return std::max(processor_count, processor_count * blocks_per_processor);
 }
 
@@ -463,15 +462,13 @@ int main(int argc, char** argv) {
 
     results.push_back(benchmark("hipMemcpyAsync D2D", bytes, 2.0, options.peak_gbps,
                                 options.seconds, options.trials, stream, [&] {
-                                    HIP_CHECK(hipMemcpyAsync(destination.get(), source.get(),
-                                                               bytes, hipMemcpyDeviceToDevice,
-                                                               stream));
+                                    HIP_CHECK(hipMemcpyAsync(destination.get(), source.get(), bytes,
+                                                             hipMemcpyDeviceToDevice, stream));
                                 }));
 
     std::vector<uint4> host_checksums(static_cast<std::size_t>(read_grid));
     HIP_CHECK(hipMemcpyAsync(host_checksums.data(), checksums.get(),
-                             host_checksums.size() * sizeof(uint4), hipMemcpyDeviceToHost,
-                             stream));
+                             host_checksums.size() * sizeof(uint4), hipMemcpyDeviceToHost, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
     uint4 checksum = make_uint4(0, 0, 0, 0);
@@ -484,9 +481,8 @@ int main(int argc, char** argv) {
     const auto expected_lane = [vector_count](std::uint32_t value) {
         return static_cast<std::uint32_t>(static_cast<std::uint64_t>(value) * vector_count);
     };
-    const uint4 expected =
-        make_uint4(expected_lane(source_value.x), expected_lane(source_value.y),
-                   expected_lane(source_value.z), expected_lane(source_value.w));
+    const uint4 expected = make_uint4(expected_lane(source_value.x), expected_lane(source_value.y),
+                                      expected_lane(source_value.z), expected_lane(source_value.w));
     if (checksum.x != expected.x || checksum.y != expected.y || checksum.z != expected.z ||
         checksum.w != expected.w) {
         std::fprintf(stderr, "Read checksum mismatch\n");

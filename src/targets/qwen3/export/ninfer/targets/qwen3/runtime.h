@@ -3,6 +3,7 @@
 #include "ninfer/types.h"
 #include "runtime/contract/transient_region.h"
 #include "runtime/contract/types.h"
+#include "targets/qwen3/impl/runtime/kv_gpu_snapshot.h"
 #include "targets/qwen3/impl/runtime/kv_ram_snapshot.h"
 #include "targets/qwen3/impl/runtime/kv_disk_snapshot.h"
 #include <ninfer/targets/qwen3/prepared_prompt.h>
@@ -10,12 +11,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
+#include <vector>
 
 namespace ninfer {
 struct DeviceContext;
 class HostPinnedArena;
-}
+} // namespace ninfer
 
 namespace ninfer::targets::qwen3 {
 
@@ -161,19 +164,31 @@ public:
     [[nodiscard]] bool
     can_admit_lane_after_retained_eviction(std::uint32_t lane,
                                            const RequestPlan<Variant>& plan) const noexcept;
-    [[nodiscard]] bool can_admit_lane_after_releasing(
-        std::uint32_t lane, const RequestPlan<Variant>& plan,
-        std::span<const std::uint32_t> release_lanes) const noexcept;
+    [[nodiscard]] bool
+    can_admit_lane_after_releasing(std::uint32_t lane, const RequestPlan<Variant>& plan,
+                                   std::span<const std::uint32_t> release_lanes) const noexcept;
     [[nodiscard]] runtime::AdmissionResources admission_capacity() const noexcept;
-    [[nodiscard]] runtime::PrefillStepResult start_prefill_lane(std::uint32_t lane,
-                                                                PreparedPrompt&& prompt,
-                                                                RequestPlan<Variant>&& plan,
-                                                                runtime::TransientRegion transient,
-                                                                const OutputSession* output = nullptr);
-    [[nodiscard]] runtime::PrefillStepResult advance_prefill_lane(std::uint32_t lane);
+    [[nodiscard]] runtime::PrefillStepResult
+    start_prefill_lane(std::uint32_t lane, PreparedPrompt&& prompt, RequestPlan<Variant>&& plan,
+                       runtime::TransientRegion transient, const OutputSession* output = nullptr,
+                       bool decode_waiting = false);
+    // With decode_waiting and a configured mixed forward, a mixable owner returns without
+    // progress (0 tokens, incomplete): its first slice runs in the next mixed round.
+    // decode_waiting bounds the step by the configured mixed forward width instead of the chunk.
+    [[nodiscard]] runtime::PrefillStepResult advance_prefill_lane(std::uint32_t lane,
+                                                                  bool decode_waiting = false);
     [[nodiscard]] runtime::BatchedGeneratedRound
     decode_batch(std::span<const std::uint32_t> lanes,
                  std::span<const runtime::RoundBudget> budgets);
+    // Whether the staged owner's next step can join a decode round's target forward, and that
+    // round: one DFlash round for `lanes` that also advances the owner's next chunk.
+    [[nodiscard]] bool prefill_mixable(std::uint32_t lane) const noexcept;
+    // The resolved startup mixed forward width (0 = prefill-first).
+    [[nodiscard]] std::uint32_t mixed_forward() const noexcept;
+    [[nodiscard]] runtime::MixedGeneratedRound
+    decode_batch_with_prefill(std::span<const std::uint32_t> lanes,
+                              std::span<const runtime::RoundBudget> budgets,
+                              std::uint32_t prefill_lane);
     void set_suppressed_tokens_lane(std::uint32_t lane, std::span<const TokenId> tokens);
     void clear_suppressed_tokens_lane(std::uint32_t lane);
     void set_typical_cycle_reasoning_lane(std::uint32_t lane, bool enabled);
@@ -184,17 +199,27 @@ public:
                                std::span<const std::uint8_t> cancelled,
                                std::span<const std::uint8_t> rejected = {});
     void abort_lane(std::uint32_t lane) noexcept;
-    void retain_lane(std::uint32_t lane);
+    [[nodiscard]] bool retain_reusable_lane(std::uint32_t lane);
+    [[nodiscard]] bool copy_reusable_prompt(std::uint32_t lane, std::uint32_t prompt_tokens,
+                                            std::vector<TokenId>& tokens,
+                                            std::uint32_t& rewrite_frontier) const;
     [[nodiscard]] bool revert_cancelled_prefill_lane(std::uint32_t lane);
     [[nodiscard]] bool has_retained_lane(std::uint32_t lane) const noexcept;
     [[nodiscard]] std::uint64_t retained_use_tick(std::uint32_t lane) const noexcept;
     void evict_retained_lane(std::uint32_t lane) noexcept;
+    void mark_turn_closed(std::uint32_t lane) noexcept;
     [[nodiscard]] bool capture_retained_lane(std::uint32_t lane,
-                                             std::uint64_t* ram_entry_id = nullptr);
+                                             std::uint64_t* ram_entry_id = nullptr,
+                                             bool may_block = true, bool* deferred = nullptr,
+                                             std::span<const std::uint64_t> attempt_ram_ids = {});
     void restore_ram_entry(std::uint32_t lane, std::uint64_t entry_id,
                            const RequestPlan<Variant>& plan);
     void restore_disk_entry(std::uint32_t lane, std::uint64_t entry_id,
                             const RequestPlan<Variant>& plan);
+    // Whether a RAM entry's capture copies have landed, so its restore starts without waiting.
+    [[nodiscard]] bool ram_restore_ready(std::uint64_t entry_id) const;
+    [[nodiscard]] bool disk_restore_ready(std::uint64_t entry_id) const;
+    [[nodiscard]] bool kv_ram_reclaim_pending() const;
     void claim_ram_entry(std::uint64_t entry_id);
     void release_ram_entry(std::uint64_t entry_id);
     void consume_ram_entry(std::uint64_t entry_id);
@@ -211,13 +236,17 @@ public:
     void prefetch_disk_plan(std::uint64_t entry_id, const RequestPlan<Variant>& plan);
     void pump_disk_restore();
     void cancel_disk_restore();
+    void begin_copy_hold_cancel();
+    [[nodiscard]] bool copy_hold_cancel_settled() const;
     void discard_ram_capture(std::uint64_t ram_id);
     void shutdown_kv_tiers(LoadProgress progress = {});
     void request_idle_spill();
     [[nodiscard]] qwen3::detail::KvRamSnapshot kv_ram_snapshot() const noexcept;
     qwen3::detail::KvRamCopySeconds harvest_kv_ram_copy_seconds();
-    [[nodiscard]] qwen3::detail::KvDiskSnapshot kv_disk_snapshot() const noexcept;
+    [[nodiscard]] std::optional<qwen3::detail::KvDiskSnapshot>
+    try_kv_disk_snapshot() const noexcept;
     qwen3::detail::KvDiskCopySeconds harvest_kv_disk_copy_seconds();
+    [[nodiscard]] qwen3::detail::KvGpuSnapshot kv_gpu_snapshot() const noexcept;
     [[nodiscard]] bool kv_ram_copies_ready() const;
     [[nodiscard]] bool kv_disk_copies_ready() const;
     [[nodiscard]] bool kv_disk_restore_failed() const;
@@ -248,10 +277,9 @@ private:
     std::unique_ptr<detail::ProgramImpl<Variant>> impl_;
 
     template <class V>
-    friend std::unique_ptr<Program<V>> create_program(const typename V::ModelView&,
-                                                      typename V::WeightsProfile, SequencePlan<V>&&,
-                                                      DeviceContext&,
-                                                      std::unique_ptr<HostPinnedArena>);
+    friend std::unique_ptr<Program<V>>
+    create_program(const typename V::ModelView&, typename V::WeightsProfile, SequencePlan<V>&&,
+                   DeviceContext&, std::unique_ptr<HostPinnedArena>);
 };
 
 template <class Variant>

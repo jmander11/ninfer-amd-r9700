@@ -1,5 +1,15 @@
 # R9700 perplexity and Pareto-quality gate
 
+## Exploratory dense/XAttention context comparison
+
+`tools/bench/context_ladder.py run --kind ppl` runs serial, matched-token prefill PPL
+at explicit context lengths, retaining aligned NLL/argmax sidecars. Its `compare` command
+rejects mismatched inputs, score windows, artifacts and activation/cache profiles and
+reports PPL/NLL changes and new severe positions. Reusable speed, PPL and trace commands
+are in `tools/bench/context_ladder.md`. This exploratory measurement setup does not replace
+the fixed BF16-source admission campaign below; never use cycled timing IDs as natural
+long-context quality evidence or extrapolate the retained4K5090 scores to longer inputs.
+
 ## Bounded NVFP4 comparison
 
 `compare_nvfp4.py` compares three identical 4096-token samples with the local
@@ -46,7 +56,7 @@ integer-product work only: there is no speed action or implied tok/s estimate.
 Commands/results: `profiles/ppl/r9700-endpoint-precision-20260923/`.
 
 On this shared machine, serialize conversion/readback, builds, and GPU jobs; never overlap
-them across agents. Explicitly cap CMake builds with `--parallel 14` or fewer jobs and
+them across agents. Explicitly cap CMake builds with `--parallel 8` or fewer jobs and
 reduce/stop on memory or I/O pressure. A build-job cap is not a memory limit.
 
 Use Python3.11 and an explicit `--out` directory. Actions, in order, are
@@ -143,9 +153,10 @@ B128/S16/tau900 profile, selected chunk, candidate-local quality authority, and 
 BF16 source. It emits one future C1 command under
 `profiles/ppl/r9700-selected-exact-token-20260921`; run its `commands.sh` only under the exclusive
 GPU lease. Preparation requires the published selection and `apps/ninfer-ppl` in its exact selected
-build root. The fresh phase-sum roots initially contain bench/planner but not that scorer;
-the resource bridge preserves old prefill quality, not a claim that an old executable exercises
-the new selected runtime. Do not silently substitute the original panel scorer or rebuild a
+build root. The fresh phase-sum roots initially contain bench/planner but not that scorer.
+The FP8 context/reporting recovery bridges those roots relied on were retired with hipBLASLt
+(438f6a89), and a selection whose source provenance binds either bridge is rejected. Do not
+silently substitute the original panel scorer or rebuild a
 frozen root from this launcher. The launcher runs under the installed
 `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python` with the ROCm library paths exported.
 It reuses the selected quality campaign's bound BF16 prefill reference and exact repeat proof,
@@ -285,7 +296,7 @@ sidecars. `results.json` is `ninfer_r9700_ppl_campaign` schema v6 and records th
 candidate and scorer hashes, validated BF16 source identity/counts, validated
 source config/index and all 18 shard SHA-256 values, corpus manifest/hash/token count, exact
 commands, compiled group, both activation profiles, the
-`t1-ge64-t2-ge320-t3plus-stream-v1` attention classifier, compile-bound dense or XAttention
+`packed-t1to6-split512-t4tree-v1` attention classifier, compile-bound dense or XAttention
 prefill profile, explicit quality tier, execution labels, sidecar hashes, thresholds, and the
 overall gate result. The runner
 rejects corpus, model, weights, group,
@@ -1027,7 +1038,7 @@ Its input is an explicit retained comparison manifest:
       "execution_profile": {
         "q4_activation_bits": 8,
         "w8_activation_bits": 8,
-        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+        "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
         "xattention_profile": "dense"
       },
       "quality_cells": {

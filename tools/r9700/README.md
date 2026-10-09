@@ -1,37 +1,60 @@
 # R9700 codec and gfx12 qualification
 
-DFlash target chain verification W4..6 uses the same batched FP8-Q WMMA / FP32
-softmax / INT4-times-FP16 PV arithmetic for contexts 64..8191. The represented
-public-input oracle remains BF16-Q attention with exact decoded cache planes;
-the private FP8-Q profile is bounded by the existing pointwise quantization
-deviation plus `2e-4 * max(1, abs(profile_oracle))`, with a separate FP64 profile
-check. Serial-WMMA bit parity supplements, rather than replaces, that oracle.
-Other widths, tree/device-count forms and contexts retain their existing routes,
-including split512 at context 8192 and above. The workspace planner owns four,
-five or six independent FP32 score planes as appropriate.
-QK packs two independent query rows into the two eight-lane halves of WMMA's
-M dimension, with six valid heads in each half. The odd W5 tail is masked;
-each dot retains its FP8 operands and ascending K reduction. Softmax is unchanged.
-W6 with G16 feature-fast values/scales at4096<=context<8192 uses two adjacent
-PV features per lane, sharing their packed byte, scale and probability while
-retaining each ordered FP32 FMA chain. Other widths/layouts/contexts retain the
-single-feature route; broad pairing was slower for W4/W5. The static checker
-covers both emitted PV routes. Qualification also checks invalid device page-table rows and physical
-pages poison every represented W4/W5/W6 row without touching workspace guards.
+Host-fixed 1..6-row decode (ordinary T=1, MTP verification, DFlash chain verification W2..6;
+contexts 64..262144) uses the packed split-context dense route:
+one 192-thread CTA (three CTAs per WGP) per KV head and context chunk (at most 64 chunks of at
+least 256 keys). The six query heads' (row, head) pairs are packed into sixteen-lane tiles, so
+three compute waves cover W6, while three loader waves convert the next 16-key block into the
+second of two LDS buffers (one barrier per block). Every pair runs the dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K, online FP32 Softmax with FP16
+probabilities, FP16 V/8 PV) and writes per-row numerator/origin/denominator partials; a stable FP32
+merge normalizes. The public oracle is BF16-Q attention with exact decoded cache planes and the
+dense criterion |error| <= 2e-3 absolute or relative. Ordinary T=1 decode and MTP verification
+use the same packed route (rows 1..6), so greedy DFlash and greedy ordinary decode share one
+attention arithmetic. Tree/device-count forms and other layouts retain their existing routes,
+including split512 for tree/device-count T=4 at context 8192 and above. The workspace planner owns the bounded partials. Qualification also
+checks invalid device page-table rows and physical pages poison every represented row (1..6)
+without touching workspace guards; `check_attention_parity_static.py` pins the split kernel's
+resources (235 VGPRs, no scratch, 16 BF16 and 16 FP16 WMMAs) and the merge kernel. A compact batch
+of up to eight sequences shares one split launch and one merge (grid z = sequence, per-sequence
+kernarg slots and workspace), and one append codec launch (grid y = sequence).
 
 Focused qualification (JSON on stdout):
 
 ```bash
 build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator
 build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator --long-context
+build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator --sequence-batch
 build-r9700/src/ninfer_r9700_runtime_planner_qual --host-attention-parity-routing
+build-r9700/src/ninfer_r9700_runtime_planner_qual --host-dflash-graph-allowance
+build-r9700/src/ninfer_r9700_full_attention_qual
 ```
 
-The discriminator retains W5/W6 and adds W4 at context64 and133 (4100 with
-`--long-context`), compact C1..4 device page-table selection, causal prefixes,
-invalid-row poisoning, serial/eager/graph equality, and score/output guards.
+The discriminator retains W5/W6 and adds widths 1..4 at context64 and133 (4100 with
+`--long-context`), compact C1..8 device page-table selection, causal prefixes,
+invalid-row poisoning, eager/graph equality, and workspace/output guards. `--sequence-batch`
+requires the B=1..8 sequence-batched packed launch (contexts 37/600/4100/33000/129/2050/8200/1000
+over one shuffled shared pool, W8 and mixed W8/5/1/7 and W8/5/1/7/4/8/2/6 rows, device table rows and direct tables) to equal each
+sequence's one-sequence launch byte for byte, eager and graph-replayed, from poisoned outputs and
+workspaces, and the batched append (prefix, device-count, table-row and invalid-position
+sequences) to equal per-sequence appends in every plane byte and status word.
 Cold-start fixed K3 and adaptive Engine exact-token tests remain required: a
 warmed adaptive benchmark can stop choosing K3 and conceal a W4 route mismatch.
+The public leaf qualifier additionally covers contexts15200/32768, W4..6,
+fragmented physical pages, compact C1..4 table rows, pending publication,
+undersized-workspace rejection, the independent FP64 public oracle, and
+poisoned eager/captured output and scratch guards; its T1..6 fixed-context cells use the same
+packed-route criterion. All packed decode contexts share one graph topology (split kernel plus
+merge).
+
+`ninfer_r9700_fp8_row_scaled_linear_qual` checks the row-scaled E4M3 Linear (`LinearExecution`):
+the small-T route used by verification and ordinary decode (one 128-thread CTA per 16 rows, native
+FP8 WMMA, K split in four ordered quarters) on N7168/K5120 and N5120/K6144 at T=1,2,5,6,8,16 over
+every element, and the prefill GEMM route (raw E4M3 staging) on N7168/K5120, N5120/K6144,
+N34816/K5120, N5120/K17408 and N4096/K5120 at T=17,300,2048 over sampled tokens and rows, against
+an FP64 product of the consumed codes (BF16 half-ulp plus the FP32 accumulation bound), with
+output guards and per-token nonfinite-input poisoning. `ninfer_r9700_swa_qual` includes the production C1 K5
+drafter block (T6 over a 4096-token window) and the C8 K7/K6 drafter blocks (T8/T7 over eight
+4096-token windows) with their timings.
 
 Selected concurrent Text localization uses the existing eager layer-boundary
 trace without serializing the model batch. Set
@@ -165,10 +188,17 @@ Require both `abs(actual-q)<=E` and `abs(actual-public)<=abs(q-public)+E`
 per output and in per-token L2. Positive budget arithmetic rounds outward;
 zero terms require exact zero and nonfinite values fail. The separate arithmetic
 check prevents quantization allowance from hiding an implementation defect.
-Exact INT32 G64 dots and exact FP16 scale products feed ascending FP32 FMAs,
-then one BF16 RNE cast; this finite, non-underflowing profile justifies the bound.
-Codec, exact generic/eager/graph, poison, guard and deliberate output-corruption
-checks remain mandatory. This is not a bound on model-quality loss: PPL admission
+Exact INT32 G64 dots and exact FP16 scale products feed ascending FP32 FMA chains
+over contiguous K ranges, one per wave of a K-split CTA (4 waves; 8 at N5120/K4096, 16 at
+N1280, 1 at N12288), whose partials wave zero adds in wave order before one BF16 RNE cast;
+the chain-plus-combine depth never exceeds `G`, so this finite, non-underflowing profile
+justifies the same bound. The generic WMMA control is checked against the same oracle but is
+no longer a bitwise reference. Two projections of one prepared K5120 activation (the GDN
+query-key/value-z pair N4096+N12288 and the attention query-key/gate-value pair N7168+N7168) run
+as one launch with four-way K-split CTAs per 16-row tile; the qualifier's `pairs` section checks
+both outputs of each pair at T5/6/12 against the same public FP64 bound through the
+shared-activation Op. Codec, exact eager/graph, poison, guard and deliberate
+output-corruption checks remain mandatory. This is not a bound on model-quality loss: PPL admission
 remains separate and no production precision changes.
 
 The old 2% relative-RMS/10%-of-reference-RMS gross screen is retained as diagnostic
@@ -188,10 +218,19 @@ N7168/K5120, N6144/K5120, N1280/K5120 and N5120/K4096 at their selected widths.
 including the three previously selected output cells. The complete owner has89
 cells. N12288 T5/6 retains scale-gather; its concurrent widths use the tiled
 successor body, not the small-T accumulator mapping.
-N34816/K5120 T18/20/24 use one wave for both M tiles, sharing each weight payload
-while retaining independent ordered G64 accumulations. Other projection cells
-retain their prior routes. Focused canonical qualification and complete-Op timing:
-`profiles/bench/r9700-remaining-candidates-20260924/`.
+Other projection cells retain their prior routes. Focused canonical qualification and
+complete-Op timing: `profiles/bench/r9700-remaining-candidates-20260924/`.
+Every concurrent-DFlash width T17..64 of N34816/K5120, N5120/K17408, N5120/K25600, N6144/K5120,
+N5120/K4096 and the N131072/K5120 draft head, and T49..64 of N1280/K5120, take a token-tile CTA
+(`a8q4_token_tile_cta.h`: one CTA per ceil(T/16)x16 token tile and 64- or 128-row tile, staged
+activations shared by its row fragments, in-CTA K split with two groups of loads in flight) selected
+per shape and tile class from `profiles/bench/r9700-c8-20260930/drafter/token_tile_ab2.json`
+(table and medians in `a8q4_small_batch_projection.h`); N1280/K5120 T25..48 keeps the tiled body
+with one CTA row per M tile. `--wide-only` qualifies just these cells (including the off-table
+class-bound widths T17/33/63) and the in-place residual epilogue of the N5120 token-tile routes;
+`--wide-ab` additionally times every qualified wide cell (7 interleaved unprofiled event trials
+over disjoint weight copies of at least 256 MiB) against the prefill-CTA/WMMA32 route those widths
+took before the wide table.
 These scopes use identical numerical criteria and
 report their restricted domain explicitly. Restricted results never qualify the
 unmeasured domain. Retained original diagnostic provenance:
@@ -202,8 +241,8 @@ ISA checker have been removed. Their evidence remains under the gate-up-pipeline
 projection-pipeline and verify-pipeline-family packages in `profiles/bench/`.
 For new linked ISA inspection use the safe extractor
 `tools/bench/extract_embedded_code_object.py`: the selected projection module owns
-`small_batch_projection_kernel<N,K,T>` for the ordinary tiled cells, including down,
-and `gate_up_paired_tiles_kernel<T>` for N34816/K5120 T18/20/24.
+`small_batch_projection_kernel<N,K,T>` for the ordinary tiled cells, including down, and
+`a8q4_token_tile_kernel<TokenTileConfig<...>,Accumulate>` for the token-tile wide cells.
 Do not apply the retired four-IU4-site scale-gather checker to primed/drained pipelines.
 
 ## Standalone suite
@@ -443,13 +482,18 @@ identity. Ordinary benchmark-only schema-v5 reports remain diagnostic and are no
 admission evidence.
 
 The cooperative prefill CTAs are now production linear-Op routes at only their physically admitted
-tuple predicates. A8Q4G64 uses a sixteen-wave 64-token-by-64-row CTA, stages one K64 group in a
-6,400-byte fragment-major LDS tile, and issues the native low/high signedness pair of
-`v_wmma_i32_16x16x32_iu4`. A8W8G32 is a separate sixteen-wave 64-token-by-64-row implementation,
+tuple predicates. A8Q4G64 uses an eight-wave 128-token-by-128-row CTA with token tiles fastest in
+the grid; each wave owns 2x4 fragments. It double-buffers one K64 group (26,624 bytes of LDS),
+loads each next group from scalar bases with U32 offsets (scale first) while the current group
+computes, and chains the signed high-nibble `v_wmma_i32_16x16x32_iu4` pair from the exact
+0x04B40000 origin, shifts by four, and completes the unsigned low-nibble pair, so the I32 result
+reads as FP32 12582912+dot without a conversion. It is bit-exact to the former M64xN128 kernel,
+and `prefill-cta-static-q4` pins its symbol, 64 IU4 sites, loads and resources.
+A8W8G32 is a separate sixteen-wave 64-token-by-64-row implementation,
 stages one signed-I8 G32 group in 4,352 bytes of fragment-major LDS, and issues two native signed
 `v_wmma_i32_16x16x16_iu8` operations per group. Both retain no scratch and bounded VGPR use.
 
-The qualified Stage-1 memory pipeline is the production body for both cooperative CTAs. Each
+The qualified Stage-1 memory pipeline is the production body for the W8 cooperative CTA. Each
 barrier uses workgroup-local release, signal/wait, and acquire; the former broad `global_inv`
 body is retained only under an explicitly named qualification entry for direct regression. Run
 the exact bit-parity/status/tail matrices with:
@@ -652,32 +696,11 @@ WMMAs at occupancy 16; independent activation/scale and arithmetic-cleanup ceili
 VGPRs. The overlapping bounds are not additive. This does not prove practical-ceiling closure;
 that question remains open.
 
-The retained-production FP8 audit closes that projection family as the missing `>=51.439 ms`
-floor mechanism. At C1/P2048/G0/chunk4096, hipBLASLt solution `123104` accounts for 64 MLP
-gate/up calls (`[T,N,K]=[2048,34816,5120]`, `255.024909 ms`, `183.234` useful TFLOP/s) and 48
-GDN query/key calls (`[2048,4096,5120]`, `23.726265 ms`, `173.781` TFLOP/s). Solution `123100`
-accounts for the 32 full-attention query/key and gate/value calls
-(`[2048,7168,5120]`, `28.559464 ms`, `168.433` TFLOP/s). The fresh symbols match the retained
-loaded-ELF proofs of native gfx1201 `v_wmma_f32_16x16x16_fp8_fp8`; both use 192 architectural VGPR,
-zero private/scratch, and 25,088 or 12,544 bytes LDS. Do not confuse these row-scaled E4M3 FP8
-roles with the separate A8W8/IU8 CTA implementation.
-
-The shared-library-context startup regression uses
-`BUILD/src/ninfer_r9700_fp8_gate_up_qual --shared-context --output NEW_REPORT.json`.
-It prepares all three production FP8 shapes (N34816/N7168/N4096, K5120) before storage binding
-at startup widths 1/2/3/4/2048, rejects unbound execution, then compares against independent-context
-algorithm fingerprints prepared after binding (the former order). It checks sampled outputs
-against the represented-format FP64 oracle in eager and twice-replayed Device Graph execution
-at T4/T2048. All projections share one context and serialized activation region. Memory snapshots
-separate context creation, preparation, storage binding and later execution; they are diagnostics, not a
-substitute for real Engine startup headroom/capacity evidence. Reports are create-only.
-
-All ten supported zero-workspace gate/up catalog solutions have been timed, the closest alternate
-saves only a projected `0.212524 ms` over 64 calls, M128xN128 regressed, M128xN256 is
-resource-terminal, and adjacent consumer fusion is bounded below the floor deficit. No additional
-FP8 catalog, custom-kernel, fusion, or counter-only performance command is admitted. P2048 remains
-`1904.339303 tok/s`; the 2,000 tok/s floor is not passed, and whether to retain or revise it is now
-a product-contract/user decision. Candidate exhaustion alone is not practical-ceiling proof.
+The row-scaled E4M3 FP8 projections ran on hipBLASLt (solutions `123104`/`123100`, 168-183
+useful TFLOP/s at P2048) until 2026-09-27. They now run on the FP8LUT4 prefill GEMM with raw E4M3
+staging (~212-217 TFLOP/s at T2048), and hipBLASLt, its catalog/prefix qualifiers and its
+shared-context regression were removed. Do not confuse these row-scaled E4M3 FP8 roles with the
+separate A8W8/IU8 CTA implementation.
 
 Two M64xN256 Q4 prefill experiments are terminal rejections and their executable paths have been
 removed. The 16-wave/512-thread variant passed numerical qualification and improved the weighted
@@ -729,58 +752,45 @@ and N1024 regressed at all four extents by `1.21819x` through `1.35600x`. Its re
 `2ac938b230197384a476bd57ccfd39d72a1b73c03bee82c58bf3be9df7de5b1f`. Production remains A8;
 the already-rejected A4 quality profile was not reevaluated.
 
-The dense attention route is the three-stage full-score GQA6 path with bounded query panels
-in `fp8_int4_kv_attention.hip`. It accepts initial and appended P=128..8192 calls through a
-262144-token visible context with token-fastest
-FP8 K plus feature-fastest signed INT4 V and FP16 scales. QK uses Bk16 below P512 and the selected
-Bk32 schedule for complete calls with at least 512 query rows, regardless of panel width;
-each tile is shared across the six query heads of one KV
-head and writes FP32 scores. A separate maximum pass validates each causal
-vector; PV forms FP32 probabilities and reuses each direct INT4/FP16-scale V tile across the same
-six heads. The caller-owned score/max workspace is reused across layers at its planner-stable arena
-address. P<128, tree attention, and other layouts retain their prior routes. Device-active counts
-remain relative to the whole call; each panel clamps that count using its original row offset.
+The dense attention route is one fused causal GQA6 kernel in `fp8_int4_kv_attention.hip`
+(`dense_prefill_kernel`). It accepts initial and appended P=128..8192 calls through a
+262144-token visible context with token-fastest FP8 K plus feature-fastest signed INT4 V and FP16
+scales, and needs no caller-owned workspace. One 384-thread CTA owns a KV head and 32 query rows;
+each of its twelve waves owns one query head and sixteen rows over all 256 features. Every 32-key
+block is decoded once into LDS (exact BF16 K; FP16 V/8 from exact n/8 times the FP16 scale), then
+each wave computes S^T=K Q^T with 32 BF16 WMMAs, updates online FP32 Softmax (reference raised
+only when a block exceeds it by 2^8), and accumulates O+=P V with 32 FP16 WMMAs. The denominator
+sums exactly the FP16 probabilities in FP32. Blocks fully visible to every row skip masking; a
+nonfinite visible score poisons its row through a NaN denominator. The kernel is held to 240
+VGPRs (six waves per SIMD) so two CTAs share a WGP. P<128, tree attention, and other layouts
+retain their prior routes.
 
 After the serialized campaign permits a new build/GPU run, execute the independent FP64 harness:
 
 ```sh
-make -C tools/r9700 dense-prefill-attention
+make -C tools/r9700 -j8 dense-prefill-attention
+# One explicit shape (rows, visible context, value group):
+tools/r9700/build/dense_prefill_attention_qual 1537 12288 16
+# Oracle check, then the median of N individually event-timed launches:
+tools/r9700/build/dense_prefill_attention_qual --time 2048 65536 16 30
 ```
 
-It covers G16/G32 initial prefixes, appended 8K/32K contexts, 8192 query rows, partial panels,
-and a 262144-context panel boundary with fragmented physical pages and exact stored cache planes.
-Independent FP64 scores are computed once per sampled row/head and validate all 256 output
-features across all four KV heads. It also checks workspace/output canaries, active counts crossing
-panels, invalid whole-call counts, and eager/Device Graph replay after poisoned scratch.
-`dense-prefill-attention-full-score-isa` prints both selected QK kernels plus maximum and PV. Invoke
-`dense-prefill-attention-full-score-static` with the exact selected mangled symbol and
-`DENSE_ATTN_STAGE=qk_bk16`, `qk_bk32`, `maximum`, or `pv`. The checker requires exactly sixteen
-BF16 WMMAs for Bk16 and 32 for Bk32, and forbids every WMMA opcode in maximum/PV. The emitted
-pre-panel gfx1201 resources were Bk16 QK 29 VGPR/8,296-byte LDS/occupancy 15, Bk32 QK 97 next-free
-VGPR/16,488-byte LDS/occupancy 11, maximum 17 VGPR/64-byte LDS/occupancy 16, and PV 116
-VGPR/occupancy 12 with 9,208-byte G16 or 8,952-byte G32 LDS. Every stage is wave32 WGP mode with
-zero private/scratch/flat-scratch and zero register spills; PV must contain native FP32 exp and
-FP32 FMA/FMAC.
+It covers G16/G32 initial prefixes, appended 8K/32K contexts, 8192 query rows, key-block and page
+boundaries around 2K/4K/12K/32K, 64K/128K/262144 contexts with fragmented physical pages,
+nonperiodic represented inputs, both finite FP16 scale extremes, and exact stored cache planes.
+Independent FP64 attention validates all 256 output features of sampled rows across all four KV
+heads. It also checks output canaries, device-active counts, invalid whole-call counts, malformed
+positions, page-table rows and physical pages, and eager/Device Graph replay. The kernel must
+report zero scratch/spills. `dense-prefill-attention-isa` prints the selected kernel's WMMA and
+resource lines; `dense-prefill-attention-static` with `DENSE_ATTN_ASSEMBLY`, `DENSE_ATTN_METADATA`,
+the exact mangled `DENSE_ATTN_SYMBOL` and `DENSE_ATTN_VALUE_GROUP` requires 32 BF16 and 32 FP16
+WMMAs, native FP32 exp, three barrier pairs, 37,552-byte LDS, at most 240 next-free VGPRs,
+occupancy at least 6, 384-thread wave32 WGP execution and zero private/scratch/spills. Current
+G16/G32 kernels use 240 next-free VGPRs. Timing, whole-model results and quality checks are in
+`docs/performance.md`.
 
-The full-score route uses a caller-owned reusable FP32 workspace of
-`24*panel_rows*(visible_context+1)*4` bytes. Panel rows are the lesser of the query count and
-`floor(2048*2048/visible_context/16)*16`, bounding scores at 384 MiB and maxima at 192 KiB.
-P2048 remains one panel with its original 384.1875 MiB workspace. The planner uses a conservative
-envelope bound rather than the exact endpoint size because panel-size rounding introduces a
-sawtooth as context grows. All panels reuse one stable address on the owning stream.
-Its 192-thread QK stage launches one Bq16 CTA
-per KV head/query tile/key tile; Bk32 halves the key-tile workgroups and reuses each represented
-query fragment across two K16 WMMA fragments. Six query-head waves share each decoded FP8-K tile; its
-maximum stage validates and reduces each causal FP32 score vector; its 256-thread PV stage stages
-FP32 probabilities plus each signed-INT4/FP16-scale V tile once for all six GQA heads. PV retains
-FP32 exponential, denominator, and numerator arithmetic and contains no WMMA. Inspect all staged
-ISA with `dense-prefill-attention-full-score-isa`; invoke
-`dense-prefill-attention-full-score-static` with `DENSE_ATTN_STAGE=qk_bk16`, `qk_bk32`, `maximum`,
-or `pv` and the
-exact corresponding non-active mangled symbol. The retained selector timed the three-launch Op as
-one HIP-event sample after every stage and the independent FP64 oracle passed.
-
-For G16 and G32 at P128/512/1024/2048/4096, the retained pre-promotion report compared the complete
+Historical score-panel evidence (superseded by the fused route): for G16 and G32 at
+P128/512/1024/2048/4096, the retained pre-promotion report compared the complete
 incumbent fused call with Bq4/Bq8/Bq16 after independent FP64 qualification. It timed one complete Op
 call per event sample using seven rotating forward/reverse route pairs, preserving all fourteen
 raw samples and each route's real CTA count. Bq16 won every measured cell. Its exact
@@ -793,16 +803,17 @@ is `profiles/bench/r9700-dense-prefill-full-score-ab-20260904.json`, SHA-256
 Bq16 medians are 14.669395/61.569540 ms for G16 and 14.819379/61.336494 ms for G32.
 The selected crossover report is
 `profiles/bench/r9700-dense-full-score-bk16-bk32-crossover-ab-20260904.json`, SHA-256
-`7941bb518ce2a2287e06403952ad9d90f2ada115550c1967e474906f5a600a2f`. It selects Bk16 at P128 and
-Bk32 at P512/1024/2048/4096 for both G16 and G32; production keeps Bk16 for the intervening
-unmeasured P129..511 fallback. The focused qualifier now covers production correctness only.
+`7941bb518ce2a2287e06403952ad9d90f2ada115550c1967e474906f5a600a2f`. It selected Bk16 at P128 and
+Bk32 at P512/1024/2048/4096 for both G16 and G32. September25 tiled QK supersedes that
+large-call choice as described above; P129..511 still uses16x16.
+The focused qualifier covers production correctness only.
 
-The subsequently isolated dense P2048 FP8-Q/Bk32 route passed its exact FP8-Q panel, independent
+The earlier isolated dense P2048 FP8-Q/Bk32 score-panel route passed its exact FP8-Q panel, independent
 FP64 score and complete-attention oracles, workspace overwrite/liveness, and static resource gates,
 but failed its fixed physical threshold. Candidate/incumbent medians were 2.983591080/3.442310095 ms
 (`0.8667409378x`); 16 calls total 47.73745728 ms, only 7.33950424 ms matched saving rather than the
-required 15 ms (candidate ceiling 32.439611 ms). Production remains the BF16-WMMA Bq16/Bk32 route,
-and all FP8-Q/Bk32 candidate modes and checker surfaces are removed. The immutable design report is
+required 15 ms (candidate ceiling 32.439611 ms); its candidate modes and checker surfaces were
+removed. The later fused-route FP8-QK evaluation is recorded in `docs/performance.md`. The immutable design report is
 `profiles/bench/r9700-dense-full-score-fp8-q-bk32-static-design-20260904.json` (SHA-256
 `aed480c787313c280aefc83d8cdf943a6b81711872786677f905f3d4036cd521`); the terminal physical report
 is `profiles/bench/r9700-dense-full-score-fp8-q-bk32-ab-20260904.json` (SHA-256
@@ -1099,7 +1110,10 @@ all-layer transaction and publication contract.
 split by ownership: `ninfer_r9700_state_qual` covers all-layer host/device append, compact
 publication, invalid device-position frontier preservation, and publication-local poisoning;
 `ninfer_r9700_kv_ram_qual` covers exact three-plane capture/restore and fingerprint
-rejection, and `ninfer_r9700_full_attention_qual` covers the target attention consumer.
+rejection, plus exact RAM/disk current-versus-rewrite state selection for frontier, turn,
+response and checkpoint-drop reuse. It verifies kept and untouched GDN, hidden and DFlash cyclic
+bytes, and the disk state-decode count. `ninfer_r9700_full_attention_qual` covers the target
+attention consumer.
 
 `ninfer_r9700_kv_cache_append_prefix_qual` covers the separate DFlash BF16 state mutation. It
 checks bit-exact D128/Hkv8 device-count prefix writes, inert physical tails, wraparound in the live
@@ -1107,26 +1121,40 @@ checks bit-exact D128/Hkv8 device-count prefix writes, inert physical tails, wra
 unchanged represented inputs, and dynamic count replay through a HIP Graph. It does not publish a
 frontier and never enters the asymmetric FP8-K/INT4-V Text/MTP transaction contract.
 
+`ninfer_r9700_dflash_context_kv_qual` checks the passive 2048-row K/V view of a packed
+6144-row QKV weight against the independent FP64 Linear oracle, with the native A8 error budget,
+at T1/4/8/9/16/17/32/64/65/128/129, including eager and captured producer-image projections
+against the same public oracle and exact canonical-projection equality. Full-QKV output equality
+is supplementary. Its fused append
+oracle evaluates complete FP64 RMSNorm/RoPE from represented BF16 K and weights, with exact V
+and untouched-cache checks. It covers B1/4/8, W1/8/64, W2048/B1, wraparound, mixed device counts,
+shuffled lanes and captured replay with changed counts. Alternating captured event timings
+measure warm-L2 selective projection and norm/RoPE/append edges, not cold-weight bandwidth.
+
 `ninfer_r9700_mtp_round_qual` covers the exact MTP next-round state transition over every fixed
-product shape K=1..5 and B=1..4. It compares alignment IDs, next proposal extents, AR positions,
+product shape K=1..5 and B=1..8. It compares alignment IDs, next proposal extents, AR positions,
 MRoPE positions, and validity columns with an independent host integer oracle, including
 budget/context exhaustion, zero/full acceptance, nontrivial row pitch, untouched pitch padding,
 and immutable inputs. The public Op and implementation are native HIP members of the closed
 gfx1201 archive; the retired wrapper, launcher, kernel, and duplicate legacy test are removed.
 
 `ninfer_r9700_speculative_round_qual` covers the complete chain and packed-tree acceptance owner.
-It exhausts K=1..8, W=2..16, and B=1..4, then checks mixed greedy/stochastic rows at both the
+It exhausts K=1..8, W=2..16, and B=1..8, then checks mixed greedy/stochastic rows at both the
 512-token single-workgroup boundary and the full 248320-token Qwen3.8 vocabulary. An independent
 host oracle rebuilds the represented-BF16 top-20 distribution in FP64, applies penalties and the
-round-local path overlay, uses the exact counter RNG, and evaluates selector-q Leviathan residuals
-and SpecInfer child membership. Exact comparisons cover every accepted token, count, anchor,
+round-local path overlay, uses the exact counter RNG, and evaluates selector-q Leviathan residuals,
+p-less block verification (Sun et al. 2024, Algorithm 2) with forced one- and two-draft accepts, and
+SpecInfer child membership. Statistical p-less block-verification cases at V=64 and V=248077 of
+248320 physical rows check the first two emitted tokens against the p-less law by chi-square and
+the mean accepted length against an FP64 enumeration of Algorithm 2, including a chained second
+round from the same seed. Exact comparisons cover every accepted token, count, anchor,
 length, accepted column, fold path, optional token-count publication, immutable input, and BF16
 hidden selection bit. A captured full-vocabulary-style multi-stage chain replays at fixed addresses
 with dynamic input state. The selected caller-owned partial/distribution pipeline uses no hidden
 allocation or host readback. Retained pre-cap physical R9700 timings over 20 unprofiled ROCm events
 measured 2.01 ms for chain V=248320/K=8/B=8 and 0.59 ms for the mixed greedy/stochastic product
-tree V=248320/W=12/B=8; those B=8 measurements are historical, not supported-product evidence.
-The active qualifier covers B=1..4. LLVM metadata reports 20 VGPR/1440 bytes LDS for the partial kernel and 17
+tree V=248320/W=12/B=8; those pre-cap timings predate the current kernels and are not current
+product evidence. The active qualifier covers B=1..8. LLVM metadata reports 20 VGPR/1440 bytes LDS for the partial kernel and 17
 VGPR/224 bytes LDS for finalization, with wave32 and no private scratch in either. The retired
 wrapper, launcher, kernel, and duplicate legacy test are removed.
 
@@ -1191,16 +1219,18 @@ W8 route additionally owns complete `[248320,5120]` device code/scale extents, p
 checks IDs through 248319 bit-exactly against signed-code times stored-FP16-scale, and rejects a
 short payload and incorrect K padding. Its 1,288.36 MiB fixture measured 0.013 ms for the eight-row
 gather in the qualifying ROCm-event observation; that timing describes the check, not an embedding
-route selection. MTP cases also reject malformed logical shapes and partial byte-range aliases. Build and run the
+route selection. The production Q4G64 N16K16 embedding route is checked the same way at the
+complete `[248320,5120]` extent against independent logical codes times stored-FP16 scales; the structural corpus uses 104 features so the final code word
+exercises the partial-word stores. MTP cases also reject malformed logical shapes and partial byte-range aliases. Build and run the
 standalone form with
 `make -C tools/r9700 build/eager_op_qual`.
 
-K5120 small-token RMSNorm uses the ordinary parallel-CTA arithmetic consistently at T1..24,
-including speculative verification batches. `make -C tools/r9700
-rmsnorm-decode-production-regression` checks the represented-input FP64 oracle and exact
-same-column equality against T1 at every width, plus eager/graph equality at T2/5/6/10/24.
-There is no rows5/6 candidate build flag. T25..127 and other feature widths retain their
-existing routes; T>=128 prefill remains unchanged.
+K5120 RMSNorm uses the parallel row-CTA arithmetic at every width: decode, speculative
+verification batches, mixed decode/prefill units and prefill chunks (unaligned T>=128 rows keep
+the byte-copy token8 route). `make -C tools/r9700 rmsnorm-decode-production-regression` checks
+the represented-input FP64 oracle and exact same-column equality against T1 at T1..128, 255, 256
+and 2048, plus eager/graph equality at T2/5/6/10/24/64/127. There is no rows5/6 candidate build
+flag; other feature widths retain their existing routes.
 
 `rmsnorm_prefill_qual` retains the direct regression boundary for the production K5120 prefill
 route selected at T>=128. One 256-thread workgroup assigns each of its eight wave32 waves
@@ -1245,9 +1275,10 @@ make -C tools/r9700 rmsnorm-k256-prefill-benchmark \
 ```
 
 The canonical small-token RMSNorm route covers exactly K5120 and rows 1 through 24, including
-ordinary decode and flattened speculative verification batches. One 256-thread CTA owns each row:
-every lane accumulates 20 represented BF16 values in FP32, wave32 shuffles reduce each wave, and
-eight LDS partials complete the CTA reduction before BF16 publication. The numerical gate compares
+ordinary decode and flattened speculative verification batches. One 640-thread CTA owns each row:
+every lane loads one 16-byte vector of eight represented BF16 values and accumulates their squares
+in FP32, wave32 xor shuffles reduce each wave, and every lane adds the twenty LDS wave partials in
+wave order; the row stays in registers for the 16-byte BF16 publication. The numerical gate compares
 the complete result directly with an independent CPU FP64 formula across ordinary, zero, and
 mixed-magnitude inputs, both gain modes, three epsilon values, every selected row count, and two
 Device Graph replays. The current physical regression passed all 432 FP64 cases, with zero
@@ -1256,9 +1287,8 @@ RMSNorm alone did not restore whole-model parity. With the protected BF16 projec
 projected GDN control and replay-fold corrections, the P89/G128 C1–4 DFlash K4/K5 graph
 and C2–4 eager matrix now passes exact ordinary-token parity. Retained intermediate failures
 and final scope are documented in `docs/performance.md`; this is not universal-context admission.
-K5120 rows 25 through 127 retain the generic route, K5120 rows at or above
-128 retain the token8 prefill route, and every other feature width retains its existing specialized
-or generic fallback. Check the host selection boundary and gfx1201 resources without GPU execution
+Aligned K5120 rows of every width take the row-CTA route, and every other feature width
+retains its existing specialized or generic fallback. Check the host selection boundary and gfx1201 resources without GPU execution
 with:
 
 ```bash
@@ -1367,6 +1397,14 @@ and build targets are removed; production routing was never changed.
 Sealed evidence is `profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1`;
 `result.sha256` digest is `5ea1c61d7d02fdeb971c151ded538872cf46121c31d299686bf0b42390b68e15`,
 closure SHA-256 is `8e08b7a134601a6dddb5c16c5a74b7b19ed6f635bf435f50ee50b742c75ac4db`.
+
+`ninfer_r9700_a8q4_normalized_linear_prefill_qual --out-json FRESH.json` qualifies the A8 prefill
+boundaries at T2048: the normalized gate/up projection; the GDN input front (RMSNorm published as
+BF16 rows within one BF16 step of FP64, planes equal to the codec of those rows and to the gate/up
+route's planes, query-key/value/output-gate GEMMs exact against the production GEMM on the same
+planes, and the side-stream output-gate form bit-identical); the gated GDN output projection; and
+the in-place projected-residual routes (GDN output, attention output, fused SiLU down), whose
+outputs must equal BF16(residual + production GEMM) exactly, besides the FP64 oracles.
 Retained assembly, embedded objects, receipts and scripts explain the completed experiment;
 the historical package is not rerunnable. No whole C1 A/B is justified. The GDN projection/control
 heterogeneous-grid CPU/static feasibility gate has independent `SHIP`. Reproduce only this static
@@ -1376,9 +1414,12 @@ FP32 g/beta outputs; CTA-uniform branches isolate all nine control barriers. Emi
 retains native IU4 and exact control reduction/BF16 seams, at 34 VGPR, 52 SGPR, 2048 bytes LDS,
 compiler occupancy 16, and zero scratch/spills. Four vector B128 activation loads replace the
 incumbent's two scalar B256 loads; the issue-cost effect remains unmeasured. This static probe
-is not a complete public Op and makes no numerical-correctness or performance claim. Next prepare
+is not a complete public Op and makes no numerical-correctness or performance claim. Its control
+heads retain the former 256-thread strided reduction; the production control now reduces one
+16-byte vector per thread over 640 threads, so the grid qualifier's exact incumbent `g` parity
+no longer holds until the candidate adopts that association. Next prepare
 and independently review complete control+quantize+pair numerical, graph/workspace, and timing
-qualification as specified in `plans/r9700-autonomous-todos.md`. Finish this bounded decision,
+qualification as specified in the retired 2026-09 ledger (git history). Finish this bounded decision,
 then switch to recipe-independent DFlash optimization before another base-decode mechanism;
 normalization fusion is deferred. No physical command is currently runnable. Reopening a rejected
 mechanism requires a distinct mechanism and new bound.
@@ -1434,9 +1475,9 @@ and Q4 output matrix.
 The production Text-MLP fusion consumes BF16 gate/up output with Q4G64 down and A8 down
 activations at T=2,048 in a main Text layer, independently of the gate/up producer format.
 It preserves the explicit BF16 rounding boundary between FP32
-SiLU-multiply and the existing signed-A8G64 codec, then invokes the unchanged production M64N128
-Q4 matrix. Other down formats, activation widths and token widths use the ordinary split boundary.
-Compact gate/up-A4 admission retains all six NLL sidecars exactly and improves matched C1
+SiLU-multiply and the existing signed-A8G64 codec, then invokes the production A8Q4 prefill
+matrix. Other down formats, activation widths and token widths use the ordinary split boundary.
+Its historical compact gate/up-A4 admission retained all six NLL sidecars exactly and improved matched C1
 code4K ordinary prefill1494.30→1519.18tok/s; evidence is in
 `profiles/rocprof/r9700-compact-mixed-speed-20260923/`. The one-shot timing
 executable was removed after direct and matched-whole admission; its immutable report remains at
@@ -1623,6 +1664,19 @@ won at T=2048 and T=4096, so production has one route rather than an unsupported
 seven-run selected medians at T=16/32/64/128 are 0.033244/0.054612/0.099263/0.188758 ms, reductions
 of 21.37/27.02/28.47/28.97 percent. The same public timing fixture records T=1 through T=4096.
 
+Normalized ordinary widths of 64 or more (except the T129 prefix-trace diagnostic) use the chunked
+(WY) route in `gdn_prefill_chunked.hip`, which needs no workspace: one workgroup per value head
+walks 64-token chunks, forming the strictly lower `A = beta_i exp(b_i - b_j) k_i.k_j`, FP32
+diagonal blocks of `(I + A)^-1`, `Z = beta (V - Gamma K S^T)`, the corrected values
+`V'_I = (I + A_II)^-1 (Z_I - sum_{J<I} A_IJ V'_J)`, `O = scale (Gamma q) S^T + (causal decayed
+q.k) V'` and `S <- Gamma_last S + (K exp(b_last - b))^T V'` with FP16 WMMA products and FP32
+accumulation. Each wave keeps its 16 state rows as S^T WMMA accumulators, which are directly the B
+operand of the next chunk's products; a partial final chunk is masked. It replaces the former
+per-token staged recurrence (not bit-exact: FP16 operand rounding, about 5e-4 relative state error
+on long synthetic runs versus FP64, inside the Op's output/state criteria). The qualifier covers
+T=128/2048 and partial chunks at T=65 (in place), 100 and 2047, and times P2048 at about 0.87 ms
+versus 1.39 ms before.
+
 Build and run with `make -C tools/r9700 build/gdn_recurrence_qual`. Compiler metadata reports the
 selected normalized ordinary kernel at 56 VGPR, 1040 bytes LDS, zero private scratch, and occupancy
 16; snapshot/tree remain at 58/66 VGPR and at most 1536 bytes LDS. Reproduce with
@@ -1685,7 +1739,7 @@ vocabularies use one exact 512-token partial top-20 stage followed by a bounded 
 each partial selects within eight waves and merges their shortlists in wave zero, avoiding a
 45-barrier full sorting network while retaining the same total 64-bit ordering key;
 the transient key plane comes only from the caller's `WorkspaceArena`. The qualifier runs the
-full padded Qwen vocabulary of 248320 tokens at every product B=1..4 and compares selected IDs plus the
+full padded Qwen vocabulary of 248320 tokens at every product B=1..8 and compares selected IDs plus the
 entire token-count publication image with an independent host ordering/FP64 probability oracle.
 Its cases combine greedy and positive-temperature rows, exact BF16 ties across partials,
 presence/frequency penalties, top-k clamping, top-p/min-p filters, and counter keys separated by
@@ -1728,18 +1782,19 @@ transient workspace; LLVM reports 31 VGPR, 42 SGPR, no LDS/private scratch or sp
 run the `ninfer_r9700_bidirectional_gqa_qual` target in the R9700 CMake tree.
 
 `grouped_dynamic_conv_qual` reaches the public DFlash2 grouped-convolution boundary at its exact
-D5120/G320/kernel-2 geometry. It independently evaluates the complete projection and convolution
-formula in FP64 from represented BF16 activations and represented BF16, exact signed W8G32, or
-exact signed Q4G64 weights with their stored FP16 scales. The physical cases cover BF16 T1/B1,
-W8 T2/B2, adaptive-A8 Q4 T2/B2, both preparation phases, the zero-padded block boundary, and a
-separate T4/B2 finish. The
-selected implementation delegates the large `[1280,5120]` projection directly to the qualified
-native Linear Op, materializes only the caller-owned BF16 projection, and fuses phase-0 convolution
-with phase-1 stash extraction in one gfx1201 kernel. ROCm-event measurements were 0.0615 ms for
-BF16 T1/B1, 0.0939 ms for W8 T2/B2, and 0.0741 ms for Q4 T2/B2; maximum absolute oracle error was
-1.59e-5. Build and run the
-`ninfer_r9700_grouped_dynamic_conv_qual` target in the R9700 CMake tree. The prepare/finish kernels
-use 13/10 VGPR, no LDS, and no private scratch.
+D5120/G320/kernel-2 geometry. Its FP64 oracle evaluates prepare (from a supplied represented
+projection, both phases, the zero-padded block boundary), the in-place finish, and the fused
+finish + RMSNorm (represented BF16 residual seam) at T1/B1, T8/B1, T4/B2, T3/B4 and T16/B2. Every
+requested Q4 activation image must equal the independent host A8G64 oracle
+(`a8g64_image_oracle.h`) of the published BF16 values bit for bit, including a status word that
+starts stale in graph replays; a NaN or infinity must set it, and the completion words must return
+to zero after every launch. Build and run `ninfer_r9700_grouped_dynamic_conv_qual`.
+
+`q4_activation_image_qual` qualifies the Q4 activation image boundary (`ninfer/ops/linear.h`):
+quantized, RMSNorm and SiLU images against the host oracle (status CTA, reset and last-block
+status routes, NaN status), and every projection from an image bit-identical to the ordinary
+Linear on the same input for N1280/6144/34816 x K5120 and N5120 x K4096/17408 at T1/8/12/16/384.
+Build and run `ninfer_r9700_q4_activation_image_qual`.
 
 `swa_qual` qualifies the DFlash2 symmetric cyclic SWA boundary at D128/Hq32/Hkv8 for both admitted
 W2048 and W4096 windows. Its represented-BF16/FP64 oracle covers wraparound, the exact distance
@@ -1755,3 +1810,10 @@ selected finite schedule measured 0.173 ms at W4096 T3/B2, 0.063 ms at the real 
 measured 2.11/1.17 ms at the first two points. Maximum absolute oracle error was 1.25e-3. Build and
 run the `ninfer_r9700_swa_qual` target in the R9700 CMake tree. Direct/partial/reduce use 32/32/8
 VGPR respectively, with no LDS or private scratch.
+
+## Device checks
+
+`gpu_check/` holds the gfx1201 counterparts of compute-sanitizer memcheck, initcheck, and racecheck
+(guard-page allocations, poisoned allocations, and LDS race instrumentation of the device bitcode).
+`scripts/gpu-check.sh memcheck|initcheck|racecheck` runs them over the `gpucheck` qualifier set;
+semantics and limits are in [`docs/maintainer/code-quality.md`](../../docs/maintainer/code-quality.md#device-checks).

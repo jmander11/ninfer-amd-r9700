@@ -5,6 +5,11 @@ The native R9700 product exposes two whole-product benchmark executables. Config
 physical gfx1201 executables under `tools/r9700` and do not enter this graph.
 
 `ninfer_bench` drives the public Engine for prefill/decode and fixed-concurrency measurements.
+Each JSON repetition includes `prefill_tail_by_lane` entries with `tok_s` and
+`window_s`, retaining the Engine's trailing prefill-service estimate separately
+for each request. The window is at most one second; chunk contributions are
+prorated, so this is not sub-chunk GPU timing. Use it alongside whole-prompt
+average throughput to assess long-context slowdown, not as an aggregate C>1 rate.
 `ninfer_qwen3_8_27b_mtp_round_bench` drives the exact target Program for MTP round attribution.
 Both require a real converted Qwen3.8-27B R9700 artifact for execution.
 
@@ -60,10 +65,10 @@ trace and are isolated from performance rows.
 Before the larger Pareto campaign, use `--preset dflash-shortlist` to compare every supported
 DFlash draft length on one representative 8K-context, 256-token decode through the public Engine.
 The converted all-Q4 and mixed DFlash companions remain evaluation identities until base-profile
-selection. Under the C=1..4 product limit, both base recipes have complete retained pre-promotion
-native-context capacity controls at every supported concurrency; the historical mixed C7/C8
-failures no longer exclude that recipe. Current selection still requires all C=1..4 capacity cells
-to be rerun against the promoted executable and selected prefill chunk. Assign the physical DFlash
+selection. Under the former C=1..4 product limit, both base recipes had complete retained
+pre-promotion native-context capacity controls at every then-supported concurrency, and the
+historical mixed C7/C8 failures did not exclude that recipe. Current selection requires all C=1..8
+capacity cells to be rerun against the promoted executable and selected prefill chunk. Assign the physical DFlash
 campaign only after the corresponding base recipe and cache group win that selection.
 The preset is deliberately fixed at C=1: one shared ordinary control, K=1..11 performance rows
 with two measured repetitions after one warmup, and one syncing first-reject diagnostic per K.

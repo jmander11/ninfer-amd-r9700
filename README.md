@@ -2,9 +2,17 @@
 
 Native C++/HIP inference for **Qwen3.8-27B on one Radeon AI PRO R9700** (`gfx1201`,
 wave32). Supports CLI generation, OpenAI/Anthropic-compatible serving, Vision,
-DFlash2 speculative decoding, fixed concurrency of 1–4 requests, prefix caching,
+DFlash2 speculative decoding, fixed concurrency of 1–8 requests, prefix caching,
 Device Graphs and perplexity scoring. This is a target-specific AMD engine, not
 a general multi-model or multi-GPU framework.
+
+Serving includes constrained JSON/schema and EBNF output, required or named tool calls,
+optional restart-persistent Responses history, and candidate scoring through
+`POST /v1/score`. `GET /metrics` (Prometheus) and `GET /metrics.json` expose the process
+snapshot. Protocols, options, scoring semantics and metrics are in `docs/serving.md`.
+
+OpenAI Chat Completions and Responses support per-token logprobs with up to 20 ranked
+alternatives from the target model, including speculative decoding; see `docs/serving.md`.
 
 ## Performance
 
@@ -25,36 +33,45 @@ phases, excluding model loading—not end-to-end request throughput.
 Per-request rates are aggregate divided by concurrency. C1/four drafts was not
 remeasured. Five drafts wins at C1–2 and four at C3–4 on this workload; other
 prompts may differ. C4 adaptive reaches **201.04 aggregate tok/s**. All 24 final
-repetitions and 44 cold-transition cases match ordinary greedy tokens exactly.
+repetitions and 44 cold-transition cases matched ordinary greedy tokens exactly at that time;
+since 2026-09-25 verification attention keeps BF16 queries (ordinary decode uses FP8 queries), so
+greedy DFlash can differ from greedy ordinary decode on near-ties. See `docs/performance.md`.
 
-### Prefill and ordinary decode · retained 2026-09-23 results
+### Prefill · 2026-09-26 (FP8LUT4 artifact)
 
-| C1 mode | Prefill tok/s | Decode tok/s |
-|---|---:|---:|
-| No speculation | 1,519.18 | 30.15 |
-| DFlash2, five drafts | 1,472.19 | See newer table above |
-
-Same recipe/workload; prefill and ordinary decode were not remeasured after the
-latest decode changes. Keep chunk **2,048**: tested 4,096 chunks were 3.6–4.2%
-slower. Results are workload-specific, not a claimed hardware ceiling.
-Methodology, quality checks and committed evidence: `docs/performance.md`.
+Single-request prefill, chunk 2,048, same host and power: **8K 3,352, 32K 2,894,
+64K 2,455 tok/s** (context ladder). Six-waves-per-SIMD attention and GEMM kernels
+with interleaved weight staging added +12% at 32K and 64K over the first FP8LUT4
+build in a same-session A/B, with bit-identical PPL. That build was itself +16% to +36% over
+the previous Q4 artifact (8K 2,046, 32K 2,075, 64K 1,804). Ordinary and DFlash2
+decode were unchanged within noise by the FP8LUT4 migration. Results are
+workload-specific, not a claimed hardware ceiling. Methodology, quality checks
+and evidence: `docs/performance.md`.
 
 ## Model and precision
 
-- **15.79 GB base / 17.00 GB DFlash-enabled artifact** (decimal file sizes, not VRAM).
-- Selective Q4/FP8 weights, Q4 embedding/output head; Q4 DFlash with BF16 codebooks.
-- A4 for large-prefill Q4 MLP gate/up (T>128); A8 for other Q4 operations,
-  including ordinary decode and DFlash verification.
+- **16.75 GB DFlash-enabled artifact** (decimal file size, not VRAM),
+  `qwen3.8-27b/r9700-fp8lut4` (the admitted production weights).
+- Text-layer weights and output head in FP8LUT4 (4-bit codes with a per-32 codebook of exact E4M3
+  values, FP32 row scale; GPTQ-rounded on real-session calibration except attention query/key);
+  21 protected attention projections in FP8; Q4 embedding, MTP and DFlash with BF16 codebooks.
+- Measured closer to the BF16 source than the 5090 NVFP4 build on every 8K/32K prefill and
+  decode PPL cell.
+- Per-token FP8 E4M3 activations for every Text projection (prefill, ordinary
+  decode and DFlash verification); Q4 A8 for the head, MTP and drafter.
 - Fixed cache: FP8 E4M3FN keys, INT4 values, FP16 value scales. DFlash state is BF16.
 
-The selected local recipe's worst prefill PPL increase across three tested texts
-is **1.88% versus the 5090 NVFP4 reference**, with more newly severe positions on
-the technical sample (10 versus 6). This is not universal quality equivalence;
-the separate BF16-source production-admission campaign remains unfinished.
+Against a BF16 reference at 8K, the mean NLL increase is +0.023 (prefill), about a third below
+the previous Q4 artifact. At 4K it is 0.024 nats/token below the 5090 NVFP4 build on the same
+wiki/technical/code windows (about 2.4% lower PPL). NIAH exact-answer retrieval passes 8K-128K and 240K (the
+opencode compaction point, 241K-token prompts) at five positions, standard and multikey.
+Admission against the source-BF16 reference (2026-09-27): +0.023/+0.018 at 8K/32K prefill, closer
+to BF16 than the 5090 NVFP4 build on the same positions (+0.032/+0.027); graph/eager decode and
+whole-inference greedy tokens are exact. This is not universal quality equivalence.
 
-Artifacts are not bundled. The installed recipe and creation receipts are under
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`.
-Conversion and binding details: `docs/maintainer/r9700-integer-artifact-candidate.md`.
+Artifacts are not bundled. The installed artifact and its conversion receipt are
+under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/`.
+Conversion and binding details: `docs/maintainer/qwen3.8-27b-artifact.md` (FP8LUT4 Text recipe).
 
 ## Build
 
@@ -68,13 +85,18 @@ cmake -S . -B build-r9700 -G Ninja \
   -DNINFER_BUILD_APPS=ON \
   -DNINFER_BUILD_BENCHMARKS=ON \
   -DNINFER_R9700_Q4_ACTIVATION_BITS=8 \
-  -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=1 \
+  -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=0 \
   -DNINFER_R9700_W8_ACTIVATION_BITS=8
 cmake --build build-r9700 --parallel 4
 ```
 
-Only `gfx1201` is supported. Serialize builds, model conversion and GPU jobs on
-the shared host; never use uncapped build parallelism (maximum 14 jobs).
+Only `gfx1201` is supported. Serialize GPU work with the shared lock in `AGENTS.md`.
+Each agent may run one build at a time, capped at 12 compiler jobs by default (14 maximum).
+
+For the native ROCm Docker image, dedicated development container and GPU device
+passthrough commands, see `docs/containers.md`. No NVIDIA container runtime is needed.
+`compose.yaml` defaults to temperature1.5, DFlash,4GiB RAM prefix cache and32GiB
+persistent disk cache; copy `.env.example` to `.env` and set your local paths.
 
 ## Run
 
@@ -100,4 +122,4 @@ and reports: `profiles/bench/r9700-remaining-candidates-20260924/`.
 - `docs/serving.md` — OpenAI/Anthropic endpoints and request lifecycle.
 - `docs/performance.md` — benchmarks, recipes, quality comparisons and limitations.
 - `docs/README.md` — architecture, artifact formats, conversion and kernel development.
-- `plans/r9700-autonomous-todos.md` — current development status and paused campaigns.
+- `plans/r9700-autonomous-todos.md` — live development work items.

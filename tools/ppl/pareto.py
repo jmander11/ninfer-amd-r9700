@@ -13,32 +13,42 @@ import hashlib
 import json
 import math
 import re
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.ppl.run import QUALITY_TIERS
-from tools.bench.run_ninfer_bench_matrix import PRODUCTION_PREFILL_CHUNKS
-
+from tools.bench.run_ninfer_bench_matrix import (  # noqa: E402  after sys.path setup
+    PRODUCTION_PREFILL_CHUNKS,
+)
+from tools.ppl.run import QUALITY_TIERS  # noqa: E402  after sys.path setup
 
 ARTIFACT_TYPE = "ninfer_r9700_pareto_comparison"
 SCHEMA_VERSION = 7
 INPUT_ARTIFACT_TYPE = "ninfer_r9700_pareto_input"
 INPUT_SCHEMA_VERSION = 4
 SELECTION_RULE = "same_recipe_static_profile_maximin_v2"
-TERMINAL_SELECTION_RULE = (
-    "global_maximin_whole_then_capacity_then_quality_then_canonical_v1"
-)
+TERMINAL_SELECTION_RULE = "global_maximin_whole_then_capacity_then_quality_then_canonical_v1"
 XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
+RETIRED_RECOVERY_BINDINGS = ("fp8_context_resource_recovery", "benchmark_reporting_recovery")
 TERMINAL_RECIPE_PROFILES = {
     "r9700-q4g64-n16k16-eval": "all-q4g64-v1",
     "r9700-q4-w8-mse-n16k16-eval": "mixed-q4g64-w8g32-mse-v1",
-    "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-        "four-role-rowwise-f8e4m3-all-other-q4g64-v0",
+    "r9700-q4g64-f8e4m3-four-role-n16k16-eval": "four-role-rowwise-f8e4m3-all-other-q4g64-v0",
 }
+
+
+def reject_retired_recovery_bridges(sources: list) -> None:
+    """Fail closed on evidence bound to the retired hipBLASLt-era recovery bridges."""
+    if any(
+        isinstance(source, dict) and any(key in source for key in RETIRED_RECOVERY_BINDINGS)
+        for source in sources
+    ):
+        raise ValueError(
+            "FP8 context/reporting recovery bridges were retired with hipBLASLt (438f6a89)"
+        )
 
 
 def _valid_sha256(value: object) -> bool:
@@ -56,8 +66,15 @@ def _file_sha256(path: Path) -> str:
 
 def _valid_capacity_failure(failure: object) -> bool:
     if not isinstance(failure, dict) or set(failure) != {
-        "status", "concurrency", "command", "missing_report", "memory_admission",
-        "campaign_failure", "failures_file", "stderr", "stdout",
+        "status",
+        "concurrency",
+        "command",
+        "missing_report",
+        "memory_admission",
+        "campaign_failure",
+        "failures_file",
+        "stderr",
+        "stdout",
     }:
         return False
     concurrency = failure.get("concurrency")
@@ -68,23 +85,27 @@ def _valid_capacity_failure(failure: object) -> bool:
     stdout = failure.get("stdout")
     if (
         failure.get("status") != "memory_admission_ineligible"
-        or type(concurrency) is not int or concurrency not in (1, 2, 3, 4)
+        or type(concurrency) is not int
+        or concurrency not in (1, 2, 3, 4)
         or not isinstance(command, list)
         or any(not isinstance(part, str) for part in command)
         or not isinstance(failure.get("missing_report"), str)
         or not failure["missing_report"]
         or not isinstance(campaign_failure, dict)
-        or not isinstance(failures_file, dict) or set(failures_file) != {"path", "sha256"}
+        or not isinstance(failures_file, dict)
+        or set(failures_file) != {"path", "sha256"}
         or not isinstance(failures_file.get("path"), str)
         or not failures_file["path"]
         or not _valid_sha256(failures_file.get("sha256"))
-        or not isinstance(stderr, dict) or set(stderr) != {"path", "sha256", "text"}
+        or not isinstance(stderr, dict)
+        or set(stderr) != {"path", "sha256", "text"}
         or not isinstance(stderr.get("path"), str)
         or not stderr["path"]
         or not _valid_sha256(stderr.get("sha256"))
         or not isinstance(stderr.get("text"), str)
         or hashlib.sha256(stderr["text"].encode("utf-8")).hexdigest() != stderr["sha256"]
-        or not isinstance(stdout, dict) or set(stdout) != {"path", "sha256"}
+        or not isinstance(stdout, dict)
+        or set(stdout) != {"path", "sha256"}
         or not isinstance(stdout.get("path"), str)
         or not stdout["path"]
         or stdout.get("sha256") != hashlib.sha256(b"").hexdigest()
@@ -99,16 +120,16 @@ def _valid_capacity_failure(failure: object) -> bool:
     if command.count("--output-file") != 1:
         return False
     output_index = command.index("--output-file")
-    if (
-        output_index + 1 >= len(command)
-        or command[output_index + 1] != failure["missing_report"]
-    ):
+    if output_index + 1 >= len(command) or command[output_index + 1] != failure["missing_report"]:
         return False
     try:
         from tools.ppl.assemble_pareto import _structured_memory_admission_failure
+
         parsed = _structured_memory_admission_failure(
             {"concurrency": concurrency, "command": command},
-            campaign_failure, "", stderr["text"],
+            campaign_failure,
+            "",
+            stderr["text"],
         )
     except (TypeError, ValueError):
         return False
@@ -137,9 +158,12 @@ def _quality_objective(quality: object, label: str) -> tuple[dict | None, list[s
     tier = quality.get("tier")
     if tier not in QUALITY_TIERS:
         reasons.append(f"missing_explicit_quality_tier:{label}")
-    mean_limit = quality.get("maximum_mean_nll_delta", QUALITY_TIERS.get(tier, {}).get("maximum_mean_nll_delta"))
-    if (not _finite_number(mean_limit) or (tier in QUALITY_TIERS
-            and mean_limit > QUALITY_TIERS[tier]["maximum_mean_nll_delta"])):
+    mean_limit = quality.get(
+        "maximum_mean_nll_delta", QUALITY_TIERS.get(tier, {}).get("maximum_mean_nll_delta")
+    )
+    if not _finite_number(mean_limit) or (
+        tier in QUALITY_TIERS and mean_limit > QUALITY_TIERS[tier]["maximum_mean_nll_delta"]
+    ):
         reasons.append(f"invalid_quality_mean_nll_limit:{label}")
     mean_delta = quality.get("mean_nll_delta")
     scored_positions = quality.get("scored_positions")
@@ -175,8 +199,7 @@ def _quality_objective(quality: object, label: str) -> tuple[dict | None, list[s
             math.ceil(spec["maximum_new_severe_rate"] * scored_positions),
         )
         computed_eligible = (
-            float(mean_delta) <= mean_limit
-            and new_severe_positions <= severe_budget
+            float(mean_delta) <= mean_limit and new_severe_positions <= severe_budget
         )
         if not computed_eligible:
             reasons.append(f"quality_guardrails_not_met:{label}")
@@ -274,14 +297,12 @@ def dominates(first: dict, second: dict, required_workloads: list[str]) -> bool:
     capacity_cells = first["capacity_tokens_by_cell"].keys()
     no_worse = (
         all(
-            first["quality_cells"][cell][metric]
-            <= second["quality_cells"][cell][metric]
+            first["quality_cells"][cell][metric] <= second["quality_cells"][cell][metric]
             for cell in quality_cells
             for metric in ("mean_nll_delta", "new_severe_position_rate")
         )
         and all(
-            first["capacity_tokens_by_cell"][cell]
-            >= second["capacity_tokens_by_cell"][cell]
+            first["capacity_tokens_by_cell"][cell] >= second["capacity_tokens_by_cell"][cell]
             for cell in capacity_cells
         )
         and all(
@@ -292,14 +313,12 @@ def dominates(first: dict, second: dict, required_workloads: list[str]) -> bool:
     )
     strictly_better = (
         any(
-            first["quality_cells"][cell][metric]
-            < second["quality_cells"][cell][metric]
+            first["quality_cells"][cell][metric] < second["quality_cells"][cell][metric]
             for cell in quality_cells
             for metric in ("mean_nll_delta", "new_severe_position_rate")
         )
         or any(
-            first["capacity_tokens_by_cell"][cell]
-            > second["capacity_tokens_by_cell"][cell]
+            first["capacity_tokens_by_cell"][cell] > second["capacity_tokens_by_cell"][cell]
             for cell in capacity_cells
         )
         or any(
@@ -311,9 +330,7 @@ def dominates(first: dict, second: dict, required_workloads: list[str]) -> bool:
     return no_worse and strictly_better
 
 
-def _recipe_identity(
-    record: dict, provenance_by_candidate: dict[str, list[dict]]
-) -> dict | None:
+def _recipe_identity(record: dict, provenance_by_candidate: dict[str, list[dict]]) -> dict | None:
     """Return a stable weight-recipe identity without deriving it from a candidate name."""
 
     matches = provenance_by_candidate.get(record["name"], [])
@@ -353,9 +370,13 @@ def _recipe_key(identity: dict) -> str:
 def _static_profile_tuple(cache_profile: dict, execution_profile: dict) -> tuple:
     layouts = cache_profile["plane_layouts"]
     return (
-        cache_profile["value_group"], layouts["key"], layouts["value"],
-        layouts["value_scale"], execution_profile["q4_activation_bits"],
-        execution_profile["w8_activation_bits"], execution_profile["fp8_qk_wmma_profile"],
+        cache_profile["value_group"],
+        layouts["key"],
+        layouts["value"],
+        layouts["value_scale"],
+        execution_profile["q4_activation_bits"],
+        execution_profile["w8_activation_bits"],
+        execution_profile["decode_attention_profile"],
         execution_profile["xattention_profile"],
     )
 
@@ -376,15 +397,11 @@ def _normalized_selection_values(
     }
     capacity_cells = objective["capacity_tokens_by_cell"].keys()
     capacity_best = {
-        cell: max(
-            objectives[other]["capacity_tokens_by_cell"][cell]
-            for other in frontier_names
-        )
+        cell: max(objectives[other]["capacity_tokens_by_cell"][cell] for other in frontier_names)
         for cell in capacity_cells
     }
     speed_ratios = {
-        workload: objective["whole_inference_tokens_per_second"][workload]
-        / speed_best[workload]
+        workload: objective["whole_inference_tokens_per_second"][workload] / speed_best[workload]
         for workload in workloads
     }
     capacity_ratios = {
@@ -395,8 +412,7 @@ def _normalized_selection_values(
     for cell, quality in objective["quality_cells"].items():
         tier = QUALITY_TIERS[quality["quality_tier"]]
         quality_fractions[cell] = {
-            "mean_nll_delta": quality["mean_nll_delta"]
-            / tier["maximum_mean_nll_delta"],
+            "mean_nll_delta": quality["mean_nll_delta"] / tier["maximum_mean_nll_delta"],
             "new_severe_positions": quality["new_severe_positions"]
             / quality["new_severe_position_budget"],
         }
@@ -407,21 +423,23 @@ def _normalized_selection_values(
         "minimum_capacity_ratio": min(capacity_ratios.values()),
         "quality_budget_fraction_by_cell": quality_fractions,
         "worst_quality_budget_fraction": max(
-            fraction
-            for cell in quality_fractions.values()
-            for fraction in cell.values()
+            fraction for cell in quality_fractions.values() for fraction in cell.values()
         ),
     }
 
 
 def _select_cache_profiles(
-    results: list[dict], objectives: dict[str, dict], workloads: list[str],
-    *, include_singleton: bool = False,
+    results: list[dict],
+    objectives: dict[str, dict],
+    workloads: list[str],
+    *,
+    include_singleton: bool = False,
 ) -> dict:
     frontier_results = [result for result in results if result["pareto"]]
     selection_pool = (
         [result for result in results if result["name"] in objectives]
-        if include_singleton else frontier_results
+        if include_singleton
+        else frontier_results
     )
     groups: dict[str, list[dict]] = {}
     identities: dict[str, dict] = {}
@@ -441,12 +459,11 @@ def _select_cache_profiles(
     for key in sorted(groups):
         candidates = groups[key]
         group = [
-            result for result in candidates
+            result
+            for result in candidates
             if not any(
                 other["name"] != result["name"]
-                and dominates(
-                    objectives[other["name"]], objectives[result["name"]], workloads
-                )
+                and dominates(objectives[other["name"]], objectives[result["name"]], workloads)
                 for other in candidates
             )
         ]
@@ -455,8 +472,7 @@ def _select_cache_profiles(
             continue
         names = sorted(result["name"] for result in group)
         normalized = {
-            name: _normalized_selection_values(name, objectives, names, workloads)
-            for name in names
+            name: _normalized_selection_values(name, objectives, names, workloads) for name in names
         }
         remaining = names
         stages = (
@@ -465,7 +481,8 @@ def _select_cache_profiles(
             ("minimum_quality_budget_consumption", "worst_quality_budget_fraction", min),
         )
         decisive_stage = (
-            "sole_pareto_frontier_candidate" if len(names) == 1
+            "sole_pareto_frontier_candidate"
+            if len(names) == 1
             else "canonical_static_profile_identity"
         )
         if len(names) > 1:
@@ -492,31 +509,33 @@ def _select_cache_profiles(
             winner = remaining[0]
         collapsed_names.update(names)
         canonical_profiles = {
-            result["name"]: list(_static_profile_tuple(
-                result["cache_profile"], result["execution_profile"]
-            ))
+            result["name"]: list(
+                _static_profile_tuple(result["cache_profile"], result["execution_profile"])
+            )
             for result in group
         }
         winner_result = next(result for result in group if result["name"] == winner)
-        selections.append({
-            "weight_recipe": identities[key],
-            "frontier_candidates": names,
-            "winner": winner,
-            "winner_cache_profile": winner_result["cache_profile"],
-            "winner_execution_profile": winner_result["execution_profile"],
-            "decisive_stage": decisive_stage,
-            "rationale": {
-                "ordered_stages": [
-                    "maximin_whole_inference_throughput",
-                    "maximin_resolved_capacity",
-                    "minimum_quality_budget_consumption",
-                    "canonical_static_profile_identity",
-                ],
+        selections.append(
+            {
+                "weight_recipe": identities[key],
+                "frontier_candidates": names,
+                "winner": winner,
+                "winner_cache_profile": winner_result["cache_profile"],
+                "winner_execution_profile": winner_result["execution_profile"],
                 "decisive_stage": decisive_stage,
-                "canonical_static_profile_tuple_by_candidate": canonical_profiles,
-            },
-            "normalized_objectives": normalized,
-        })
+                "rationale": {
+                    "ordered_stages": [
+                        "maximin_whole_inference_throughput",
+                        "maximin_resolved_capacity",
+                        "minimum_quality_budget_consumption",
+                        "canonical_static_profile_identity",
+                    ],
+                    "decisive_stage": decisive_stage,
+                    "canonical_static_profile_tuple_by_candidate": canonical_profiles,
+                },
+                "normalized_objectives": normalized,
+            }
+        )
     return {
         "rule": SELECTION_RULE,
         "selections": selections,
@@ -525,20 +544,19 @@ def _select_cache_profiles(
 
 
 def _terminal_production_selection(
-    results: list[dict], objectives: dict[str, dict], workloads: list[str],
+    results: list[dict],
+    objectives: dict[str, dict],
+    workloads: list[str],
     profile_selection: dict,
 ) -> dict:
     """Choose one production artifact/profile from the retained per-recipe winners."""
 
-    winners = sorted(
-        selection["winner"] for selection in profile_selection["selections"]
-    )
+    winners = sorted(selection["winner"] for selection in profile_selection["selections"])
     if not winners:
         raise ValueError("terminal production selection has no eligible recipe winner")
     by_name = {result["name"]: result for result in results}
     normalized = {
-        name: _normalized_selection_values(name, objectives, winners, workloads)
-        for name in winners
+        name: _normalized_selection_values(name, objectives, winners, workloads) for name in winners
     }
     remaining = winners
     decisive_stage = "canonical_artifact_and_static_profile_identity"
@@ -610,7 +628,10 @@ def classify(payload: dict) -> dict:
     if type(require_single_selection) is not bool:
         raise ValueError("require_single_static_profile_selection must be boolean")
     selected_prefill_chunk = payload.get("selected_prefill_chunk")
-    if selected_prefill_chunk is not None and selected_prefill_chunk not in PRODUCTION_PREFILL_CHUNKS:
+    if (
+        selected_prefill_chunk is not None
+        and selected_prefill_chunk not in PRODUCTION_PREFILL_CHUNKS
+    ):
         raise ValueError("selected_prefill_chunk is unsupported")
     if require_single_selection and selected_prefill_chunk is None:
         raise ValueError("static profile selection requires one explicit selected_prefill_chunk")
@@ -647,9 +668,7 @@ def classify(payload: dict) -> dict:
         if match is not None and int(match.group(1)) not in (1, 2, 3, 4):
             invalid_concurrency.add(int(match.group(1)))
     if invalid_concurrency:
-        raise ValueError(
-            "Pareto selection inputs are limited to product concurrency C=1..4"
-        )
+        raise ValueError("Pareto selection inputs are limited to product concurrency C=1..4")
 
     provenance_by_candidate: dict[str, list[dict]] = {}
     provenance = payload.get("source_provenance", [])
@@ -682,9 +701,7 @@ def classify(payload: dict) -> dict:
             and int(match.group(1)) not in (1, 2, 3, 4)
             for key in supplied_objective_keys
         ):
-            raise ValueError(
-                f"candidate {name} contains a non-product C5+ objective cell"
-            )
+            raise ValueError(f"candidate {name} contains a non-product C5+ objective cell")
         cache_profile = record.get("cache_profile")
         execution_profile = record.get("execution_profile")
         plane_layouts = (
@@ -700,53 +717,65 @@ def classify(payload: dict) -> dict:
             raise ValueError(f"candidate {name} has no complete cache_profile identity")
         if (
             not isinstance(execution_profile, dict)
-            or set(execution_profile) != {
-                "q4_activation_bits", "w8_activation_bits", "fp8_qk_wmma_profile",
+            or set(execution_profile)
+            != {
+                "q4_activation_bits",
+                "w8_activation_bits",
+                "decode_attention_profile",
                 "xattention_profile",
             }
             or execution_profile.get("q4_activation_bits") != 8
             or execution_profile.get("w8_activation_bits") != 8
-            or execution_profile.get("fp8_qk_wmma_profile")
-            != "t1-ge64-t2-ge320-t3plus-stream-v1"
-            or execution_profile.get("xattention_profile")
-            not in ("dense", "b128-s16-tau900")
+            or execution_profile.get("decode_attention_profile")
+            != "packed-t1to6-split512-t4tree-v1"
+            or execution_profile.get("xattention_profile") not in ("dense", "b128-s16-tau900")
         ):
             raise ValueError(f"candidate {name} has no complete execution_profile identity")
-        objective, reasons = _candidate_objectives(
-            record, workloads, quality_cells, capacity_cells
-        )
+        objective, reasons = _candidate_objectives(record, workloads, quality_cells, capacity_cells)
         if require_single_selection:
             sources = provenance_by_candidate.get(name, [])
             capacity_failures = (
                 sources[0].get("capacity_failures")
-                if len(sources) == 1 and isinstance(sources[0], dict) else None
+                if len(sources) == 1 and isinstance(sources[0], dict)
+                else None
             )
-            if (
-                capacity_failures is not None
-                and (
-                    not isinstance(capacity_failures, list)
-                    or any(not _valid_capacity_failure(failure) for failure in capacity_failures)
-                )
+            if capacity_failures is not None and (
+                not isinstance(capacity_failures, list)
+                or any(not _valid_capacity_failure(failure) for failure in capacity_failures)
             ):
-                raise ValueError(
-                    f"candidate {name} has invalid capacity-failure provenance"
+                raise ValueError(f"candidate {name} has invalid capacity-failure provenance")
+            malformed_quality = [
+                reason
+                for reason in reasons
+                if (
+                    "quality" in reason
+                    or "nll" in reason
+                    or "scored_positions" in reason
+                    or "severe_positions" in reason
                 )
-            malformed_quality = [reason for reason in reasons if (
-                "quality" in reason or "nll" in reason or "scored_positions" in reason
-                or "severe_positions" in reason) and not reason.startswith("quality_guardrails_not_met:")]
+                and not reason.startswith("quality_guardrails_not_met:")
+            ]
             if malformed_quality:
-                raise ValueError(f"candidate {name} has malformed numerical quality: {malformed_quality}")
+                raise ValueError(
+                    f"candidate {name} has malformed numerical quality: {malformed_quality}"
+                )
             capacity_reasons = [reason for reason in reasons if "capacity" in reason]
             expected_capacity_reasons = {
                 f"missing_resolved_effective_maximum_capacity:c{failure['concurrency']}"
                 for failure in capacity_failures or []
             }
             if set(capacity_reasons) != expected_capacity_reasons:
-                raise ValueError(f"candidate {name} has unmatched dense/sparse capacity eligibility provenance")
-            valid_exclusion = bool(capacity_reasons or any(
-                reason.startswith("quality_guardrails_not_met:") for reason in reasons))
+                raise ValueError(
+                    f"candidate {name} has unmatched dense/sparse capacity eligibility provenance"
+                )
+            valid_exclusion = bool(
+                capacity_reasons
+                or any(reason.startswith("quality_guardrails_not_met:") for reason in reasons)
+            )
             if reasons and not valid_exclusion:
-                raise ValueError(f"eligible candidate {name} lacks complete whole-inference evidence")
+                raise ValueError(
+                    f"eligible candidate {name} lacks complete whole-inference evidence"
+                )
         if require_single_selection and "shortlist_head_precision_gate" in record:
             raise ValueError("static selection rejects the retired MTP shortlist-head gate")
         if require_single_selection and (
@@ -761,23 +790,31 @@ def classify(payload: dict) -> dict:
         weight_storage_profile = _weight_storage_profile(weight_recipe)
         if require_single_selection and weight_storage_profile is None:
             raise ValueError(f"candidate {name} has an unsupported terminal weight recipe")
-        results.append({
-            "name": name,
-            "cache_profile": cache_profile,
-            "execution_profile": execution_profile,
-            "prefill_chunk": record.get("prefill_chunk"),
-            "weight_recipe": weight_recipe,
-            "weight_storage_profile": weight_storage_profile,
-            "whole_inference_profile": record.get("whole_inference_profile"),
-            "base_capacity_profile": record.get("base_capacity_profile"),
-            "quality_cells": (record.get("quality_cells") if quality_cells
-                              else {"quality": record.get("quality")}),
-            "capacity_by_cell": (record.get("capacity_by_cell") if capacity_cells
-                                 else {"capacity": record.get("capacity")}),
-            "capacity_eligible": not any("capacity" in reason for reason in reasons),
-            "comparable": objective is not None,
-            "reasons": reasons,
-        })
+        results.append(
+            {
+                "name": name,
+                "cache_profile": cache_profile,
+                "execution_profile": execution_profile,
+                "prefill_chunk": record.get("prefill_chunk"),
+                "weight_recipe": weight_recipe,
+                "weight_storage_profile": weight_storage_profile,
+                "whole_inference_profile": record.get("whole_inference_profile"),
+                "base_capacity_profile": record.get("base_capacity_profile"),
+                "quality_cells": (
+                    record.get("quality_cells")
+                    if quality_cells
+                    else {"quality": record.get("quality")}
+                ),
+                "capacity_by_cell": (
+                    record.get("capacity_by_cell")
+                    if capacity_cells
+                    else {"capacity": record.get("capacity")}
+                ),
+                "capacity_eligible": not any("capacity" in reason for reason in reasons),
+                "comparable": objective is not None,
+                "reasons": reasons,
+            }
+        )
 
     for result in results:
         name = result["name"]
@@ -789,30 +826,37 @@ def classify(payload: dict) -> dict:
             for other in objectives
             if other != name and dominates(objectives[other], objectives[name], workloads)
         )
-        result.update({
-            "pareto": not dominated_by,
-            "dominated_by": dominated_by,
-            "objectives": objectives[name],
-        })
+        result.update(
+            {
+                "pareto": not dominated_by,
+                "dominated_by": dominated_by,
+                "objectives": objectives[name],
+            }
+        )
 
     results.sort(key=lambda result: result["name"])
     if require_single_selection:
         expected_recipe_ids = set(TERMINAL_RECIPE_PROFILES)
         expected_profiles = {
-            (16, "dense"), (32, "dense"),
-            (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+            (16, "dense"),
+            (32, "dense"),
+            (16, "b128-s16-tau900"),
+            (32, "b128-s16-tau900"),
         }
         recipe_groups: dict[str, list[dict]] = {}
         for result in results:
             identity = result["weight_recipe"]
-            if (not isinstance(identity, dict) or identity.get("kind") != "artifact"
-                    or not isinstance(identity.get("conversion_receipt"), dict)):
+            if (
+                not isinstance(identity, dict)
+                or identity.get("kind") != "artifact"
+                or not isinstance(identity.get("conversion_receipt"), dict)
+            ):
                 raise ValueError(
                     "static XAttention selection requires provenance-bound N16 artifacts"
                 )
             from tools.ppl.run import validate_n16_receipt_summary
-            validate_n16_receipt_summary(
-                identity["conversion_receipt"], identity["weights_id"])
+
+            validate_n16_receipt_summary(identity["conversion_receipt"], identity["weights_id"])
             recipe_groups.setdefault(_recipe_key(identity), []).append(result)
         if not recipe_groups:
             raise ValueError("static XAttention selection requires candidate recipes")
@@ -824,18 +868,19 @@ def classify(payload: dict) -> dict:
             raise ValueError(
                 "static XAttention selection requires one artifact hash per weights_id"
             )
-        if (
-            set(artifact_keys_by_weights_id) != expected_recipe_ids
-            or len(results) != len(expected_recipe_ids) * len(expected_profiles)
-        ):
+        if set(artifact_keys_by_weights_id) != expected_recipe_ids or len(results) != len(
+            expected_recipe_ids
+        ) * len(expected_profiles):
             raise ValueError(
                 "static XAttention selection requires exactly all three product recipe "
                 "profile quartets"
             )
         for group in recipe_groups.values():
             actual_profiles = {
-                (result["cache_profile"]["value_group"],
-                 result["execution_profile"]["xattention_profile"])
+                (
+                    result["cache_profile"]["value_group"],
+                    result["execution_profile"]["xattention_profile"],
+                )
                 for result in group
             }
             if len(group) != len(expected_profiles) or actual_profiles != expected_profiles:
@@ -847,12 +892,11 @@ def classify(payload: dict) -> dict:
             for result in group:
                 cache_group = result["cache_profile"]["value_group"]
                 profile = result["execution_profile"]["xattention_profile"]
-                eligibility_by_cache_group.setdefault(cache_group, {})[profile] = (
-                    result["capacity_eligible"]
-                )
+                eligibility_by_cache_group.setdefault(cache_group, {})[profile] = result[
+                    "capacity_eligible"
+                ]
             if any(
-                set(profiles) != set(XATTENTION_PROFILES)
-                or len(set(profiles.values())) != 1
+                set(profiles) != set(XATTENTION_PROFILES) or len(set(profiles.values())) != 1
                 for profiles in eligibility_by_cache_group.values()
             ):
                 raise ValueError(
@@ -862,13 +906,12 @@ def classify(payload: dict) -> dict:
     selection = _select_cache_profiles(
         results, objectives, workloads, include_singleton=require_single_selection
     )
-    if require_single_selection and (
-        not selection["selections"] or selection["not_collapsed"]
-    ):
+    if require_single_selection and (not selection["selections"] or selection["not_collapsed"]):
         raise ValueError("static XAttention selection left an uncollapsed frontier profile")
     terminal_selection = (
         _terminal_production_selection(results, objectives, workloads, selection)
-        if require_single_selection else None
+        if require_single_selection
+        else None
     )
     return {
         "artifact_type": ARTIFACT_TYPE,
@@ -899,20 +942,28 @@ def classify(payload: dict) -> dict:
 def _revalidate_numerical_quality(row: dict, source: dict) -> None:
     """Reopen measured quality, including complete but numerically failed gates."""
     from tools.ppl.assemble_pareto import _campaign_quality_candidate
+
     quality = source.get("quality")
     if not isinstance(quality, dict) or not isinstance(quality.get("path"), str):
         raise ValueError("schema-v7 candidate lacks bound numerical quality evidence")
     path = Path(quality["path"])
     if not path.is_file() or _file_sha256(path) != quality.get("sha256"):
         raise ValueError("schema-v7 numerical quality campaign changed")
-    cells, actual = _campaign_quality_candidate(json.loads(path.read_text()),
-        row["weight_recipe"]["weights_id"], row["cache_profile"]["value_group"], row["prefill_chunk"])
-    if (cells != row["quality_cells"] or cells != quality.get("measurements")
-            or actual["cells"] != quality.get("cells")
-            or actual["representation"] != quality.get("representation")
-            or actual["campaign_identity"] != quality.get("campaign_identity")
-            or {key: actual[key] for key in ("weights_id", "sha256", "file_size_bytes")}
-            != quality.get("artifact")):
+    cells, actual = _campaign_quality_candidate(
+        json.loads(path.read_text()),
+        row["weight_recipe"]["weights_id"],
+        row["cache_profile"]["value_group"],
+        row["prefill_chunk"],
+    )
+    if (
+        cells != row["quality_cells"]
+        or cells != quality.get("measurements")
+        or actual["cells"] != quality.get("cells")
+        or actual["representation"] != quality.get("representation")
+        or actual["campaign_identity"] != quality.get("campaign_identity")
+        or {key: actual[key] for key in ("weights_id", "sha256", "file_size_bytes")}
+        != quality.get("artifact")
+    ):
         raise ValueError("schema-v7 numerical quality measurements differ from bound sidecars")
 
 
@@ -934,8 +985,10 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
     source_provenance = value.get("source_provenance")
     input_authority = value.get("pareto_input")
     if (
-        not isinstance(candidates, list) or len(candidates) != 12
-        or not isinstance(workloads, list) or not workloads
+        not isinstance(candidates, list)
+        or len(candidates) != 12
+        or not isinstance(workloads, list)
+        or not workloads
         or selected_prefill_chunk not in PRODUCTION_PREFILL_CHUNKS
         or not isinstance(prefill_chunk_selection, dict)
         or not isinstance(prefill_chunk_selection.get("path"), str)
@@ -964,22 +1017,7 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
             provenance_by_candidate.setdefault(source["candidate"], []).append(source)
     if len(provenance_by_candidate) != 12:
         raise ValueError("schema-v7 authority has malformed source provenance")
-    recovery_bindings = [source.get("fp8_context_resource_recovery") for source in source_provenance]
-    from tools.ppl.benchmark_reporting_recovery import bound_bridge
-    reporting_recovery = bound_bridge(source_provenance)
-    if any(binding is not None for binding in recovery_bindings):
-        from tools.ppl.fp8_context_recovery import checked_file, validate_bridge
-        from tools.ppl.assemble_pareto import validate_chunk_candidate_bindings
-        if any(binding != recovery_bindings[0] for binding in recovery_bindings):
-            raise ValueError("schema-v7 resource recovery binding differs across candidates")
-        recovery_path = checked_file(recovery_bindings[0])
-        recovery = validate_bridge(recovery_path)
-        if recovery["chunk_selection"] != {
-            key: prefill_chunk_selection[key] for key in ("path", "sha256")
-        }:
-            raise ValueError("schema-v7 resource recovery differs from selected chunk authority")
-        chunk_record = json.loads(checked_file(recovery["chunk_selection"]).read_text())
-        validate_chunk_candidate_bindings(chunk_record, source_provenance, recovery, reporting_recovery)
+    reject_retired_recovery_bridges(source_provenance)
     for row in candidates:
         recipe = row.get("weight_recipe")
         cache = row.get("cache_profile")
@@ -990,21 +1028,25 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         source = provenance_by_candidate.get(row.get("name"), [])
         source = source[0] if len(source) == 1 else None
         matrices = source.get("matrices") if isinstance(source, dict) else None
-        capacity_failures = (
-            source.get("capacity_failures") if isinstance(source, dict) else None
-        )
+        capacity_failures = source.get("capacity_failures") if isinstance(source, dict) else None
         quality_cells = row.get("quality_cells")
         if not isinstance(quality_cells, dict) or set(quality_cells) != {"8k", "32k"}:
             raise ValueError("schema-v7 authority lacks retained numerical quality measurements")
-        quality_reasons = [reason for label, cell in quality_cells.items()
-                           for reason in _quality_objective(cell, label)[1]]
+        quality_reasons = [
+            reason
+            for label, cell in quality_cells.items()
+            for reason in _quality_objective(cell, label)[1]
+        ]
         if any(not reason.startswith("quality_guardrails_not_met:") for reason in quality_reasons):
             raise ValueError("schema-v7 authority has malformed numerical quality measurements")
         capacity_cells = row.get("capacity_by_cell")
         if not isinstance(capacity_cells, dict):
             raise ValueError("schema-v7 authority lacks capacity measurements")
-        capacity_reasons = [reason for c in (1, 2, 3, 4)
-                            for reason in _capacity_objective(capacity_cells.get(f"c{c}"), f"c{c}")[1]]
+        capacity_reasons = [
+            reason
+            for c in (1, 2, 3, 4)
+            for reason in _capacity_objective(capacity_cells.get(f"c{c}"), f"c{c}")[1]
+        ]
         if row.get("capacity_eligible") is not (not capacity_reasons):
             raise ValueError("schema-v7 capacity eligibility differs from measured capacity")
         if (
@@ -1013,14 +1055,16 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
             or any(not isinstance(reason, str) or not reason for reason in reasons)
             or (comparable and (reasons != [] or not isinstance(objective, dict)))
             or (not comparable and (not reasons or objective is not None))
-            or not isinstance(recipe, dict) or recipe.get("kind") != "artifact"
+            or not isinstance(recipe, dict)
+            or recipe.get("kind") != "artifact"
             or not isinstance(recipe.get("weights_id"), str)
             or row.get("weight_storage_profile")
             != TERMINAL_RECIPE_PROFILES.get(recipe.get("weights_id"))
             or not isinstance(recipe.get("sha256"), str)
             or len(recipe["sha256"]) != 64
             or any(character not in "0123456789abcdef" for character in recipe["sha256"])
-            or not isinstance(cache, dict) or cache.get("value_group") not in (16, 32)
+            or not isinstance(cache, dict)
+            or cache.get("value_group") not in (16, 32)
             or not isinstance(execution, dict)
             or execution.get("xattention_profile") not in XATTENTION_PROFILES
             or row.get("prefill_chunk") != selected_prefill_chunk
@@ -1030,8 +1074,7 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         ):
             raise ValueError("schema-v7 authority has malformed candidate provenance/objectives")
         expected_matrices = (
-            {"pareto-capacity", "pareto-whole"}
-            if comparable else {"pareto-capacity"}
+            {"pareto-capacity", "pareto-whole"} if comparable else {"pareto-capacity"}
         )
         if (
             not isinstance(matrices, dict)
@@ -1052,19 +1095,20 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
             failure_concurrency = {
                 failure.get("concurrency")
                 for failure in capacity_failures
-                if isinstance(failure, dict)
-                and type(failure.get("concurrency")) is int
+                if isinstance(failure, dict) and type(failure.get("concurrency")) is int
             }
             expected_speed_reasons = {
-                f"missing_positive_whole_inference_speed:{workload}"
-                for workload in workloads
+                f"missing_positive_whole_inference_speed:{workload}" for workload in workloads
             }
             if (
                 capacity_reason_concurrency != failure_concurrency
                 or len(failure_concurrency) != len(capacity_failures)
-                or set(capacity_reasons) != {
-                    f"missing_resolved_effective_maximum_capacity:c{c}" for c in failure_concurrency}
-                or set(reasons) != set(quality_reasons) | set(capacity_reasons) | expected_speed_reasons
+                or set(capacity_reasons)
+                != {
+                    f"missing_resolved_effective_maximum_capacity:c{c}" for c in failure_concurrency
+                }
+                or set(reasons)
+                != set(quality_reasons) | set(capacity_reasons) | expected_speed_reasons
                 or any(not _valid_capacity_failure(failure) for failure in capacity_failures)
             ):
                 raise ValueError(
@@ -1077,15 +1121,20 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         prior = recipe_identities.setdefault(weights_id, recipe)
         if prior != recipe:
             raise ValueError("schema-v7 authority binds multiple hashes to one weights_id")
-        recipe_profiles.setdefault(weights_id, set()).add((
-            cache["value_group"], execution["xattention_profile"],
-        ))
+        recipe_profiles.setdefault(weights_id, set()).add(
+            (
+                cache["value_group"],
+                execution["xattention_profile"],
+            )
+        )
         if comparable:
             objectives[row["name"]] = objective
     expected_recipes = set(TERMINAL_RECIPE_PROFILES)
     expected_profiles = {
-        (16, "dense"), (32, "dense"),
-        (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+        (16, "dense"),
+        (32, "dense"),
+        (16, "b128-s16-tau900"),
+        (32, "b128-s16-tau900"),
     }
     if set(recipe_profiles) != expected_recipes or any(
         profiles != expected_profiles for profiles in recipe_profiles.values()
@@ -1093,8 +1142,7 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         raise ValueError("schema-v7 authority lacks all three complete recipe profile quartets")
     for weights_id in expected_recipes:
         recipe_rows = [
-            row for row in candidates
-            if row["weight_recipe"]["weights_id"] == weights_id
+            row for row in candidates if row["weight_recipe"]["weights_id"] == weights_id
         ]
         for group in (16, 32):
             eligibility = {
@@ -1110,7 +1158,8 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
     for row in candidates:
         if row["name"] in objectives:
             dominated_by = sorted(
-                other for other in objectives
+                other
+                for other in objectives
                 if other != row["name"]
                 and dominates(objectives[other], objectives[row["name"]], workloads)
             )
@@ -1179,7 +1228,8 @@ def main() -> int:
         source = load_payload(input_path.read_text(encoding="utf-8"))
         result = classify(source)
         result["pareto_input"] = {
-            "path": str(input_path), "sha256": _file_sha256(input_path),
+            "path": str(input_path),
+            "sha256": _file_sha256(input_path),
         }
     except (json.JSONDecodeError, ValueError) as error:
         raise SystemExit(str(error)) from error

@@ -6,9 +6,9 @@
 
 namespace ninfer::targets::qwen3_8_27b::detail::fp8_hybrid {
 
-#define NINFER_QWEN38_FP8_HYBRID_IDENTITY(weights_id, recipe_id, digest)                  \
-    inline constexpr std::string_view kWeightsId       = weights_id;                      \
-    inline constexpr std::string_view kRecipeId        = recipe_id;                       \
+#define NINFER_QWEN38_FP8_HYBRID_IDENTITY(weights_id, recipe_id, digest)                           \
+    inline constexpr std::string_view kWeightsId       = weights_id;                               \
+    inline constexpr std::string_view kRecipeId        = recipe_id;                                \
     inline constexpr std::string_view kSelectionDigest = digest;
 #define NINFER_QWEN38_FP8_HYBRID_MATRIX(name)
 #include "targets/qwen3_8_27b/impl/load/fp8_hybrid_selection.inc"

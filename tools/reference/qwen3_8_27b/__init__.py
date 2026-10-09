@@ -31,6 +31,7 @@ def __getattr__(name: str) -> Any:
         return {"MemoryPlan": MemoryPlan, "WeightStore": WeightStore}[name]
     raise AttributeError(name)
 
+
 __all__ = [
     "ArtifactBinding",
     "AxisView",
@@ -39,8 +40,8 @@ __all__ = [
     "LogicalRowView",
     "MemoryPlan",
     "PhysicalBlock",
-    "VisionArtifactBinding",
     "RefModel",
+    "VisionArtifactBinding",
     "WeightObject",
     "WeightStore",
 ]

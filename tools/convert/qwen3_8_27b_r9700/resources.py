@@ -9,7 +9,6 @@ from tools.convert.qwen3.common import conversion
 
 from . import inventory
 
-
 OFFICIAL_RESOURCE_SHA256 = {
     "frontend/tokenizer.json": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
     "frontend/tokenizer_config.json": "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27",

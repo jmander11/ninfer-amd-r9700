@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.r9700.check_split512_report import (
-    SOURCE_PATHS,
     SHAPES,
+    SOURCE_PATHS,
     split_workspace_bytes,
     validate_report,
 )
@@ -19,23 +19,26 @@ def report() -> dict:
     for group, context, rows, active in sorted(SHAPES):
         incumbent = [2.0] * iterations
         split = [1.0] * iterations
-        measurements.append({
-            "value_group": group,
-            "context": context,
-            "query_rows": rows,
-            "active_rows": active,
-            "iterations": iterations,
-            "split_workspace_bytes": split_workspace_bytes(rows, context),
-            "incumbent_route": (
-                "fp8-q-wmma-score-plus-fp32-softmax-int4-pv" if rows == 1
-                else "bf16-q-score-streaming-online-fp32-softmax-int4-pv"
-            ),
-            "incumbent_mean_ms": 2.0,
-            "split_mean_ms": 1.0,
-            "incumbent_over_split": 2.0,
-            "incumbent_samples_ms": incumbent,
-            "split_samples_ms": split,
-        })
+        measurements.append(
+            {
+                "value_group": group,
+                "context": context,
+                "query_rows": rows,
+                "active_rows": active,
+                "iterations": iterations,
+                "split_workspace_bytes": split_workspace_bytes(rows, context),
+                "incumbent_route": (
+                    "fp8-q-wmma-score-plus-fp32-softmax-int4-pv"
+                    if rows == 1
+                    else "bf16-q-score-streaming-online-fp32-softmax-int4-pv"
+                ),
+                "incumbent_mean_ms": 2.0,
+                "split_mean_ms": 1.0,
+                "incumbent_over_split": 2.0,
+                "incumbent_samples_ms": incumbent,
+                "split_samples_ms": split,
+            }
+        )
     maximum_context = 262144
     return {
         "schema": "ninfer_r9700_split512_attention_qualification",
@@ -43,21 +46,25 @@ def report() -> dict:
         "architecture": "gfx1201",
         "disposition": "unpromoted-qualification-candidate",
         "physical_qualification": {
-            "status": "passed", "scope": "full-numerical-rejection-device-graph"
+            "status": "passed",
+            "scope": "full-numerical-rejection-device-graph",
         },
         "power_profile": {
             "path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
-            "value": "auto", "required": "auto",
+            "value": "auto",
+            "required": "auto",
         },
         "device": {
-            "name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "wave_size": 32,
-            "runtime_version": 70000000, "driver_version": 70000000,
+            "name": "AMD Radeon AI PRO R9700",
+            "architecture": "gfx1201",
+            "wave_size": 32,
+            "runtime_version": 70000000,
+            "driver_version": 70000000,
         },
         "executable": {"path": "/repo/build/split512", "sha256": "a" * 64},
         "source_root": "/repo",
         "sources": [
-            {"role": role, "path": "/repo/" + relative,
-             "sha256": f"{index:x}" * 64}
+            {"role": role, "path": "/repo/" + relative, "sha256": f"{index:x}" * 64}
             for index, (role, relative) in enumerate(SOURCE_PATHS.items(), 1)
         ],
         "workspace_contract": {
@@ -85,13 +92,21 @@ class Split512ReportTest(unittest.TestCase):
     def validate(value: dict) -> None:
         digests = {value["executable"]["path"]: value["executable"]["sha256"]}
         digests.update({source["path"]: source["sha256"] for source in value["sources"]})
-        with patch("pathlib.Path.is_file", return_value=True), \
-             patch("pathlib.Path.is_dir", return_value=True), \
-             patch("pathlib.Path.resolve", lambda self, strict=False: self), \
-             patch("tools.r9700.check_split512_report._file_sha256",
-                   side_effect=lambda path: digests[str(path)]):
-            validate_report(value, Path("/repo/build/split512"), Path("/repo"),
-                            lambda _path: "auto")
+        with (
+            patch("pathlib.Path.is_file", return_value=True),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
+            patch(
+                "tools.r9700.check_split512_report._file_sha256",
+                side_effect=lambda path: digests[str(path)],
+            ),
+        ):
+            validate_report(
+                value, Path("/repo/build/split512"), Path("/repo"), lambda _path: "auto"
+            )
 
     def test_accepts_complete_report(self) -> None:
         self.validate(report())
@@ -111,8 +126,9 @@ class Split512ReportTest(unittest.TestCase):
     def test_rejects_non_auto_live_power(self) -> None:
         value = report()
         with self.assertRaisesRegex(ValueError, "live power"):
-            validate_report(value, Path("/repo/build/split512"), Path("/repo"),
-                            lambda _path: "profile_standard")
+            validate_report(
+                value, Path("/repo/build/split512"), Path("/repo"), lambda _path: "profile_standard"
+            )
 
     def test_rejects_recomputed_speedup_drift(self) -> None:
         value = report()
@@ -165,7 +181,8 @@ class Split512ReportTest(unittest.TestCase):
             lambda value: value["device"].__setitem__("wave_size", 32.0),
             lambda value: value.__setitem__("warmup_iterations_per_route", 3.0),
             lambda value: value["workspace_contract"].__setitem__(
-                "t1_maximum_plus_one_bytes", False),
+                "t1_maximum_plus_one_bytes", False
+            ),
         ):
             with self.subTest(mutate=mutate):
                 value = report()
@@ -183,20 +200,30 @@ class Split512ReportTest(unittest.TestCase):
 
     def test_rejects_changed_executable_bytes(self) -> None:
         value = report()
-        with patch("pathlib.Path.is_file", return_value=True), \
-             patch("pathlib.Path.resolve", lambda self, strict=False: self), \
-             patch("tools.r9700.check_split512_report._file_sha256", return_value="0" * 64), \
-             self.assertRaisesRegex(ValueError, "executable bytes changed"):
-            validate_report(value, Path("/repo/build/split512"), Path("/repo"),
-                            lambda _path: "auto")
+        with (
+            patch("pathlib.Path.is_file", return_value=True),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
+            patch("tools.r9700.check_split512_report._file_sha256", return_value="0" * 64),
+            self.assertRaisesRegex(ValueError, "executable bytes changed"),
+        ):
+            validate_report(
+                value, Path("/repo/build/split512"), Path("/repo"), lambda _path: "auto"
+            )
 
     def test_rejects_same_bytes_at_different_executable_path(self) -> None:
         value = report()
-        with patch("pathlib.Path.is_file", return_value=True), \
-             patch("pathlib.Path.resolve", lambda self, strict=False: self), \
-             self.assertRaisesRegex(ValueError, "path differs"):
-            validate_report(value, Path("/retained/split512"), Path("/repo"),
-                            lambda _path: "auto")
+        with (
+            patch("pathlib.Path.is_file", return_value=True),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
+            self.assertRaisesRegex(ValueError, "path differs"),
+        ):
+            validate_report(value, Path("/retained/split512"), Path("/repo"), lambda _path: "auto")
 
     def test_rejects_report_selected_source_root(self) -> None:
         value = report()
@@ -211,14 +238,22 @@ class Split512ReportTest(unittest.TestCase):
         digests = {value["executable"]["path"]: value["executable"]["sha256"]}
         digests.update({source["path"]: source["sha256"] for source in value["sources"]})
         digests[value["sources"][-1]["path"]] = "0" * 64
-        with patch("pathlib.Path.is_file", return_value=True), \
-             patch("pathlib.Path.is_dir", return_value=True), \
-             patch("pathlib.Path.resolve", lambda self, strict=False: self), \
-             patch("tools.r9700.check_split512_report._file_sha256",
-                   side_effect=lambda path: digests[str(path)]), \
-             self.assertRaisesRegex(ValueError, "source bytes changed"):
-            validate_report(value, Path("/repo/build/split512"), Path("/repo"),
-                            lambda _path: "auto")
+        with (
+            patch("pathlib.Path.is_file", return_value=True),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "pathlib.Path.resolve",
+                lambda self, strict=False: self,  # noqa: ARG005  mirrors Path.resolve(strict=)
+            ),
+            patch(
+                "tools.r9700.check_split512_report._file_sha256",
+                side_effect=lambda path: digests[str(path)],
+            ),
+            self.assertRaisesRegex(ValueError, "source bytes changed"),
+        ):
+            validate_report(
+                value, Path("/repo/build/split512"), Path("/repo"), lambda _path: "auto"
+            )
 
 
 if __name__ == "__main__":

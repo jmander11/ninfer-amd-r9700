@@ -38,7 +38,11 @@ Artifact and target ownership:
 
 ## Live execution state
 
-- `../plans/r9700-autonomous-todos.md`: authoritative completion ledger.
+- `../plans/r9700-autonomous-todos.md`: live work ledger.
+- `maintainer/upstream-sync.md`: upstream baseline and port dispositions.
+- `maintainer/merging-to-master.md`: full AMD promotion gates for experimental-to-master merges.
+- `maintainer/code-quality.md`: static gates and the gfx1201 device checks (memcheck, initcheck,
+  racecheck).
 - `../tools/bench/README.md`: physical matrix commands, DFlash selection, safe embedded-code
   extraction, and the selected-P2048 trace/PMC/reconciliation/roofline/static-evidence workflow.
 - `../tools/r9700/README.md`: target-specific oracle, ISA/resource, and physical admission commands.

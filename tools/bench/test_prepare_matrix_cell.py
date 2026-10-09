@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from tools.bench.prepare_matrix_cell import prepare_or_validate
 
-
-PRODUCER = r'''from pathlib import Path
+PRODUCER = r"""from pathlib import Path
 import json, sys
 args=sys.argv[1:]
 out=Path(args[args.index("--output-dir")+1])
@@ -23,7 +22,7 @@ out.mkdir()
     "created_at_utc":str(out), "prepare_only":True,
     "commands":[{"report":str(out/"json/suite/c1/result.json")}],
 })+"\n")
-'''
+"""
 
 
 class PrepareMatrixCellTest(unittest.TestCase):

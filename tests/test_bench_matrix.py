@@ -6,14 +6,17 @@ import unittest
 from pathlib import Path
 
 from tools.bench.run_ninfer_bench_matrix import (
-    REPORT_SCHEMA_VERSION,
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
     PHASE_TIMING_SEMANTICS,
     R9700_KV_PLANE_LAYOUTS,
+    REPORT_SCHEMA_VERSION,
+    SPLIT512_MIN_CONTEXT,
     BenchCase,
-    report_rows,
     prefill_timing_eligible,
-    resolved_dflash_verify_width,
+    report_rows,
     resolved_dflash_topology,
+    resolved_dflash_verify_width,
 )
 
 
@@ -23,13 +26,16 @@ class BenchMatrixTest(unittest.TestCase):
         self.assertFalse(prefill_timing_eligible(legacy))
         self.assertTrue(prefill_timing_eligible(legacy, 1))
         for version in (21, 22, 23):
-            current = {**legacy, "schema_version": version,
-                       "phase_timing_semantics": PHASE_TIMING_SEMANTICS}
+            current = {
+                **legacy,
+                "schema_version": version,
+                "phase_timing_semantics": PHASE_TIMING_SEMANTICS,
+            }
             self.assertTrue(prefill_timing_eligible(current))
-        for k in range(1, 6):
+        for k in range(1, 8):
             self.assertEqual(resolved_dflash_verify_width(k, 0), k + 1)
             self.assertEqual(resolved_dflash_topology(k, k + 1), "single-block-chain")
-        for k, width in ((4, 6), (6, 7), (7, 12), (11, 12)):
+        for k, width in ((4, 6), (8, 9), (7, 12), (11, 12)):
             with self.assertRaises(ValueError):
                 resolved_dflash_verify_width(k, width)
 
@@ -82,13 +88,12 @@ class BenchMatrixTest(unittest.TestCase):
                         "kv_value_group": 16,
                         "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
                         "q4_activation_bits": 8,
-                        "q4_prefill_cta_profile":
-                            "m64n128-pingpong-n16-k16-scalar-base-production",
+                        "q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-scalar-base-production",
                         "w8_activation_bits": 16,
-                        "fp8_qk_wmma_enabled": True,
-                        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                        "fp8_qk_wmma_t1_min_context": 64,
-                        "fp8_qk_wmma_t2_min_context": 320,
+                        "split512_enabled": True,
+                        "decode_attention_profile": DECODE_ATTENTION_PROFILE,
+                        "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+                        "split512_min_context": SPLIT512_MIN_CONTEXT,
                         "xattention_qualification": False,
                         "draft_tokens": 5,
                         "spec": "mtp",
@@ -173,13 +178,12 @@ class BenchMatrixTest(unittest.TestCase):
         assert row["kv_value_group"] == 16
         assert row["kv_plane_layouts"] == R9700_KV_PLANE_LAYOUTS
         assert row["q4_activation_bits"] == 8
-        assert row["q4_prefill_cta_profile"] == (
-            "m64n128-pingpong-n16-k16-scalar-base-production"
-        )
+        assert row["q4_prefill_cta_profile"] == ("m64n128-pingpong-n16-k16-scalar-base-production")
         assert row["w8_activation_bits"] == 16
-        assert row["fp8_qk_wmma_enabled"] is True
-        assert row["fp8_qk_wmma_t1_min_context"] == 64
-        assert row["fp8_qk_wmma_t2_min_context"] == 320
+        assert row["split512_enabled"] is True
+        assert row["decode_attention_profile"] == DECODE_ATTENTION_PROFILE
+        assert row["packed_decode_min_context"] == PACKED_DECODE_MIN_CONTEXT
+        assert row["split512_min_context"] == SPLIT512_MIN_CONTEXT
         assert row["xattention_qualification"] is False
         assert row["xattention_profile"] is None
         assert row["host_to_device_bytes"] == 17_400_000_000

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import tempfile
-import unittest
 import json
 import statistics
+import tempfile
+import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -21,8 +21,8 @@ from tools.bench.select_prefill_chunk import (
     _owned_path,
     _rank,
     _stable_manifest,
-    build_cases,
     _validated_prefill_measurement,
+    build_cases,
     build_screening,
     build_selection,
     main,
@@ -37,12 +37,23 @@ def migration_receipt(weights_id: str) -> dict:
         REQUIRED_RECIPES[1]: "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
         REQUIRED_RECIPES[2]: "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
     }[weights_id]
-    value = {"path": "/receipt.json", "sha256": "f" * 64, "recipe_id": recipe_id,
-             "object_plan_sha256": "e" * 64, "source_artifact_sha256": "d" * 64,
-             "source_receipt_sha256": "c" * 64, "transcoder_sha256": "b" * 64}
+    value = {
+        "path": "/receipt.json",
+        "sha256": "f" * 64,
+        "recipe_id": recipe_id,
+        "object_plan_sha256": "e" * 64,
+        "source_artifact_sha256": "d" * 64,
+        "source_receipt_sha256": "c" * 64,
+        "transcoder_sha256": "b" * 64,
+    }
     if weights_id == REQUIRED_RECIPES[2]:
-        value.update({"selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8", "source_index_sha256": "9" * 64,
-                      "source_ranking_sha256": "8" * 64})
+        value.update(
+            {
+                "selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+                "source_index_sha256": "9" * 64,
+                "source_ranking_sha256": "8" * 64,
+            }
+        )
     else:
         value["receipt_producer_sha256"] = "7" * 64
     return value
@@ -58,28 +69,27 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             "prefill_seconds_stddev": 1.0,
             "prefill_tok_s_mean": sum(speeds) / len(speeds),
             "prefill_tok_s_stddev": statistics.stdev(speeds),
-            "reps": [
-                {"timings": {"prefill_seconds": value}} for value in seconds
-            ],
+            "reps": [{"timings": {"prefill_seconds": value}} for value in seconds],
             "speculative": {
-                "enabled": False, "draft_window": 0, "rounds": 0,
-                "drafted_tokens": 0, "accepted_tokens": 0, "fallback_steps": 0,
-                "acceptance_rate": None, "acceptance_length": None,
+                "enabled": False,
+                "draft_window": 0,
+                "rounds": 0,
+                "drafted_tokens": 0,
+                "accepted_tokens": 0,
+                "fallback_steps": 0,
+                "acceptance_rate": None,
+                "acceptance_length": None,
                 "accepted_per_position": [],
             },
         }
-        throughput, workspace = _validated_prefill_measurement(
-            test, 8192, Path("report.json")
-        )
+        throughput, workspace = _validated_prefill_measurement(test, 8192, Path("report.json"))
         self.assertAlmostEqual(throughput, sum(speeds) / len(speeds))
         self.assertEqual(workspace, 123)
 
         wrong_protocol = json.loads(json.dumps(test))
         wrong_protocol["speculative"]["rounds"] = 1
         with self.assertRaisesRegex(ValueError, "spec-none ordinary"):
-            _validated_prefill_measurement(
-                wrong_protocol, 8192, Path("report.json")
-            )
+            _validated_prefill_measurement(wrong_protocol, 8192, Path("report.json"))
 
         test["prefill_tok_s_mean"] *= 1.01
         with self.assertRaisesRegex(ValueError, "not derived from its retained repetitions"):
@@ -103,7 +113,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 },
                 "expected_q4_activation_bits": 8,
                 "expected_w8_activation_bits": 8,
-                "expected_fp8_qk_wmma_enabled": True,
+                "expected_split512_enabled": True,
                 "bench": {"sha256": "b" * 64, "file_size_bytes": 1},
                 "artifact": {
                     "model_id": "qwen3.8-27b",
@@ -123,9 +133,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                     manifest = json.loads(json.dumps(base))
                     if post_state is not None:
                         manifest["power_profile"]["rechecked_after"] = post_state
-                    (root / "manifest.json").write_text(
-                        json.dumps(manifest), encoding="utf-8"
-                    )
+                    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
                     with self.assertRaisesRegex(
                         ValueError, "not a valid physical production prefill-chunk matrix"
                     ):
@@ -146,36 +154,47 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             report = official / "prefill.json"
             report.write_text("{}", encoding="utf-8")
             cases = build_cases(
-                "prefill-chunk", prefill_chunks=(1024, 2048, 4096, 8192),
+                "prefill-chunk",
+                prefill_chunks=(1024, 2048, 4096, 8192),
                 prefill_prompt=8192,
             )
             manifest = {
                 "artifact_type": "ninfer_bench_matrix_run",
                 "schema_version": MATRIX_SCHEMA_VERSION,
-                "preset": "prefill-chunk", "dry_run": False, "concurrency": [1],
+                "preset": "prefill-chunk",
+                "dry_run": False,
+                "concurrency": [1],
                 "base_chunk_profile": "spec-none-ordinary",
                 "expected_kv_plane_layouts": {
                     "key": "token-fastest-head-major",
                     "value": "feature-fastest-page-major",
                     "value_scale": "feature-fastest-page-major",
                 },
-                "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-                "expected_fp8_qk_wmma_enabled": True,
+                "expected_q4_activation_bits": 8,
+                "expected_w8_activation_bits": 8,
+                "expected_split512_enabled": True,
                 "bench": {"sha256": "b" * 64, "file_size_bytes": 1},
                 "artifact": {
-                    "model_id": "qwen3.8-27b", "weights_id": REQUIRED_RECIPES[0],
-                    "sha256": "a" * 64, "file_size_bytes": 1,
+                    "model_id": "qwen3.8-27b",
+                    "weights_id": REQUIRED_RECIPES[0],
+                    "sha256": "a" * 64,
+                    "file_size_bytes": 1,
                 },
                 "expected_kv_value_group": REQUIRED_GROUPS[0],
                 "expected_xattention_profile": REQUIRED_PROFILES[0],
                 "corpus_sha256": "c" * 64,
                 "power_profile": {
-                    "required": "auto", "observed": "auto", "rechecked_after": "auto",
+                    "required": "auto",
+                    "observed": "auto",
+                    "rechecked_after": "auto",
                 },
                 "commands": [
                     {
-                        "suite": case.suite, "case": case.name, "concurrency": 1,
-                        "report": str(report), "command": [],
+                        "suite": case.suite,
+                        "case": case.name,
+                        "concurrency": 1,
+                        "report": str(report),
+                        "command": [],
                     }
                     for case in cases
                 ],
@@ -200,9 +219,11 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             root = Path(directory)
             (root / "manifest.json").write_text("{}", encoding="utf-8")
             (root / "failures.json").write_text("[]", encoding="utf-8")
-            with patch("tools.bench.select_prefill_chunk._manifest") as load:
-                with self.assertRaisesRegex(ValueError, "retains a failed matrix marker"):
-                    _stable_manifest(root, 8192, (1024, 2048, 4096, 8192))
+            with (
+                patch("tools.bench.select_prefill_chunk._manifest") as load,
+                self.assertRaisesRegex(ValueError, "retains a failed matrix marker"),
+            ):
+                _stable_manifest(root, 8192, (1024, 2048, 4096, 8192))
             load.assert_not_called()
 
     def test_stable_manifest_rejects_dangling_failure_marker_symlink(self) -> None:
@@ -210,9 +231,11 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             root = Path(directory)
             (root / "manifest.json").write_text("{}", encoding="utf-8")
             (root / "failures.json").symlink_to(root / "missing-outside-campaign")
-            with patch("tools.bench.select_prefill_chunk._manifest") as load:
-                with self.assertRaisesRegex(ValueError, "retains a failed matrix marker"):
-                    _stable_manifest(root, 8192, (1024, 2048, 4096, 8192))
+            with (
+                patch("tools.bench.select_prefill_chunk._manifest") as load,
+                self.assertRaisesRegex(ValueError, "retains a failed matrix marker"),
+            ):
+                _stable_manifest(root, 8192, (1024, 2048, 4096, 8192))
             load.assert_not_called()
 
     def test_global_maximin_uses_all_candidates_and_both_prompts(self) -> None:
@@ -235,14 +258,16 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 (final / "manifest.json").write_text("{}", encoding="utf-8")
                 roots.append((screen, final))
                 artifact = {
-                    "model_id": "qwen3.8-27b", "weights_id": identity[0],
+                    "model_id": "qwen3.8-27b",
+                    "weights_id": identity[0],
                     "sha256": chr(ord("a") + REQUIRED_RECIPES.index(identity[0])) * 64,
                     "file_size_bytes": 100 * (1 + REQUIRED_RECIPES.index(identity[0])),
                 }
                 hybrid = identity[0] == REQUIRED_RECIPES[2]
                 artifact["conversion_receipt"] = migration_receipt(identity[0])
                 common = {
-                    "artifact": artifact, "bench": {"sha256": str(index) * 64},
+                    "artifact": artifact,
+                    "bench": {"sha256": str(index) * 64},
                     "corpus_sha256": "c" * 64,
                     "expected_kv_value_group": identity[1],
                     "expected_kv_plane_layouts": {
@@ -252,25 +277,34 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                     },
                     "expected_q4_activation_bits": 8,
                     "expected_w8_activation_bits": 8,
-                    "expected_fp8_qk_wmma_enabled": True,
-                    "expected_fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+                    "expected_split512_enabled": True,
+                    "expected_decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
                     "expected_xattention_profile": identity[2],
                     "required_candidate_identity": (
                         "fp8-hybrid-selection-authority" if hybrid else None
                     ),
                     "hybrid_shared_workspace_authority": (
-                        {"tool": {"path": "/planner", "file_size_bytes": 1,
-                                  "sha256": "e" * 64}}
-                        if hybrid else None
+                        {"tool": {"path": "/planner", "file_size_bytes": 1, "sha256": "e" * 64}}
+                        if hybrid
+                        else None
                     ),
                 }
-                by_root[screen] = (common, {
-                    1024: self.row(50, 900), 2048: self.row(90, 800),
-                    4096: self.row(100, 1000), 8192: self.row(80, 1100),
-                })
-                by_root[final] = (common, {
-                    4096: self.row(80, 1000), 2048: self.row(100, 800),
-                })
+                by_root[screen] = (
+                    common,
+                    {
+                        1024: self.row(50, 900),
+                        2048: self.row(90, 800),
+                        4096: self.row(100, 1000),
+                        8192: self.row(80, 1100),
+                    },
+                )
+                by_root[final] = (
+                    common,
+                    {
+                        4096: self.row(80, 1000),
+                        2048: self.row(100, 800),
+                    },
+                )
 
             with patch(
                 "tools.bench.select_prefill_chunk._manifest",
@@ -290,41 +324,60 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             self.assertEqual(len(result["final_ranking"][0]["normalized_throughput"]), 24)
             self.assertEqual(len(result["sources"]), 12)
             self.assertTrue(all(len(source["screen_reports"]) == 4 for source in result["sources"]))
-            self.assertTrue(all(len(source["finalist_reports"]) == 2 for source in result["sources"]))
+            self.assertTrue(
+                all(len(source["finalist_reports"]) == 2 for source in result["sources"])
+            )
 
     def test_requires_exact_cartesian_candidate_set(self) -> None:
         roots = [(Path(f"/screen-{index}"), Path(f"/final-{index}")) for index in range(12)]
         identity = (REQUIRED_RECIPES[0], 16, "dense")
         manifest = {
-            "artifact": {"model_id": "qwen3.8-27b", "weights_id": identity[0],
-                         "sha256": "a" * 64, "file_size_bytes": 1,
-                         "conversion_receipt": migration_receipt(identity[0])},
+            "artifact": {
+                "model_id": "qwen3.8-27b",
+                "weights_id": identity[0],
+                "sha256": "a" * 64,
+                "file_size_bytes": 1,
+                "conversion_receipt": migration_receipt(identity[0]),
+            },
             "bench": {"sha256": "b" * 64, "file_size_bytes": 2},
             "corpus_sha256": "c" * 64,
-            "expected_kv_value_group": identity[1], "expected_xattention_profile": identity[2],
+            "expected_kv_value_group": identity[1],
+            "expected_xattention_profile": identity[2],
         }
-        with patch(
-            "tools.bench.select_prefill_chunk._manifest",
-            return_value=(manifest, {chunk: self.row(1, 1) for chunk in (1024, 2048, 4096, 8192)}),
-        ), patch("tools.bench.select_prefill_chunk.file_sha256", return_value="f" * 64):
-            with self.assertRaisesRegex(ValueError, "duplicate prefill-chunk candidate"):
-                build_selection(roots)
+        with (
+            patch(
+                "tools.bench.select_prefill_chunk._manifest",
+                return_value=(
+                    manifest,
+                    {chunk: self.row(1, 1) for chunk in (1024, 2048, 4096, 8192)},
+                ),
+            ),
+            patch("tools.bench.select_prefill_chunk.file_sha256", return_value="f" * 64),
+            self.assertRaisesRegex(ValueError, "duplicate prefill-chunk candidate"),
+        ):
+            build_selection(roots)
 
     def test_workspace_then_smaller_chunk_break_exact_throughput_tie(self) -> None:
         rows = {
             ("recipe", 16, "dense"): {
-                1024: self.row(10, 20), 2048: self.row(10, 10), 4096: self.row(10, 10),
+                1024: self.row(10, 20),
+                2048: self.row(10, 10),
+                4096: self.row(10, 10),
             }
         }
-        self.assertEqual([row["chunk"] for row in _rank((1024, 2048, 4096), rows)], [2048, 4096, 1024])
+        self.assertEqual(
+            [row["chunk"] for row in _rank((1024, 2048, 4096), rows)], [2048, 4096, 1024]
+        )
 
     def test_final_rank_preserves_full_screen_normalizer(self) -> None:
         rows = {
             ("candidate-a", 8192): {
-                1024: self.row(90, 10), 2048: self.row(80, 10),
+                1024: self.row(90, 10),
+                2048: self.row(80, 10),
             },
             ("candidate-a", 32768): {
-                1024: self.row(80, 10), 2048: self.row(100, 10),
+                1024: self.row(80, 10),
+                2048: self.row(100, 10),
             },
         }
         # The eliminated 8K leader reached 100. Retaining that denominator makes both finalists'
@@ -348,7 +401,8 @@ class PrefillChunkSelectionTest(unittest.TestCase):
         for index, identity in enumerate(identities):
             manifest = {
                 "artifact": {
-                    "model_id": "qwen3.8-27b", "weights_id": identity[0],
+                    "model_id": "qwen3.8-27b",
+                    "weights_id": identity[0],
                     "sha256": chr(ord("a") + REQUIRED_RECIPES.index(identity[0])) * 64,
                     "file_size_bytes": 1,
                     "conversion_receipt": migration_receipt(identity[0]),
@@ -357,20 +411,26 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 "expected_kv_value_group": identity[1],
                 "expected_xattention_profile": identity[2],
                 "required_candidate_identity": (
-                    "fp8-hybrid-selection-authority"
-                    if identity[0] == REQUIRED_RECIPES[2] else None
+                    "fp8-hybrid-selection-authority" if identity[0] == REQUIRED_RECIPES[2] else None
                 ),
             }
             reports = {
-                1024: self.row(50, 900), 2048: self.row(90, 800),
-                4096: self.row(100, 1000), 8192: self.row(80, 1100),
+                1024: self.row(50, 900),
+                2048: self.row(90, 800),
+                4096: self.row(100, 1000),
+                8192: self.row(80, 1100),
             }
-            loaded.append((manifest, reports, {
-                "path": f"/screen-{index}/manifest.json", "sha256": str(index) * 64,
-            }))
-        with patch(
-            "tools.bench.select_prefill_chunk._stable_manifest", side_effect=loaded
-        ):
+            loaded.append(
+                (
+                    manifest,
+                    reports,
+                    {
+                        "path": f"/screen-{index}/manifest.json",
+                        "sha256": str(index) * 64,
+                    },
+                )
+            )
+        with patch("tools.bench.select_prefill_chunk._stable_manifest", side_effect=loaded):
             result = build_screening(roots)
         self.assertEqual(result["candidate_count"], 12)
         self.assertEqual(result["finalist_chunks"], [4096, 2048])
@@ -383,34 +443,37 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             payload = {"finalist_chunks": [4096, 2048]}
             record.write_text(json.dumps(payload), encoding="utf-8")
             roots = [Path(f"/screen-{index}") for index in range(12)]
-            with patch(
-                "tools.bench.select_prefill_chunk.build_screening", return_value=payload
-            ) as rebuild, patch(
-                "tools.bench.select_prefill_chunk.file_sha256", return_value="a" * 64
+            with (
+                patch(
+                    "tools.bench.select_prefill_chunk.build_screening", return_value=payload
+                ) as rebuild,
+                patch("tools.bench.select_prefill_chunk.file_sha256", return_value="a" * 64),
             ):
                 self.assertEqual(validate_screening_record(record, roots), payload)
                 rebuild.assert_called_once_with(roots)
 
             changed = {"finalist_chunks": [2048, 4096]}
             record.write_text(json.dumps(changed), encoding="utf-8")
-            with patch(
-                "tools.bench.select_prefill_chunk.build_screening", return_value=payload
-            ), patch(
-                "tools.bench.select_prefill_chunk.file_sha256", return_value="a" * 64
-            ), self.assertRaisesRegex(ValueError, "does not match its source evidence"):
+            with (
+                patch("tools.bench.select_prefill_chunk.build_screening", return_value=payload),
+                patch("tools.bench.select_prefill_chunk.file_sha256", return_value="a" * 64),
+                self.assertRaisesRegex(ValueError, "does not match its source evidence"),
+            ):
                 validate_screening_record(record, roots)
 
     def test_verify_screening_cli_prints_only_validated_finalists(self) -> None:
-        arguments = [
-            part
-            for index in range(12)
-            for part in ("--screen", f"/screen-{index}")
-        ] + ["--verify-screening", "/screening.json"]
+        arguments = [part for index in range(12) for part in ("--screen", f"/screen-{index}")] + [
+            "--verify-screening",
+            "/screening.json",
+        ]
         output = StringIO()
-        with patch(
-            "tools.bench.select_prefill_chunk.validate_screening_record",
-            return_value={"finalist_chunks": [4096, 2048]},
-        ) as validate, redirect_stdout(output):
+        with (
+            patch(
+                "tools.bench.select_prefill_chunk.validate_screening_record",
+                return_value={"finalist_chunks": [4096, 2048]},
+            ) as validate,
+            redirect_stdout(output),
+        ):
             self.assertEqual(main(arguments), 0)
         self.assertEqual(output.getvalue(), "4096\n2048\n")
         validate.assert_called_once_with(
@@ -434,22 +497,32 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 for chunk in (1024, 2048, 4096, 8192):
                     report = screen.parent / f"screen-{chunk}.json"
                     report.write_text(f"screen-{index}-{chunk}", encoding="utf-8")
-                    screen_reports.append({
-                        "chunk": chunk, "path": str(report), "sha256": self.digest(report),
-                    })
+                    screen_reports.append(
+                        {
+                            "chunk": chunk,
+                            "path": str(report),
+                            "sha256": self.digest(report),
+                        }
+                    )
                 for chunk in (2048, 4096):
                     report = final.parent / f"final-{chunk}.json"
                     report.write_text(f"final-{index}-{chunk}", encoding="utf-8")
-                    final_reports.append({
-                        "chunk": chunk, "path": str(report), "sha256": self.digest(report),
-                    })
+                    final_reports.append(
+                        {
+                            "chunk": chunk,
+                            "path": str(report),
+                            "sha256": self.digest(report),
+                        }
+                    )
                 roots.append((screen.parent, final.parent))
-                sources.append({
-                    "screen_manifest": {"path": str(screen), "sha256": self.digest(screen)},
-                    "finalist_manifest": {"path": str(final), "sha256": self.digest(final)},
-                    "screen_reports": screen_reports,
-                    "finalist_reports": final_reports,
-                })
+                sources.append(
+                    {
+                        "screen_manifest": {"path": str(screen), "sha256": self.digest(screen)},
+                        "finalist_manifest": {"path": str(final), "sha256": self.digest(final)},
+                        "screen_reports": screen_reports,
+                        "finalist_reports": final_reports,
+                    }
+                )
             payload = {
                 "artifact_type": "ninfer_r9700_prefill_chunk_selection",
                 "schema_version": 2,
@@ -488,11 +561,16 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 ],
             }
             record = root / "selection.json"
-            record.write_text(json.dumps({
-                "artifact_type": "ninfer_r9700_prefill_chunk_selection",
-                "schema_version": 2,
-                "sources": [source] * 12,
-            }), encoding="utf-8")
+            record.write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "ninfer_r9700_prefill_chunk_selection",
+                        "schema_version": 2,
+                        "sources": [source] * 12,
+                    }
+                ),
+                encoding="utf-8",
+            )
             report.write_text("changed", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "source bytes changed"):
                 validate_selection_record(record)
@@ -508,6 +586,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
     @staticmethod
     def digest(path: Path) -> str:
         import hashlib
+
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
 

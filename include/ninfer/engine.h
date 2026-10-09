@@ -74,6 +74,9 @@ public:
 
     [[nodiscard]] std::uint32_t count_tokens(PromptInput input) const;
     [[nodiscard]] PromptCapabilities prompt_capabilities() const;
+    // The exact bytes a vocabulary token decodes to, special tokens included. One token may hold a
+    // partial UTF-8 sequence. Throws std::out_of_range for an id outside the vocabulary.
+    [[nodiscard]] std::string token_bytes(TokenId token) const;
     [[nodiscard]] ModelSamplingDefaults sampling_defaults() const;
 
     // Establishes queue membership synchronously. Delivery intent is fixed before queue
@@ -83,7 +86,7 @@ public:
     // independently from GPU execution.
     [[nodiscard]] GenerationHandle
     submit(PreparedPrompt prompt, RequestOptions options,
-           OutputDelivery delivery = OutputDelivery::TerminalOnly,
+           OutputDelivery delivery                                = OutputDelivery::TerminalOnly,
            std::chrono::steady_clock::time_point pending_deadline = {},
            HostInputLease host_input                              = {});
 
@@ -92,8 +95,16 @@ public:
                               const CancellationView& cancellation = {});
 
     // Teacher-forced next-token NLL over a prepared token sequence. Does not sample, decode,
-    // or change generate/serve graphs. Used only by the perplexity tool.
+    // or change generate/serve graphs. Requires an idle Engine.
     [[nodiscard]] ScoreResult score(PreparedPrompt prompt, ScoreOptions options = {});
+
+    // One idle admission and execution reservation for the complete batch. No
+    // generation can interleave between candidates. Each sequence is evaluated
+    // independently; this does not promise shared-prefix computation reuse.
+    // At most 16 sequences and 4 * max_context aggregate prepared tokens.
+    [[nodiscard]] std::vector<ScoreResult> score_many(std::vector<PreparedPrompt> prompts,
+                                                      std::vector<ScoreOptions> options,
+                                                      const CancellationView& cancellation = {});
 
     [[nodiscard]] const EngineOptions& options() const;
     [[nodiscard]] LoadSummary load_summary() const;

@@ -8,7 +8,6 @@ import json
 import math
 from dataclasses import asdict, dataclass
 
-
 GROUP = 64
 OUTPUT_BYTES = 2
 W8_GROUP = 32
@@ -105,8 +104,7 @@ def requested_traffic(shape: Shape, tile: Tile) -> Traffic:
     """
     shape.validate()
     output_tiles = (tile.m // 16) * (tile.n // 16)
-    if (tile.m % 16 or tile.n % 16 or tile.waves <= 0 or
-            output_tiles % tile.waves):
+    if tile.m % 16 or tile.n % 16 or tile.waves <= 0 or output_tiles % tile.waves:
         raise ValueError("tile must assign an integral number of 16x16 WMMA tiles per wave")
 
     groups = shape.columns // GROUP
@@ -121,7 +119,7 @@ def requested_traffic(shape: Shape, tile: Tile) -> Traffic:
             if tile.stage_unique_operands:
                 # The uniform scalar status load is issued independently by every wave.
                 status += 4 * tile.waves
-                a_codes += groups * valid_m * GROUP       # two Q4 planes == one byte/K
+                a_codes += groups * valid_m * GROUP  # two Q4 planes == one byte/K
                 w_codes += groups * valid_n * GROUP // 2  # one Q4 plane
                 a_scales += groups * valid_m * 2
                 w_scales += groups * valid_n * 2
@@ -246,8 +244,11 @@ def requested_w8_traffic(shape: Shape, tile: Tile) -> W8Traffic:
         issued_iu8_ops_per_requested_byte=issued_iu8_ops / total,
         static_lds_bytes=lds,
     )
-def with_roofline(traffic: Traffic, bandwidth_gbps: float | None,
-                  iu4_tops: float | None) -> dict[str, object]:
+
+
+def with_roofline(
+    traffic: Traffic, bandwidth_gbps: float | None, iu4_tops: float | None
+) -> dict[str, object]:
     result: dict[str, object] = asdict(traffic)
     bounds: dict[str, float] = {}
     if bandwidth_gbps is not None:
@@ -273,8 +274,9 @@ def with_roofline(traffic: Traffic, bandwidth_gbps: float | None,
     return result
 
 
-def with_w8_roofline(traffic: W8Traffic, bandwidth_gbps: float | None,
-                     iu8_tops: float | None) -> dict[str, object]:
+def with_w8_roofline(
+    traffic: W8Traffic, bandwidth_gbps: float | None, iu8_tops: float | None
+) -> dict[str, object]:
     result: dict[str, object] = asdict(traffic)
     bounds: dict[str, float] = {}
     if bandwidth_gbps is not None:
@@ -325,13 +327,20 @@ def parse_w8_shape(text: str) -> Shape:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Model source-requested traffic for A8Q4G64 and A8W8G32 prefill tiles.")
+        description="Model source-requested traffic for A8Q4G64 and A8W8G32 prefill tiles."
+    )
     parser.add_argument(
-        "--shape", action="append", type=parse_shape,
-        help="T,N,K; repeatable (defaults to the three dominant traced prefill shapes)")
+        "--shape",
+        action="append",
+        type=parse_shape,
+        help="T,N,K; repeatable (defaults to the three dominant traced prefill shapes)",
+    )
     parser.add_argument(
-        "--w8-shape", action="append", type=parse_w8_shape,
-        help="T,N,logical-K; repeatable (defaults to four dominant mixed Text shapes)")
+        "--w8-shape",
+        action="append",
+        type=parse_w8_shape,
+        help="T,N,logical-K; repeatable (defaults to four dominant mixed Text shapes)",
+    )
     parser.add_argument("--bandwidth-gbps", type=float)
     parser.add_argument("--iu4-tops", type=float)
     parser.add_argument("--iu8-tops", type=float)
@@ -354,19 +363,23 @@ def main() -> int:
         "scope": "source/ISA-requested bytes; cache coalescing, residency, and HBM traffic excluded",
         "roofline_scope": "scenario over a caller-supplied requested-byte service rate, not an HBM bound",
         "a8_decomposition": "unsigned-low plus signed-high IU4; issued IU4 ops are 2x logical",
-        "a8q4g64": {"issued_math": "two IU4 paths for unsigned-low/signed-high A8", "shapes": [
-            {
-                "tokens": shape.tokens,
-                "rows": shape.rows,
-                "columns": shape.columns,
-                "tiles": [
-                    with_roofline(requested_traffic(shape, tile),
-                                  args.bandwidth_gbps, args.iu4_tops)
-                    for tile in TILES
-                ],
-            }
-            for shape in shapes
-        ]},
+        "a8q4g64": {
+            "issued_math": "two IU4 paths for unsigned-low/signed-high A8",
+            "shapes": [
+                {
+                    "tokens": shape.tokens,
+                    "rows": shape.rows,
+                    "columns": shape.columns,
+                    "tiles": [
+                        with_roofline(
+                            requested_traffic(shape, tile), args.bandwidth_gbps, args.iu4_tops
+                        )
+                        for tile in TILES
+                    ],
+                }
+                for shape in shapes
+            ],
+        },
         "a8w8g32": {
             "issued_math": "two signed IU8 K16 instructions per exact G32 group",
             "canonical_k_alignment": W8_K_ALIGNMENT,
@@ -376,8 +389,9 @@ def main() -> int:
                     "rows": shape.rows,
                     "columns": shape.columns,
                     "tiles": [
-                        with_w8_roofline(requested_w8_traffic(shape, tile),
-                                         args.bandwidth_gbps, args.iu8_tops)
+                        with_w8_roofline(
+                            requested_w8_traffic(shape, tile), args.bandwidth_gbps, args.iu8_tops
+                        )
                         for tile in W8_TILES
                     ],
                 }

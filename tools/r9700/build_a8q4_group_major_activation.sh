@@ -2,10 +2,7 @@
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$repo"
-mkdir -p tools/r9700/build
-/opt/rocm/llvm/bin/clang++ --offload-device-only --offload-arch=gfx1201 -O3 -std=c++20 -x hip \
-  tools/r9700/a8q4_group_major_activation_qual.hip -Itools/r9700 \
-  -S -o tools/r9700/build/a8q4_group_major_activation_qual.s
+make -s -C tools/r9700 build/a8q4_group_major_activation_qual.s
 PYTHON=/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python
 "$PYTHON" -m tools.r9700.check_a8q4_group_major_activation_static \
   --source tools/r9700/a8q4_group_major_activation_qual.hip \

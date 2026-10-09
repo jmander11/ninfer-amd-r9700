@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 CONTIGUOUS_LAYOUT = "contiguous-le-v1"
 ROW_SPLIT_LAYOUT = "row-split-k128-v1"
 Q4_LAYOUT = "r9700-q4g64-n16-k16-v1"
@@ -84,8 +83,13 @@ def tensor_spec(
 ) -> TensorSpec:
     """Build a tensor spec with the canonical layout for its numeric format."""
 
-    layout = (CONTIGUOUS_LAYOUT if numeric_format in DIRECT_FORMATS else
-              Q4_LAYOUT if numeric_format == Q4 else ROW_SPLIT_LAYOUT)
+    layout = (
+        CONTIGUOUS_LAYOUT
+        if numeric_format in DIRECT_FORMATS
+        else Q4_LAYOUT
+        if numeric_format == Q4
+        else ROW_SPLIT_LAYOUT
+    )
     return TensorSpec(name=name, shape=shape, format=numeric_format, layout=layout)
 
 
@@ -151,8 +155,6 @@ __all__ = [
     "FP32",
     "I32",
     "LAYOUT_NAMES",
-    "LogicalAliasSpec",
-    "LogicalRowViewSpec",
     "Q4",
     "Q4_LAYOUT",
     "Q5",
@@ -160,11 +162,13 @@ __all__ = [
     "RESOURCE_ENCODING",
     "RESOURCE_SPECS",
     "ROW_SPLIT_LAYOUT",
+    "VISION_LAYERS",
+    "W8",
+    "LogicalAliasSpec",
+    "LogicalRowViewSpec",
     "ResourceSpec",
     "StoredObjectSpec",
     "TensorSpec",
-    "VISION_LAYERS",
-    "W8",
     "build_vision_specs",
     "tensor_spec",
 ]

@@ -10,28 +10,41 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
+from tools.bench.run_ninfer_bench_matrix import (
+    MATRIX_SCHEMA_VERSION,
+    R9700_KV_PLANE_LAYOUTS,
+    R9700_POWER_PROFILE,
+    BenchCase,
+    file_sha256,
+)
 from tools.ppl.assemble_pareto import (
+    _bind_prefill_chunk_authority,
+    _manifest_prefill_chunk,
     _quality_candidate,
     _reports,
-    _manifest_prefill_chunk,
-    _bind_prefill_chunk_authority,
     _validate_ordinary_whole_report,
     assemble_candidate,
     validate_chunk_candidate_bindings,
     validate_xattention_dense_controls,
 )
-from tools.bench.run_ninfer_bench_matrix import BenchCase, file_sha256
-from tools.bench.run_ninfer_bench_matrix import MATRIX_SCHEMA_VERSION, R9700_KV_PLANE_LAYOUTS, R9700_POWER_PROFILE
-from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pareto import _valid_capacity_failure, classify
 
 
 def passing_quality_cells():
-    return {label: {"eligible": True, "tier": "accuracy", "mean_nll_delta": .01,
-        "complete_finite_aligned": True, "scored_positions": 4095,
-        "new_severe_positions": 0} for label in ("8k", "32k")}
+    return {
+        label: {
+            "eligible": True,
+            "tier": "accuracy",
+            "mean_nll_delta": 0.01,
+            "complete_finite_aligned": True,
+            "scored_positions": 4095,
+            "new_severe_positions": 0,
+        }
+        for label in ("8k", "32k")
+    }
 
 
 class AssembleParetoTest(unittest.TestCase):
@@ -55,45 +68,80 @@ class AssembleParetoTest(unittest.TestCase):
                 "post_chunk_capacity_gate": True,
             }
             _bind_prefill_chunk_authority(manifest, "pareto-capacity", authority)
-            stale = {key: value for key, value in authority.items()
-                     if key != "base_chunk_profile"}
+            stale = {key: value for key, value in authority.items() if key != "base_chunk_profile"}
             with self.assertRaisesRegex(ValueError, "malformed"):
                 _bind_prefill_chunk_authority(manifest, "pareto-capacity", stale)
 
     def test_whole_requires_one_exact_ordinary_ranking_report(self) -> None:
         def row(tokens: int) -> dict:
             return {
-                "label": f"whole-pp{tokens}+tg256", "kind": "whole",
-                "n_prompt": tokens, "n_gen": 256, "requested_output_tokens": 257,
-                "prepare_seconds_mean": 0.001, "prepare_seconds_stddev": 0.0,
-                "prefill_seconds_mean": 1.0, "prefill_seconds_stddev": 0.0,
-                "decode_seconds_mean": 2.0, "decode_seconds_stddev": 0.0,
-                "total_seconds_mean": 4.0, "total_seconds_stddev": 0.0,
-                "prefill_tok_s_mean": float(tokens), "prefill_tok_s_stddev": 0.0,
-                "decode_output_tok_s_mean": 128.0, "decode_output_tok_s_stddev": 0.0,
-                "decode_engine_tok_s_mean": 128.0, "decode_engine_tok_s_stddev": 0.0,
-                "whole_output_tok_s_mean": 64.25, "whole_output_tok_s_stddev": 0.0,
-                "speculative": {"enabled": False, "draft_window": 0, "rounds": 0,
-                                "drafted_tokens": 0, "accepted_tokens": 0,
-                                "fallback_steps": 0, "acceptance_rate": None,
-                                "acceptance_length": None, "accepted_per_position": []},
-                "reps": [{
-                    "generated_output_tokens": 257, "decode_output_tokens": 256,
-                    "decode_engine_tokens": 256,
-                    "timings": {"prepare_seconds": 0.001, "vision_seconds": 0,
-                                "prefill_seconds": 1.0, "decode_seconds": 2.0,
-                                "total_seconds": 4.0},
-                    "speculative": {"enabled": False, "draft_window": 0, "rounds": 0,
-                                    "drafted_tokens": 0, "accepted_tokens": 0,
-                                    "fallback_steps": 0, "acceptance_rate": None,
-                                    "acceptance_length": None, "accepted_per_position": []},
-                } for _ in range(3)],
+                "label": f"whole-pp{tokens}+tg256",
+                "kind": "whole",
+                "n_prompt": tokens,
+                "n_gen": 256,
+                "requested_output_tokens": 257,
+                "prepare_seconds_mean": 0.001,
+                "prepare_seconds_stddev": 0.0,
+                "prefill_seconds_mean": 1.0,
+                "prefill_seconds_stddev": 0.0,
+                "decode_seconds_mean": 2.0,
+                "decode_seconds_stddev": 0.0,
+                "total_seconds_mean": 4.0,
+                "total_seconds_stddev": 0.0,
+                "prefill_tok_s_mean": float(tokens),
+                "prefill_tok_s_stddev": 0.0,
+                "decode_output_tok_s_mean": 128.0,
+                "decode_output_tok_s_stddev": 0.0,
+                "decode_engine_tok_s_mean": 128.0,
+                "decode_engine_tok_s_stddev": 0.0,
+                "whole_output_tok_s_mean": 64.25,
+                "whole_output_tok_s_stddev": 0.0,
+                "speculative": {
+                    "enabled": False,
+                    "draft_window": 0,
+                    "rounds": 0,
+                    "drafted_tokens": 0,
+                    "accepted_tokens": 0,
+                    "fallback_steps": 0,
+                    "acceptance_rate": None,
+                    "acceptance_length": None,
+                    "accepted_per_position": [],
+                },
+                "reps": [
+                    {
+                        "generated_output_tokens": 257,
+                        "decode_output_tokens": 256,
+                        "decode_engine_tokens": 256,
+                        "timings": {
+                            "prepare_seconds": 0.001,
+                            "vision_seconds": 0,
+                            "prefill_seconds": 1.0,
+                            "decode_seconds": 2.0,
+                            "total_seconds": 4.0,
+                        },
+                        "speculative": {
+                            "enabled": False,
+                            "draft_window": 0,
+                            "rounds": 0,
+                            "drafted_tokens": 0,
+                            "accepted_tokens": 0,
+                            "fallback_steps": 0,
+                            "acceptance_rate": None,
+                            "acceptance_length": None,
+                            "accepted_per_position": [],
+                        },
+                    }
+                    for _ in range(3)
+                ],
             }
+
         ordinary = {
             "schema_version": 20,
             "config": {
-                "spec": "none", "draft_tokens": 0,
-                "speculative_execution": False, "proposal_head": "full",
+                "spec": "none",
+                "draft_tokens": 0,
+                "speculative_execution": False,
+                "proposal_head": "full",
             },
             "tests": [row(tokens) for tokens in (8192, 32768)],
         }
@@ -103,8 +151,10 @@ class AssembleParetoTest(unittest.TestCase):
         c4["phase_timing_semantics"] = "serial-lane-service-sum_shared-decode-max_v1"
         for test in c4["tests"]:
             for field in (
-                "prefill_tok_s_mean", "decode_output_tok_s_mean",
-                "decode_engine_tok_s_mean", "whole_output_tok_s_mean",
+                "prefill_tok_s_mean",
+                "decode_output_tok_s_mean",
+                "decode_engine_tok_s_mean",
+                "whole_output_tok_s_mean",
             ):
                 test[field] *= 4
             for rep in test["reps"]:
@@ -124,10 +174,14 @@ class AssembleParetoTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires one ordinary ranking row"):
             _validate_ordinary_whole_report([], 1)
         mtp = copy.deepcopy(ordinary)
-        mtp["config"].update({
-            "spec": "mtp", "draft_tokens": 3,
-            "speculative_execution": True, "proposal_head": "optimized",
-        })
+        mtp["config"].update(
+            {
+                "spec": "mtp",
+                "draft_tokens": 3,
+                "speculative_execution": True,
+                "proposal_head": "optimized",
+            }
+        )
         with self.assertRaisesRegex(ValueError, "not spec-none ordinary"):
             _validate_ordinary_whole_report([mtp], 1)
         missing = copy.deepcopy(ordinary)
@@ -144,17 +198,31 @@ class AssembleParetoTest(unittest.TestCase):
             _validate_ordinary_whole_report([hidden_speculation], 1)
 
     def test_chunk_selection_binds_candidate_artifact_bench_group_and_profile(self) -> None:
-        artifact = {"weights_id": "r9700-q4g64-n16k16-eval", "sha256": "a" * 64, "file_size_bytes": 1}
+        artifact = {
+            "weights_id": "r9700-q4g64-n16k16-eval",
+            "sha256": "a" * 64,
+            "file_size_bytes": 1,
+        }
         bench = {"sha256": "b" * 64, "file_size_bytes": 2}
-        selection = {"sources": [{
-            "weights_id": artifact["weights_id"], "kv_value_group": 16,
-            "xattention_profile": "dense", "artifact": artifact,
-            "benchmark_executable": bench,
-        }]}
-        provenance = [{
-            "artifact": artifact, "benchmark_executable": bench, "cache_value_group": 16,
-            "quality": {"representation": {"xattention_profile": "dense"}},
-        }]
+        selection = {
+            "sources": [
+                {
+                    "weights_id": artifact["weights_id"],
+                    "kv_value_group": 16,
+                    "xattention_profile": "dense",
+                    "artifact": artifact,
+                    "benchmark_executable": bench,
+                }
+            ]
+        }
+        provenance = [
+            {
+                "artifact": artifact,
+                "benchmark_executable": bench,
+                "cache_value_group": 16,
+                "quality": {"representation": {"xattention_profile": "dense"}},
+            }
+        ]
         validate_chunk_candidate_bindings(selection, provenance)
         changed = copy.deepcopy(provenance)
         changed[0]["benchmark_executable"]["sha256"] = "c" * 64
@@ -186,7 +254,8 @@ class AssembleParetoTest(unittest.TestCase):
 
     @patch("tools.ppl.assemble_pareto.ppl_run.validate_bf16_repeat_comparison")
     def test_xattention_admission_requires_complete_controls_per_artifact(
-        self, validate_repeat,
+        self,
+        validate_repeat,
     ) -> None:
         candidates = [
             {
@@ -197,14 +266,18 @@ class AssembleParetoTest(unittest.TestCase):
                 "execution_profile": {"xattention_profile": profile},
             }
             for group, profile in (
-                (16, "dense"), (32, "dense"),
-                (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+                (16, "dense"),
+                (32, "dense"),
+                (16, "b128-s16-tau900"),
+                (32, "b128-s16-tau900"),
             )
         ]
         reused_bf16 = {"path": "/authority.json", "sha256": "4" * 64}
         repeat_comparison = {
-            "path": "/comparison.json", "sha256": "5" * 64,
-            "authority_input": "first", "authority_campaign_sha256": "4" * 64,
+            "path": "/comparison.json",
+            "sha256": "5" * 64,
+            "authority_input": "first",
+            "authority_campaign_sha256": "4" * 64,
         }
         validate_repeat.return_value = repeat_comparison
         campaign_identity = {
@@ -228,22 +301,24 @@ class AssembleParetoTest(unittest.TestCase):
         provenance = []
         for candidate in candidates:
             profile = candidate["execution_profile"]["xattention_profile"]
-            provenance.append({
-                "candidate": candidate["name"],
-                "artifact": {
-                    "weights_id": "r9700-q4g64-n16k16-eval",
-                    "sha256": "a" * 64,
-                    "file_size_bytes": 123,
-                },
-                "quality": {
-                    "path": f"/{profile}.json",
-                    "sha256": ("2" if profile == "dense" else "3") * 64,
-                    "representation": {"xattention_profile": profile},
-                    "campaign_identity": campaign_identity,
-                },
-                "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
-                "capacity_failures": [],
-            })
+            provenance.append(
+                {
+                    "candidate": candidate["name"],
+                    "artifact": {
+                        "weights_id": "r9700-q4g64-n16k16-eval",
+                        "sha256": "a" * 64,
+                        "file_size_bytes": 123,
+                    },
+                    "quality": {
+                        "path": f"/{profile}.json",
+                        "sha256": ("2" if profile == "dense" else "3") * 64,
+                        "representation": {"xattention_profile": profile},
+                        "campaign_identity": campaign_identity,
+                    },
+                    "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
+                    "capacity_failures": [],
+                }
+            )
         with self.assertRaisesRegex(ValueError, "all-Q4, mixed Q4/W8"):
             validate_xattention_dense_controls(candidates, provenance)
         with self.assertRaisesRegex(ValueError, "every candidate artifact"):
@@ -272,8 +347,7 @@ class AssembleParetoTest(unittest.TestCase):
             for source in provenance
         ]
         third_candidates = [
-            {**candidate, "name": f"hybrid-{candidate['name']}"}
-            for candidate in candidates
+            {**candidate, "name": f"hybrid-{candidate['name']}"} for candidate in candidates
         ]
         third_provenance = [
             {
@@ -296,24 +370,36 @@ class AssembleParetoTest(unittest.TestCase):
             [*provenance, *second_provenance, *third_provenance],
         )
         all_candidates = [*candidates, *second_candidates, *third_candidates]
-        failed_pair = copy.deepcopy([
-            *provenance, *second_provenance, *third_provenance,
-        ])
+        failed_pair = copy.deepcopy(
+            [
+                *provenance,
+                *second_provenance,
+                *third_provenance,
+            ]
+        )
         for index in (8, 10):
             failed_pair[index]["matrices"] = {"pareto-capacity": {}}
-            failed_pair[index]["capacity_failures"] = [{
+            failed_pair[index]["capacity_failures"] = [
+                {
+                    "status": "memory_admission_ineligible",
+                    "concurrency": 4,
+                }
+            ]
+        validate_xattention_dense_controls(all_candidates, failed_pair)
+        unmatched = copy.deepcopy(
+            [
+                *provenance,
+                *second_provenance,
+                *third_provenance,
+            ]
+        )
+        unmatched[8]["matrices"] = {"pareto-capacity": {}}
+        unmatched[8]["capacity_failures"] = [
+            {
                 "status": "memory_admission_ineligible",
                 "concurrency": 4,
-            }]
-        validate_xattention_dense_controls(all_candidates, failed_pair)
-        unmatched = copy.deepcopy([
-            *provenance, *second_provenance, *third_provenance,
-        ])
-        unmatched[8]["matrices"] = {"pareto-capacity": {}}
-        unmatched[8]["capacity_failures"] = [{
-            "status": "memory_admission_ineligible",
-            "concurrency": 4,
-        }]
+            }
+        ]
         with self.assertRaisesRegex(ValueError, "matched dense/sparse capacity eligibility"):
             validate_xattention_dense_controls(all_candidates, unmatched)
         failed_with_whole = copy.deepcopy(failed_pair)
@@ -323,7 +409,8 @@ class AssembleParetoTest(unittest.TestCase):
         changed_repeat = copy.deepcopy(second_provenance)
         changed_repeat[-1]["quality"]["campaign_identity"] = copy.deepcopy(campaign_identity)
         changed_repeat[-1]["quality"]["campaign_identity"]["bf16_repeat_comparison"] = {
-            **repeat_comparison, "sha256": "6" * 64,
+            **repeat_comparison,
+            "sha256": "6" * 64,
         }
         with self.assertRaisesRegex(ValueError, "repeat authority binding differs"):
             validate_xattention_dense_controls(
@@ -333,7 +420,8 @@ class AssembleParetoTest(unittest.TestCase):
         provenance[-1] = {
             **provenance[-1],
             "artifact": {
-                "weights_id": "r9700-q4g64-n16k16-eval", "sha256": "b" * 64,
+                "weights_id": "r9700-q4g64-n16k16-eval",
+                "sha256": "b" * 64,
                 "file_size_bytes": 123,
             },
         }
@@ -349,24 +437,30 @@ class AssembleParetoTest(unittest.TestCase):
                 "execution_profile": {"xattention_profile": profile},
             }
             for group, profile in (
-                (16, "dense"), (32, "dense"),
-                (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+                (16, "dense"),
+                (32, "dense"),
+                (16, "b128-s16-tau900"),
+                (32, "b128-s16-tau900"),
             )
         ]
-        provenance = [{
-            "candidate": candidate["name"],
-            "artifact": {
-                "weights_id": "other", "sha256": "a" * 64,
-                "file_size_bytes": 123,
-            },
-            "quality": {
-                "representation": {
-                    "xattention_profile": candidate["execution_profile"]["xattention_profile"]
+        provenance = [
+            {
+                "candidate": candidate["name"],
+                "artifact": {
+                    "weights_id": "other",
+                    "sha256": "a" * 64,
+                    "file_size_bytes": 123,
                 },
-            },
-            "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
-            "capacity_failures": [],
-        } for candidate in candidates]
+                "quality": {
+                    "representation": {
+                        "xattention_profile": candidate["execution_profile"]["xattention_profile"]
+                    },
+                },
+                "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
+                "capacity_failures": [],
+            }
+            for candidate in candidates
+        ]
         with self.assertRaisesRegex(ValueError, "native schema-v6 PPL campaigns"):
             validate_xattention_dense_controls(candidates, provenance)
 
@@ -379,38 +473,48 @@ class AssembleParetoTest(unittest.TestCase):
                 "execution_profile": {"xattention_profile": profile},
             }
             for group, profile in (
-                (16, "dense"), (32, "dense"),
-                (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+                (16, "dense"),
+                (32, "dense"),
+                (16, "b128-s16-tau900"),
+                (32, "b128-s16-tau900"),
             )
         ]
         identity = {
-            "artifact_type": "ninfer_r9700_ppl_campaign", "schema_version": 6,
+            "artifact_type": "ninfer_r9700_ppl_campaign",
+            "schema_version": 6,
             "corpus": {"ids_sha256": "c" * 64, "manifest_sha256": "d" * 64},
             "reference_weights_id": "bf16-source",
             "reference_source": {
-                "config_sha256": "e" * 64, "index_sha256": "f" * 64,
+                "config_sha256": "e" * 64,
+                "index_sha256": "f" * 64,
             },
             "reference_execution": {"profile": "deterministic-fixture"},
             "bf16_scorer": {"sha256": "1" * 64, "bytes": 123},
         }
-        provenance = [{
-            "candidate": candidate["name"],
-            "artifact": {
-                "weights_id": "r9700-q4g64-n16k16-eval", "sha256": "a" * 64,
-                "file_size_bytes": 123,
-            },
-            "quality": {
-                "path": f"/{candidate['execution_profile']['xattention_profile']}.json",
-                "sha256": (
-                    "2" if candidate["execution_profile"]["xattention_profile"] == "dense"
-                    else "3"
-                ) * 64,
-                "representation": candidate["execution_profile"],
-                "campaign_identity": identity,
-            },
-            "matrices": {"pareto-capacity": {}},
-            "capacity_failures": [],
-        } for candidate in candidates]
+        provenance = [
+            {
+                "candidate": candidate["name"],
+                "artifact": {
+                    "weights_id": "r9700-q4g64-n16k16-eval",
+                    "sha256": "a" * 64,
+                    "file_size_bytes": 123,
+                },
+                "quality": {
+                    "path": f"/{candidate['execution_profile']['xattention_profile']}.json",
+                    "sha256": (
+                        "2"
+                        if candidate["execution_profile"]["xattention_profile"] == "dense"
+                        else "3"
+                    )
+                    * 64,
+                    "representation": candidate["execution_profile"],
+                    "campaign_identity": identity,
+                },
+                "matrices": {"pareto-capacity": {}},
+                "capacity_failures": [],
+            }
+            for candidate in candidates
+        ]
         with self.assertRaisesRegex(ValueError, "capacity and whole matrices"):
             validate_xattention_dense_controls(candidates, provenance)
 
@@ -424,69 +528,115 @@ class AssembleParetoTest(unittest.TestCase):
                 path.write_text("{}", encoding="utf-8")
                 path.with_suffix(".nllf32").write_bytes(b"nll")
                 path.with_suffix(".argmaxi32").write_bytes(b"argmax")
-                cells.append({
-                    "scheme": "r9700-g16", "schedule": "prefill",
-                    "model_id": "qwen3.8-27b", "weights_id": "weights",
-                    "kv_format": "fp8-k-int4-v", "kv_value_group": 16,
-                    "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-                    "q4_activation_bits": 8, "w8_activation_bits": 8,
-                    "fp8_qk_wmma_enabled": True,
-                    "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                    "xattention_qualification": True,
-                    "xattention_profile": "b128-s16-tau900",
-                    "xattention_find_block": 128, "xattention_stride": 16,
-                    "xattention_tau_permille": 900,
-                    "prefill_chunk": 4096,
-                    "prompt_tokens": tokens, "tokens_scored": tokens - 1,
-                    "quality_tier": "capacity-speed", "pass": True,
-                    "gate": 0.048790164169432,
-                    "quality_eligible": True, "complete_finite_aligned": True,
-                    "delta_mean_nll": 0.01, "new_severe_positions": 1,
-                    "command": ["ppl", "--out-json", str(path)],
-                    "nll_sha256": file_sha256(path.with_suffix(".nllf32")),
-                    "argmax_sha256": file_sha256(path.with_suffix(".argmaxi32")),
-                })
-                path.write_text(json.dumps({
-                    key: value for key, value in cells[-1].items()
-                    if key not in {
-                        "command", "nll_sha256", "argmax_sha256", "quality_tier",
-                        "pass", "quality_eligible", "complete_finite_aligned",
-                        "delta_mean_nll", "new_severe_positions",
+                cells.append(
+                    {
+                        "scheme": "r9700-g16",
+                        "schedule": "prefill",
+                        "model_id": "qwen3.8-27b",
+                        "weights_id": "weights",
+                        "kv_format": "fp8-k-int4-v",
+                        "kv_value_group": 16,
+                        "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
+                        "q4_activation_bits": 8,
+                        "w8_activation_bits": 8,
+                        "split512_enabled": True,
+                        "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                        "xattention_qualification": True,
+                        "xattention_profile": "b128-s16-tau900",
+                        "xattention_find_block": 128,
+                        "xattention_stride": 16,
+                        "xattention_tau_permille": 900,
+                        "prefill_chunk": 4096,
+                        "prompt_tokens": tokens,
+                        "tokens_scored": tokens - 1,
+                        "quality_tier": "capacity-speed",
+                        "pass": True,
+                        "gate": 0.048790164169432,
+                        "quality_eligible": True,
+                        "complete_finite_aligned": True,
+                        "delta_mean_nll": 0.01,
+                        "new_severe_positions": 1,
+                        "command": ["ppl", "--out-json", str(path)],
+                        "nll_sha256": file_sha256(path.with_suffix(".nllf32")),
+                        "argmax_sha256": file_sha256(path.with_suffix(".argmaxi32")),
                     }
-                }), encoding="utf-8")
-            quality, source = _quality_candidate({
-                "artifact_type": "ninfer_r9700_ppl_campaign", "schema_version": 6,
-                "pass": True, "model_id": "qwen3.8-27b", "schedules": ["prefill"],
-                "lengths": [8192, 32768], "prefill_chunk": 4096,
-                "q4_activation_bits": 8,
-                "w8_activation_bits": 8,
-                "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                "xattention_profile": "b128-s16-tau900",
-                "candidate_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-                "candidate_artifact": {
-                    "weights_id": "weights", "sha256": "a" * 64,
-                    "bytes": 123,
+                )
+                path.write_text(
+                    json.dumps(
+                        {
+                            key: value
+                            for key, value in cells[-1].items()
+                            if key
+                            not in {
+                                "command",
+                                "nll_sha256",
+                                "argmax_sha256",
+                                "quality_tier",
+                                "pass",
+                                "quality_eligible",
+                                "complete_finite_aligned",
+                                "delta_mean_nll",
+                                "new_severe_positions",
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            quality, source = _quality_candidate(
+                {
+                    "artifact_type": "ninfer_r9700_ppl_campaign",
+                    "schema_version": 6,
+                    "pass": True,
+                    "model_id": "qwen3.8-27b",
+                    "schedules": ["prefill"],
+                    "lengths": [8192, 32768],
+                    "prefill_chunk": 4096,
+                    "q4_activation_bits": 8,
+                    "w8_activation_bits": 8,
+                    "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                    "xattention_profile": "b128-s16-tau900",
+                    "candidate_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
+                    "candidate_artifact": {
+                        "weights_id": "weights",
+                        "sha256": "a" * 64,
+                        "bytes": 123,
+                    },
+                    "cells": cells,
                 },
-                "cells": cells,
-            }, "weights", 16, 4096)
-            self.assertEqual(set(quality), {"8k", "32k"})
-            self.assertEqual(
-                source["representation"]["xattention_profile"], "b128-s16-tau900"
+                "weights",
+                16,
+                4096,
             )
+            self.assertEqual(set(quality), {"8k", "32k"})
+            self.assertEqual(source["representation"]["xattention_profile"], "b128-s16-tau900")
             self.assertEqual(source["file_size_bytes"], 123)
 
             with self.assertRaisesRegex(ValueError, "unsupported identity or execution profile"):
-                _quality_candidate({
-                    "artifact_type": "ninfer_r9700_ppl_campaign", "schema_version": 6,
-                    "pass": True, "model_id": "qwen3.8-27b", "schedules": ["prefill"],
-                    "lengths": [8192, 32768], "prefill_chunk": 4096,
-                    "q4_activation_bits": 8, "w8_activation_bits": 8,
-                    "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                    "xattention_profile": "b128-s16-tau900",
-                    "candidate_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-                    "candidate_artifact": {"weights_id": "weights", "sha256": "a" * 64, "bytes": 123},
-                    "cells": cells,
-                }, "weights", 16, 2048)
+                _quality_candidate(
+                    {
+                        "artifact_type": "ninfer_r9700_ppl_campaign",
+                        "schema_version": 6,
+                        "pass": True,
+                        "model_id": "qwen3.8-27b",
+                        "schedules": ["prefill"],
+                        "lengths": [8192, 32768],
+                        "prefill_chunk": 4096,
+                        "q4_activation_bits": 8,
+                        "w8_activation_bits": 8,
+                        "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                        "xattention_profile": "b128-s16-tau900",
+                        "candidate_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
+                        "candidate_artifact": {
+                            "weights_id": "weights",
+                            "sha256": "a" * 64,
+                            "bytes": 123,
+                        },
+                        "cells": cells,
+                    },
+                    "weights",
+                    16,
+                    2048,
+                )
 
     @patch("tools.ppl.assemble_pareto._replay_campaign_quality")
     def test_native_ppl_campaign_rejects_changed_raw_cell(self, _replay) -> None:
@@ -497,33 +647,47 @@ class AssembleParetoTest(unittest.TestCase):
             path.with_suffix(".nllf32").write_bytes(b"nll")
             path.with_suffix(".argmaxi32").write_bytes(b"argmax")
             cell = {
-                "scheme": "r9700-g16", "schedule": "prefill",
-                "model_id": "qwen3.8-27b", "weights_id": "weights",
-                "kv_format": "fp8-k-int4-v", "kv_value_group": 16,
+                "scheme": "r9700-g16",
+                "schedule": "prefill",
+                "model_id": "qwen3.8-27b",
+                "weights_id": "weights",
+                "kv_format": "fp8-k-int4-v",
+                "kv_value_group": 16,
                 "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-                "q4_activation_bits": 8, "w8_activation_bits": 8,
-                "fp8_qk_wmma_enabled": True,
-                "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+                "q4_activation_bits": 8,
+                "w8_activation_bits": 8,
+                "split512_enabled": True,
+                "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
                 "xattention_qualification": False,
-                "prompt_tokens": 8192, "tokens_scored": 8191,
-                "quality_tier": "capacity-speed", "pass": True,
+                "prompt_tokens": 8192,
+                "tokens_scored": 8191,
+                "quality_tier": "capacity-speed",
+                "pass": True,
                 "gate": 0.048790164169432,
-                "quality_eligible": True, "complete_finite_aligned": True,
-                "delta_mean_nll": 0.01, "new_severe_positions": 1,
+                "quality_eligible": True,
+                "complete_finite_aligned": True,
+                "delta_mean_nll": 0.01,
+                "new_severe_positions": 1,
                 "command": ["ppl", "--out-json", str(path)],
                 "nll_sha256": file_sha256(path.with_suffix(".nllf32")),
                 "argmax_sha256": file_sha256(path.with_suffix(".argmaxi32")),
             }
             campaign = {
-                "artifact_type": "ninfer_r9700_ppl_campaign", "schema_version": 6,
-                "pass": True, "model_id": "qwen3.8-27b", "schedules": ["prefill"],
-                "lengths": [8192, 32768], "q4_activation_bits": 8,
+                "artifact_type": "ninfer_r9700_ppl_campaign",
+                "schema_version": 6,
+                "pass": True,
+                "model_id": "qwen3.8-27b",
+                "schedules": ["prefill"],
+                "lengths": [8192, 32768],
+                "q4_activation_bits": 8,
                 "w8_activation_bits": 8,
-                "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+                "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
                 "xattention_profile": "dense",
                 "candidate_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
                 "candidate_artifact": {
-                    "weights_id": "weights", "sha256": "a" * 64, "bytes": 123,
+                    "weights_id": "weights",
+                    "sha256": "a" * 64,
+                    "bytes": 123,
                 },
                 "cells": [cell],
             }
@@ -539,11 +703,12 @@ class AssembleParetoTest(unittest.TestCase):
                 {"suite": "suite", "case": "case", "concurrency": 1},
             ],
         }
-        with tempfile.TemporaryDirectory() as directory, patch(
-            "tools.ppl.assemble_pareto.build_cases", return_value=[case]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("tools.ppl.assemble_pareto.build_cases", return_value=[case]),
+            self.assertRaisesRegex(ValueError, "exact pareto matrix point set"),
         ):
-            with self.assertRaisesRegex(ValueError, "exact pareto matrix point set"):
-                _reports(Path(directory), manifest, "pareto", 4096)
+            _reports(Path(directory), manifest, "pareto", 4096)
 
     def test_report_loader_rejects_report_outside_campaign(self) -> None:
         case = BenchCase("suite", "case", ("-p", "128"), 1, 0)
@@ -553,22 +718,32 @@ class AssembleParetoTest(unittest.TestCase):
             external.write_text("{}", encoding="utf-8")
             manifest = {
                 "concurrency": [1],
-                "commands": [{
-                    "suite": "suite", "case": "case", "concurrency": 1,
-                    "command": ["bench"], "report": str(external),
-                }],
+                "commands": [
+                    {
+                        "suite": "suite",
+                        "case": "case",
+                        "concurrency": 1,
+                        "command": ["bench"],
+                        "report": str(external),
+                    }
+                ],
             }
-            with patch("tools.ppl.assemble_pareto.build_cases", return_value=[case]):
-                with self.assertRaisesRegex(ValueError, "resolves outside"):
-                    _reports(root, manifest, "pareto", 4096)
+            with (
+                patch("tools.ppl.assemble_pareto.build_cases", return_value=[case]),
+                self.assertRaisesRegex(ValueError, "resolves outside"),
+            ):
+                _reports(root, manifest, "pareto", 4096)
 
     def test_assembly_binds_artifact_bench_and_all_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             quality_path = root / "quality.json"
             artifact = {
-                "path": "/model.ninfer", "weights_id": "weights", "model_id": "qwen3.8-27b",
-                "sha256": "a" * 64, "file_size_bytes": 123,
+                "path": "/model.ninfer",
+                "weights_id": "weights",
+                "model_id": "qwen3.8-27b",
+                "sha256": "a" * 64,
+                "file_size_bytes": 123,
             }
             quality_results = []
             for tokens in (8192, 32768):
@@ -576,31 +751,41 @@ class AssembleParetoTest(unittest.TestCase):
                 cell.write_text("{}", encoding="utf-8")
                 cell.with_suffix(".nllf32").write_bytes(b"nll")
                 cell.with_suffix(".argmaxi32").write_bytes(b"argmax")
-                quality_results.append({
-                    "artifact_weights_id": "weights", "kv_value_group": 16,
-                    "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-                    "prompt_tokens": tokens, "scored_positions": tokens - 1,
-                    "complete_finite_aligned": True, "cell": str(cell),
-                    "paired_vs_bf16": {"mean_nll_delta": 0.01,
-                                       "new_severe_positions": 1},
-                    "gates": {"accuracy": {"pass": True}},
-                    "sha256": {
-                        "json": file_sha256(cell),
-                        "nllf32": file_sha256(cell.with_suffix(".nllf32")),
-                        "argmaxi32": file_sha256(cell.with_suffix(".argmaxi32")),
-                    },
-                })
-            quality_path.write_text(json.dumps({
-                "schema": "ninfer-r9700-q4-a8-final-quality-v2",
-                "representation": {
-                    "q4_activation_bits": 8, "w8_activation_bits": 8,
-                    "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                    "xattention_profile": "dense",
-                    "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-                },
-                "artifacts": [{"weights_id": "weights", "sha256": "a" * 64, "bytes": 123}],
-                "results": quality_results,
-            }), encoding="utf-8")
+                quality_results.append(
+                    {
+                        "artifact_weights_id": "weights",
+                        "kv_value_group": 16,
+                        "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
+                        "prompt_tokens": tokens,
+                        "scored_positions": tokens - 1,
+                        "complete_finite_aligned": True,
+                        "cell": str(cell),
+                        "paired_vs_bf16": {"mean_nll_delta": 0.01, "new_severe_positions": 1},
+                        "gates": {"accuracy": {"pass": True}},
+                        "sha256": {
+                            "json": file_sha256(cell),
+                            "nllf32": file_sha256(cell.with_suffix(".nllf32")),
+                            "argmaxi32": file_sha256(cell.with_suffix(".argmaxi32")),
+                        },
+                    }
+                )
+            quality_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "ninfer-r9700-q4-a8-final-quality-v2",
+                        "representation": {
+                            "q4_activation_bits": 8,
+                            "w8_activation_bits": 8,
+                            "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                            "xattention_profile": "dense",
+                            "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
+                        },
+                        "artifacts": [{"weights_id": "weights", "sha256": "a" * 64, "bytes": 123}],
+                        "results": quality_results,
+                    }
+                ),
+                encoding="utf-8",
+            )
             bench = {"path": "/bench", "sha256": "b" * 64, "file_size_bytes": 456}
             chunk_authority = {
                 "path": str(root / "selected-prefill-chunk.json"),
@@ -618,51 +803,83 @@ class AssembleParetoTest(unittest.TestCase):
                 for concurrency in range(1, 5):
                     report = item / f"c{concurrency}.json"
                     report.write_text("{}", encoding="utf-8")
-                    report_records.append({
-                        "suite": "pareto_effective_capacity",
-                        "case": "effective_capacity_ordinary",
-                        "concurrency": concurrency,
-                        "command": [
-                            "bench", "--weights", "/model.ninfer",
-                            "--max-ctx", "262144", "--concurrency", str(concurrency),
-                            "--kv-capacity", "auto", "--draft-tokens", "0",
-                            "--prefill-chunk", "4096", "--output-file", str(report),
-                        ],
-                        "report": str(report),
-                    })
-                (item / "manifest.json").write_text(json.dumps({
-                    "artifact_type": "ninfer_bench_matrix_run",
-                    "schema_version": MATRIX_SCHEMA_VERSION,
-                    "preset": preset, "dry_run": False, "artifact": artifact, "bench": bench,
-                    "selected_prefill_chunk": 4096,
-                    "base_capacity_profile": (
-                        "spec-none-ordinary" if preset == "pareto-capacity" else None
+                    report_records.append(
+                        {
+                            "suite": "pareto_effective_capacity",
+                            "case": "effective_capacity_ordinary",
+                            "concurrency": concurrency,
+                            "command": [
+                                "bench",
+                                "--weights",
+                                "/model.ninfer",
+                                "--max-ctx",
+                                "262144",
+                                "--concurrency",
+                                str(concurrency),
+                                "--kv-capacity",
+                                "auto",
+                                "--draft-tokens",
+                                "0",
+                                "--prefill-chunk",
+                                "4096",
+                                "--output-file",
+                                str(report),
+                            ],
+                            "report": str(report),
+                        }
+                    )
+                (item / "manifest.json").write_text(
+                    json.dumps(
+                        {
+                            "artifact_type": "ninfer_bench_matrix_run",
+                            "schema_version": MATRIX_SCHEMA_VERSION,
+                            "preset": preset,
+                            "dry_run": False,
+                            "artifact": artifact,
+                            "bench": bench,
+                            "selected_prefill_chunk": 4096,
+                            "base_capacity_profile": (
+                                "spec-none-ordinary" if preset == "pareto-capacity" else None
+                            ),
+                            "base_ranking_profile": (
+                                "spec-none-ordinary" if preset == "pareto-whole" else None
+                            ),
+                            "prefill_chunk_authority": chunk_authority,
+                            **(
+                                {"post_chunk_capacity_gate": True}
+                                if preset == "pareto-capacity"
+                                else {}
+                            ),
+                            "expected_kv_value_group": 16,
+                            "expected_q4_activation_bits": 8,
+                            "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
+                            "expected_w8_activation_bits": 8,
+                            "expected_split512_enabled": True,
+                            "expected_decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                            "expected_xattention_profile": "dense",
+                            "concurrency": list(range(1, 5)),
+                            "power_profile": (
+                                {
+                                    "required": "auto",
+                                    "sysfs_path": str(R9700_POWER_PROFILE),
+                                    "observed": "auto",
+                                    "rechecked_after": "auto",
+                                }
+                                if preset == "pareto-whole"
+                                else None
+                            ),
+                            "commands": report_records,
+                        }
                     ),
-                    "base_ranking_profile": (
-                        "spec-none-ordinary" if preset == "pareto-whole" else None
-                    ),
-                    "prefill_chunk_authority": chunk_authority,
-                    **({"post_chunk_capacity_gate": True}
-                       if preset == "pareto-capacity" else {}),
-                    "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
-                    "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-                    "expected_w8_activation_bits": 8,
-                    "expected_fp8_qk_wmma_enabled": True,
-                    "expected_fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                    "expected_xattention_profile": "dense",
-                    "concurrency": list(range(1, 5)),
-                    "power_profile": ({
-                        "required": "auto",
-                        "sysfs_path": str(R9700_POWER_PROFILE),
-                        "observed": "auto",
-                        "rechecked_after": "auto",
-                    } if preset == "pareto-whole" else None),
-                    "commands": report_records,
-                }), encoding="utf-8")
+                    encoding="utf-8",
+                )
                 roots[preset] = item
 
             def reports(
-                _root: Path, _manifest: dict, preset: str, _prefill_chunk: int,
+                _root: Path,
+                _manifest: dict,
+                preset: str,
+                _prefill_chunk: int,
                 **_options: object,
             ) -> dict:
                 output = {}
@@ -671,72 +888,105 @@ class AssembleParetoTest(unittest.TestCase):
                         if (_root / f"c{concurrency}.json").is_file():
                             output[concurrency] = [{"capacity": concurrency}]
                     else:
-                        rows = [{
-                            "label": f"whole-pp{tokens}+tg256",
-                            "kind": "whole", "n_prompt": tokens, "n_gen": 256,
-                            "requested_output_tokens": 257,
-                            "prepare_seconds_mean": 0.001,
-                            "prepare_seconds_stddev": 0.0,
-                            "prefill_seconds_mean": 1.0,
-                            "prefill_seconds_stddev": 0.0,
-                            "decode_seconds_mean": 2.0,
-                            "decode_seconds_stddev": 0.0,
-                            "total_seconds_mean": 4.0,
-                            "total_seconds_stddev": 0.0,
-                            "prefill_tok_s_mean": float(tokens * concurrency),
-                            "prefill_tok_s_stddev": 0.0,
-                            "decode_output_tok_s_mean": 128.0 * concurrency,
-                            "decode_output_tok_s_stddev": 0.0,
-                            "decode_engine_tok_s_mean": 128.0 * concurrency,
-                            "decode_engine_tok_s_stddev": 0.0,
-                            "whole_output_tok_s_mean": 64.25 * concurrency,
-                            "whole_output_tok_s_stddev": 0.0,
-                            "speculative": {"enabled": False, "draft_window": 0,
-                                            "rounds": 0, "drafted_tokens": 0,
-                                            "accepted_tokens": 0, "fallback_steps": 0,
+                        rows = [
+                            {
+                                "label": f"whole-pp{tokens}+tg256",
+                                "kind": "whole",
+                                "n_prompt": tokens,
+                                "n_gen": 256,
+                                "requested_output_tokens": 257,
+                                "prepare_seconds_mean": 0.001,
+                                "prepare_seconds_stddev": 0.0,
+                                "prefill_seconds_mean": 1.0,
+                                "prefill_seconds_stddev": 0.0,
+                                "decode_seconds_mean": 2.0,
+                                "decode_seconds_stddev": 0.0,
+                                "total_seconds_mean": 4.0,
+                                "total_seconds_stddev": 0.0,
+                                "prefill_tok_s_mean": float(tokens * concurrency),
+                                "prefill_tok_s_stddev": 0.0,
+                                "decode_output_tok_s_mean": 128.0 * concurrency,
+                                "decode_output_tok_s_stddev": 0.0,
+                                "decode_engine_tok_s_mean": 128.0 * concurrency,
+                                "decode_engine_tok_s_stddev": 0.0,
+                                "whole_output_tok_s_mean": 64.25 * concurrency,
+                                "whole_output_tok_s_stddev": 0.0,
+                                "speculative": {
+                                    "enabled": False,
+                                    "draft_window": 0,
+                                    "rounds": 0,
+                                    "drafted_tokens": 0,
+                                    "accepted_tokens": 0,
+                                    "fallback_steps": 0,
+                                    "acceptance_rate": None,
+                                    "acceptance_length": None,
+                                    "accepted_per_position": [],
+                                },
+                                "reps": [
+                                    {
+                                        "generated_output_tokens": 257 * concurrency,
+                                        "decode_output_tokens": 256 * concurrency,
+                                        "decode_engine_tokens": 256 * concurrency,
+                                        "timings": {
+                                            "prepare_seconds": 0.001,
+                                            "vision_seconds": 0,
+                                            "prefill_seconds": 1.0,
+                                            "decode_seconds": 2.0,
+                                            "total_seconds": 4.0,
+                                        },
+                                        "speculative": {
+                                            "enabled": False,
+                                            "draft_window": 0,
+                                            "rounds": 0,
+                                            "drafted_tokens": 0,
+                                            "accepted_tokens": 0,
+                                            "fallback_steps": 0,
                                             "acceptance_rate": None,
                                             "acceptance_length": None,
-                                            "accepted_per_position": []},
-                            "reps": [{
-                                "generated_output_tokens": 257 * concurrency,
-                                "decode_output_tokens": 256 * concurrency,
-                                "decode_engine_tokens": 256 * concurrency,
-                                "timings": {
-                                    "prepare_seconds": 0.001, "vision_seconds": 0,
-                                    "prefill_seconds": 1.0, "decode_seconds": 2.0,
-                                    "total_seconds": 4.0,
+                                            "accepted_per_position": [],
+                                        },
+                                    }
+                                    for _ in range(3)
+                                ],
+                            }
+                            for tokens in (8192, 32768)
+                        ]
+                        output[concurrency] = [
+                            {
+                                "schema_version": 21,
+                                "phase_timing_semantics": "serial-lane-service-sum_shared-decode-max_v1",
+                                "config": {
+                                    "spec": "none",
+                                    "draft_tokens": 0,
+                                    "speculative_execution": False,
+                                    "proposal_head": "full",
                                 },
-                                "speculative": {"enabled": False, "draft_window": 0,
-                                                "rounds": 0, "drafted_tokens": 0,
-                                                "accepted_tokens": 0, "fallback_steps": 0,
-                                                "acceptance_rate": None,
-                                                "acceptance_length": None,
-                                                "accepted_per_position": []},
-                            } for _ in range(3)],
-                        } for tokens in (8192, 32768)]
-                        output[concurrency] = [{
-                            "schema_version": 21,
-                            "phase_timing_semantics": "serial-lane-service-sum_shared-decode-max_v1",
-                            "config": {
-                                "spec": "none", "draft_tokens": 0,
-                                "speculative_execution": False,
-                                "proposal_head": "full",
-                            },
-                            "tests": copy.deepcopy(rows),
-                        }]
+                                "tests": copy.deepcopy(rows),
+                            }
+                        ]
                 return output
 
-            with patch("tools.ppl.assemble_pareto._reports", side_effect=reports), patch(
-                "tools.ppl.assemble_pareto.validate_automatic_feasibility",
-                side_effect=lambda report: {
-                    "measurement_kind": "resolved_effective_maximum",
-                    "binding_constraint": "model_context" if report["capacity"] < 3 else "device_memory",
-                    "resolved_effective_maximum_tokens": report["capacity"] * 1000,
-                },
+            with (
+                patch("tools.ppl.assemble_pareto._reports", side_effect=reports),
+                patch(
+                    "tools.ppl.assemble_pareto.validate_automatic_feasibility",
+                    side_effect=lambda report: {
+                        "measurement_kind": "resolved_effective_maximum",
+                        "binding_constraint": "model_context"
+                        if report["capacity"] < 3
+                        else "device_memory",
+                        "resolved_effective_maximum_tokens": report["capacity"] * 1000,
+                    },
+                ),
             ):
                 candidate, provenance = assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             self.assertEqual(len(candidate["capacity_by_cell"]), 4)
@@ -752,24 +1002,25 @@ class AssembleParetoTest(unittest.TestCase):
             self.assertEqual(
                 candidate["whole_inference_tokens_per_second"]["whole_32768_c4"], 257.0
             )
-            self.assertEqual(
-                set(provenance["matrices"]), {"pareto-capacity", "pareto-whole"}
-            )
+            self.assertEqual(set(provenance["matrices"]), {"pareto-capacity", "pareto-whole"})
             self.assertEqual(provenance["artifact"]["sha256"], "a" * 64)
             self.assertEqual(candidate["prefill_chunk"], 4096)
             self.assertEqual(provenance["selected_prefill_chunk"], 4096)
             self.assertEqual(provenance["quality"]["sha256"], file_sha256(quality_path))
             self.assertEqual(provenance["quality"]["artifact"]["sha256"], "a" * 64)
-            classified = classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_quality_cells": ["8k", "32k"],
-                "required_capacity_cells": [f"c{i}" for i in range(1, 5)],
-                "required_speed_workloads": sorted(
-                    candidate["whole_inference_tokens_per_second"]
-                ),
-                "candidates": [candidate],
-                "source_provenance": [provenance],
-            })
+            classified = classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_quality_cells": ["8k", "32k"],
+                    "required_capacity_cells": [f"c{i}" for i in range(1, 5)],
+                    "required_speed_workloads": sorted(
+                        candidate["whole_inference_tokens_per_second"]
+                    ),
+                    "candidates": [candidate],
+                    "source_provenance": [provenance],
+                }
+            )
             self.assertEqual(classified["schema_version"], 7)
             self.assertEqual(
                 classified["candidates"][0]["execution_profile"]["xattention_profile"],
@@ -787,19 +1038,30 @@ class AssembleParetoTest(unittest.TestCase):
             capacity_manifest.write_text(json.dumps(invalid_gate), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "not a post-chunk capacity gate"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             invalid_gate["post_chunk_capacity_gate"] = True
             invalid_gate["prefill_chunk_authority"] = {
-                **chunk_authority, "sha256": "8" * 64,
+                **chunk_authority,
+                "sha256": "8" * 64,
             }
             capacity_manifest.write_text(json.dumps(invalid_gate), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "does not bind the selected"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             invalid_gate["prefill_chunk_authority"] = chunk_authority
@@ -808,13 +1070,19 @@ class AssembleParetoTest(unittest.TestCase):
             whole_manifest = roots["pareto-whole"] / "manifest.json"
             mismatched_chunk = json.loads(whole_manifest.read_text(encoding="utf-8"))
             mismatched_chunk["prefill_chunk_authority"] = {
-                **chunk_authority, "path": "/different-selection.json",
+                **chunk_authority,
+                "path": "/different-selection.json",
             }
             whole_manifest.write_text(json.dumps(mismatched_chunk), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "does not bind the selected"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             mismatched_chunk["prefill_chunk_authority"] = chunk_authority
@@ -823,8 +1091,13 @@ class AssembleParetoTest(unittest.TestCase):
             whole_manifest.write_text(json.dumps(mismatched_chunk), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "do not bind one selected prefill chunk"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             mismatched_chunk["commands"][0]["command"][chunk_index + 1] = "4096"
@@ -835,8 +1108,13 @@ class AssembleParetoTest(unittest.TestCase):
             capacity_manifest.write_text(json.dumps(superseded), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "required ordered C=1..4"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             superseded["concurrency"] = list(range(1, 5))
@@ -847,8 +1125,13 @@ class AssembleParetoTest(unittest.TestCase):
             whole_manifest.write_text(json.dumps(changed_layout), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "execution profile"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             changed_layout["expected_xattention_profile"] = "dense"
@@ -859,8 +1142,13 @@ class AssembleParetoTest(unittest.TestCase):
             whole_manifest.write_text(json.dumps(changed_layout), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "cache plane layouts"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             changed_layout["expected_kv_plane_layouts"] = R9700_KV_PLANE_LAYOUTS
@@ -869,8 +1157,13 @@ class AssembleParetoTest(unittest.TestCase):
             (roots["pareto-whole"] / "failures.json").write_text("[]", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "not a valid physical pareto-whole"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             (roots["pareto-whole"] / "failures.json").unlink()
@@ -880,8 +1173,13 @@ class AssembleParetoTest(unittest.TestCase):
             whole_manifest.write_text(json.dumps(changed_power), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "stable auto power"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
             changed_power["power_profile"]["rechecked_after"] = "auto"
@@ -891,7 +1189,9 @@ class AssembleParetoTest(unittest.TestCase):
             missing.unlink()
             logs = roots["pareto-capacity"] / "logs"
             logs.mkdir()
-            (logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stderr.txt").write_text(
+            (
+                logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stderr.txt"
+            ).write_text(
                 "[ninfer_bench] loading /model.ninfer (max_context=262144, concurrency=4, "
                 "kv_format=fp8-k-int4-v)\n"
                 "ninfer_bench: minimum Engine runtime reservation requires 10663212291 bytes "
@@ -899,41 +1199,65 @@ class AssembleParetoTest(unittest.TestCase):
                 "11477728256 bytes are available after weights\n",
                 encoding="utf-8",
             )
-            (logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stdout.txt").write_text(
-                "", encoding="utf-8"
-            )
+            (
+                logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stdout.txt"
+            ).write_text("", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "no failures.json"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], None, 4096, chunk_authority,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    None,
+                    4096,
+                    chunk_authority,
                 )
             missing_record = json.loads(
                 (roots["pareto-capacity"] / "manifest.json").read_text(encoding="utf-8")
             )["commands"][-1]
-            (roots["pareto-capacity"] / "failures.json").write_text(json.dumps([{
-                "suite": missing_record["suite"],
-                "case": missing_record["case"],
-                "concurrency": 4,
-                "returncode": 1,
-                "stdout": str(
-                    logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stdout.txt"
+            (roots["pareto-capacity"] / "failures.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "suite": missing_record["suite"],
+                            "case": missing_record["case"],
+                            "concurrency": 4,
+                            "returncode": 1,
+                            "stdout": str(
+                                logs
+                                / "pareto_effective_capacity.effective_capacity_ordinary.c4.stdout.txt"
+                            ),
+                            "stderr": str(
+                                logs
+                                / "pareto_effective_capacity.effective_capacity_ordinary.c4.stderr.txt"
+                            ),
+                            "command": missing_record["command"],
+                        }
+                    ]
                 ),
-                "stderr": str(
-                    logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stderr.txt"
+                encoding="utf-8",
+            )
+            with (
+                patch("tools.ppl.assemble_pareto._reports", side_effect=reports),
+                patch(
+                    "tools.ppl.assemble_pareto.validate_automatic_feasibility",
+                    side_effect=lambda report: {
+                        "measurement_kind": "resolved_effective_maximum",
+                        "binding_constraint": "device_memory",
+                        "resolved_effective_maximum_tokens": report["capacity"] * 1000,
+                    },
                 ),
-                "command": missing_record["command"],
-            }]), encoding="utf-8")
-            with patch("tools.ppl.assemble_pareto._reports", side_effect=reports), patch(
-                "tools.ppl.assemble_pareto.validate_automatic_feasibility",
-                side_effect=lambda report: {
-                    "measurement_kind": "resolved_effective_maximum",
-                    "binding_constraint": "device_memory",
-                    "resolved_effective_maximum_tokens": report["capacity"] * 1000,
-                },
             ):
                 incomplete, failed_source = assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], None, 4096, chunk_authority,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    None,
+                    4096,
+                    chunk_authority,
                 )
             self.assertNotIn("c4", incomplete["capacity_by_cell"])
             self.assertFalse(incomplete["whole_inference_tokens_per_second"])
@@ -963,8 +1287,14 @@ class AssembleParetoTest(unittest.TestCase):
             stderr_path.write_text("ninfer_bench: segmentation fault\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "exact startup admission failure"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], None, 4096, chunk_authority,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    None,
+                    4096,
+                    chunk_authority,
                 )
             stderr_path.write_text(valid_stderr, encoding="utf-8")
             failures_path = roots["pareto-capacity"] / "failures.json"
@@ -973,20 +1303,29 @@ class AssembleParetoTest(unittest.TestCase):
             failures_path.write_text(json.dumps(generic), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "exact process failure record"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], None, 4096, chunk_authority,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    None,
+                    4096,
+                    chunk_authority,
                 )
             generic[0]["returncode"] = 1
             failures_path.write_text(json.dumps(generic), encoding="utf-8")
-            excluded = classify({
-                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-                "required_quality_cells": ["8k", "32k"],
-                "required_capacity_cells": [f"c{i}" for i in range(1, 5)],
-                "required_speed_workloads": sorted(
-                    candidate["whole_inference_tokens_per_second"]
-                ),
-                "candidates": [incomplete],
-            })
+            excluded = classify(
+                {
+                    "artifact_type": "ninfer_r9700_pareto_input",
+                    "schema_version": 4,
+                    "required_quality_cells": ["8k", "32k"],
+                    "required_capacity_cells": [f"c{i}" for i in range(1, 5)],
+                    "required_speed_workloads": sorted(
+                        candidate["whole_inference_tokens_per_second"]
+                    ),
+                    "candidates": [incomplete],
+                }
+            )
             self.assertFalse(excluded["candidates"][0]["comparable"])
             self.assertIn(
                 "missing_resolved_effective_maximum_capacity:c4",
@@ -999,8 +1338,13 @@ class AssembleParetoTest(unittest.TestCase):
             whole_manifest.write_text(json.dumps(changed), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "different benchmark bytes"):
                 assemble_candidate(
-                    "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    "candidate",
+                    "weights",
+                    16,
+                    quality_path,
+                    roots["pareto-capacity"],
+                    roots["pareto-whole"],
+                    4096,
                     chunk_authority,
                 )
 

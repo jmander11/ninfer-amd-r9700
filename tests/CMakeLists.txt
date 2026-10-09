@@ -36,6 +36,11 @@ set_tests_properties(ninfer_kv_disk_cache_test PROPERTIES
 add_test(NAME ninfer_kv_disk_crc_host_test COMMAND ninfer_kv_disk_cache_test --crc-only)
 set_tests_properties(ninfer_kv_disk_crc_host_test PROPERTIES LABELS "host")
 
+ninfer_add_r9700_test(ninfer_media_decode_test
+  SOURCES test_media_decode.cpp
+  LIBRARIES ninfer_media_decode)
+set_tests_properties(ninfer_media_decode_test PROPERTIES LABELS "host")
+
 # The public headers must remain independent of repository-private and device headers.
 add_executable(ninfer_public_api_test test_public_api.cpp)
 target_include_directories(ninfer_public_api_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
@@ -56,21 +61,6 @@ target_compile_options(ninfer_xattention_oracle_test PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
 add_test(NAME ninfer_xattention_oracle_test COMMAND ninfer_xattention_oracle_test)
 
-add_test(NAME ninfer_fp8_gate_up_comparison_report_test
-  COMMAND ${Python3_EXECUTABLE} -m unittest -q
-    tools.bench.test_validate_fp8_gate_up_comparison)
-set_tests_properties(ninfer_fp8_gate_up_comparison_report_test PROPERTIES
-  LABELS "host"
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-
-add_test(NAME ninfer_fp8_gate_up_hardware_proof_host_test
-  COMMAND ${Python3_EXECUTABLE} -m unittest -q
-    tools.bench.test_prepare_fp8_gate_up_hardware_proof
-    tools.bench.test_validate_fp8_gate_up_hardware_proof)
-set_tests_properties(ninfer_fp8_gate_up_hardware_proof_host_test PROPERTIES
-  LABELS "host"
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-
 # Model-independent framing and supported host/runtime policies.
 ninfer_add_r9700_test(ninfer_speculative_stats_test
   SOURCES test_speculative_stats.cpp)
@@ -80,6 +70,11 @@ ninfer_add_r9700_test(ninfer_artifact_reader_test
 ninfer_add_r9700_test(ninfer_tensor_test
   SOURCES test_tensor.cpp
   LIBRARIES ninfer_r9700_core)
+# Exact oracle for host staging of prompt embedding rows.
+ninfer_add_r9700_test(ninfer_embedding_staging_test
+  SOURCES ops/test_embedding_staging.cpp
+  LIBRARIES ninfer_r9700_core)
+set_tests_properties(ninfer_embedding_staging_test PROPERTIES LABELS "host")
 ninfer_add_r9700_test(ninfer_pinned_arena_recovery_test
   SOURCES test_pinned_arena_recovery.cpp
   LIBRARIES ninfer_r9700_core)
@@ -114,8 +109,13 @@ ninfer_add_r9700_test(ninfer_typical_cycle_test
 ninfer_add_r9700_test(ninfer_generation_recovery_test
   SOURCES targets/qwen3/test_generation_recovery.cpp
   LIBRARIES ninfer_engine)
-ninfer_add_r9700_test(ninfer_tool_grammar_test
-  SOURCES targets/qwen3/test_tool_grammar.cpp
+ninfer_add_r9700_test(ninfer_qwen3_recovery_executor_test
+  SOURCES targets/qwen3/test_recovery_executor.cpp
+  LIBRARIES ninfer_engine)
+target_compile_definitions(ninfer_qwen3_recovery_executor_test PRIVATE
+  NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+ninfer_add_r9700_test(ninfer_token_grammar_test
+  SOURCES targets/qwen3/test_token_grammar.cpp
   LIBRARIES ninfer_engine)
 ninfer_add_r9700_test(ninfer_frontend_test
   SOURCES targets/qwen3/test_frontend.cpp
@@ -141,6 +141,7 @@ if(TARGET ninfer_serve)
       openai_schema
       responses_schema
       response_store
+      score_schema
       anthropic_schema
       serve_options
       request_log)
@@ -152,6 +153,11 @@ if(TARGET ninfer_serve)
     SOURCES test_http_error_handler.cpp
     LIBRARIES ninfer_serve)
   target_include_directories(ninfer_http_error_handler_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
+  ninfer_add_r9700_test(ninfer_serve_metrics_test
+    SOURCES test_serve_metrics.cpp
+    LIBRARIES ninfer_serve)
+  target_include_directories(ninfer_serve_metrics_test PRIVATE
     ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
 endif()
 
@@ -184,7 +190,7 @@ target_link_libraries(ninfer_r9700_instruction_qual PRIVATE hip::host)
 add_executable(ninfer_r9700_kv_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/kv_op_qual.hip)
 target_include_directories(ninfer_r9700_kv_qual PRIVATE
-  ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests)
+  ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests)
 set_target_properties(ninfer_r9700_kv_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_kv_qual PRIVATE ninfer_r9700_core hip::host)
 
@@ -318,11 +324,13 @@ set(ninfer_r9700_qualifiers
   ninfer_r9700_dflash_state_qual
   ninfer_r9700_dflash2_select_qual
   ninfer_r9700_bidirectional_gqa_qual
+  ninfer_r9700_dflash_context_kv_qual
   ninfer_r9700_grouped_dynamic_conv_qual
   ninfer_r9700_swa_qual
   ninfer_r9700_kv_cache_append_prefix_qual
   ninfer_r9700_kv_ram_qual
   ninfer_r9700_sampling_qual
+  ninfer_r9700_token_logprobs_qual
   ninfer_r9700_speculative_round_qual
   ninfer_r9700_rope_qual
   ninfer_r9700_vision_pos_embed_qual
@@ -338,13 +346,17 @@ set(ninfer_r9700_qualifiers
   ninfer_r9700_scalar_schedule_qual
   ninfer_r9700_runtime_planner_qual
   ninfer_r9700_engine_boundary_qual)
+# Every qualifier is also in the device-check set (`gpucheck`, scripts/gpu-check.sh,
+# docs/maintainer/code-quality.md). The race-check tree raises the timeout: instrumented LDS
+# accesses make the speculative-round qualifier about 2.5 times slower.
+set(NINFER_R9700_QUALIFIER_TIMEOUT 300 CACHE STRING "CTest timeout of each R9700 qualifier, seconds")
 foreach(qualifier IN LISTS ninfer_r9700_qualifiers)
   if(TARGET ${qualifier})
     add_test(NAME ${qualifier} COMMAND ${qualifier})
     set_tests_properties(${qualifier} PROPERTIES
-      LABELS "r9700"
+      LABELS "r9700;gpucheck"
       RESOURCE_LOCK r9700_device
-      TIMEOUT 300)
+      TIMEOUT ${NINFER_R9700_QUALIFIER_TIMEOUT})
   endif()
 endforeach()
 
@@ -365,3 +377,15 @@ if(TARGET ninfer_r9700_runtime_planner_qual)
     COMMAND ninfer_r9700_runtime_planner_qual --host-attention-parity-routing)
   set_tests_properties(ninfer_r9700_attention_parity_routing_host PROPERTIES LABELS "host")
 endif()
+
+ninfer_add_r9700_test(ninfer_r9700_engine_logprobs_real_test
+  SOURCES targets/qwen3_8_27b/test_engine_logprobs_real.cpp
+  LIBRARIES ninfer_engine)
+set_tests_properties(ninfer_r9700_engine_logprobs_real_test PROPERTIES
+  LABELS "r9700;real" SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK r9700_device)
+
+ninfer_add_r9700_test(ninfer_r9700_output_constraint_real_test
+  SOURCES targets/qwen3_8_27b/test_output_constraint_real.cpp
+  LIBRARIES ninfer_engine)
+set_tests_properties(ninfer_r9700_output_constraint_real_test PROPERTIES
+  LABELS "r9700;real" SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK r9700_device)

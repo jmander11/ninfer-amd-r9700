@@ -1,15 +1,21 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from tools.r9700.check_silu_mul_split_prefill_static import check
-
 
 SYMBOL = "_ZN6ninfer3ops5r97005eager12_GLOBAL__N_137silu_mul_split17408_2d_kernelEv"
 
 
-def fixture(*, vgprs: int = 24, occupancy: int = 16, lds: int = 0, scratch: int = 0,
-            operation: str = "v_exp_f32 v0, v0", maximum_workgroup: int = 256) -> str:
+def fixture(
+    *,
+    vgprs: int = 24,
+    occupancy: int = 16,
+    lds: int = 0,
+    scratch: int = 0,
+    operation: str = "v_exp_f32 v0, v0",
+    maximum_workgroup: int = 256,
+) -> str:
     return f"""\t.globl {SYMBOL} ; -- Begin function {SYMBOL}
 {SYMBOL}:
   {operation}
@@ -49,9 +55,11 @@ class StaticCheckTest(unittest.TestCase):
 
     def test_rejects_resources(self):
         for text in (fixture(vgprs=65), fixture(lds=16), fixture(scratch=16)):
-            with self.subTest(text=text):
-                with self.assertRaisesRegex(ValueError, "resources|must be zero"):
-                    self.run_check(text)
+            with (
+                self.subTest(text=text),
+                self.assertRaisesRegex(ValueError, "resources|must be zero"),
+            ):
+                self.run_check(text)
 
     def test_rejects_geometry(self):
         with self.assertRaisesRegex(ValueError, "geometry"):

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import time
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
@@ -47,15 +47,11 @@ def preflight_conversion(
 ) -> E4M3ConversionPreflight:
     model = Path(model_dir)
     e4m3_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
-    object_plan = family_conversion.build_object_plan(
-        e4m3_inventory.OBJECT_SPECS, resource_map
-    )
+    object_plan = family_conversion.build_object_plan(e4m3_inventory.OBJECT_SPECS, resource_map)
     ranking = build_draft_ranking.validate_ranking_provenance(draft_ranking)
     draft = draft_head.compute_shortlist(ranking.ranking_path, model)
     return E4M3ConversionPreflight(
@@ -142,28 +138,30 @@ def convert(
     output.parent.mkdir(parents=True, exist_ok=True)
     resource_payloads = {resource.name: resource.data for resource in preflight.resources}
 
-    with ShardReader(preflight.model_dir) as reader:
-        with ArtifactWriter(
+    with (
+        ShardReader(preflight.model_dir) as reader,
+        ArtifactWriter(
             output,
             ArtifactIdentity(e4m3_inventory.MODEL_ID, e4m3_inventory.WEIGHTS_ID),
             preflight.object_plan.specs,
-        ) as writer:
-            if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError("E4M3 writer plan differs from completed preflight")
-            for index, spec in enumerate(e4m3_inventory.OBJECT_SPECS, start=1):
-                if isinstance(spec, e4m3_inventory.ResourceSpec):
-                    payload = resource_payloads[spec.name]
-                else:
-                    tensor = source.materialize_tensor(spec, reader, preflight.draft)
-                    payload = _encode_tensor(tensor, spec)
-                writer.write(spec.name, payload)
-                if not isinstance(spec, e4m3_inventory.ResourceSpec):
-                    del tensor
-                del payload
-                print(
-                    f"[{index}/{len(e4m3_inventory.OBJECT_SPECS)}] {spec.name}",
-                    flush=True,
-                )
+        ) as writer,
+    ):
+        if writer.objects != preflight.object_plan.objects:
+            raise RuntimeError("E4M3 writer plan differs from completed preflight")
+        for index, spec in enumerate(e4m3_inventory.OBJECT_SPECS, start=1):
+            if isinstance(spec, e4m3_inventory.ResourceSpec):
+                payload = resource_payloads[spec.name]
+            else:
+                tensor = source.materialize_tensor(spec, reader, preflight.draft)
+                payload = _encode_tensor(tensor, spec)
+            writer.write(spec.name, payload)
+            if not isinstance(spec, e4m3_inventory.ResourceSpec):
+                del tensor
+            del payload
+            print(
+                f"[{index}/{len(e4m3_inventory.OBJECT_SPECS)}] {spec.name}",
+                flush=True,
+            )
 
     report = family_conversion.build_conversion_report(
         identity=ArtifactIdentity(e4m3_inventory.MODEL_ID, e4m3_inventory.WEIGHTS_ID),
@@ -219,9 +217,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.preflight_only:
         if args.out is not None:
             parser.error("--preflight-only does not accept --out")
-        summary = preflight_summary(
-            preflight_conversion(args.model, args.draft_ranking)
-        )
+        summary = preflight_summary(preflight_conversion(args.model, args.draft_ranking))
         print(json.dumps(summary, indent=2))
         return
     if args.out is None:

@@ -14,12 +14,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import shutil
 import stat
 import subprocess
 import tempfile
-from typing import Sequence
+from collections.abc import Sequence
+from pathlib import Path
 
 
 def _lexical_absolute(path: Path) -> Path:
@@ -80,10 +80,12 @@ def validate_existing(actual: Path, expected: Path) -> None:
     expected_manifest = json.loads((expected / "manifest.json").read_text(encoding="utf-8"))
     if not isinstance(actual_manifest, dict) or not isinstance(expected_manifest, dict):
         raise ValueError("prepared matrix manifest is not an object")
-    if (not isinstance(actual_manifest.get("created_at_utc"), str)
-            or not actual_manifest["created_at_utc"]
-            or not isinstance(expected_manifest.get("created_at_utc"), str)
-            or not expected_manifest["created_at_utc"]):
+    if (
+        not isinstance(actual_manifest.get("created_at_utc"), str)
+        or not actual_manifest["created_at_utc"]
+        or not isinstance(expected_manifest.get("created_at_utc"), str)
+        or not expected_manifest["created_at_utc"]
+    ):
         raise ValueError("prepared matrix manifest lacks its creation timestamp")
     actual_manifest.pop("created_at_utc", None)
     expected_manifest.pop("created_at_utc", None)
@@ -91,8 +93,8 @@ def validate_existing(actual: Path, expected: Path) -> None:
     if actual_manifest != expected_manifest:
         raise ValueError("existing prepared matrix manifest differs from the derived contract")
 
-    expected_commands = (expected / "commands.sh").read_text(encoding="utf-8").replace(
-        str(expected), str(actual)
+    expected_commands = (
+        (expected / "commands.sh").read_text(encoding="utf-8").replace(str(expected), str(actual))
     )
     if (actual / "commands.sh").read_text(encoding="utf-8") != expected_commands:
         raise ValueError("existing prepared matrix commands differ from the derived contract")

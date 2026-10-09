@@ -1,18 +1,20 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from tools.r9700.check_causal_conv_prefill_static import check
 
 
-def fixture(*, vgprs: int = 48, scratch: int = 0, omit_tile: int | None = None,
-            maximum_workgroup: int = 256) -> str:
+def fixture(
+    *, vgprs: int = 48, scratch: int = 0, omit_tile: int | None = None, maximum_workgroup: int = 256
+) -> str:
     blocks = []
     for tile in (4, 8, 16, 32):
         if tile == omit_tile:
             continue
-        symbol = ("_ZN6ninfer3ops5r97003gdn12_GLOBAL__N_1"
-                  f"33causal_conv1d_silu_prefill_kernelILj{tile}EEv")
+        symbol = (
+            f"_ZN6ninfer3ops5r97003gdn12_GLOBAL__N_133causal_conv1d_silu_prefill_kernelILj{tile}EEv"
+        )
         blocks.append(f"""; -- Begin function {symbol}
 {symbol}:
   .amdhsa_group_segment_fixed_size 0
@@ -27,8 +29,9 @@ def fixture(*, vgprs: int = 48, scratch: int = 0, omit_tile: int | None = None,
     for tile in (4, 8, 16, 32):
         if tile == omit_tile:
             continue
-        symbol = ("_ZN6ninfer3ops5r97003gdn12_GLOBAL__N_1"
-                  f"33causal_conv1d_silu_prefill_kernelILj{tile}EEv")
+        symbol = (
+            f"_ZN6ninfer3ops5r97003gdn12_GLOBAL__N_133causal_conv1d_silu_prefill_kernelILj{tile}EEv"
+        )
         metadata.append(f"""  - .args: []
     .max_flat_workgroup_size: {maximum_workgroup}
     .name: {symbol}

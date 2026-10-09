@@ -55,7 +55,7 @@ constexpr std::string_view kR9700PowerProfilePath =
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
-std::string trim(std::string value) {
+std::string trim(const std::string& value) {
     const std::size_t first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return {};
     const std::size_t last = value.find_last_not_of(" \t\r\n");
@@ -67,7 +67,7 @@ std::string require_auto_power_profile() {
     if (!input) fail("cannot read R9700 power profile: " + std::string(kR9700PowerProfilePath));
     std::string value;
     std::getline(input, value);
-    value = trim(std::move(value));
+    value = trim(value);
     if (value != "auto") {
         fail("performance qualification requires R9700 power profile 'auto', found '" +
              value + "'");
@@ -87,6 +87,7 @@ std::string shell_quote(std::string_view value) {
 
 std::string sha256_file(const std::filesystem::path& path) {
     const std::string command = "sha256sum -- " + shell_quote(path.string());
+    // NOLINTNEXTLINE(bugprone-command-processor): fixed sha256sum on a shell-quoted path
     FILE* pipe = popen(command.c_str(), "r");
     if (pipe == nullptr) fail("cannot launch sha256sum for " + path.string());
     std::array<char, 256> buffer{};

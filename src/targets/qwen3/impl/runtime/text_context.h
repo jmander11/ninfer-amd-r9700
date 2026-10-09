@@ -3,12 +3,15 @@
 // Qwen3 family runtime implementation; instantiated only by exact variants.
 
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
+#include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
+#include "targets/qwen3/impl/runtime/token_masks.h"
 
 #include "core/arena.h"
 #include "core/device.h"
 #include "core/gdn_replay_records.h"
 #include "core/tensor.h"
 #include "core/weight.h"
+#include "ninfer/ops/gdn_replay.h"
 #include "ninfer/ops/sampling.h"
 #include <ninfer/targets/qwen3/decoder_state.h>
 #include <ninfer/targets/qwen3/prepared_prompt.h>
@@ -69,8 +72,7 @@ struct ModelConfig {
 };
 
 inline constexpr ModelConfig kCfg{};
-inline constexpr float kAttnScale                     = kAttentionScale;
-inline constexpr std::uint32_t kPrefillChunkAlignment = 128;
+inline constexpr float kAttnScale = kAttentionScale;
 
 struct MlpW {
     const MlpWeights* payload = nullptr;
@@ -127,7 +129,7 @@ struct PrefillChunkResult {
 
 struct DFlashFeatureSink {
     static constexpr bool enabled = true;
-    using PrefillConsumer         = std::function<void(const Tensor&, const Tensor&, bool)>;
+    using PrefillConsumer         = std::function<void(const Tensor&, const Tensor&)>;
 
     Tensor* features                  = nullptr;
     Tensor* positions                 = nullptr;
@@ -144,22 +146,30 @@ struct DFlashFeatureSink {
     void begin(const Tensor& value);
     void capture_layer(int layer, const Tensor& value, hipStream_t stream);
     void capture_positions(const Tensor& source, hipStream_t stream);
-    void consume_prefill_chunk(std::int32_t tokens, bool rewrite_checkpoint);
+    void consume_prefill_chunk(std::int32_t tokens);
 };
 
 class VisionPrefillSession;
+
+// One text-only prefill-owner chunk that shares a Text forward with a DFlash verify batch. The
+// owner's columns lead the aggregate; row-wise Linears, norms and the post-mixer run once over
+// every column, while KV append, attention, convolution and recurrence stay per sequence.
+struct MixedPrefillSlice {
+    std::span<const int> prompt;                 // full prompt token ids
+    std::uint32_t nominal_length        = 0;     // requested extent from the KV base
+    bool finalize_at_end                = false; // sample the first token after the prompt
+    const ops::SamplingConfig* sampling = nullptr;
+};
 
 class TextContext {
 public:
     TextContext(DeviceContext& ctx, const LoadedModelData& weights,
                 typename Variant::ExecutionState* linear_execution, WorkspaceArena& work,
-                qwen3::PagedKVCacheView kv, LinearAttentionStatePool& state,
-                qwen3::RoundState& io, Tensor& prefill_hidden, std::uint32_t prefill_chunk,
-                std::uint32_t text_kv_base,
-                qwen3::PagedKVCacheView mtp_kv           = qwen3::PagedKVCacheView(),
-                const qwen3::PagedKVCache* batch_text_kv = nullptr,
-                const qwen3::PagedKVCache* batch_mtp_kv  = nullptr);
-    ~TextContext();
+                qwen3::PagedKVCacheView kv, LinearAttentionStatePool& state, qwen3::RoundState& io,
+                Tensor& prefill_hidden, std::uint32_t prefill_chunk, std::uint32_t text_kv_base,
+                qwen3::PagedKVCacheView mtp_kv          = qwen3::PagedKVCacheView(),
+                const qwen3::PagedKVCache* batch_mtp_kv = nullptr);
+    ~TextContext() = default;
 
     TextContext(const TextContext&)            = delete;
     TextContext& operator=(const TextContext&) = delete;
@@ -170,10 +180,20 @@ public:
         proposal_head_n_   = count;
     }
 
-    void set_sampling(const ops::SamplingConfig* config) noexcept { sampling_config_ = config; }
+    // `exchange`, when set, supplies `config` as a speculative tool-mask reply that the stream
+    // acquires before its first read of the configs.
+    void set_sampling(const ops::SamplingConfig* config,
+                      qwen3::TokenMaskExchange* exchange = nullptr) noexcept {
+        sampling_config_   = config;
+        sampling_exchange_ = exchange;
+    }
 
     void set_prefill_rewrite_checkpoint_frontier(std::int64_t position) noexcept {
         prefill_rewrite_checkpoint_frontier_ = position;
+    }
+
+    void set_prefill_split_frontiers(std::span<const std::uint32_t> frontiers) noexcept {
+        prefill_split_frontiers_ = frontiers;
     }
 
     void set_rewrite_checkpoint_hidden_output(Tensor* output) noexcept {
@@ -182,32 +202,37 @@ public:
 
     void set_mtp_proposal_extent(std::uint32_t extent) noexcept { mtp_proposal_extent_ = extent; }
 
-    void set_linear_state_slots(std::int32_t current_slot, std::int32_t rewrite_checkpoint_slot);
-    void set_gdn_state_action(GdnStateAction action, const GdnReplayRecords* replay_records);
+    // Prefill gathers prompt embedding rows through the Program's host staging.
+    void set_prompt_embedding_staging(PromptEmbeddingStaging* staging) noexcept {
+        prompt_embedding_ = staging;
+    }
+
+    void set_linear_state_slot(std::int32_t current_slot);
+    // `deferred_fold` (RecordForReplay only, may be null): device rows of the previous round's
+    // ReplaySSM fold, applied to each GDN layer ahead of that layer's verification front.
+    void set_gdn_state_action(GdnStateAction action, const GdnReplayRecords* replay_records,
+                              const ops::GdnDeferredFoldRows* deferred_fold);
     void set_tree_verify(const Tensor* parent_index, const Tensor* ancestor_mask,
                          const Tensor* prefix_lengths);
+
     void set_sequence_row(std::int32_t row) noexcept { active_sequence_row_ = row; }
 
     // One caller-owned transaction per packed sequence. The Program opens these transactions
     // against the sequence publications before entering the Text schedule and commits them only
     // after every full-attention layer has appended successfully. TextContext neither publishes
     // nor aborts them; it consumes the same ordered transaction at each of the 16 full layers.
-    void set_text_kv_transactions(
-        std::span<qwen3::PagedKVTransaction* const> transactions);
+    void set_text_kv_transactions(std::span<qwen3::PagedKVTransaction* const> transactions);
 
     // Prefill discovers its exact chunk extent only after checkpoint and Vision chunk planning.
     // The caller supplies sequence-owned authorities and persistent status storage; TextContext
     // opens and commits one exact transaction per realized chunk after its device positions exist.
-    void set_prefill_text_kv_authority(qwen3::PagedKVCache& cache,
-                                       PagedKVAllocation& allocation,
+    void set_prefill_text_kv_authority(qwen3::PagedKVCache& cache, PagedKVAllocation& allocation,
                                        qwen3::PagedKVPublication& publication,
                                        std::uint32_t* device_status);
-    void set_prefill_mtp_kv_authority(qwen3::PagedKVCache& cache,
-                                      PagedKVAllocation& allocation,
+    void set_prefill_mtp_kv_authority(qwen3::PagedKVCache& cache, PagedKVAllocation& allocation,
                                       qwen3::PagedKVPublication& publication,
                                       std::uint32_t* device_status);
-    void set_mtp_kv_transactions(
-        std::span<qwen3::PagedKVTransaction* const> transactions);
+    void set_mtp_kv_transactions(std::span<qwen3::PagedKVTransaction* const> transactions);
 
     [[nodiscard]] const Weight* proposal_head() const noexcept { return proposal_head_; }
 
@@ -228,10 +253,22 @@ public:
     [[nodiscard]] PrefillChunkResult
     prefill_chunk(const qwen3::PreparedPromptData& input, std::uint32_t begin,
                   std::uint32_t nominal_length, VisionPrefillSession& vision, bool finalize_at_end);
-    [[nodiscard]] PrefillChunkResult
-    prefill_chunk(const qwen3::PreparedPromptData& input, std::uint32_t begin,
-                  std::uint32_t nominal_length, VisionPrefillSession& vision, bool finalize_at_end,
-                  DFlashFeatureSink& sink);
+    [[nodiscard]] PrefillChunkResult prefill_chunk(const qwen3::PreparedPromptData& input,
+                                                   std::uint32_t begin,
+                                                   std::uint32_t nominal_length,
+                                                   VisionPrefillSession& vision,
+                                                   bool finalize_at_end, DFlashFeatureSink& sink);
+    // Text suffix of a multimodal prompt. There is no Vision session, but RoPE stays on the
+    // prompt's 3-axis positions; a 1-D continuation would not match a cold prefill.
+    [[nodiscard]] PrefillChunkResult prefill_mrope_chunk(const qwen3::PreparedPromptData& input,
+                                                         std::uint32_t begin,
+                                                         std::uint32_t nominal_length,
+                                                         bool finalize_at_end);
+    [[nodiscard]] PrefillChunkResult prefill_mrope_chunk(const qwen3::PreparedPromptData& input,
+                                                         std::uint32_t begin,
+                                                         std::uint32_t nominal_length,
+                                                         bool finalize_at_end,
+                                                         DFlashFeatureSink& sink);
     void ordinary_decode_batch(const Tensor& ids, const Tensor& cache_positions,
                                const Tensor& rope_positions, const Tensor& kv_table_rows,
                                const Tensor& linear_state_slots, Tensor& hidden, Tensor& logits);
@@ -239,24 +276,33 @@ public:
                              const Tensor& rope_positions, const Tensor& valid_columns,
                              const Tensor& kv_table_rows, const Tensor& linear_state_slots,
                              Tensor& hidden, Tensor& logits, Tensor& target_tokens,
-                             bool reset_workspace = true,
-                             bool dflash_target_verify = false);
+                             bool reset_workspace = true);
     void target_verify_batch(const Tensor& ids, const Tensor& cache_positions,
                              const Tensor& rope_positions, const Tensor& valid_columns,
                              const Tensor& kv_table_rows, const Tensor& linear_state_slots,
                              Tensor& hidden, Tensor& logits, Tensor& target_tokens,
-                             DFlashFeatureSink& sink,
-                             bool reset_workspace = true,
-                             bool dflash_target_verify = false);
+                             DFlashFeatureSink& sink, bool reset_workspace = true);
+    // Mixed unit: the prefill owner (prefill KV authority, linear-state slot and KV base as for
+    // prefill_chunk) followed by the verify batch (as for target_verify_batch, whose Text KV
+    // transactions and replay-record state action the caller binds). Never resets the workspace.
+    // The owner's KV transaction is returned open in `owner_transaction` with its expected
+    // frontier: the caller commits it after the round's remaining work is enqueued, so the
+    // commit's status read does not stall the host between the last layer and the tails.
+    [[nodiscard]] PrefillChunkResult mixed_prefill_verify(
+        const MixedPrefillSlice& slice, DFlashFeatureSink& prefill_sink, const Tensor& ids,
+        const Tensor& cache_positions, const Tensor& rope_positions, const Tensor& valid_columns,
+        const Tensor& kv_table_rows, const Tensor& linear_state_slots, Tensor& hidden,
+        Tensor& logits, Tensor& target_tokens, DFlashFeatureSink& verify_sink,
+        std::optional<qwen3::PagedKVTransaction>& owner_transaction, std::uint32_t& owner_frontier);
     void mtp_forward_decode_batch(const Tensor& ids, const Tensor& hidden,
                                   const Tensor& cache_positions, const Tensor& rope_positions,
                                   const Tensor& valid_columns, const Tensor& kv_table_rows,
                                   Tensor& mtp_hidden);
     void mtp_propose_batch(const Tensor& hidden, Tensor& logits, Tensor& draft_tokens);
     void mtp_forward_batch(const Tensor& ids, const Tensor& hidden, const Tensor& positions,
-                           Tensor& mtp_hidden, int logits_column, Tensor* logits, Tensor* draft_token,
-                           const Tensor* explicit_rope_positions = nullptr,
-                           const Tensor* input_embeddings        = nullptr);
+                           Tensor& mtp_hidden, int logits_column, Tensor* logits,
+                           Tensor* draft_token, const Tensor* explicit_rope_positions = nullptr,
+                           const Tensor* input_embeddings = nullptr);
     void mtp_forward_ar_step(const Tensor& token, const Tensor& previous_hidden,
                              const Tensor& position, Tensor& mtp_hidden, Tensor& logits,
                              Tensor& draft_token);
@@ -269,37 +315,36 @@ private:
 
     [[nodiscard]] const MtpW& mtp_weights() const;
     template <class Tap>
-    void attn_mix(const FullLayerW& weights, Tensor& x, int index, int text_layer, Phase phase,
-                  Tap& tap);
+    void attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_layer, Phase ph, Tap& tap);
     template <class Tap>
-    void gdn_mix(const GdnLayerW& weights, Tensor& x, int index, int text_layer, Phase phase,
-                 Tap& tap);
-    void mlp_tail(const Tensor* post_norm, const MlpW& weights, Tensor& x, int text_layer,
-                  Phase phase);
-    void run_layers(Tensor& x, Phase phase);
+    void gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_layer, Phase ph, Tap& tap);
+    void gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int text_layer);
+    // Layer `gidx`'s share of the bound deferred fold, if any.
+    [[nodiscard]] std::optional<ops::GdnLayerFold> deferred_gdn_layer_fold(int gidx);
+    void mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x, int text_layer, Phase ph);
+    void run_layers(Tensor& x, Phase ph);
     template <class Tap>
-    void run_layers(Tensor& x, Phase phase, Tap& tap);
+    void run_layers(Tensor& x, Phase ph, Tap& tap);
     template <class Tap>
     void target_verify_batch_impl(const Tensor& ids, const Tensor& cache_positions,
                                   const Tensor& rope_positions, const Tensor& valid_columns,
                                   const Tensor& kv_table_rows, const Tensor& linear_state_slots,
                                   Tensor& hidden, Tensor& logits, Tensor& target_tokens, Tap& tap,
-                                  bool reset_workspace, bool dflash_target_verify);
+                                  bool reset_workspace);
 
-    void mtp_forward_stem(const Tensor& ids, const Tensor& hidden, const Tensor* input_embeddings,
+    // Gathers `ids` unless `input_embeddings` supplies the columns of `hidden`.
+    void mtp_forward_stem(const Tensor* ids, const Tensor& hidden, const Tensor* input_embeddings,
                           Tensor& x, Tensor& ah);
     void mtp_forward_tail(Tensor& x, const Tensor& ah, const Tensor& positions,
                           const Tensor& rope_positions, Tensor& mtp_hidden);
     void mtp_forward_core(const Tensor& ids, const Tensor& hidden, const Tensor& positions,
                           const Tensor& rope_positions, Tensor& mtp_hidden,
                           const Tensor* input_embeddings);
-    void mtp_prefill_chunk(const Tensor& ids, const Tensor& hidden, const Tensor* input_embeddings,
-                           const Tensor& positions, const Tensor& rope_positions,
-                           bool final_chunk, Tensor* final_hidden, Tensor* logits,
-                           Tensor* draft_token);
+    void mtp_prefill_chunk(const Tensor& input_embeddings, const Tensor& hidden,
+                           const Tensor& positions, const Tensor& rope_positions, bool final_chunk,
+                           Tensor* final_hidden, Tensor* logits, Tensor* draft_token);
     void proposal_argmax(const Tensor& hidden, Tensor& logits, Tensor& proposal_tokens);
-    void run_linear(const Tensor& input, const Weight& weight, Tensor& output,
-                    hipStream_t stream);
+    void run_linear(const Tensor& input, const Weight& weight, Tensor& output, hipStream_t stream);
 
     struct MultimodalPrefill {
         std::span<const int> token_ids;
@@ -324,51 +369,55 @@ private:
     WorkspaceArena& work_;
     qwen3::PagedKVCacheView kv_;
     qwen3::PagedKVCacheView mtp_kv_;
-    const qwen3::PagedKVCache* batch_text_kv_ = nullptr;
-    const qwen3::PagedKVCache* batch_mtp_kv_  = nullptr;
+    const qwen3::PagedKVCache* batch_mtp_kv_ = nullptr;
     LinearAttentionStatePool& state_;
     qwen3::RoundState& io_;
     Tensor& prefill_hidden_;
     std::uint32_t prefill_chunk_;
     std::uint32_t text_kv_base_;
-    const Tensor* active_cache_positions_                 = nullptr;
-    const Tensor* active_rope_positions_                  = nullptr;
-    const Tensor* active_linear_state_slots_              = nullptr;
-    const Tensor* active_valid_columns_                   = nullptr;
-    const Tensor* active_parent_index_                    = nullptr;
-    const Tensor* active_ancestor_mask_                   = nullptr;
-    const Tensor* active_prefix_lengths_                  = nullptr;
-    const Tensor* active_backend_kv_table_rows_           = nullptr;
+    const Tensor* active_cache_positions_       = nullptr;
+    const Tensor* active_rope_positions_        = nullptr;
+    const Tensor* active_linear_state_slots_    = nullptr;
+    const Tensor* active_valid_columns_         = nullptr;
+    const Tensor* active_parent_index_          = nullptr;
+    const Tensor* active_ancestor_mask_         = nullptr;
+    const Tensor* active_prefix_lengths_        = nullptr;
+    const Tensor* active_backend_kv_table_rows_ = nullptr;
     std::span<qwen3::PagedKVTransaction* const> text_kv_transactions_;
-    qwen3::PagedKVCache* prefill_text_kv_cache_                 = nullptr;
-    PagedKVAllocation* prefill_text_kv_allocation_                = nullptr;
-    qwen3::PagedKVPublication* prefill_text_kv_publication_     = nullptr;
-    std::uint32_t* prefill_text_kv_status_                        = nullptr;
-    qwen3::PagedKVCache* prefill_mtp_kv_cache_                  = nullptr;
-    PagedKVAllocation* prefill_mtp_kv_allocation_                 = nullptr;
-    qwen3::PagedKVPublication* prefill_mtp_kv_publication_      = nullptr;
-    std::uint32_t* prefill_mtp_kv_status_                         = nullptr;
+    qwen3::PagedKVCache* prefill_text_kv_cache_             = nullptr;
+    PagedKVAllocation* prefill_text_kv_allocation_          = nullptr;
+    qwen3::PagedKVPublication* prefill_text_kv_publication_ = nullptr;
+    std::uint32_t* prefill_text_kv_status_                  = nullptr;
+    qwen3::PagedKVCache* prefill_mtp_kv_cache_              = nullptr;
+    PagedKVAllocation* prefill_mtp_kv_allocation_           = nullptr;
+    qwen3::PagedKVPublication* prefill_mtp_kv_publication_  = nullptr;
+    std::uint32_t* prefill_mtp_kv_status_                   = nullptr;
     std::span<qwen3::PagedKVTransaction* const> mtp_kv_transactions_;
-    std::int32_t active_sequence_batch_                   = 0;
-    std::int32_t active_sequence_width_                   = 0;
-    bool active_dflash_target_verify_                     = false;
+    std::int32_t active_sequence_batch_ = 0;
+    std::int32_t active_sequence_width_ = 0;
+    // Mixed unit: leading prefill-owner columns and their KV transaction.
+    std::int32_t mixed_prefill_columns_                   = 0;
+    qwen3::PagedKVTransaction* mixed_prefill_transaction_ = nullptr;
     bool active_ordinary_decode_                          = false;
     std::int32_t active_sequence_row_                     = 0;
     std::int32_t rope_delta_                              = 0;
     std::int32_t linear_state_current_slot_               = 0;
-    std::int32_t linear_state_rewrite_checkpoint_slot_    = 0;
     GdnStateAction gdn_state_action_                      = GdnStateAction::UpdateInPlace;
     const GdnReplayRecords* replay_records_               = nullptr;
+    const ops::GdnDeferredFoldRows* deferred_gdn_fold_    = nullptr;
     std::int64_t prefill_rewrite_checkpoint_frontier_     = -1;
-    Tensor* rewrite_checkpoint_hidden_output_             = nullptr;
-    std::uint32_t mtp_proposal_extent_                    = 0;
-    const Weight* embed_                        = nullptr;
-    const Tensor* final_norm_                   = nullptr;
-    const Weight* lm_head_                      = nullptr;
-    const Weight* proposal_head_                = nullptr;
-    const std::int32_t* proposal_head_ids_      = nullptr;
-    int proposal_head_n_                        = 0;
-    const ops::SamplingConfig* sampling_config_ = nullptr;
+    std::span<const std::uint32_t> prefill_split_frontiers_{};
+    Tensor* rewrite_checkpoint_hidden_output_    = nullptr;
+    std::uint32_t mtp_proposal_extent_           = 0;
+    const Weight* embed_                         = nullptr;
+    PromptEmbeddingStaging* prompt_embedding_    = nullptr;
+    const Tensor* final_norm_                    = nullptr;
+    const Weight* lm_head_                       = nullptr;
+    const Weight* proposal_head_                 = nullptr;
+    const std::int32_t* proposal_head_ids_       = nullptr;
+    int proposal_head_n_                         = 0;
+    const ops::SamplingConfig* sampling_config_  = nullptr;
+    qwen3::TokenMaskExchange* sampling_exchange_ = nullptr;
     MtpW mtp_;
     std::array<FullLayerW, TextConfig::full_attention_layers()> full_{};
     std::array<GdnLayerW, TextConfig::gdn_layers()> gdn_{};

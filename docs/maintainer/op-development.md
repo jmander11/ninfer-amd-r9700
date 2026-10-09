@@ -421,6 +421,14 @@ Different production routes use different criteria only when their arithmetic or
 profiles differ materially. Widening a criterion requires a numerical reason and requalification
 of its complete affected domain; one failing implementation is not sufficient justification.
 
+### 6.4 Device checks
+
+A new or changed kernel with LDS staging, cross-wave reductions, or barrier-split phases passes
+its qualifier under `scripts/gpu-check.sh racecheck`, and a new workspace or arena consumer under
+`initcheck`; a kernel that indexes caller buffers by runtime extents also runs under `memcheck`
+([code-quality.md](code-quality.md#device-checks)). Every registered R9700 qualifier is in the
+`gpucheck` CTest set and must stay within the race-check tree's CTest timeout.
+
 ## 7. Performance evidence
 
 An Op microbenchmark measures the public semantic operation at an exact shape, format, layout,

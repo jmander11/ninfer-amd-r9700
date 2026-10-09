@@ -1,7 +1,7 @@
 # NInfer 小规模并发推理架构
 
 本文定义 NInfer 在单 GPU、单模型实例下支持少量并发请求的执行架构。典型
-`max_concurrency` 为 2–4。
+`max_concurrency` 为 2–8。
 
 设计目标不是让多个请求轮流执行，而是让所有处于 decode 阶段的请求形成一次真正的 batched
 model execution：一次 model traversal、一次 Device Graph replay 和一组 batched operators 同时为
@@ -18,7 +18,7 @@ model execution：一次 model traversal、一次 Device Graph replay 和一组 
 ### 1.1 Supported workload
 
 - 单 GPU、单 resident model instance；
-- 启动时固定 `max_concurrency=C`，支持 `C=1..4`，典型 `C=2..4`；
+- 启动时固定 `max_concurrency=C`，支持 `C=1..8`，典型 `C=2..8`；
 - 运行时 `0..C` 个 admitted requests；
 - Text 与 image/video prompt；
 - ordinary decoding 与 engine-wide speculative decoding；
@@ -29,7 +29,8 @@ model execution：一次 model traversal、一次 Device Graph replay 和一组 
 ### 1.2 Non-goals
 
 - request preemption、swap、pause/resume，或把 **active** request 的 KV 迁出 GPU；
-- 多请求 batched prefill 或 prefill/decode mixed forward；
+- 多请求 batched prefill（同一时刻只有一个 prefill owner；§8.9 的 mixed round 只把该 owner 的一个
+  bounded slice 并入 DFlash decode round 的 target forward）；
 - 多 GPU 或 distributed inference；
 - priority、tenant QoS 或 deadline-aware GPU scheduling；
 - 面向数十至数百请求的通用 continuous batching；
@@ -86,8 +87,12 @@ NInfer 不支持 preemption，因此 request 只有在其 prompt、声明的最�
 
 ### 2.5 One prefill owner
 
-同一时刻最多有一个 admitted request 拥有 prefill/finalization path。Suffix prefill 以 bounded chunk 为
-单位，在 decode rounds 之间运行。其他等待请求仍留在 host queue，不占 slot 或 model state。
+同一时刻最多有一个 admitted request 拥有 prefill/finalization path。Suffix prefill 以 bounded step 为
+单位推进：`mixed_forward=0` 时 owner 的整个 prefill 在下一个 decode round 之前连续完成
+（prefill-first）；`mixed_forward=N>0` 且存在 decode-ready request 时，每个 step 的 forward 宽度为 N：
+独立 step 最多推进 N 个 prompt tokens，mixed step 推进 N 减去该 round 的 live verify columns
+（§8.9），并按 §7.3 与 decode rounds 交错或并入 mixed round。其他等待请求仍留在 host queue，不占 slot
+或 model state。
 
 ### 2.6 Single GPU execution owner
 
@@ -97,11 +102,20 @@ NInfer 不支持 preemption，因此 request 只有在其 prompt、声明的最�
 
 RAM 第二层的 D2H/H2D 走独立的 copy engine（`DeviceContext::copy_stream`），不是 GPU scheduling
 unit，也不占用 compute owner。Copy 可以与**另一条** lane 的合法 compute unit 重叠；当前
-PrefillChunk / DecodeRound 正在读写的 pages 不得作为 copy source 或 destination。MTP prefill
-context-checkpoint 冻结是例外：staging GDN（slot `2C`，与 lane current 不相交）以及 staging hidden
-的 D2H 可以与**同一条** lane 的下一 prefill chunk 重叠。冻结期间 `2C` 从 turn-rollback occupant
-借出，pack 后 H2D 把 rollback 装回；`occupied=false` 必须发生在 clobber D2D 之前。`device.stream`
-上的 `synchronize()` 只排空 compute，不排空 copy_stream。
+PrefillChunk / DecodeRound 正在读写的 pages 不得作为 copy source 或 destination。MTP/DFlash prefill
+context-checkpoint 冻结是例外：staging GDN（slot `C`，与 lane current 不相交）、staging hidden，
+以及 DFlash staging cyclic state 的 D2H 可以与**同一条** lane 的下一 prefill chunk 重叠。冻结期间 `C` 从 turn-rollback occupant
+借出，pack 后 H2D 把 rollback 装回；`occupied=false` 必须发生在 clobber D2D 之前。Rewrite-checkpoint
+capture 同样借用 staging：compute stream 先等待 staging 上一轮 copy（stream wait，不阻塞 host），
+D2D 把 lane current GDN 和 DFlash local lane 拷入 staging，`copy_stream` 再把 staging 以逐层线性
+D2H 拷入该 lane 的 pinned rewrite image，与后续 prefill/decode 重叠。`device.stream` 上的
+`synchronize()` 只排空 compute，不排空 copy_stream。Checkpoint host images（每条 lane 的 rewrite
+image 与 MTP/DFlash context-checkpoint head pool）在启动时从一块 prefault 并注册的 pinned slab 切出，
+由 Program 拥有；head 离队后回池，后续 freeze、turn-rollback 与 RAM/disk restore 复用同一 image 与
+completion event，serving 期间不调用 `hipHostMalloc`/`hipHostFree`。Pool 容量是每 lane 一个 rollback
+head，加上所有 lane 在共享 KV capacity 内能同时持有的 ladder head 数（`--max-context` 之上的 mark
+不可达）；pool 用尽时跳过可选的 capture 或 restored head。复用 head 前等待其上一个 DMA/host-copy
+owner 一律是 stream wait（copy_stream 或 compute stream 等 head fence），scheduler 线程不 host wait。
 
 ### 2.7 Bounded ingress and output
 
@@ -134,9 +148,10 @@ backfilled decode-ready requests 仍进入同一个 maximal compact batch。
 The Qwen frontend owns compiled tool schemas, transactional grammar state, and typed completed
 calls. Program owns planner-accounted device eligibility masks and pinned exchange storage.
 Ordinary sampling uses one mask per compact row; speculative verification uses one per actual
-chain position or tree node. HIP Graph host nodes fork grammar state after proposal metadata
-arrives on the host, then upload target masks. Proposals do not advance committed grammar; only
-the accepted publication transaction does. Callback errors surface before publication.
+chain position or tree node. A Program-owned matcher thread forks grammar state once proposal
+metadata reaches the host mailbox, while the target forward runs; target sampling acquires the
+masks. Proposals do not advance committed grammar; only the accepted publication transaction
+does. Matcher errors and missing replies surface before publication.
 
 P-less sampling evaluates the eligible full-vocabulary softmax. With temperature T>0, collision
 mass L=sum(p²), and epsilon=0.0625, membership is p>=max(L*exp(-2*epsilon/T),1/1024).
@@ -152,15 +167,25 @@ For p-less, non-raw, text-only thinking requests, bounded recovery may withhold 
 call or interrupt persistent reasoning at a committed round boundary. Reasoning retries additionally
 require positive temperature, three disjoint exact occurrences of a 256-token passage, and at least
 4096 distinct redundant tokens. This is not a reasoning-length limit. The detector resets per attempt.
-The family owns the original input and repairs it by removing failed/historical reasoning and adding
-a labeled system notice, without inventing a user turn or call result.
+The family owns the original input. A retry splices onto the resident prompt tokens, keeping
+historical reasoning: it closes the open think turn, appends a labeled system notice or
+rejected-call feedback, and reopens the thinking prologue. Only the failed generation is omitted; a
+second retry appends its notice after the first retry's prompt. It invents no user turn or call
+result. A splice whose suffix does not round-trip through the tokenizer exhausts recovery.
 
-At most two repairs consume reserved cold-prefill entitlement and the original remaining output
-budget. A retry keeps its lane/admission, leaves the decode-ready set, clears complete KV/GDN/
-speculative state, and prefills without prefix reuse or checkpoint capture. It cannot truncate KV
-while retaining stale recurrent state. Other requests keep maximal-batch scheduling outside that
-exclusive prefill. Calls remain unpublished until accepted; already streamed prose/reasoning cannot
-be retracted. Extra prefill work and recovery events are reported separately from original prompt
+At most two retries consume the reserved retry service work and the original remaining output
+budget, each within the original context entitlement. A retry keeps its lane/admission and leaves
+the decode-ready set. With prefix reuse enabled it retains the lane in place and plans the spliced
+prompt against it: a ready prompt-frontier checkpoint (the live frontier, the response-replay
+rewrite checkpoint, or a context checkpoint) is restored and only the suffix is prefilled, with the
+typed FP8-K/INT4-V pages, GDN state, and MTP/DFlash proposal state of that checkpoint. Only when no
+resident checkpoint is reusable does it take the longer RAM or disk image onto the aborted lane, and
+a failed host restore cold-prefills the same lane without sticking a cold fallback. It never trims
+KV at an arbitrary token while retaining stale recurrent state, and it captures no turn rollback
+checkpoint. Other requests keep maximal-batch scheduling outside that exclusive prefill; a
+host-restore retry holds its lane in copy-hold like an admission, so they keep decoding while the
+RAM or disk image copies. Calls remain unpublished until accepted; already
+streamed prose/reasoning cannot be retracted. Extra prefill work and recovery events are reported separately from original prompt
 usage. Exhaustion is a request error, not synthetic EOS, engine shutdown, or a promise of progress.
 
 ---
@@ -213,7 +238,7 @@ usage. Exhaustion is a request error, not synthetic EOS, engine shutdown, or a p
 | Server Frontend | 请求校验、有界 CPU preparation/pending work、取消输入和响应 I/O |
 | GPU Executor | admission、boundary processing、状态提交和全部 GPU submission |
 | Slot Table | 保存 admitted requests 的稳定控制状态 |
-| Scheduler | 在 boundary 执行 protected-head admission，并选择下一 `PrefillChunk` 或完整 active `DecodeRound` |
+| Scheduler | 在 boundary 执行 protected-head admission，并选择下一 `PrefillChunk`、`MixedRound` 或完整 active `DecodeRound` |
 | Target Batch Assembler | 把 round membership 转成 target 所需的 typed controls 和 state selectors |
 | Model Runtime | 持有唯一 resident model、共享 execution memory 和 graph assets，执行 whole-batch schedule |
 | DecodeBatchFrame | 一份最大容量为 `C` 的地址稳定 round staging；每轮只使用 exact-`B` prefix |
@@ -320,11 +345,13 @@ capacity 时可以先驱逐其他 free lanes 上的 retained state。新 request
 state 始终重新创建。
 
 Qwen3 的 lane 是 Linear Attention state 的唯一 locator。`C=max_concurrency` 时，shared pool 固定使用
-`[0,C)` 作为各 lane 的 current committed state，使用 `[C,2C)` 作为各 lane 的 rewrite-checkpoint
-state；MTP 或 DFlash 引擎额外保留 slot `2C` 作为 Engine-wide GDN：默认热 occupant 是 turn-rollback（append
-occupy 在 suffix prefill 之前把 current+`tail_hidden` 钉在上一完成 `E`），ladder freeze 借走后再
-装回。它不是 rewrite slot。一份 slot 同时选择全部 GDN layers 的 convolution history
-和 recurrent state。Decode round
+`[0,C)` 作为各 lane 的 current committed state；MTP 或 DFlash 引擎额外保留 slot `C` 作为 Engine-wide
+GDN：默认热 occupant 是 turn-rollback（append occupy 在 suffix prefill 之前把 current+`tail_hidden`
+钉在上一完成 `E`），ladder freeze 借走后再装回，rewrite capture 借走后保留为该 lane rewrite image 的
+设备副本（按 lane 和 image generation 标记），供 rewrite restore 直接 D2D。一份 slot 同时选择全部
+GDN layers 的 convolution history 和 recurrent state。Rewrite checkpoint 本身不是 slot：每条 lane 在
+启动时拥有一份 pinned host image（GDN slot image，DFlash 下加 cyclic local lane image）和一个 copy
+event；staging 不再持有该 generation 时，restore 在 compute stream 上等待该 event 后逐层 H2D。Decode round
 不在 `SequenceState` 中维护随 speculative position 变化的 state selector。
 
 ### 4.4 Batch row
@@ -526,8 +553,9 @@ service work = known Text/Vision suffix-prefill and finalization work
 Output 部分使用声明的 finite effective output bound，不预测 prompt 内容、reasoning difficulty 或实际 EOS。
 Prefill 部分使用已经 bounded 的 target scheduling-unit profiles；短 output 不能抵消任意长的 Text/Vision
 prefill。当前 Qwen3 profile 以 externally scheduled prefill/finalization steps 的有限上界作为 prefill
-quanta，并把每个 effective remaining output token 计为一个 decode quantum；prompt snapshot 和 Vision item
-造成的已知 prefill split 在 planning 时计入。Selected speculative backend 可以影响 target 的统一 work
+quanta，并把每个 effective remaining output token 计为一个 decode quantum；prefill quanta 按执行时同一
+chunk policy（含 irregular-tail 4096 规则）逐步模拟 rewrite checkpoint、Vision item/MTP shifted consumer
+以及多模态 prompt 的历史 assistant turn-closure frontier 造成的 split，而不是每个 split 只加一个 quantum。Selected speculative backend 可以影响 target 的统一 work
 projection，但不会在 Scheduler 中产生 MTP/DFlash policy branches。
 
 Projection 只服务以下两件事：选择 frozen incumbent donor order，以及约束 temporal borrowing。它不是
@@ -691,7 +719,7 @@ The optional MTP KV pool is physically separate from Main Text but is sized by t
 target-specific profile. 设 `S=max_context`、`P` 为 page size、`L=ceil(S/P)`、
 `C=max_concurrency`、`M_min=max(L,C)`、`M_max=C*L`。Explicit policy 从用户 token capacity 得到
 `M=ceil(K_main/P)`；Automatic policy 在权重加载后保留 headroom `R`，从完整 target physical layout 的
-reservation curve 直接求出 `F-R` 可容纳的最大 `M`。CLI/server 使用 `R=1 GiB`，并在完整 startup 后
+reservation curve 直接求出 `F-R` 可容纳的最大 `M`。CLI/server 默认 `R=64 MiB`（`--kv-capacity-headroom`），并在完整 startup 后
 报告实际 free memory。Main Text uses `M` physical page groups and each allocation has logical
 capacity `L`; MTP uses
 `M + C*ceil((K_draft-1)/P)` 个 physical groups，logical capacity 同样为 `L`，其中 `K_draft` 是
@@ -752,8 +780,16 @@ committed prefill chunk 末尾的 current GDN 与该 chunk 最后一列 hidden�
 Qwen frontend 从有效 `preserve_thinking` 语义发布 desired checkpoint：`false` 选择最后一个真实 user
 之后第一条 assistant opener 的末尾；`true` 选择本次完整 deterministic generation prologue 的末尾，
 即当前 prompt frontier。Thinking generation 包含 `<think>\n`，non-thinking generation 包含完整 empty
-thinking block。Boundary 先作为 byte offset 产生，再独立 tokenize 并验证为完整 prompt token prefix；
-schema adapter 不推断或改写这些 target-private 语义。
+thinking block。例外：thinking 请求的最新 assistant turn 没有 reasoning（client 丢弃）时，下一轮
+re-render 在 opener 之后即分叉（effort template 省略空 wrapper；toggle template 的
+`<think>\n\n` 另行 tokenize），因此 checkpoint 放在 generation opener（`<think>\n` 之前），代价是多一个
+很短的 prefill unit。Boundary 先作为 byte offset 产生，再独立 tokenize 并验证为完整 prompt token prefix；
+schema adapter 不推断或改写这些 target-private 语义。`false` 时 frontend 另外发布每个历史 assistant
+opener 末尾的 turn-closure token frontier（按 turn 顺序、以不相交区间 tokenize 并对照完整编码验证）。
+多模态 prompt 的 cold prefill 在这些 frontier 处切分 chunk，使其 state 与早先 turn 捕获的 checkpoint
+一致；多模态 prompt 中不含 Vision item 的 suffix 仍按 prompt 的 3-axis MRoPE position 执行，而不是
+1-D text RoPE。Vision chunk 在第一个 image Text column 处切分以匹配 reused text-only prefix，同时该
+chunk 仍携带 MTP shifted input 所需的 image embedding。
 
 Admission 在同一 lane 成功时消费 retained entry，并把 SequenceState ownership 转移给新 request：
 
@@ -814,7 +850,7 @@ default is `off`. It does not change GPU pool capacity, active-set
 accounting, or Device Graph addresses, and it does not move an in-flight request off the GPU.
 
 MTP 或 DFlash prefill may freeze current GDN into an Engine-wide staging slot during an in-flight prefill
-(after the Program prefill step compute-syncs that chunk). That freeze borrows slot `2C` from the
+(after the Program prefill step compute-syncs that chunk). That freeze borrows slot `C` from the
 turn-rollback occupant: `occupied=false` before the clobber D2D, pack the ladder head, then H2D
 rollback GDN and hidden back. DFlash also D2Ds that lane's cyclic local into a 1-lane Engine-wide
 staging window before the same `d2d_done` fence; host-pack D2H reads that frozen window, not live
@@ -843,17 +879,41 @@ The executor captures at each admission site that is about to destroy a retained
 3. a RAM restore that is about to cover a still-dirty target lane.
 
 Capture queues D2H on `copy_stream` and **holds the source pages mapped** until `copies_ready`.
-Admit is two-phase: bind records the request in its lane and any captured-but-not-evicted victims
-as copy-hold; other decode-ready lanes may run a DecodeRound while that D2H (and later restore
-H2D) is in flight. Admit-complete waits with `hipEventQuery` (and `hipEventSynchronize` on copy
-only when membership is empty), then `evict_retained_lane` / `kv.reset()`, optional restore H2D,
+Admit is two-phase: bind records the request in its lane and the retained victims awaiting release
+as copy-hold (including victims whose optional capture was dropped); other decode-ready lanes may
+run a DecodeRound while that D2H (and later restore H2D) is in flight. Admit-complete waits with `hipEventQuery` (and `hipEventSynchronize` on copy
+only when membership is empty), then `evict_retained_lane` / `kv.reset()`, optional restore H2D
+(a RAM restore starts only once its entry's own capture copies are ready, polled while others
+decode),
 `wait_kv_ram_copies_on_compute` immediately before this lane's `start_prefill_lane`, and harvest.
 Harvest of D2H/H2D elapsed happens after that wait, not on an overlapping DecodeRound launch.
+A cancellation while other lanes decode does not drain at once: `begin_copy_hold_cancel` stops
+further disk restore work and records a fence on the copy stream behind the copies already queued,
+the hold stays parked while DecodeRounds continue, and the drain below runs once
+`copy_hold_cancel_settled` (or membership is empty), so it no longer waits on in-flight SSD reads.
+A shutdown with such a hold parked finishes it as cancelled.
+A `CacheRestoreFailure` before prefill consumes the prompt parks the hold the same way; once it
+settles, best-effort cleanup releases the claims and drops the failed RAM/disk entry, then a retry
+cold-prefills its lane and a new request re-enters FIFO admission as a cold fallback. Any other
+request-local failure (`RequestError`, or a `CacheRestoreFailure` after prefill starts) of an
+admission, copy-hold, or generation-recovery retry drains and fails only that request (a drain
+after any `CacheRestoreFailure`, or of a cancelled failed hold, also drops the failed entry);
+other exceptions remain Engine-fatal.
 If the held request is cancelled or fails before admit-complete, drain waits for those copies,
-harvests, releases an unused RAM claim, and `evict_retained_lane` on every captured victim so the
-D2H image is the only remaining copy. A later RAM hit exclusive-claims the matching host entry (pinned entries are invisible to later
-`plan_match`). `capture` and `unpack` record a start HIP event before the copies and a done event
-after them so other-lane decode can overlap the DMA. Consume then erases that entry wherever it
+harvests, releases unused RAM/disk claims (after a `CacheRestoreFailure` it also drops the failed
+entry, as above), and calls `evict_retained_lane` on every selected victim not yet evicted; a
+failed restore's fallback evicts them the same way.
+If capture succeeded, the completed D2H image is the only remaining copy. A later RAM hit
+exclusive-claims the matching host entry (pinned entries are invisible to later `plan_match`). `capture` and `unpack` record a start HIP event before the copies and a done event
+after them so other-lane decode can overlap the DMA. The pinned rewrite-checkpoint and ladder
+images (GDN conv/recurrent, about 150 MB per image, plus DFlash cyclic) copy host-to-host through
+`enqueue_host_copies`, a stream-ordered `hipLaunchHostFunc` callback in 4 MiB chunks, because
+ROCm runs `hipMemcpyAsync` between host buffers as a CPU copy inside the call. Each image's `copies_done`
+fence is stream-waited before and re-recorded after those copies; disk restore does the same on
+its state stream. A RAM restore's installed ladder heads copy out of the entry on that host-copy
+stream behind only their own fences: no stream joins them and the entry's copy fence, which gates
+the lane's first prefill chunk, excludes them; a separate block fence keeps the entry's block
+allocated until they land. Consume then erases that entry wherever it
 sits in the FIFO and retires the host block, including after an incomplete first chunk; a throw
 before consume releases the claim and leaves the host row in place. After consume the bundle lives
 only in VRAM until a later spill recaptures it. Occupancy `used`/`entries` (human `kv-ram=` / `n=`)
@@ -898,11 +958,12 @@ spill/allocation failure does not turn active requests into offloaded/preempted 
 
 ### 7.1 GPU scheduling units
 
-Scheduler 只提交两类 GPU compute work：
+Scheduler 只提交三类 GPU compute work：
 
 ```text
 PrefillChunk(request)
 DecodeRound(all decode-ready requests)
+MixedRound(all decode-ready requests, one prefill slice of the owner)   # DFlash only, §8.9
 ```
 
 完整 request 不是 scheduling unit。所有 **compute** GPU work 在 `device.stream` 上串行执行。
@@ -930,7 +991,10 @@ opportunity，直到该 lane 的 copies 允许 `start_prefill_lane`。
 6. choose, prepare and launch one next GPU unit
 ```
 
-copy-hold 在 admission-turn gate 之前检查：membership 非空且 copies 未就绪时先跑其他 lane 的
+已取消或 restore 失败而 parked 的 copy-hold 最先检查：其 fenced copies settle 之前，只要 membership
+非空就只跑该 membership 的 DecodeRound，generation recovery、admission 和 prefill 都不推进；settle 后
+（或 membership 为空）才 cancel 该 lane，或丢弃失败 entry 并走 cold fallback。其余 copy-hold 在
+admission-turn gate 之前检查：membership 非空且 copies 未就绪时先跑其他 lane 的
 DecodeRound（不 harvest、不 `EventSynchronize` copy）；membership 空则 `EventSynchronize` copy
 并 complete。Harvest 只在该 request 的 `start_prefill_lane` wait 之后。
 
@@ -941,36 +1005,60 @@ boundary 最多发布一个新 admitted request。
 
 ### 7.3 Decode/prefill policy
 
-调度策略为：
+调度策略由两个 startup-fixed 参数决定：`mixed_forward=N`（decode-ready 时每个 prefill step 的
+forward 宽度，256 的倍数，`0` 表示 prefill-first；未设置时由 planner 自动选择：DFlash 且 C>1 时
+`N = min(1024, chunk)`，其中 chunk 为 `min(prefill_chunk, max_context)` 向下取 256 的倍数；若该值不大于
+`(C-1)W` 或为其他 backend，则为 `0`）和 `mixed_forward_rounds=D`（每个 slice 对应的 decode
+rounds，`D>=1`）：
 
 ```text
-if the completed unit was a DecodeRound and a prefill owner exists:
-    run one latency-bounded PrefillChunk
+if a parked copy-hold was cancelled or its restore failed:
+    if its fenced copies have not settled and requests are DECODE_READY:
+        run one DecodeRound containing them (nothing else advances)
+    else:
+        cancel it, or drop the failed entry and fall back to cold prefill
+else if an admitted copy-hold exists:
+    if its copies are not ready and requests are DECODE_READY:
+        run one DecodeRound containing them
+    else:
+        complete it and start its prefill
+else if a prefill owner exists:
+    if N == 0 or no request is DECODE_READY:
+        run the owner's next PrefillChunk (up to prefill_chunk tokens)
+    else if the owner is mixable (§8.9):
+        run D-1 DecodeRounds, then one MixedRound whose owner fills N columns
+        less the round's live verify columns
+    else:
+        run D DecodeRounds, then one PrefillChunk of <= N tokens
+else if a generation-recovery retry is queued:
+    start it (a host restore parks it as a copy-hold)
+else if a pending request is admissible and decode-admission budget permits:
+    admit it and start its prefill
 else if one or more requests are DECODE_READY:
     run one DecodeRound containing all of them
-else if a prefill owner exists:
-    run the next PrefillChunk
 else:
     remain idle
 ```
 
-因此 decode 和 prefill 同时持续 runnable 时：
-
-```text
-DecodeRound -> PrefillChunk -> DecodeRound -> PrefillChunk -> ...
-```
-
-没有 decode-ready request 时，prefill chunks 连续执行；没有 prefill owner 时，decode rounds 连续执行。
+`S=0` 时 decode 在整个 prompt 的 prefill 期间停顿，prefill 吞吐最高；`S>0` 用 prefill 吞吐换取
+decode 进度。Mixed slice 与 decode rows 共享一次 weight stream，因此同等 decode 份额下 mixed round
+的 decode 停顿只有一个 round 的时长，而 separate `PrefillChunk` 的停顿是整个 slice 的时长。实测
+frontier 见 [`performance.md`](../performance.md#mixed-prefilldecode-frontier-2026-09-29)。没有 decode-ready
+request 时，prefill chunks 以完整 `prefill_chunk` 连续执行；没有 prefill owner 时，decode rounds
+连续执行。
 
 当没有 prefill owner 而 ordered pending queue 非空时，§5 选中的 head 或 backfill request 占用下一次
 prefill/finalization opportunity：GPU idle 时可以立即 admission；已有 decode-ready rows 时，先完成一个
 DecodeRound，再 admission selected request 并执行它的 first prefill/finalization unit。若该 unit 未完成，
-它成为唯一 prefill owner并进入上述交替；若它完成，request 在下一 boundary 加入 decode batch。持续
+它成为唯一 prefill owner并进入上述策略；若它完成，request 在下一 boundary 加入 decode batch。持续
 ingress 因此不能在两个 donor progress rounds 之间连续 admission 多个 requests，也不能无限延迟 frozen
 frontier 的 decode progress。
 
-Prefill chunk profile 限制插入两个 decode rounds 之间的 GPU 时间。其具体 token/media extent 是经过
-target 和 hardware qualification 的配置，不属于 scheduler semantic。Vision 和其他 prefill GPU phases
+`N>0` 时 slice 限制插入两个 decode rounds 之间（或并入一个 mixed round）的 prompt work；`N=0`
+时 decode 停顿覆盖 owner 的整个 prefill。存在 decode-ready request 时，Vision encode 单独构成一个
+prefill step（不推进 prompt tokens，`encoded_only`），随后的 decode rounds 先于消费它的 text chunk 运行，
+因此 decode 停顿不会叠加 encode 与 chunk。Chunk/slice 的具体 token/media extent 是经过 target 和
+hardware qualification 的配置，不属于 scheduler semantic。Vision 和其他 prefill GPU phases
 必须本身构成 bounded unit，或已被计入该 chunk 的 latency bound；不存在 scheduler 之外的
 unbounded prefill work。
 
@@ -1185,6 +1273,18 @@ Per-request KV/context、recurrent state、sampling state 和 output ownership �
 
 ### 8.7 Result resolution and commit
 
+Token logprobs follow the same rule. A request that set `OutputOptions::top_logprobs` raises its
+row's `logprob_rows` flag in the round's control frame. Every decode schedule (ordinary, MTP, and
+DFlash, captured or eager) ends its token decision with `ops::token_logprobs`, which scores each
+produced token against the logits column that decided it (column `i` for the supported chain
+verification) and writes a fixed-size record per token slot into the result
+frame: the token's log-probability and the 20 highest-ranked ids with theirs. The launch is part
+of every definition, so no graph variant or post-replay launch exists; a row whose flag is clear
+returns from the kernel before reading logits and its record slots are not written. The
+prefill-sampled first token uses the same Op on the scalar step logits, before the MTP bridge
+reuses them. The Engine turns the records of the committed token prefix into `TokenLogprob`
+values per output channel; tokens that publish to no channel are dropped there.
+
 Graph replay 后只回传 compact per-row result，例如 ordinary sampled token，不能回传 logits 或逐层状态。
 GPU Executor 等待一次 whole-round completion，然后通过 frozen `RoundMembership` 对每行独立 resolve：
 
@@ -1203,7 +1303,8 @@ row result
 
 Speculative backend 的 target GDN 使用 ReplaySSM 时，GPU graph 只读 lane 的 current state 并写
 Program-owned raw records，不推进 committed GDN state。CPU output preview 得到每行最终提交长度后，
-`resolve_pending_batch` 先用原始 `B` 行执行一次 all-layer Fold，再完成必要的 hidden/backend correction，
+`resolve_pending_batch` 先用原始 `B` 行执行一次 all-layer Fold（继续运行的 DFlash chain 行除外，见下文
+deferred Fold），再完成必要的 hidden/backend correction，
 同步成功后才推进 host frontiers。取消行以 `commit_columns=0` 参与原始 row mapping，Fold 对该行严格
 no-op，随后 retain 该行已 commit 的 continuation，而不是释放 bundle。Executor 只能在这个 commit tail
 成功后提交 output preview 和发布 output event。
@@ -1219,6 +1320,57 @@ request-local ordinary decode path。
 Prefill 仍是单 sequence unit。它独占自己的 `SequenceState`，但复用 Model Runtime 和 shared workspace；
 它不占有一个长期 `DecodeBatchFrame` row。Final prefill 建立完整 decode cursor 后，该 request 只在下一
 boundary 通过正常 batch assembly 加入 ordinary decode。
+
+### 8.9 Mixed prefill/decode round
+
+With DFlash, a mixable owner's slice shares the target forward of a decode round. The owner is
+mixable while it is Prefilling a text-only prompt: no Vision/media phase and no MTP bridge
+preparation. Other owners use the separate-step path of §7.3. A tool-grammar owner's final step
+mixes too: its first-token root mask occupies the exchange's last row, which a verify batch
+(at most C-1 rows while a request prefills) never reaches, and computing it leaves the batch's
+bindings intact (Speculative grammar exchange).
+
+```text
+columns = [owner slice (S_eff tokens) | verify rows (B x W_live)]
+S_eff   = min(remaining prompt, N - B x W_live)      (at least N - (C-1)W before the last slice)
+```
+
+The forward width is fixed at the configured `N`, a multiple of 256 (prefill holds its rate at
+256-multiple widths and loses 3-5% between them). The owner takes the verify columns a round
+leaves unused, when fewer than `C-1` requests decode or adaptive draft length gives `W_live < W`,
+so the aligned forward width holds in every round.
+
+- Linears, norms and MLP run once over all columns, so the weights stream once for both the
+  owner's prompt tokens and the verify rows.
+- Attention runs per segment: the owner's KV transaction and causal prefill attention first,
+  then each verify row against its own cache. Verify KV status is indexed by lane.
+- GDN: the owner uses the prefill convolution and chunked recurrence on its own current slot;
+  verify rows use the record path over their column range.
+- DFlash feature capture is split between the owner's prefill sink and the verify taps. The
+  owner's DFlash context append runs after the round's egress. The owner stages its ingress
+  in frame slot `C-1`, because the owner is never a member and `B <= C-1`.
+- Final owner steps finalize and sample as in ordinary prefill.
+- Admission with decode-ready requests and a configured mixed forward does not run a mixable owner's
+  first step: `start_prefill_lane` returns without progress, and the first slice joins the next
+  round, so decode never stalls for a separate first step. That empty step spends no service
+  quantum and does not restart the `D` cadence.
+- The owner's KV transaction is committed as the round's last host action, after the owner and
+  verify tails, the egress copy and the owner context append are enqueued. Its status read
+  therefore waits on the finished round instead of stalling submission between the last layer
+  and the tails.
+- Capacity: the plan rejects an `N` that is not a multiple of 256, exceeds the prefill chunk, or
+  cannot hold `(C-1)W` verify columns plus one prompt token. The workspace plan reserves a
+  separate `dflash_mixed` layout of `N` columns with an owner of up to `N - 2B` columns at each
+  batch `B` (verify panels are at least two columns wide).
+- Mixed rounds are eager. Pure decode rounds keep their Device Graph definitions, and
+  adaptive-draft round-time observation skips mixed rounds.
+
+The owner's prefill Ops and state transitions are those of prefill-first; greedy owner tokens
+matched prefill-first in every pair check, and 8K PPL is identical at chunk 2048 and 256. Verify rows take the wide-T Linear/norm routes of the mixed width.
+They are checked against the same Op oracles, but they are not bitwise equal to a pure decode
+round, so greedy streams may diverge at near-ties. The owner's KV commit synchronizes at the end
+of the round, so a mixed step's prefill timing and the decode round time both span the whole
+mixed round.
 
 ---
 
@@ -1286,6 +1438,21 @@ qualification。完整算子与 route correctness 由独立测试和 real-artifa
 startup 只验证 graph inventory、update compatibility、resource materialization 和每个 executable 的一次
 可执行性。
 
+### 9.1a `B=1` persistent lowering
+
+`B=1` definition 在 capture 后、instantiate 前由 `ops::persistent_decode_lower` 原地改写：图中每段至少两个
+连续的 hosted kernel nodes（small-T FP8LUT4 / row-scaled FP8 projections、FP8 activation producers、
+GDN front / pair-conv / record、Q/K norm-RoPE）替换为一个 persistent kernel node。该 kernel 以每 WGP 两个
+384-thread blocks 常驻，把每个 captured launch 作为一个 phase，用其原 kernel body（GDN record 为同一 Op
+的 per-(sequence, head) re-tiled body，宽度 >8 时保持 kernel node）、原参数和 virtual block/grid indices 执行，phase 之间是 grid barrier；输出与原 kernel nodes bitwise 相同。其余 nodes
+（verify attention、drafter、sampling、copies）保持不变，graph 仍是单链。
+
+Lowering 返回的 program storage（phase records、captured arguments、barrier words）由
+`DecodeGraphDefinition` 持有，生命周期覆盖 graph 及由其 instantiate / update 的 executables；同一
+topology 的 definitions 降低为相同 node 序列，因此 `hipGraphExecUpdate` 照常适用。Memory plan 为每个
+lowered definition 计入固定 allowance。`B>1` definitions 不降低（lowered C4/C8 更慢），见
+`docs/performance.md`。
+
 ### 9.2 Dynamic active set
 
 active set 改变时，runtime 发布新的 frame ingress 并选择匹配的预捕获 definition：
@@ -1346,7 +1513,10 @@ fill pinned ingress rows [0,B)
 ```
 
 Cross-page materialization 发生在 replay 前的同一 execution lane，不改变 captured pool/table bases，也不形成
-graph key。Graph-off mode 按相同顺序 eager 提交这些动作。
+graph key。Graph-off mode 按相同顺序 eager 提交这些动作，并且与 graph mode 一样在所选 planned profile 的
+maximum execution frontier 下执行该 transaction（attention split 大小与 DFlash envelopes 由该上界决定），因此
+eager 与 captured replay 逐位相同；以 live frontier 执行会在 16K 以上改变 packed decode split，破坏 graph/eager
+精确性。
 
 不得为每个 `B`、profile 或 captured definition 复制 logits、hidden、workspace 或 per-sequence state。
 Model/control ingress、forward 和 result egress 不存在 per-row device submission；跨 page 时的 table
@@ -1412,7 +1582,7 @@ backend；迁移与后续改动必须继续保护它现有的graph/eager语义�
 `DecodeRound(all decode-ready requests)`。
 
 Without adaptive drafting, the proposal window is startup-fixed and only that K is planned and
-captured. Startup-enabled adaptive drafting preplans the bounded supported K set (DFlash {3,4,5}),
+captured. Startup-enabled adaptive drafting preplans the bounded supported K set (DFlash {3..N} for `--draft-tokens N>=5`, MTP {3,4,5}),
 with separate K-specific graph definitions and accounted memory. At each round boundary one K is
 selected for the whole compact batch. Each row's remaining output/context budget constrains its
 logical proposals and publication, not necessarily DFlash's physical captured K. DFlash can
@@ -1429,9 +1599,12 @@ acceptance is observed only for actual proposals. MTP retains its existing budge
 These are functional scheduling semantics, not a claim that adaptive K beats a physically qualified
 fixed policy on a particular artifact.
 
-R9700 DFlash is chain-only, K<=5, W=K+1 including the target anchor; no packed-tree or two-block
-product schedule is exposed. The fixed-policy production comparison uses K4/W5 and K5/W6, not the
-retired K1..11 shortlist. DFlash companion 也不自动继承固定 Q4 recipe：它从真实
+R9700 DFlash is chain-only, K<=7, W=K+1<=8 including the target anchor; no packed-tree or
+two-block product schedule is exposed. Production runs adaptive K{3..7}: 7-8-row / 32-token
+drafter and GDN routes plus two-tile small-T FP8 target Linears keep C1..C4 rounds off the
+prefill GEMM (2026-09-28, `docs/performance.md`); fixed-budget W8 root-sibling/best-first trees
+remain rejected.
+DFlash companion 也不自动继承固定 Q4 recipe：它从真实
 BF16 DFlash2 checkpoint 独立比较 canonical Q4G64、source-MSE Q4G64 与 source-MSE W8G32，只有物理
 small-width speed 和 quality 同时支持时才加入 row-scaled E4M3。所有 recipe 保留 BF16 selector codebooks
 和 private BF16 state。
@@ -1476,6 +1649,15 @@ convolution/key/value/gate records 写入固定 arena，physical record row 恒�
 最终 output prefix 后，一次 Fold 用 frozen `lanes[b]` 把 row `b` 提交到该 lane 的 current state。Rows
 不得因取消或不同 acceptance length 被压缩、重排。Record 位于 Device Graph 内，Fold 位于 CPU 决策后的
 eager commit tail；下一 GPU unit 必须等当前 records 被 Fold 消费后才能覆盖 arena。
+
+Deferred Fold：DFlash chain 行若提交 `committed > 0` 且非 terminal，`resolve_pending_batch` 不在 commit
+tail 中 fold 它，而是在 `SequenceState` 记下 `(committed, record row)`；该 lane 的 GDN slot 暂停在 round
+base 之前的状态，ledger/KV/hidden 照常推进。下一 DFlash round 把这些行写入
+`DFlashDecodeIngress::gdn_fold`（按本轮 row，含旧 record row 与 slot），target verify 对每个 GDN 层先应用
+该层 Fold（FP8 front 内融合，其他路径用 `gdn_replay_fold_layer`），再写本轮该层 records，因此 arena
+覆盖仍在消费之后，结果与 all-layer Fold 逐位相同。不在下一 round 中的 lane、tree round，以及读取或捕获
+lane 状态的 Program 入口（prefill、retain、capture/restore、score、shutdown）先用 all-layer Fold
+eagerly flush；`clear_lane` 丢弃未应用的 Fold。
 
 Target execution 完成到 Fold 结束期间，请求处于 Pending：authoritative execution/ledger frontiers、ledger
 内容和 prefix identity 仍停在 round base；licensed tokens 和 backend staging 只作为未发布候选存在。Fold、
@@ -1669,3 +1851,50 @@ admission。Later arrivals 从未成为 H 的 donor，也不能恢复已消费�
 - [ReplaySSM GDN technical reference](replayssm-gdn.md)
 - [Serving behavior](../serving.md)
 - [Qwen3.8-27B model semantics](qwen3.8-27b-model.md)
+
+### Idle maintenance and scoring ownership
+
+Idle KV copy readiness and spill submission run under execution ownership after
+rechecking the queue and active slots. The queue mutex is released before any Program
+or HIP call. If scoring holds execution ownership while slots appear empty, the worker
+skips Program access and retries after a bounded wait. A short idle-maintenance mutex
+serializes this host submission section with `score_many` admission, so maintenance
+alone cannot make an otherwise idle Engine report overloaded. Scoring releases that
+mutex after reserving execution ownership; normal decode never takes it.
+
+### Constrained output and grammar exchange
+
+The Qwen frontend owns immutable compiled tool/response schemas and EBNF constraints, and
+transactional matcher state. `PromptOptions::output_constraint` constrains answer content without
+injecting schema text into the prompt. Response schemas enforce assertions with JSON Schema
+defaults and fixed property order; unsupported assertions fail preparation. Reasoning remains
+unconstrained until `</think>`. Constrained content preserves literal special-token bytes and EBNF
+whitespace, while model stops keep ordinary publication policy. Tool declarations and response
+constraints cannot be combined; tool-call parsing is enabled only for tool grammars. The existing
+HIP `TokenMaskExchange` supplies ordinary root and speculative chain masks, and only committed
+publication advances matcher state. Caller stops and limits can truncate a valid prefix.
+
+`TokenMaskExchange` owns a fine-grained coherent host mailbox and a matcher thread; the round's
+Device Graph contains no host node. Once the verification IDs exist, a publish kernel on the
+compute stream copies IDs, parents and valid-column counts into the mailbox and raises its
+request number with a system-scope release. The matcher, armed from before the round's launch
+until `finish_round()` after its synchronization, polls the request (20 us), runs the grammar
+and posts the sampling configurations, the restricted mask rows and a release of the reply
+number. Rows whose masks permit the whole token domain carry a null mask; a row whose nodes share
+one mask publishes it once with column stride zero. Target verification then runs embedding
+through LM head, and an acquire kernel before the masked argmax waits for the reply and copies
+the configurations and restricted rows into the planned device buffers, so the host match
+overlaps the target forward. Without a reply within two seconds the round samples with the bound
+unmasked configurations and `finish_round()` throws before publication; a request left
+unanswered is retired then, never answered against later bindings. Ordinary root masking uses
+its synchronized CPU boundary. A prefilling request's root mask is written into the last row
+without rebinding, at admission and again before its final step (another prefilling request may
+have written the shared row since); inside a mixed round that host fill precedes the runner's
+enqueue, so the armed matcher is still idle.
+
+Bindings change at synchronized round boundaries, which the matcher cannot overlap: it holds the
+exchange mutex while answering. Lane release and Program teardown retain the owning execution
+boundary before request/OutputSession storage is released. Graph-branch alternatives are not
+available on this HIP: a side-stream branch executes serially, segment scheduling makes rounds
+2.3x slower, and a captured external event wait crashes (`docs/performance.md`, Decode step
+attribution).

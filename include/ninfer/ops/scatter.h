@@ -85,4 +85,25 @@ void gather_bf16_path(Tensor& features, const Tensor& lanes, const Tensor& path,
 void extract_bf16_columns(const Tensor& source, std::int32_t source_column, Tensor& destination,
                           hipStream_t stream);
 
+/**
+ * Op: split_bf16_columns
+ *
+ * Math / indexing:
+ *   For source [D,T], first [S,T] and second [D-S,T]:
+ *   first[d,t] = source[d,t] for 0<=d<S; second[d,t] = source[S+d,t] for 0<=d<D-S.
+ *
+ * Logical shapes:
+ *   Contiguous BF16 tensors; 0<S<D, both destinations have T columns.
+ *
+ * Numeric:
+ *   Exact BF16 element copies.
+ *
+ * Effects:
+ *   Writes both destinations completely in one launch; no tensor aliases another.
+ *
+ * Workspace:
+ *   None. The Op has no persistent state side effect.
+ */
+void split_bf16_columns(const Tensor& source, Tensor& first, Tensor& second, hipStream_t stream);
+
 } // namespace ninfer::ops

@@ -2,7 +2,10 @@
 
 #include "core/layout.h"
 #include "core/tensor.h"
+#include "ninfer/ops/gdn_replay.h"
 #include "ninfer/ops/sampling.h"
+#include "ninfer/ops/token_logprobs.h"
+#include "ninfer/ops/p_less_proposal_calibration.h"
 #include "ninfer/types.h"
 
 #include <array>
@@ -18,15 +21,49 @@ inline constexpr std::uint32_t kDFlashDecodeMaximumDrafts = 15;
 inline constexpr std::uint32_t kDFlashDecodeMaximumWidth  = kDFlashDecodeMaximumDrafts + 1;
 
 struct RoundStateSpec {
-    std::int32_t hidden            = 0;
-    std::int32_t output_rows       = 0;
-    std::uint32_t batch_capacity   = 1;
-    std::uint32_t draft_window     = 0;
+    std::int32_t hidden          = 0;
+    std::int32_t output_rows     = 0;
+    std::uint32_t batch_capacity = 1;
+    std::uint32_t draft_window   = 0;
     // Packed DFlash verify width. 0 means draft_window+1 (chain). Tree verify sets this to the
     // packed N, which may be smaller than the expand width.
     std::uint32_t dflash_verify_width = 0;
-    bool enable_mtp                = false;
-    bool enable_dflash             = false;
+    bool enable_mtp                   = false;
+    bool enable_dflash                = false;
+};
+
+static_assert(static_cast<std::uint32_t>(ops::kMaximumTopLogprobs) == kMaximumTopLogprobs);
+
+// Per-token logprob records of one round frame in slot-major order: slot (i,b) of a [W,B] frame
+// is element b*W + i, and its ops::kMaximumTopLogprobs ranked alternatives are contiguous. Only
+// the slots of rows whose ingress logprob_rows flag is set are written.
+template <std::size_t Slots>
+struct RoundLogprobRecords {
+    std::array<float, Slots> token_logprobs{};
+    std::array<TokenId, Slots * ops::kMaximumTopLogprobs> top_ids{};
+    std::array<float, Slots * ops::kMaximumTopLogprobs> top_logprobs{};
+};
+
+// Device views of one frame's logprob request flags and records (ops::token_logprobs operands).
+struct RoundLogprobTensors {
+    Tensor row_enabled;    // I32 [B]
+    Tensor token_logprobs; // FP32 [W,B]
+    Tensor top_ids;        // I32 [K,W,B]
+    Tensor top_logprobs;   // FP32 [K,W,B]
+};
+
+// Scores a round's produced tokens into a frame's logprob records with ops::token_logprobs: slot
+// (i,b) scores tokens[i,b] against logits column columns[i,b] (column i without `columns`), for
+// i < counts[b] (every i without `counts`), in rows whose flag is set. `logits` is BF16
+// [output_rows,C,batch] and `tokens` I32 [W,batch] with W and batch within the frame.
+void record_round_logprobs(const RoundLogprobTensors& frame, const Tensor& logits,
+                           const Tensor& tokens, const Tensor* counts, const Tensor* columns,
+                           std::int32_t token_domain, hipStream_t stream);
+
+// Device frame of the token a prefill samples: its request flag and its one logprob record.
+struct PrefillLogprobFrame {
+    std::int32_t enabled = 0;
+    RoundLogprobRecords<1> records;
 };
 
 // Stable pinned/device transfer format for ordinary decode. The full fixed-size object is copied
@@ -37,11 +74,14 @@ struct OrdinaryDecodeIngress {
     std::array<std::int32_t, kMaximumConcurrency> rope_positions{};
     std::array<std::int32_t, kMaximumConcurrency> text_kv_table_rows{};
     std::array<std::int32_t, kMaximumConcurrency> lanes{};
+    // Nonzero for a row whose request reports token logprobs.
+    std::array<std::int32_t, kMaximumConcurrency> logprob_rows{};
     std::array<ops::SamplingConfig, kMaximumConcurrency> sampling{};
 };
 
 struct OrdinaryDecodeEgress {
     std::array<TokenId, kMaximumConcurrency> sampled_tokens{};
+    RoundLogprobRecords<kMaximumConcurrency> logprobs;
 };
 
 // Stable pinned/device transfer formats for concurrent MTP decode. The arrays use the maximum
@@ -52,22 +92,29 @@ struct MtpDecodeIngress {
     std::array<std::int32_t, kMaximumConcurrency> remaining_budgets{};
     std::array<std::int32_t, kMaximumConcurrency> current_extents{};
     std::array<std::int32_t, kMaximumConcurrency> target_valid_columns{};
-    std::array<TokenId, kMaximumConcurrency * kMtpDecodeMaximumDrafts> current_drafts{};
-    std::array<std::int32_t, kMaximumConcurrency * kMtpDecodeMaximumWidth> target_rope_positions{};
+    std::array<TokenId, std::size_t{kMaximumConcurrency} * kMtpDecodeMaximumDrafts>
+        current_drafts{};
+    std::array<std::int32_t, std::size_t{kMaximumConcurrency} * kMtpDecodeMaximumWidth>
+        target_rope_positions{};
     std::array<std::int32_t, kMaximumConcurrency> text_kv_table_rows{};
     std::array<std::int32_t, kMaximumConcurrency> mtp_kv_table_rows{};
     std::array<std::int32_t, kMaximumConcurrency> lanes{};
     std::array<std::int32_t, kMaximumConcurrency> rope_deltas{};
+    // Nonzero for a row whose request reports token logprobs.
+    std::array<std::int32_t, kMaximumConcurrency> logprob_rows{};
     std::array<ops::SamplingConfig, kMaximumConcurrency> sampling{};
 };
 
 struct MtpDecodeEgress {
-    std::array<TokenId, kMaximumConcurrency * kMtpDecodeMaximumWidth> licensed_tokens{};
+    std::array<TokenId, std::size_t{kMaximumConcurrency} * kMtpDecodeMaximumWidth>
+        licensed_tokens{};
     std::array<std::int32_t, kMaximumConcurrency> licensed_counts{};
     std::array<std::int32_t, kMaximumConcurrency> accepted_drafts{};
     // Step-major: all B rows for proposal step 0, followed by all B rows for step 1, etc.
-    std::array<TokenId, kMaximumConcurrency * kMtpDecodeMaximumDrafts> next_drafts{};
+    std::array<TokenId, std::size_t{kMaximumConcurrency} * kMtpDecodeMaximumDrafts> next_drafts{};
     std::array<std::int32_t, kMaximumConcurrency> next_extents{};
+    // Slot (i,b) scores licensed_tokens[i,b] at the frame's configured width.
+    RoundLogprobRecords<std::size_t{kMaximumConcurrency} * kMtpDecodeMaximumWidth> logprobs;
 };
 
 // Stable pinned/device transfer formats for one exact-B DFlash transaction. The proposal is
@@ -84,15 +131,28 @@ struct DFlashDecodeIngress {
     // DFlash companion positions remain absolute. The target verifier applies this per-row
     // MRoPE delta to its own position panel after proposal construction.
     std::array<std::int32_t, kMaximumConcurrency> rope_deltas{};
+    std::array<std::int32_t, kMaximumConcurrency> logprob_rows{};
     std::array<ops::SamplingConfig, kMaximumConcurrency> sampling{};
+    // The previous round's ReplaySSM fold, deferred into this round's verification forward:
+    // row b folds its lane's accepted columns layer by layer ahead of that layer's GDN front.
+    ops::GdnDeferredFoldRows gdn_fold{};
 };
 
 struct DFlashDecodeEgress {
-    std::array<TokenId, kMaximumConcurrency * kDFlashDecodeMaximumWidth> licensed_tokens{};
+    std::array<TokenId, std::size_t{kMaximumConcurrency} * kDFlashDecodeMaximumWidth>
+        licensed_tokens{};
     std::array<std::int32_t, kMaximumConcurrency> licensed_counts{};
     std::array<std::int32_t, kMaximumConcurrency> accepted_drafts{};
     std::array<std::int32_t, kMaximumConcurrency> accepted_column{};
-    std::array<std::int32_t, kMaximumConcurrency * kDFlashDecodeMaximumWidth> fold_path{};
+    std::array<std::int32_t, std::size_t{kMaximumConcurrency} * kDFlashDecodeMaximumWidth>
+        fold_path{};
+    // Chain p-less proposal calibration [G,k,B] of the round
+    // (ops::speculative_accept_greedy_drafts), packed at the round's k and batch.
+    std::array<float, std::size_t{ops::kPLessProposalCalibrationTemperatureCount} *
+                          kDFlashDecodeMaximumDrafts * kMaximumConcurrency>
+        proposal_calibration{};
+    // Slot (i,b) scores licensed_tokens[i,b] at the frame's configured width.
+    RoundLogprobRecords<std::size_t{kMaximumConcurrency} * kDFlashDecodeMaximumWidth> logprobs;
 };
 
 struct OrdinaryDecodeStateLayout {
@@ -175,6 +235,7 @@ struct RoundStateLayout {
     std::optional<DFlashPrefillStateLayout> dflash_prefill;
     std::optional<MtpDecodeStateLayout> mtp_decode;
     std::optional<DFlashDecodeStateLayout> dflash_decode;
+    LayoutRegion prefill_logprobs;
     bool complete = false;
 };
 
@@ -188,6 +249,7 @@ struct OrdinaryDecodeState {
     Tensor lanes;
     const ops::SamplingConfig* sampling = nullptr;
     Tensor sampled_tokens;
+    RoundLogprobTensors logprobs;
     Tensor logits;
     Tensor hidden;
 
@@ -244,6 +306,7 @@ struct MtpDecodeState {
     Tensor accepted_drafts;
     Tensor next_drafts;
     Tensor next_extents;
+    RoundLogprobTensors logprobs;
     Tensor verify_ids;
     Tensor target_positions;
     Tensor target_argmax;
@@ -276,7 +339,8 @@ struct DFlashDecodeState {
     Tensor dflash_kv_table_rows;
     Tensor lanes;
     Tensor rope_deltas;
-    const ops::SamplingConfig* sampling = nullptr;
+    const ops::SamplingConfig* sampling      = nullptr;
+    const ops::GdnDeferredFoldRows* gdn_fold = nullptr;
     Tensor licensed_tokens;
     Tensor licensed_counts;
     Tensor accepted_drafts;
@@ -294,6 +358,10 @@ struct DFlashDecodeState {
     Tensor cache_positions;
     Tensor accepted_column;
     Tensor fold_path;
+    // FP32 [G*kDFlashDecodeMaximumDrafts*B] egress storage; a round views its packed [G,k,B]
+    // prefix.
+    Tensor proposal_calibration;
+    RoundLogprobTensors logprobs;
     Tensor target_argmax;
     Tensor target_logits;
     Tensor target_hidden;
@@ -321,6 +389,9 @@ struct RoundState {
     std::optional<DFlashPrefillState> dflash_prefill;
     std::optional<MtpDecodeState> mtp_decode;
     std::optional<DFlashDecodeState> dflash_decode;
+    // The prefill-sampled token's logprob frame: `token` scored against `logits`.
+    DeviceSpan prefill_logprob_frame;
+    RoundLogprobTensors prefill_logprobs;
 
     RoundState() = default;
     RoundState(DeviceSpan backing, const RoundStateLayout& layout);

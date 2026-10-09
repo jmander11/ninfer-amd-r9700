@@ -6,16 +6,15 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
-from . import protocol
-from . import scorer
+from . import protocol, scorer
 
 
 def options(
@@ -122,7 +121,7 @@ class DeterministicExecutionContractTest(unittest.TestCase):
                 "output_dtype": "bfloat16",
                 "final_state_dtype": "float32",
                 "output_final_state": True,
-                "scale": 128 ** -0.5,
+                "scale": 128**-0.5,
             },
         )
 
@@ -182,12 +181,16 @@ class DeterministicExecutionContractTest(unittest.TestCase):
             self.assertEqual(os.environ["TORCH_BLAS_PREFER_HIPBLASLT"], "1")
 
     def test_forbidden_environment_override_fails_even_when_empty(self) -> None:
-        with mock.patch.dict(os.environ, {"TRITON_OVERRIDE_ARCH": ""}, clear=True):
-            with self.assertRaisesRegex(ValueError, "TRITON_OVERRIDE_ARCH"):
-                protocol.establish_deterministic_environment()
-        with mock.patch.dict(os.environ, {"PYTORCH_ALLOC_CONF": ""}, clear=True):
-            with self.assertRaisesRegex(ValueError, "PYTORCH_ALLOC_CONF"):
-                protocol.establish_deterministic_environment()
+        with (
+            mock.patch.dict(os.environ, {"TRITON_OVERRIDE_ARCH": ""}, clear=True),
+            self.assertRaisesRegex(ValueError, "TRITON_OVERRIDE_ARCH"),
+        ):
+            protocol.establish_deterministic_environment()
+        with (
+            mock.patch.dict(os.environ, {"PYTORCH_ALLOC_CONF": ""}, clear=True),
+            self.assertRaisesRegex(ValueError, "PYTORCH_ALLOC_CONF"),
+        ):
+            protocol.establish_deterministic_environment()
 
     def test_resolved_triton_codegen_requires_exact_gfx1201_defaults(self) -> None:
         class Values:
@@ -210,13 +213,23 @@ class DeterministicExecutionContractTest(unittest.TestCase):
                 def get_current_target():
                     return type("Target", (), {"backend": "hip", "arch": "gfx1201"})()
 
-        triton = type("Triton", (), {
-            "knobs": type("Knobs", (), {
-                "language": Values(), "runtime": Values(), "compilation": Values(),
-                "amd": Values(),
-            })(),
-            "runtime": type("Runtime", (), {"driver": Driver()})(),
-        })()
+        triton = type(
+            "Triton",
+            (),
+            {
+                "knobs": type(
+                    "Knobs",
+                    (),
+                    {
+                        "language": Values(),
+                        "runtime": Values(),
+                        "compilation": Values(),
+                        "amd": Values(),
+                    },
+                )(),
+                "runtime": type("Runtime", (), {"driver": Driver()})(),
+            },
+        )()
         self.assertEqual(
             protocol.resolved_triton_codegen(triton),
             protocol.TRITON_CODEGEN_EXECUTION,
@@ -238,15 +251,21 @@ class DeterministicExecutionContractTest(unittest.TestCase):
             result = root / "retained.json"
             result.write_text("retained\n", encoding="utf-8")
             argv = [
-                "--weights", str(root / "missing-source"),
-                "--ids", str(root / "missing.ids"),
-                "--out-json", str(result),
+                "--weights",
+                str(root / "missing-source"),
+                "--ids",
+                str(root / "missing.ids"),
+                "--out-json",
+                str(result),
             ]
-            with mock.patch.dict(
-                os.environ,
-                {"TORCH_BLAS_PREFER_HIPBLASLT": "1", "ROCBLAS_DEFAULT_ATOMICS_MODE": "0"},
-                clear=True,
-            ), contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"TORCH_BLAS_PREFER_HIPBLASLT": "1", "ROCBLAS_DEFAULT_ATOMICS_MODE": "0"},
+                    clear=True,
+                ),
+                contextlib.redirect_stderr(io.StringIO()) as stderr,
+            ):
                 self.assertEqual(scorer.main(argv), 1)
             self.assertIn("TORCH_BLAS_PREFER_HIPBLASLT", stderr.getvalue())
             self.assertEqual(result.read_text(encoding="utf-8"), "retained\n")
@@ -312,16 +331,14 @@ class ArgumentContractTest(unittest.TestCase):
 
     def test_product_labels_do_not_enter_formula_signature(self) -> None:
         ordinary = protocol.parse_options(self.base())
-        mtp = protocol.parse_options(self.base() + ["--spec", "mtp", "--draft-tokens", "3"])
-        eager = protocol.parse_options(self.base() + ["--no-device-graph"])
-        decode = protocol.parse_options(self.base() + ["--schedule", "decode"])
+        mtp = protocol.parse_options([*self.base(), "--spec", "mtp", "--draft-tokens", "3"])
+        eager = protocol.parse_options([*self.base(), "--no-device-graph"])
+        decode = protocol.parse_options([*self.base(), "--schedule", "decode"])
         self.assertEqual(protocol.formula_signature(ordinary), protocol.formula_signature(mtp))
         self.assertEqual(protocol.formula_signature(ordinary), protocol.formula_signature(eager))
         self.assertEqual(protocol.formula_signature(ordinary), protocol.formula_signature(decode))
-        prefill_zero = protocol.parse_options(self.base() + ["--skip", "0"])
-        decode_zero = protocol.parse_options(
-            self.base() + ["--skip", "0", "--schedule", "decode"]
-        )
+        prefill_zero = protocol.parse_options([*self.base(), "--skip", "0"])
+        decode_zero = protocol.parse_options([*self.base(), "--skip", "0", "--schedule", "decode"])
         self.assertEqual(
             protocol.formula_signature(prefill_zero), protocol.formula_signature(decode_zero)
         )
@@ -330,12 +347,8 @@ class ArgumentContractTest(unittest.TestCase):
 
     def test_cache_profile_is_an_explicit_formula_input(self) -> None:
         baseline = protocol.parse_options(self.base())
-        g16 = protocol.parse_options(
-            self.base() + ["--scheme", protocol.G16_CACHE_SCHEME]
-        )
-        g32 = protocol.parse_options(
-            self.base() + ["--scheme", protocol.G32_CACHE_SCHEME]
-        )
+        g16 = protocol.parse_options([*self.base(), "--scheme", protocol.G16_CACHE_SCHEME])
+        g32 = protocol.parse_options([*self.base(), "--scheme", protocol.G32_CACHE_SCHEME])
         self.assertIsNone(protocol.cache_value_group(baseline.scheme))
         self.assertEqual(protocol.cache_value_group(g16.scheme), 16)
         self.assertEqual(protocol.cache_value_group(g32.scheme), 32)
@@ -344,23 +357,21 @@ class ArgumentContractTest(unittest.TestCase):
 
     def test_product_flags_are_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires --draft-tokens"):
-            protocol.parse_options(self.base() + ["--spec", "mtp"])
+            protocol.parse_options([*self.base(), "--spec", "mtp"])
         with self.assertRaisesRegex(ValueError, "requires --spec mtp"):
-            protocol.parse_options(self.base() + ["--draft-tokens", "3"])
+            protocol.parse_options([*self.base(), "--draft-tokens", "3"])
         with self.assertRaisesRegex(ValueError, "no Device Graph"):
-            protocol.parse_options(self.base() + ["--device-graph"])
-        with self.assertRaises(SystemExit):
-            with contextlib.redirect_stderr(io.StringIO()):
-                protocol.parse_options(self.base() + ["--spec", "dflash"])
+            protocol.parse_options([*self.base(), "--device-graph"])
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            protocol.parse_options([*self.base(), "--spec", "dflash"])
         with self.assertRaisesRegex(ValueError, "must be bf16-reference"):
-            protocol.parse_options(self.base() + ["--scheme", "r9700-g16"])
+            protocol.parse_options([*self.base(), "--scheme", "r9700-g16"])
 
     def test_trace_cannot_collide_with_result_triplet(self) -> None:
         for trace in ("result.json", "result.nllf32", "result.argmaxi32"):
             with self.subTest(trace=trace), self.assertRaisesRegex(ValueError, "separate"):
                 protocol.parse_options(
-                    self.base()
-                    + ["--out-json", "result.json", "--trace-json", trace]
+                    [*self.base(), "--out-json", "result.json", "--trace-json", trace]
                 )
 
     def test_executable_help_needs_no_model_dependencies(self) -> None:
@@ -408,8 +419,7 @@ class ResultLifecycleTest(unittest.TestCase):
             root = Path(directory)
             output = root / "result.json"
             trace = root / "trace.json"
-            paths = (output, output.with_suffix(".nllf32"),
-                     output.with_suffix(".argmaxi32"), trace)
+            paths = (output, output.with_suffix(".nllf32"), output.with_suffix(".argmaxi32"), trace)
             for path in paths:
                 path.write_text("stale")
             protocol.clear_result(options(root, str(output), trace=trace))
@@ -423,9 +433,7 @@ class SourceMappingTest(unittest.TestCase):
         self.assertEqual(len(requirements), 851)
         self.assertIn("model.language_model.embed_tokens.weight", names)
         self.assertIn("lm_head.weight", names)
-        self.assertNotEqual(
-            "model.language_model.embed_tokens.weight", "lm_head.weight"
-        )
+        self.assertNotEqual("model.language_model.embed_tokens.weight", "lm_head.weight")
         conv = next(
             item
             for item in requirements
@@ -440,17 +448,13 @@ class SourceMappingTest(unittest.TestCase):
         self.assertEqual(protocol.q_projection_row(23, 255, gate=True), 12287)
 
     def test_gdn_qkv_slices_are_exact(self) -> None:
-        self.assertEqual(
-            protocol.GDN_QKV_RANGES, ((0, 2048), (2048, 4096), (4096, 10240))
-        )
+        self.assertEqual(protocol.GDN_QKV_RANGES, ((0, 2048), (2048, 4096), (4096, 10240)))
 
 
 class CheckpointPreflightTest(unittest.TestCase):
     def build_fake_source(self, root: Path, *, omit_shard: int | None = None) -> None:
         (root / "config.json").write_text(json.dumps(exact_config()), encoding="utf-8")
-        shard_names = [
-            f"model-{part:05d}-of-00018.safetensors" for part in range(1, 19)
-        ]
+        shard_names = [f"model-{part:05d}-of-00018.safetensors" for part in range(1, 19)]
         weight_map = {
             item.name: shard_names[index % len(shard_names)]
             for index, item in enumerate(protocol.expected_text_tensors())
@@ -521,9 +525,7 @@ class SidecarContractTest(unittest.TestCase):
                 disk["source_shards_sha256"],
                 {"model-00001-of-00018.safetensors": "d" * 64},
             )
-            self.assertEqual(
-                disk["formula_profile"], "checkpoint-direct-qwen3.8-source-bf16"
-            )
+            self.assertEqual(disk["formula_profile"], "checkpoint-direct-qwen3.8-source-bf16")
             self.assertEqual(disk["execution_provenance"], provenance().execution)
             self.assertFalse(disk["cache_only_diagnostic"])
             self.assertIsNone(disk["cache_diagnostic_scope"])

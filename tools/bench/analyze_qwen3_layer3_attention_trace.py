@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -28,13 +29,20 @@ STAGE_FIELDS = (
     ("residual_x", "bf16", 5120),
 )
 FIELD_SHAPES = {
-    "input_x": [5120], "norm_h": [5120],
-    "projection_q": [256, 24], "projection_gate": [256, 24],
-    "projection_k": [256, 4], "projection_v": [256, 4],
-    "normalized_qk": [7168], "rope_qk": [7168],
-    "attention_fp32": [256, 24], "attention_bf16": [256, 24],
-    "gated_attention": [256, 24], "residual_x": [5120],
-    "key_fp8": [130, 4, 256], "value_int4": [130, 4, 128],
+    "input_x": [5120],
+    "norm_h": [5120],
+    "projection_q": [256, 24],
+    "projection_gate": [256, 24],
+    "projection_k": [256, 4],
+    "projection_v": [256, 4],
+    "normalized_qk": [7168],
+    "rope_qk": [7168],
+    "attention_fp32": [256, 24],
+    "attention_bf16": [256, 24],
+    "gated_attention": [256, 24],
+    "residual_x": [5120],
+    "key_fp8": [130, 4, 256],
+    "value_int4": [130, 4, 128],
     "value_scale_fp16": [130, 4, 16],
 }
 STAGE_BYTES = 137216
@@ -50,27 +58,70 @@ ROLES = {
     "dflash": ("target-dflash-frontier130-column0", 5, 134),
 }
 MANIFEST_KEYS = {
-    "artifact_type", "schema_version", "diagnostic_only", "timing_evidence_eligible",
-    "production_routing_authorized", "execution", "role", "call", "cache_read",
-    "visibility", "provenance", "fields", "sidecar_path", "sidecar_bytes",
-    "sidecar_fnv1a64", "layout",
+    "artifact_type",
+    "schema_version",
+    "diagnostic_only",
+    "timing_evidence_eligible",
+    "production_routing_authorized",
+    "execution",
+    "role",
+    "call",
+    "cache_read",
+    "visibility",
+    "provenance",
+    "fields",
+    "sidecar_path",
+    "sidecar_bytes",
+    "sidecar_fnv1a64",
+    "layout",
 }
 CALL_KEYS = {
-    "phase", "batch", "width", "selected_column", "absolute_frontier", "token",
-    "cache_position", "rope_position", "text_layer", "full_attention_index",
-    "sequence_batch", "sequence_width", "transaction_position_count", "live_width",
+    "phase",
+    "batch",
+    "width",
+    "selected_column",
+    "absolute_frontier",
+    "token",
+    "cache_position",
+    "rope_position",
+    "text_layer",
+    "full_attention_index",
+    "sequence_batch",
+    "sequence_width",
+    "transaction_position_count",
+    "live_width",
 }
 CACHE_KEYS = {
-    "valid_for_stream", "pending", "visible_frontier", "mapped_pages", "head_dim",
-    "kv_heads", "value_group", "key_layout", "value_layout", "value_scale_layout",
-    "device_table_row_present", "pool_table_row_stride", "pool_table_row_count",
+    "valid_for_stream",
+    "pending",
+    "visible_frontier",
+    "mapped_pages",
+    "head_dim",
+    "kv_heads",
+    "value_group",
+    "key_layout",
+    "value_layout",
+    "value_scale_layout",
+    "device_table_row_present",
+    "pool_table_row_stride",
+    "pool_table_row_count",
     "active_query_rows_present",
 }
 VISIBILITY_KEYS = {"row_position", "ancestor_masks", "prefix_lengths", "prefix_length_stride"}
 PROVENANCE_KEYS = {
-    "source_commit", "source_tree", "executable_sha256", "artifact_sha256",
-    "history_sha256", "corpus_sha256", "device_index", "device_name", "architecture",
-    "wave_size", "pci", "power_profile_source", "power_profile_value",
+    "source_commit",
+    "source_tree",
+    "executable_sha256",
+    "artifact_sha256",
+    "history_sha256",
+    "corpus_sha256",
+    "device_index",
+    "device_name",
+    "architecture",
+    "wave_size",
+    "pci",
+    "power_profile_source",
+    "power_profile_value",
 }
 CLASSIFICATION = {
     "input_x": "upstream_input_difference",
@@ -102,8 +153,11 @@ def _pairs(items):
 
 
 def _load_json(path: Path) -> dict:
-    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_pairs,
-                       parse_constant=lambda token: fail(f"nonfinite JSON value: {token}"))
+    value = json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=_pairs,
+        parse_constant=lambda token: fail(f"nonfinite JSON value: {token}"),
+    )
     if not isinstance(value, dict):
         fail(f"manifest is not an object: {path}")
     return value
@@ -137,9 +191,17 @@ def _field_layout() -> list[dict]:
             layout = "logical-position-major,head,feature-fastest"
         else:
             layout = "selected-token feature-fastest"
-        fields.append({"name": name, "dtype": dtype, "shape": FIELD_SHAPES[name],
-                       "layout": layout, "elements": elements, "offset": offset,
-                       "bytes": byte_count})
+        fields.append(
+            {
+                "name": name,
+                "dtype": dtype,
+                "shape": FIELD_SHAPES[name],
+                "layout": layout,
+                "elements": elements,
+                "offset": offset,
+                "bytes": byte_count,
+            }
+        )
         offset += byte_count
     if offset != SIDECAR_BYTES:
         fail("internal field layout is inconsistent")
@@ -160,8 +222,11 @@ def _validate_provenance(value: object, label: str) -> dict:
         if not isinstance(value[key], str) or re.fullmatch(r"[0-9a-f]{40}", value[key]) is None:
             fail(f"{label} provenance {key} is invalid")
     exact = {
-        "device_index": 0, "device_name": "AMD Radeon AI PRO R9700",
-        "architecture": "gfx1201", "wave_size": 32, "pci": "0000:13:00.0",
+        "device_index": 0,
+        "device_name": "AMD Radeon AI PRO R9700",
+        "architecture": "gfx1201",
+        "wave_size": 32,
+        "pci": "0000:13:00.0",
         "power_profile_value": "auto",
     }
     for key, expected in exact.items():
@@ -186,7 +251,9 @@ def _visible_positions(value: dict, kind: str) -> list[int]:
     return list(range(row + 1))
 
 
-def _decode_finite(data: bytes, dtype: str, elements: int, label: str) -> tuple[tuple[int, ...], tuple[float, ...]]:
+def _decode_finite(
+    data: bytes, dtype: str, elements: int, label: str
+) -> tuple[tuple[int, ...], tuple[float, ...]]:
     if dtype == "bf16":
         bits = struct.unpack(f"<{elements}H", data)
         values = tuple(struct.unpack("<f", struct.pack("<I", item << 16))[0] for item in bits)
@@ -211,9 +278,13 @@ def _load(path: Path, kind: str) -> tuple[dict, bytes, list[int]]:
         fail(f"{kind} manifest schema differs")
     role, width, frontier = ROLES[kind]
     exact = {
-        "artifact_type": "ninfer_qwen3_layer3_attention_trace", "schema_version": 1,
-        "diagnostic_only": True, "timing_evidence_eligible": False,
-        "production_routing_authorized": False, "execution": "eager", "role": role,
+        "artifact_type": "ninfer_qwen3_layer3_attention_trace",
+        "schema_version": 1,
+        "diagnostic_only": True,
+        "timing_evidence_eligible": False,
+        "production_routing_authorized": False,
+        "execution": "eager",
+        "role": role,
         "sidecar_bytes": SIDECAR_BYTES,
         "layout": "typed selected-column layer3 attention stages then canonical logical cache positions0..129",
     }
@@ -224,11 +295,20 @@ def _load(path: Path, kind: str) -> tuple[dict, bytes, list[int]]:
     if not isinstance(call, dict) or set(call) != CALL_KEYS:
         fail(f"{kind} call schema differs")
     call_exact = {
-        "phase": "verify", "batch": 1, "width": width, "selected_column": 0,
-        "absolute_frontier": 130, "token": 96558, "cache_position": POSITION,
-        "rope_position": POSITION, "text_layer": 3, "full_attention_index": 0,
-        "sequence_batch": 1, "sequence_width": width,
-        "transaction_position_count": width, "live_width": width,
+        "phase": "verify",
+        "batch": 1,
+        "width": width,
+        "selected_column": 0,
+        "absolute_frontier": 130,
+        "token": 96558,
+        "cache_position": POSITION,
+        "rope_position": POSITION,
+        "text_layer": 3,
+        "full_attention_index": 0,
+        "sequence_batch": 1,
+        "sequence_width": width,
+        "transaction_position_count": width,
+        "live_width": width,
     }
     for key, expected in call_exact.items():
         if call.get(key) != expected:
@@ -237,12 +317,17 @@ def _load(path: Path, kind: str) -> tuple[dict, bytes, list[int]]:
     if not isinstance(cache, dict) or set(cache) != CACHE_KEYS:
         fail(f"{kind} cache-read schema differs")
     cache_exact = {
-        "valid_for_stream": True, "pending": True, "visible_frontier": frontier,
-        "head_dim": 256, "kv_heads": 4, "value_group": 16,
+        "valid_for_stream": True,
+        "pending": True,
+        "visible_frontier": frontier,
+        "head_dim": 256,
+        "kv_heads": 4,
+        "value_group": 16,
         "key_layout": "token-fastest-head-major",
         "value_layout": "feature-fastest-page-major",
         "value_scale_layout": "feature-fastest-page-major",
-        "device_table_row_present": True, "active_query_rows_present": False,
+        "device_table_row_present": True,
+        "active_query_rows_present": False,
     }
     for key, expected in cache_exact.items():
         if cache.get(key) != expected:
@@ -254,14 +339,24 @@ def _load(path: Path, kind: str) -> tuple[dict, bytes, list[int]]:
     rows = _integer(cache.get("pool_table_row_count"), f"{kind} table rows", 1)
     if stride < mapped or rows < 1:
         fail(f"{kind} table geometry is invalid")
-    visible = _visible_positions(value.get("visibility"), kind) if isinstance(value.get("visibility"), dict) else fail(f"{kind} visibility is invalid")
+    visible = (
+        _visible_positions(value.get("visibility"), kind)
+        if isinstance(value.get("visibility"), dict)
+        else fail(f"{kind} visibility is invalid")
+    )
     _validate_provenance(value.get("provenance"), kind)
     if value.get("fields") != FIELDS:
         fail(f"{kind} field layout differs")
     raw_path = value.get("sidecar_path")
     sidecar = Path(raw_path) if isinstance(raw_path, str) else None
     expected_sidecar = path.with_suffix(".bin")
-    if sidecar is None or sidecar != expected_sidecar or not sidecar.is_absolute() or sidecar.is_symlink() or not sidecar.is_file():
+    if (
+        sidecar is None
+        or sidecar != expected_sidecar
+        or not sidecar.is_absolute()
+        or sidecar.is_symlink()
+        or not sidecar.is_file()
+    ):
         fail(f"{kind} sidecar identity is invalid")
     data = sidecar.read_bytes()
     if len(data) != SIDECAR_BYTES or value.get("sidecar_fnv1a64") != fnv1a64(data):
@@ -275,17 +370,27 @@ def _load(path: Path, kind: str) -> tuple[dict, bytes, list[int]]:
 def _difference(field: dict, left: bytes, right: bytes) -> dict:
     begin, end = field["offset"], field["offset"] + field["bytes"]
     lhs, rhs = left[begin:end], right[begin:end]
-    indices = [index for index, pair in enumerate(zip(lhs, rhs)) if pair[0] != pair[1]]
-    detail = {"field": field["name"], "first_byte_index": indices[0],
-              "mismatch_byte_count": len(indices)}
+    indices = [index for index, pair in enumerate(zip(lhs, rhs, strict=True)) if pair[0] != pair[1]]
+    detail = {
+        "field": field["name"],
+        "first_byte_index": indices[0],
+        "mismatch_byte_count": len(indices),
+    }
     bits_l, values_l = _decode_finite(lhs, field["dtype"], field["elements"], field["name"])
     bits_r, values_r = _decode_finite(rhs, field["dtype"], field["elements"], field["name"])
     if bits_l:
         element_bytes = 4 if field["dtype"] == "fp32" else 2
         element = indices[0] // element_bytes
-        detail.update({"first_element_index": element, "left_bits": bits_l[element],
-                       "right_bits": bits_r[element],
-                       "maximum_absolute_difference": max(abs(a - b) for a, b in zip(values_l, values_r))})
+        detail.update(
+            {
+                "first_element_index": element,
+                "left_bits": bits_l[element],
+                "right_bits": bits_r[element],
+                "maximum_absolute_difference": max(
+                    abs(a - b) for a, b in zip(values_l, values_r, strict=True)
+                ),
+            }
+        )
     return detail
 
 
@@ -309,8 +414,10 @@ def analyze(ordinary_path: Path, dflash_path: Path) -> dict:
             break
     if detail is None and dflash_visible != expected_visible:
         classification = "tree_visibility_difference"
-        detail = {"ordinary_visible_positions": ordinary_visible,
-                  "dflash_visible_positions": dflash_visible}
+        detail = {
+            "ordinary_visible_positions": ordinary_visible,
+            "dflash_visible_positions": dflash_visible,
+        }
     if detail is None:
         for name, _, _ in CACHE_FIELDS:
             field = FIELD_BY_NAME[name]
@@ -318,10 +425,17 @@ def analyze(ordinary_path: Path, dflash_path: Path) -> dict:
             if left[begin:end] == right[begin:end]:
                 continue
             token_stride = field["bytes"] // 130
-            mismatch = next(index for index, pair in enumerate(zip(left[begin:end], right[begin:end])) if pair[0] != pair[1])
+            mismatch = next(
+                index
+                for index, pair in enumerate(zip(left[begin:end], right[begin:end], strict=True))
+                if pair[0] != pair[1]
+            )
             logical_position = mismatch // token_stride
-            classification = ("kv_append_codec_difference" if logical_position == POSITION
-                              else "prior_cache_state_difference")
+            classification = (
+                "kv_append_codec_difference"
+                if logical_position == POSITION
+                else "prior_cache_state_difference"
+            )
             detail = _difference(field, left, right)
             detail["logical_position"] = logical_position
             break
@@ -335,9 +449,12 @@ def analyze(ordinary_path: Path, dflash_path: Path) -> dict:
                 break
     return {
         "artifact_type": "ninfer_qwen3_layer3_attention_trace_comparison",
-        "schema_version": 1, "diagnostic_only": True,
-        "timing_evidence_eligible": False, "production_routing_authorized": False,
-        "classification": classification, "first_difference": detail,
+        "schema_version": 1,
+        "diagnostic_only": True,
+        "timing_evidence_eligible": False,
+        "production_routing_authorized": False,
+        "classification": classification,
+        "first_difference": detail,
         "limitations": [
             "localizes the first selected-column layer-3 attention owner but is not a numerical oracle",
             "the trace is synchronous eager-only diagnostic evidence and cannot support timing",
@@ -353,10 +470,8 @@ def _write_new(path: Path, value: dict) -> None:
             json.dump(value, output, indent=2, sort_keys=True, allow_nan=False)
             output.write("\n")
     except Exception:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(path)
-        except FileNotFoundError:
-            pass
         raise
 
 

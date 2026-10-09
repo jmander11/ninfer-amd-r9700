@@ -33,9 +33,7 @@ template <typename Fn>
 void expect_throw(Fn&& fn, std::string_view message) {
     try {
         fn();
-    } catch (const std::exception&) {
-        return;
-    }
+    } catch (const std::exception&) { return; }
     expect(false, message);
 }
 
@@ -46,8 +44,8 @@ std::uint16_t bf16(float value) {
 }
 
 void test_top_two_uses_argmax_tie_order() {
-    const std::array<std::uint16_t, 5> logits{
-        bf16(1.0F), bf16(3.0F), bf16(3.0F), bf16(2.0F), bf16(-8.0F)};
+    const std::array<std::uint16_t, 5> logits{bf16(1.0F), bf16(3.0F), bf16(3.0F), bf16(2.0F),
+                                              bf16(-8.0F)};
     const trace::RankedBf16 ranked = trace::rank_bf16(logits, 4);
     expect(ranked.top1_token == 1 && ranked.top2_token == 2,
            "equal maxima select the lowest token first and next-lowest second");
@@ -62,8 +60,7 @@ void test_top_two_uses_argmax_tie_order() {
 }
 
 void test_valid_domain_and_nonfinite_guards() {
-    const std::array<std::uint16_t, 4> logits{
-        bf16(-1.0F), bf16(2.0F), bf16(9.0F), bf16(8.0F)};
+    const std::array<std::uint16_t, 4> logits{bf16(-1.0F), bf16(2.0F), bf16(9.0F), bf16(8.0F)};
     const trace::RankedBf16 ranked = trace::rank_bf16(logits, 2);
     expect(ranked.top1_token == 1 && ranked.top2_token == 0,
            "physical rows outside the token domain do not participate");
@@ -88,10 +85,9 @@ void test_frontier_and_acceptance_contract() {
 }
 
 void test_machine_readable_envelope() {
-    const std::filesystem::path path =
-        std::filesystem::temp_directory_path() /
-        ("ninfer-decision-trace-contract-" + std::to_string(static_cast<long long>(getpid())) +
-         ".json");
+    const std::filesystem::path path = std::filesystem::temp_directory_path() /
+                                       ("ninfer-decision-trace-contract-" +
+                                        std::to_string(static_cast<long long>(getpid())) + ".json");
     std::filesystem::remove(path);
     {
         trace::Writer writer(path.string());
@@ -104,8 +100,7 @@ void test_machine_readable_envelope() {
                    std::string::npos &&
                contents.find("\"diagnostic_only\": true") != std::string::npos &&
                contents.find("\"timing_eligible\": false") != std::string::npos &&
-               contents.find("\"production_routing_authorized\": false") !=
-                   std::string::npos &&
+               contents.find("\"production_routing_authorized\": false") != std::string::npos &&
                contents.find("\"events\": [") != std::string::npos &&
                contents.ends_with("\n  ]\n}\n"),
            "trace writer emits a closed diagnostic-only JSON envelope");

@@ -32,7 +32,7 @@ class HybridGreedyDiagnosticTest(unittest.TestCase):
     def test_candidate_sidecars_are_hash_and_domain_bound(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "8192.prefill.r9700-g16.json"
-            raw = {field: None for field in run.CANDIDATE_SCORER_REPORT_FIELDS}
+            raw = dict.fromkeys(run.CANDIDATE_SCORER_REPORT_FIELDS)
             raw.update(
                 {
                     "scheme": "r9700-g16",
@@ -62,9 +62,7 @@ class HybridGreedyDiagnosticTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "sidecar hashes differ"):
                 validator._candidate_sidecars(cell)
             cell["argmax_sha256"] = run.file_sha256(path.with_suffix(".argmaxi32"))
-            path.with_suffix(".argmaxi32").write_bytes(
-                struct.pack("<i", run.TOKEN_DOMAIN)
-            )
+            path.with_suffix(".argmaxi32").write_bytes(struct.pack("<i", run.TOKEN_DOMAIN))
             cell["argmax_sha256"] = run.file_sha256(path.with_suffix(".argmaxi32"))
             with self.assertRaisesRegex(SystemExit, "in-domain"):
                 validator._candidate_sidecars(cell)

@@ -12,7 +12,7 @@ namespace ninfer::targets::qwen3::detail {
 // separately; no runtime or artifact selector reaches this constant. The losing build-time branch
 // is removed after the gate.
 #ifndef NINFER_R9700_KV_VALUE_GROUP
-#define NINFER_R9700_KV_VALUE_GROUP 16
+#    define NINFER_R9700_KV_VALUE_GROUP 16
 #endif
 static_assert(NINFER_R9700_KV_VALUE_GROUP == 16 || NINFER_R9700_KV_VALUE_GROUP == 32,
               "R9700 KV value group must be G16 or G32");
@@ -22,9 +22,8 @@ inline constexpr Fp8KInt4VPlaneLayouts kR9700TextKVPlaneLayouts{
     .value       = Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
     .value_scale = Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
 };
-inline constexpr char kR9700TextKVKeyPlaneLayoutName[] = "token-fastest-head-major";
-inline constexpr char kR9700TextKVValuePlaneLayoutName[] = "feature-fastest-page-major";
-inline constexpr char kR9700TextKVValueScalePlaneLayoutName[] =
-    "feature-fastest-page-major";
+inline constexpr char kR9700TextKVKeyPlaneLayoutName[]        = "token-fastest-head-major";
+inline constexpr char kR9700TextKVValuePlaneLayoutName[]      = "feature-fastest-page-major";
+inline constexpr char kR9700TextKVValueScalePlaneLayoutName[] = "feature-fastest-page-major";
 
 } // namespace ninfer::targets::qwen3::detail

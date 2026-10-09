@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import mmap
 import os
 import secrets
 import struct
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Sequence, TypeAlias
+from typing import TypeAlias
 
 from .layouts import align_up, encoded_size, get_layout
-
 
 MAGIC = b"NINFER\x00\x02"
 _V1_MAGIC = b"NINFER\x00\x01"
@@ -23,9 +24,7 @@ RAW_BYTES_V1 = "raw-bytes-v1"
 
 _ROOT_MEMBERS = frozenset({"identity", "objects"})
 _IDENTITY_MEMBERS = frozenset({"model_id", "weights_id"})
-_TENSOR_MEMBERS = frozenset(
-    {"name", "kind", "shape", "format", "layout", "offset", "bytes"}
-)
+_TENSOR_MEMBERS = frozenset({"name", "kind", "shape", "format", "layout", "offset", "bytes"})
 _RESOURCE_MEMBERS = frozenset({"name", "kind", "encoding", "offset", "bytes"})
 
 
@@ -155,7 +154,9 @@ def plan_objects(specs: Sequence[ObjectSpec]) -> tuple[ArtifactObject, ...]:
             raise ArtifactError(f"duplicate object name: {name}")
         names.add(name)
         if isinstance(spec, TensorSpec):
-            shape = tuple(_require_integer(dim, "shape dimension", positive=True) for dim in spec.shape)
+            shape = tuple(
+                _require_integer(dim, "shape dimension", positive=True) for dim in spec.shape
+            )
             layout = get_layout(_require_string(spec.layout, "tensor layout"))
             payload_bytes = encoded_size(layout, spec.format, shape)
             offset = align_up(cursor, layout.alignment)
@@ -189,9 +190,7 @@ def _require_identity(identity: ArtifactIdentity) -> ArtifactIdentity:
     )
 
 
-def encode_directory(
-    identity: ArtifactIdentity, objects: Sequence[ArtifactObject]
-) -> bytes:
+def encode_directory(identity: ArtifactIdentity, objects: Sequence[ArtifactObject]) -> bytes:
     checked_identity = _require_identity(identity)
     if not objects:
         raise ArtifactError("objects must not be empty")
@@ -249,13 +248,8 @@ def parse_directory(
     if not isinstance(value, dict) or frozenset(value) != _ROOT_MEMBERS:
         raise ArtifactError("directory root must contain exactly identity and objects")
     raw_identity = value["identity"]
-    if (
-        not isinstance(raw_identity, dict)
-        or frozenset(raw_identity) != _IDENTITY_MEMBERS
-    ):
-        raise ArtifactError(
-            "artifact identity must contain exactly model_id and weights_id"
-        )
+    if not isinstance(raw_identity, dict) or frozenset(raw_identity) != _IDENTITY_MEMBERS:
+        raise ArtifactError("artifact identity must contain exactly model_id and weights_id")
     identity = ArtifactIdentity(
         model_id=_require_string(raw_identity["model_id"], "model_id"),
         weights_id=_require_string(raw_identity["weights_id"], "weights_id"),
@@ -330,7 +324,7 @@ class Artifact:
             raise
 
     @classmethod
-    def open(cls, path: str | Path) -> "Artifact":
+    def open(cls, path: str | Path) -> Artifact:
         return cls(path)
 
     def find(self, name: str) -> ArtifactObject:
@@ -351,7 +345,7 @@ class Artifact:
         if not self._file.closed:
             self._file.close()
 
-    def __enter__(self) -> "Artifact":
+    def __enter__(self) -> Artifact:
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
@@ -385,16 +379,12 @@ class ArtifactWriter:
         self._next = 0
         self._cursor = 0
         self._finished = False
-        self._temporary_path = self.path.with_name(
-            f".{self.path.name}.{secrets.token_hex(16)}.tmp"
-        )
+        self._temporary_path = self.path.with_name(f".{self.path.name}.{secrets.token_hex(16)}.tmp")
         self._file = self._temporary_path.open("x+b")
         try:
             self._file.write(PREFIX.pack(MAGIC, len(directory)))
             self._file.write(directory)
-            self._file.write(
-                b"\x00" * (self.payload_offset - PREFIX_BYTES - len(directory))
-            )
+            self._file.write(b"\x00" * (self.payload_offset - PREFIX_BYTES - len(directory)))
         except BaseException:
             self.close()
             raise
@@ -434,22 +424,18 @@ class ArtifactWriter:
             self._file.close()
             os.link(self._temporary_path, self.path)
         except BaseException:
-            try:
+            with contextlib.suppress(BaseException):
                 self.close()
-            except BaseException:
-                pass
             raise
         self._finished = True
         self._remove_temporary_best_effort()
 
     def _remove_temporary_best_effort(self) -> None:
-        try:
+        # Publication is the commit point. A staging hard link that cannot
+        # be removed must never turn a complete destination into a reported
+        # failure or motivate deletion of that destination.
+        with contextlib.suppress(OSError):
             self._temporary_path.unlink(missing_ok=True)
-        except OSError:
-            # Publication is the commit point. A staging hard link that cannot
-            # be removed must never turn a complete destination into a reported
-            # failure or motivate deletion of that destination.
-            pass
 
     def close(self) -> None:
         try:
@@ -458,7 +444,7 @@ class ArtifactWriter:
         finally:
             self._remove_temporary_best_effort()
 
-    def __enter__(self) -> "ArtifactWriter":
+    def __enter__(self) -> ArtifactWriter:
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:

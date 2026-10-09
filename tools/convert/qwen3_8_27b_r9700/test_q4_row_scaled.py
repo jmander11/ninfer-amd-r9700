@@ -5,8 +5,8 @@ import unittest
 import torch
 
 from .q4_row_scaled import compare_sample, quantize_dequantize
-from .screen_q4_row_scaled_quality import assemble_report, select_row_indices
 from .screen_q4_group_sizes_quality import _production_model, measure
+from .screen_q4_row_scaled_quality import assemble_report, select_row_indices
 
 
 class Q4RowScaledTest(unittest.TestCase):
@@ -19,16 +19,17 @@ class Q4RowScaledTest(unittest.TestCase):
         self.assertEqual(grouped.shape, source.shape)
         self.assertEqual(row.shape, source.shape)
         result = compare_sample(source)
-        self.assertLess(result["q4g64"]["relative_l2"],
-                        result["q4_row_scaled"]["relative_l2"])
+        self.assertLess(result["q4g64"]["relative_l2"], result["q4_row_scaled"]["relative_l2"])
         self.assertGreater(result["ratios"]["relative_l2"], 1.0)
 
     def test_zero_rows_and_invalid_inputs(self) -> None:
         source = torch.zeros((2, 64), dtype=torch.bfloat16)
-        self.assertTrue(torch.equal(
-            quantize_dequantize(source, group_size=None),
-            torch.zeros_like(source, dtype=torch.float32),
-        ))
+        self.assertTrue(
+            torch.equal(
+                quantize_dequantize(source, group_size=None),
+                torch.zeros_like(source, dtype=torch.float32),
+            )
+        )
         with self.assertRaisesRegex(TypeError, "rank-two BF16"):
             quantize_dequantize(source.float(), group_size=None)
         padded = quantize_dequantize(source[:, :63], group_size=64)
@@ -47,16 +48,27 @@ class Q4RowScaledTest(unittest.TestCase):
     def test_report_aggregates_both_codecs_and_ratios(self) -> None:
         def record(name: str, grouped: float, row: float) -> dict[str, object]:
             return {
-                "name": name, "shape": [1, 64], "sampled_row_indices": [0],
-                "sampled_rows": 1, "sampled_elements": 64, "zero_rows": 0,
-                "q4g64": {"squared_error": grouped * grouped,
-                           "squared_reference": 1.0, "relative_l2": grouped,
-                           "max_abs": grouped * 2},
-                "q4_row_scaled": {"squared_error": row * row,
-                                   "squared_reference": 1.0, "relative_l2": row,
-                                   "max_abs": row * 2},
+                "name": name,
+                "shape": [1, 64],
+                "sampled_row_indices": [0],
+                "sampled_rows": 1,
+                "sampled_elements": 64,
+                "zero_rows": 0,
+                "q4g64": {
+                    "squared_error": grouped * grouped,
+                    "squared_reference": 1.0,
+                    "relative_l2": grouped,
+                    "max_abs": grouped * 2,
+                },
+                "q4_row_scaled": {
+                    "squared_error": row * row,
+                    "squared_reference": 1.0,
+                    "relative_l2": row,
+                    "max_abs": row * 2,
+                },
                 "ratios": {"relative_l2": row / grouped, "max_abs": row / grouped},
             }
+
         report = assemble_report(
             rows_per_tensor=1,
             tensors=[record("b", 0.1, 0.3), record("a", 0.2, 0.4)],
@@ -65,9 +77,10 @@ class Q4RowScaledTest(unittest.TestCase):
             worst_count=2,
         )
         aggregate = report["aggregate"]
-        self.assertAlmostEqual(aggregate["candidate_over_control"]["relative_l2"],
-                               (0.3**2 + 0.4**2) ** 0.5 /
-                               (0.1**2 + 0.2**2) ** 0.5)
+        self.assertAlmostEqual(
+            aggregate["candidate_over_control"]["relative_l2"],
+            (0.3**2 + 0.4**2) ** 0.5 / (0.1**2 + 0.2**2) ** 0.5,
+        )
         self.assertEqual([item["name"] for item in report["tensors"]], ["a", "b"])
         self.assertEqual(report["sampling"]["candidate_tensor_count"], 2)
 
@@ -78,12 +91,16 @@ class Q4RowScaledTest(unittest.TestCase):
         baseline = _production_model(64)
         for group, denominator in ((128, 2), (256, 4), (512, 8)):
             candidate = _production_model(group)
-            self.assertEqual(candidate["scale_request_bytes"] * denominator,
-                             baseline["scale_request_bytes"])
-            self.assertEqual(candidate["fp32_group_accumulations"] * denominator,
-                             baseline["fp32_group_accumulations"])
-            self.assertLess(candidate["conservative_split_low_plus_16_high_max_abs"],
-                            candidate["int32_limit"])
+            self.assertEqual(
+                candidate["scale_request_bytes"] * denominator, baseline["scale_request_bytes"]
+            )
+            self.assertEqual(
+                candidate["fp32_group_accumulations"] * denominator,
+                baseline["fp32_group_accumulations"],
+            )
+            self.assertLess(
+                candidate["conservative_split_low_plus_16_high_max_abs"], candidate["int32_limit"]
+            )
 
 
 if __name__ == "__main__":

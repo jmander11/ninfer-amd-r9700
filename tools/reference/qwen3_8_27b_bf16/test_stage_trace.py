@@ -4,10 +4,6 @@ import copy
 import unittest
 
 from .compare_stage_traces import _expected_checkpoints, compare, validate_trace
-from .stage_trace import (
-    LOGIT_ROWS, TRACE_ENVIRONMENT_KEYS, TRACE_ROWS, TYPE, VERSION,
-    resolved_preferred_blas_library,
-)
 from .protocol import (
     ATTENTION_PV_EXECUTION,
     DETERMINISTIC_ENVIRONMENT,
@@ -16,7 +12,14 @@ from .protocol import (
     MATMUL_REDUCTION_EXECUTION,
     TRITON_CODEGEN_EXECUTION,
 )
-
+from .stage_trace import (
+    LOGIT_ROWS,
+    TRACE_ENVIRONMENT_KEYS,
+    TRACE_ROWS,
+    TYPE,
+    VERSION,
+    resolved_preferred_blas_library,
+)
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64
@@ -33,9 +36,7 @@ class StageTraceContractTest(unittest.TestCase):
                 "end": end,
                 "dtype": (
                     "torch.float32"
-                    if any(token in name for token in (
-                        "masked-qk-fp32", "softmax-fp32", "pv-fp32"
-                    ))
+                    if any(token in name for token in ("masked-qk-fp32", "softmax-fp32", "pv-fp32"))
                     else "torch.bfloat16"
                 ),
                 "shape": shape,
@@ -84,8 +85,7 @@ class StageTraceContractTest(unittest.TestCase):
                 "deterministic_algorithms": {"enabled": True, "warn_only": False},
                 "matmul_reduction": dict(MATMUL_REDUCTION_EXECUTION),
                 "environment": {
-                    key: DETERMINISTIC_ENVIRONMENT.get(key)
-                    for key in TRACE_ENVIRONMENT_KEYS
+                    key: DETERMINISTIC_ENVIRONMENT.get(key) for key in TRACE_ENVIRONMENT_KEYS
                 },
                 "scorer_python_tree_sha256": SHA_A,
                 "fla_python_tree_sha256": SHA_A,
@@ -94,7 +94,6 @@ class StageTraceContractTest(unittest.TestCase):
             "checkpoints": checkpoints,
             "scores": {"nll_sha256": SHA_A, "argmax_sha256": SHA_A},
         }
-
 
     def test_compare_exact_and_first_mismatch(self) -> None:
         first = self.trace()
@@ -110,14 +109,24 @@ class StageTraceContractTest(unittest.TestCase):
         names = [row[0] for row in rows]
         detail = [row for row in rows if ".attention-detail." in row[0]]
         self.assertEqual(len(detail), 22)
-        self.assertEqual(detail[0], (
-            "layer-03.attention-detail.normalized-input.last",
-            4032, 4096, [64, 5120],
-        ))
-        self.assertEqual(detail[-1], (
-            "layer-03.attention-detail.post-residual.last",
-            4032, 4096, [64, 5120],
-        ))
+        self.assertEqual(
+            detail[0],
+            (
+                "layer-03.attention-detail.normalized-input.last",
+                4032,
+                4096,
+                [64, 5120],
+            ),
+        )
+        self.assertEqual(
+            detail[-1],
+            (
+                "layer-03.attention-detail.post-residual.last",
+                4032,
+                4096,
+                [64, 5120],
+            ),
+        )
         self.assertLess(
             names.index("layer-03.attention-detail.post-residual.last"),
             names.index("layer-03.attention.first"),
@@ -125,14 +134,24 @@ class StageTraceContractTest(unittest.TestCase):
         self.assertFalse(any("layer-07.attention-detail" in name for name in names))
         kernel = [row for row in detail if ".kv-" in row[0]]
         self.assertEqual(len(kernel), 12)
-        self.assertEqual(kernel[0], (
-            "layer-03.attention-detail.kv-00.masked-qk-fp32.last",
-            4032, 4096, [64, 6, 4096],
-        ))
-        self.assertEqual(kernel[2], (
-            "layer-03.attention-detail.kv-00.pv-fp32.last",
-            4032, 4096, [64, 6, 256],
-        ))
+        self.assertEqual(
+            kernel[0],
+            (
+                "layer-03.attention-detail.kv-00.masked-qk-fp32.last",
+                4032,
+                4096,
+                [64, 6, 4096],
+            ),
+        )
+        self.assertEqual(
+            kernel[2],
+            (
+                "layer-03.attention-detail.kv-00.pv-fp32.last",
+                4032,
+                4096,
+                [64, 6, 256],
+            ),
+        )
 
     def test_layer_three_attention_detail_collects_only_global_tail(self) -> None:
         class FakeTensor:
@@ -150,8 +169,13 @@ class StageTraceContractTest(unittest.TestCase):
         from .stage_trace import StageTrace
 
         trace = StageTrace(
-            None, None, prompt_tokens=130, skip_tokens=64, prefill_chunk=64,
-            device_index=0, provenance={},
+            None,
+            None,
+            prompt_tokens=130,
+            skip_tokens=64,
+            prefill_chunk=64,
+            device_index=0,
+            provenance={},
         )
         trace.capture_attention_detail(3, "normalized-input", FakeTensor(64), 0, 64)
         trace.capture_attention_detail(7, "normalized-input", FakeTensor(64), 64, 128)
@@ -179,13 +203,16 @@ class StageTraceContractTest(unittest.TestCase):
         from .stage_trace import StageTrace
 
         trace = StageTrace(
-            None, None, prompt_tokens=130, skip_tokens=64, prefill_chunk=64,
-            device_index=0, provenance={},
+            None,
+            None,
+            prompt_tokens=130,
+            skip_tokens=64,
+            prefill_chunk=64,
+            device_index=0,
+            provenance={},
         )
         # The first span sees only its local 64-key prefix and cannot overlap the global tail.
-        trace.capture_attention_kernel_detail(
-            "masked-qk-fp32", 0, FakeTensor(32, (6, 64)), 0, 32
-        )
+        trace.capture_attention_kernel_detail("masked-qk-fp32", 0, FakeTensor(32, (6, 64)), 0, 32)
         self.assertEqual(trace.items, [])
         trace.capture_attention_kernel_detail(
             "masked-qk-fp32", 0, FakeTensor(64, (6, 129)), 65, 129
@@ -260,7 +287,8 @@ class StageTraceContractTest(unittest.TestCase):
     def test_rejects_wrong_stage_order_and_ranges(self) -> None:
         wrong_order = self.trace()
         wrong_order["checkpoints"][0], wrong_order["checkpoints"][1] = (
-            wrong_order["checkpoints"][1], wrong_order["checkpoints"][0]
+            wrong_order["checkpoints"][1],
+            wrong_order["checkpoints"][0],
         )
         with self.assertRaisesRegex(ValueError, "embedding.first"):
             validate_trace(wrong_order)
@@ -281,9 +309,7 @@ class StageTraceContractTest(unittest.TestCase):
 
     def test_masked_qk_allows_only_expected_negative_infinity(self) -> None:
         trace = self.trace()
-        masked = next(
-            row for row in trace["checkpoints"] if "masked-qk-fp32" in row["name"]
-        )
+        masked = next(row for row in trace["checkpoints"] if "masked-qk-fp32" in row["name"])
         self.assertFalse(masked["finite"])
         self.assertTrue(masked["negative_infinity"])
         validate_trace(trace)

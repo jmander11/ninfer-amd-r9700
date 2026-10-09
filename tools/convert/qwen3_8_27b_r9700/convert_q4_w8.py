@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import time
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
@@ -46,15 +46,11 @@ def preflight_conversion(
 ) -> Q4W8ConversionPreflight:
     model = Path(model_dir)
     q4_w8_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     frontend_resources = resources.load_resources(model)
     resource_map = {resource.name: resource.data for resource in frontend_resources}
-    object_plan = family_conversion.build_object_plan(
-        q4_w8_inventory.OBJECT_SPECS, resource_map
-    )
+    object_plan = family_conversion.build_object_plan(q4_w8_inventory.OBJECT_SPECS, resource_map)
     ranking = build_draft_ranking.validate_ranking_provenance(draft_ranking)
     draft = draft_head.compute_shortlist(ranking.ranking_path, model)
     return Q4W8ConversionPreflight(
@@ -95,9 +91,7 @@ def convert(
 ) -> Path:
     output = Path(out_path)
     if output.exists():
-        raise FileExistsError(
-            f"refusing to overwrite existing Q4/W8 evaluation artifact: {output}"
-        )
+        raise FileExistsError(f"refusing to overwrite existing Q4/W8 evaluation artifact: {output}")
     started = time.perf_counter()
     requested_device = str(device)
     resolved_device = pick_device(device)
@@ -105,32 +99,32 @@ def convert(
     output.parent.mkdir(parents=True, exist_ok=True)
     resource_payloads = {resource.name: resource.data for resource in preflight.resources}
 
-    with ShardReader(preflight.model_dir) as reader:
-        with ArtifactWriter(
+    with (
+        ShardReader(preflight.model_dir) as reader,
+        ArtifactWriter(
             output,
             ArtifactIdentity(q4_w8_inventory.MODEL_ID, q4_w8_inventory.WEIGHTS_ID),
             preflight.object_plan.specs,
-        ) as writer:
-            if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError("Q4/W8 writer plan differs from completed preflight")
-            for index, spec in enumerate(q4_w8_inventory.OBJECT_SPECS, start=1):
-                if isinstance(spec, q4_w8_inventory.ResourceSpec):
-                    payload = resource_payloads[spec.name]
-                else:
-                    tensor = _materialize_tensor(spec, reader, preflight.draft)
-                    payload = _encode_tensor(tensor, spec, resolved_device)
-                    del tensor
-                writer.write(spec.name, payload)
-                del payload
-                print(
-                    f"[{index}/{len(q4_w8_inventory.OBJECT_SPECS)}] {spec.name}",
-                    flush=True,
-                )
+        ) as writer,
+    ):
+        if writer.objects != preflight.object_plan.objects:
+            raise RuntimeError("Q4/W8 writer plan differs from completed preflight")
+        for index, spec in enumerate(q4_w8_inventory.OBJECT_SPECS, start=1):
+            if isinstance(spec, q4_w8_inventory.ResourceSpec):
+                payload = resource_payloads[spec.name]
+            else:
+                tensor = _materialize_tensor(spec, reader, preflight.draft)
+                payload = _encode_tensor(tensor, spec, resolved_device)
+                del tensor
+            writer.write(spec.name, payload)
+            del payload
+            print(
+                f"[{index}/{len(q4_w8_inventory.OBJECT_SPECS)}] {spec.name}",
+                flush=True,
+            )
 
     report = family_conversion.build_conversion_report(
-        identity=ArtifactIdentity(
-            q4_w8_inventory.MODEL_ID, q4_w8_inventory.WEIGHTS_ID
-        ),
+        identity=ArtifactIdentity(q4_w8_inventory.MODEL_ID, q4_w8_inventory.WEIGHTS_ID),
         target_key=q4_w8_inventory.TARGET_KEY,
         recipe_id=q4_w8_inventory.RECIPE_ID,
         repo_root=_repo_root(),

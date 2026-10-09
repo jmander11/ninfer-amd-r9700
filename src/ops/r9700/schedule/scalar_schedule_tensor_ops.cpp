@@ -77,9 +77,9 @@ void add_bias(const Tensor& bias, Tensor& x, hipStream_t stream) {
     }
     if (overlaps(bias, x)) { throw std::invalid_argument("add_bias: bias must not overlap x"); }
     const auto rows = static_cast<std::size_t>(elements / x.ne[0]);
-    HIP_CHECK(r9700::schedule::add_bias_bf16(
-        static_cast<const hip_bfloat16*>(bias.data), static_cast<hip_bfloat16*>(x.data),
-        static_cast<std::uint32_t>(x.ne[0]), rows, stream));
+    HIP_CHECK(r9700::schedule::add_bias_bf16(static_cast<const hip_bfloat16*>(bias.data),
+                                             static_cast<hip_bfloat16*>(x.data),
+                                             static_cast<std::uint32_t>(x.ne[0]), rows, stream));
 }
 
 void nll_from_logits(const Tensor& logits, const Tensor& targets, Tensor& out,
@@ -90,14 +90,14 @@ void nll_from_logits(const Tensor& logits, const Tensor& targets, Tensor& out,
     if (targets.dtype != DType::I32) {
         throw std::invalid_argument("nll_from_logits: targets must be I32");
     }
-    if (out.dtype != DType::FP32) { throw std::invalid_argument("nll_from_logits: out must be FP32"); }
-    if (logits.ne[2] != 1 || logits.ne[3] != 1 || targets.ne[1] != 1 ||
-        targets.ne[2] != 1 || targets.ne[3] != 1 || out.ne[1] != 1 || out.ne[2] != 1 ||
-        out.ne[3] != 1) {
+    if (out.dtype != DType::FP32) {
+        throw std::invalid_argument("nll_from_logits: out must be FP32");
+    }
+    if (logits.ne[2] != 1 || logits.ne[3] != 1 || targets.ne[1] != 1 || targets.ne[2] != 1 ||
+        targets.ne[3] != 1 || out.ne[1] != 1 || out.ne[2] != 1 || out.ne[3] != 1) {
         throw std::invalid_argument("nll_from_logits: expected logits [V,T], targets/out [T]");
     }
-    if (logits.ne[0] <= 0 || logits.ne[1] <= 0 || valid_rows <= 0 ||
-        valid_rows > logits.ne[0]) {
+    if (logits.ne[0] <= 0 || logits.ne[1] <= 0 || valid_rows <= 0 || valid_rows > logits.ne[0]) {
         throw std::invalid_argument("nll_from_logits: invalid row or column extent");
     }
     if (targets.ne[0] != logits.ne[1] || out.ne[0] != logits.ne[1]) {
@@ -117,15 +117,15 @@ void nll_from_logits(const Tensor& logits, const Tensor& targets, Tensor& out,
         static_cast<std::uint32_t>(logits.ne[1]), stream));
 }
 
-void prepare_masked_block(const Tensor& anchors, const Tensor& lengths,
-                          const Tensor& valid_columns, std::int32_t mask_id, Tensor& ids,
-                          Tensor& positions, hipStream_t stream) {
+void prepare_masked_block(const Tensor& anchors, const Tensor& lengths, const Tensor& valid_columns,
+                          std::int32_t mask_id, Tensor& ids, Tensor& positions,
+                          hipStream_t stream) {
     constexpr const char* operation = "prepare_masked_block";
-    const std::int32_t width = ids.ne[0];
-    const std::int32_t batch = ids.ne[1];
+    const std::int32_t width        = ids.ne[0];
+    const std::int32_t batch        = ids.ne[1];
     if (width < 1 || width > 16 || batch < 1 ||
         batch > static_cast<std::int32_t>(kMaximumConcurrency) || mask_id < 0) {
-        throw std::invalid_argument("prepare_masked_block: requires W=1..16, B=1..4, mask_id>=0");
+        throw std::invalid_argument("prepare_masked_block: requires W=1..16, B=1..8, mask_id>=0");
     }
     require_i32_vector(anchors, batch, operation, "anchors");
     require_i32_vector(lengths, batch, operation, "lengths");
@@ -150,16 +150,15 @@ void prepare_ragged_prefix(const Tensor& source, const Tensor& lanes, const Tens
                            Tensor& counts, hipStream_t stream) {
     const std::int32_t width = source.ne[1];
     const std::int32_t batch = destination.ne[2];
-    const auto vector_shape = [batch](const Tensor& tensor) {
+    const auto vector_shape  = [batch](const Tensor& tensor) {
         return tensor.dtype == DType::I32 && tensor.ne[0] == batch && tensor.ne[1] == 1 &&
                tensor.ne[2] == 1 && tensor.ne[3] == 1 && tensor.is_contiguous() &&
                tensor.data != nullptr;
     };
     if (source.dtype != DType::BF16 || destination.dtype != DType::BF16 || source.ne[0] <= 0 ||
         (source.ne[0] % 8) != 0 || width <= 0 || width > 16 || source.ne[2] <= 0 ||
-        source.ne[3] != 1 ||
-        destination.ne[0] != source.ne[0] || destination.ne[1] != width || batch <= 0 ||
-        batch > static_cast<std::int32_t>(kMaximumConcurrency) ||
+        source.ne[3] != 1 || destination.ne[0] != source.ne[0] || destination.ne[1] != width ||
+        batch <= 0 || batch > static_cast<std::int32_t>(kMaximumConcurrency) ||
         destination.ne[3] != 1 || positions.dtype != DType::I32 || positions.ne[0] != width ||
         positions.ne[1] != batch || positions.ne[2] != 1 || positions.ne[3] != 1 ||
         !vector_shape(lanes) || !vector_shape(starts) || !vector_shape(ends) ||
@@ -173,7 +172,8 @@ void prepare_ragged_prefix(const Tensor& source, const Tensor& lanes, const Tens
         (source.nb[1] % static_cast<std::int64_t>(sizeof(uint4))) != 0 ||
         (source.nb[2] % static_cast<std::int64_t>(sizeof(uint4))) != 0 ||
         ((reinterpret_cast<std::uintptr_t>(source.data) |
-          reinterpret_cast<std::uintptr_t>(destination.data)) & 15U) != 0U) {
+          reinterpret_cast<std::uintptr_t>(destination.data)) &
+         15U) != 0U) {
         throw std::invalid_argument(
             "prepare_ragged_prefix: tensors must have aligned dense-column storage");
     }

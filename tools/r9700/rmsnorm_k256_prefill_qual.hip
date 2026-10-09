@@ -23,32 +23,39 @@
 
 namespace {
 constexpr std::uint32_t kFeatures = 256U;
-constexpr float kEps = 1.0e-6F;
-constexpr std::size_t kSamples = 7U;
+constexpr float kEps              = 1.0e-6F;
+constexpr std::size_t kSamples    = 7U;
 constexpr std::string_view kPowerPath =
     "/sys/class/drm/card2/device/power_dpm_force_performance_level";
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
+
 void hip_check(hipError_t status, const char* expression, const char* file, int line) {
     if (status == hipSuccess) return;
     std::ostringstream message;
     message << file << ':' << line << ": " << expression << ": " << hipGetErrorString(status);
     fail(message.str());
 }
+
 #define HIP_CHECK(expression) hip_check((expression), #expression, __FILE__, __LINE__)
 
-template <typename T> class DeviceBuffer {
+template <typename T>
+class DeviceBuffer {
 public:
     explicit DeviceBuffer(std::size_t count) : count_(count) {
         HIP_CHECK(hipMalloc(&data_, count * sizeof(T)));
     }
+
     ~DeviceBuffer() { (void)hipFree(data_); }
-    DeviceBuffer(const DeviceBuffer&) = delete;
+
+    DeviceBuffer(const DeviceBuffer&)            = delete;
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
     [[nodiscard]] T* get() const noexcept { return data_; }
+
     [[nodiscard]] std::size_t size() const noexcept { return count_; }
 private:
-    T* data_ = nullptr;
+    T* data_           = nullptr;
     std::size_t count_ = 0;
 };
 
@@ -61,28 +68,36 @@ std::uint16_t bf16_bits(float value) {
     }
     return static_cast<std::uint16_t>(word >> 16U);
 }
+
 hip_bfloat16 bf16(float value) {
     hip_bfloat16 result;
     result.data = bf16_bits(value);
     return result;
 }
+
 std::vector<hip_bfloat16> fixture(std::size_t count, std::uint32_t seed) {
     std::vector<hip_bfloat16> values(count);
     for (std::size_t index = 0; index < count; ++index) {
         const auto code = static_cast<std::int32_t>((index * 37U + seed * 19U) % 509U) - 254;
-        values[index] = bf16(static_cast<float>(code) / 127.0F);
+        values[index]   = bf16(static_cast<float>(code) / 127.0F);
     }
     return values;
 }
-template <typename T> void upload(DeviceBuffer<T>& output, const std::vector<T>& input) {
+
+template <typename T>
+void upload(DeviceBuffer<T>& output, const std::vector<T>& input) {
     if (output.size() != input.size()) fail("upload extent mismatch");
-    HIP_CHECK(hipMemcpy(output.get(), input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(output.get(), input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
 }
-template <typename T> std::vector<T> download(const DeviceBuffer<T>& input, std::size_t count) {
+
+template <typename T>
+std::vector<T> download(const DeviceBuffer<T>& input, std::size_t count) {
     std::vector<T> output(count);
     HIP_CHECK(hipMemcpy(output.data(), input.get(), count * sizeof(T), hipMemcpyDeviceToHost));
     return output;
 }
+
 void require_auto() {
     std::ifstream input{std::string(kPowerPath)};
     std::string value;
@@ -90,6 +105,7 @@ void require_auto() {
         fail("physical timing requires card2 power profile auto");
     }
 }
+
 void require_fresh(const std::filesystem::path& path) {
     std::error_code error;
     const auto status = std::filesystem::symlink_status(path, error);
@@ -98,6 +114,7 @@ void require_fresh(const std::filesystem::path& path) {
         fail("report path exists or cannot be inspected");
     }
 }
+
 void select_r9700() {
     int count = 0;
     HIP_CHECK(hipGetDeviceCount(&count));
@@ -116,7 +133,7 @@ void select_r9700() {
 
 void qualify_numerical(hipStream_t stream) {
     constexpr std::uint32_t maximum_rows = 129U;
-    const auto input = fixture(static_cast<std::size_t>(maximum_rows) * kFeatures, 7U);
+    const auto input  = fixture(static_cast<std::size_t>(maximum_rows) * kFeatures, 7U);
     const auto weight = fixture(kFeatures, 11U);
     DeviceBuffer<hip_bfloat16> d_input(input.size()), d_weight(weight.size());
     DeviceBuffer<hip_bfloat16> d_incumbent(input.size()), d_candidate(input.size());
@@ -143,21 +160,20 @@ void qualify_numerical(hipStream_t stream) {
                 }
                 for (std::uint32_t row = 0; row < rows; ++row) {
                     const std::size_t base = static_cast<std::size_t>(row) * kFeatures;
-                    double sumsq = 0.0;
+                    double sumsq           = 0.0;
                     for (std::uint32_t feature = 0; feature < kFeatures; ++feature) {
                         const double value = static_cast<float>(input[base + feature]);
                         sumsq += value * value;
                     }
                     const double inverse = 1.0 / std::sqrt(sumsq / kFeatures + eps);
                     for (std::uint32_t feature = 0; feature < kFeatures; ++feature) {
-                        const double gain = static_cast<float>(weight[feature]) +
-                                            (unit_offset ? 1.0 : 0.0);
-                        const double expected = static_cast<float>(input[base + feature]) *
-                                                inverse * gain;
+                        const double gain =
+                            static_cast<float>(weight[feature]) + (unit_offset ? 1.0 : 0.0);
+                        const double expected =
+                            static_cast<float>(input[base + feature]) * inverse * gain;
                         const double observed = static_cast<float>(candidate[base + feature]);
                         const double absolute = std::abs(observed - expected);
-                        const double relative = absolute /
-                                                std::max(1.0e-6, std::abs(expected));
+                        const double relative = absolute / std::max(1.0e-6, std::abs(expected));
                         if (absolute > 4.0e-2 && relative > 4.0e-2) {
                             fail("candidate exceeds FP64 criterion");
                         }
@@ -176,7 +192,8 @@ void qualify_numerical(hipStream_t stream) {
     }
 }
 
-template <typename Launch> float timed(hipStream_t stream, Launch&& launch) {
+template <typename Launch>
+float timed(hipStream_t stream, Launch&& launch) {
     hipEvent_t start = nullptr, stop = nullptr;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
@@ -190,10 +207,12 @@ template <typename Launch> float timed(hipStream_t stream, Launch&& launch) {
     HIP_CHECK(hipEventDestroy(stop));
     return value;
 }
+
 float median(std::array<float, kSamples> values) {
     std::sort(values.begin(), values.end());
     return values[values.size() / 2U];
 }
+
 void write_samples(std::ostringstream& out, const std::array<float, kSamples>& values) {
     out << '[';
     for (std::size_t index = 0; index < values.size(); ++index) {
@@ -202,13 +221,16 @@ void write_samples(std::ostringstream& out, const std::array<float, kSamples>& v
     }
     out << ']';
 }
+
 void benchmark(hipStream_t stream, const std::filesystem::path& path) {
     constexpr std::uint32_t maximum_rows = 49152U;
-    const auto input = fixture(static_cast<std::size_t>(maximum_rows) * kFeatures, 101U);
+    const auto input  = fixture(static_cast<std::size_t>(maximum_rows) * kFeatures, 101U);
     const auto weight = fixture(kFeatures, 103U);
-    DeviceBuffer<hip_bfloat16> d_input(input.size()), d_weight(weight.size()), d_output(input.size());
+    DeviceBuffer<hip_bfloat16> d_input(input.size()), d_weight(weight.size()),
+        d_output(input.size());
     upload(d_input, input);
     upload(d_weight, weight);
+
     struct Row {
         std::uint32_t rows;
         std::array<float, kSamples> incumbent{};
@@ -216,13 +238,20 @@ void benchmark(hipStream_t stream, const std::filesystem::path& path) {
         float incumbent_median = 0.0F;
         float candidate_median = 0.0F;
     };
+
     std::vector<Row> results;
     for (const std::uint32_t rows : {128U, 512U, 2048U, 8192U, 49152U}) {
-        auto incumbent = [&] { return ninfer::ops::r9700::eager::rmsnorm_incumbent_qualification(
-            d_input.get(), d_weight.get(), d_output.get(), kFeatures, rows, kEps, true, stream); };
-        auto candidate = [&] { return ninfer::ops::r9700::eager::rmsnorm_k256_token8_qualification(
-            d_input.get(), d_weight.get(), d_output.get(), rows, kEps, true, stream); };
-        HIP_CHECK(incumbent()); HIP_CHECK(candidate()); HIP_CHECK(hipStreamSynchronize(stream));
+        auto incumbent = [&] {
+            return ninfer::ops::r9700::eager::rmsnorm_incumbent_qualification(
+                d_input.get(), d_weight.get(), d_output.get(), kFeatures, rows, kEps, true, stream);
+        };
+        auto candidate = [&] {
+            return ninfer::ops::r9700::eager::rmsnorm_k256_token8_qualification(
+                d_input.get(), d_weight.get(), d_output.get(), rows, kEps, true, stream);
+        };
+        HIP_CHECK(incumbent());
+        HIP_CHECK(candidate());
+        HIP_CHECK(hipStreamSynchronize(stream));
         Row result{.rows = rows};
         for (std::size_t sample = 0; sample < kSamples; ++sample) {
             if ((sample & 1U) == 0U) {
@@ -259,7 +288,8 @@ void benchmark(hipStream_t stream, const std::filesystem::path& path) {
         const Row& row = results[index];
         out << "    {\"rows\": " << row.rows << ", \"incumbent_samples_ms\": ";
         write_samples(out, row.incumbent);
-        out << ", \"candidate_samples_ms\": "; write_samples(out, row.candidate);
+        out << ", \"candidate_samples_ms\": ";
+        write_samples(out, row.candidate);
         out << ", \"incumbent_median_ms\": " << row.incumbent_median
             << ", \"candidate_median_ms\": " << row.candidate_median
             << ", \"speedup\": " << row.incumbent_median / row.candidate_median << '}'
@@ -267,12 +297,15 @@ void benchmark(hipStream_t stream, const std::filesystem::path& path) {
     }
     out << "  ]\n}\n";
     const std::string payload = out.str();
-    const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    const int fd              = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
     if (fd < 0) fail("refusing to overwrite or could not create report");
     std::size_t written = 0;
     while (written < payload.size()) {
         const ssize_t count = ::write(fd, payload.data() + written, payload.size() - written);
-        if (count <= 0) { (void)::close(fd); fail("could not finish report"); }
+        if (count <= 0) {
+            (void)::close(fd);
+            fail("could not finish report");
+        }
         written += static_cast<std::size_t>(count);
     }
     if (::close(fd) != 0) fail("could not close report");
@@ -286,10 +319,13 @@ int main(int argc, char** argv) {
             fail("usage: rmsnorm_k256_prefill_qual --benchmark --out-json PATH");
         }
         const std::filesystem::path path = argv[3];
-        require_fresh(path); require_auto(); select_r9700();
+        require_fresh(path);
+        require_auto();
+        select_r9700();
         hipStream_t stream = nullptr;
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-        qualify_numerical(stream); benchmark(stream, path);
+        qualify_numerical(stream);
+        benchmark(stream, path);
         HIP_CHECK(hipStreamDestroy(stream));
         std::cout << "r9700 RMSNorm K256 token8 qualification: PASS\n";
         return 0;

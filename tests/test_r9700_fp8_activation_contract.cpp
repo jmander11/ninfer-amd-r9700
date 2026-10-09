@@ -9,7 +9,7 @@
 #include <stdexcept>
 
 namespace linear = ninfer::ops::r9700::linear;
-namespace ops = ninfer::ops;
+namespace ops    = ninfer::ops;
 
 namespace {
 
@@ -25,7 +25,8 @@ int main() {
         static_assert(linear::Fp8ActivationNonfinite == 1U);
         require(linear::fp8_activation_workspace_capacity_bytes(1, 1) == 516,
                 "scalar FP8 activation workspace geometry is wrong");
-        constexpr std::size_t kBytes = 1028;
+        // Codes [3, 256], scales [3] at 768, one status word per token at 1024.
+        constexpr std::size_t kBytes = 1036;
         require(linear::fp8_activation_workspace_capacity_bytes(3, 129) == kBytes,
                 "K128-padded FP8 activation workspace geometry is wrong");
         require(ops::LinearExecution::activation_workspace_capacity_bytes(3, 129) == kBytes,
@@ -39,7 +40,7 @@ int main() {
         alignas(256) std::array<std::byte, kBytes> storage{};
         linear::Fp8ActivationWorkspace workspace{};
         require(linear::fp8_bind_activation_workspace(storage.data(), storage.size(), 3, 129,
-                                                       &workspace) == hipSuccess,
+                                                      &workspace) == hipSuccess,
                 "valid FP8 activation workspace did not bind");
         auto* base = reinterpret_cast<std::uint8_t*>(storage.data());
         require(workspace.codes == base && workspace.code_bytes == 768 &&
@@ -50,10 +51,9 @@ int main() {
                     workspace.padded_columns == 256,
                 "bound FP8 activation planes differ from the contract");
         require(linear::fp8_bind_activation_workspace(storage.data(), storage.size() - 1, 3, 129,
-                                                       &workspace) == hipErrorInvalidValue &&
-                    linear::fp8_bind_activation_workspace(storage.data() + 1, storage.size() - 1,
-                                                          3, 129,
-                                                          &workspace) == hipErrorInvalidValue,
+                                                      &workspace) == hipErrorInvalidValue &&
+                    linear::fp8_bind_activation_workspace(storage.data() + 1, storage.size() - 1, 3,
+                                                          129, &workspace) == hipErrorInvalidValue,
                 "malformed FP8 activation storage was accepted");
         std::cout << "R9700 FP8 activation workspace contract passed\n";
         return 0;

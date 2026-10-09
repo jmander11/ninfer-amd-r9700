@@ -13,10 +13,12 @@
 #include <ninfer/targets/qwen3/prepared_prompt.h>
 #include <ninfer/targets/qwen3/decoder_state.h>
 #include "targets/qwen3/impl/runtime/text_context.h"
-#include "targets/qwen3/impl/runtime/tool_masks.h"
+#include "targets/qwen3/impl/runtime/token_masks.h"
 #include "targets/qwen3/impl/runtime/dflash_context.h"
 #include "targets/qwen3/impl/runtime/vision_context.h"
 #include "targets/qwen3/impl/runtime/vision_prefill.h"
+#include "targets/qwen3/impl/runtime/prefill_schedule.h"
+#include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
 
 #include <algorithm>
 #include <array>
@@ -31,30 +33,8 @@ namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
 using qwen3::PreparedPromptData;
 using qwen3::PromptModality;
 
-// Large aligned extents use the full 8192-token workspace efficiently. A large unaligned tail
-// sends every major projection through its remainder schedule; cap that unit at 4096 so only the
-// smaller final unit pays the tail cost. Explicit smaller chunks retain their requested policy.
-inline constexpr std::uint32_t kIrregularPrefillSplit = 4096;
-
-[[nodiscard]] inline std::uint32_t select_prefill_chunk(std::uint32_t remaining,
-                                                        std::uint32_t maximum) noexcept {
-    const std::uint32_t nominal = std::min(remaining, maximum);
-    if (maximum > kIrregularPrefillSplit && nominal > kIrregularPrefillSplit &&
-        nominal % kPrefillChunkAlignment != 0) {
-        return kIrregularPrefillSplit;
-    }
-    return nominal;
-}
-
-[[nodiscard]] inline std::uint64_t prefill_chunk_count(std::uint32_t tokens,
-                                                       std::uint32_t maximum) noexcept {
-    std::uint64_t count = 0;
-    while (tokens != 0) {
-        tokens -= select_prefill_chunk(tokens, maximum);
-        ++count;
-    }
-    return count;
-}
+using qwen3::detail::select_prefill_chunk;
+using qwen3::detail::prefill_chunk_count;
 
 struct ExecutionCore {
     DeviceContext& device;
@@ -79,16 +59,16 @@ struct PrefillContext {
     std::uint32_t text_kv_base;
     const ops::SamplingConfig* sampling;
     Tensor* rewrite_checkpoint_hidden;
-    std::int32_t current_state_slot                         = 0;
-    std::int32_t rewrite_checkpoint_state_slot              = 0;
-    std::uint32_t mtp_proposal_extent                       = 0;
+    std::int32_t current_state_slot                       = 0;
+    std::uint32_t mtp_proposal_extent                     = 0;
     const qwen3::DFlashDecodeIngress* dflash_host_ingress = nullptr;
-    PagedKVAllocation* text_kv_allocation                   = nullptr;
+    PagedKVAllocation* text_kv_allocation                 = nullptr;
     qwen3::PagedKVPublication* text_kv_publication        = nullptr;
-    std::uint32_t* text_kv_status                           = nullptr;
-    PagedKVAllocation* mtp_kv_allocation                    = nullptr;
+    std::uint32_t* text_kv_status                         = nullptr;
+    PagedKVAllocation* mtp_kv_allocation                  = nullptr;
     qwen3::PagedKVPublication* mtp_kv_publication         = nullptr;
-    std::uint32_t* mtp_kv_status                            = nullptr;
+    std::uint32_t* mtp_kv_status                          = nullptr;
+    PromptEmbeddingStaging* prompt_embedding              = nullptr;
 };
 
 struct OrdinaryBatchContext {
@@ -113,7 +93,7 @@ struct MtpBatchContext {
     // One round-scoped segmented authority per compact row. The same fixed-address transaction
     // spans alignment and every AR append and is resolved by Program once after execution.
     std::span<qwen3::PagedKVTransaction* const> mtp_kv_transactions{};
-    qwen3::ToolMaskExchange* tool_masks = nullptr;
+    qwen3::TokenMaskExchange* token_masks = nullptr;
 };
 
 struct DFlashBatchContext {
@@ -125,7 +105,12 @@ struct DFlashBatchContext {
     qwen3::DFlashDecodeEgress& host_egress;
     Tensor& continuation_hidden_store;
     std::span<qwen3::PagedKVTransaction* const> text_kv_transactions{};
-    qwen3::ToolMaskExchange* tool_masks = nullptr;
+    qwen3::TokenMaskExchange* token_masks = nullptr;
+    // DFlash2 chain rounds score the p-less proposal calibration grid into host_egress. A
+    // captured graph fixes whether the scoring kernel exists, so this is the Program's startup
+    // property (calibrates_p_less_drafts()) at warm-up, capture, and every round alike, never a
+    // per-round choice. Packed-tree rounds do not score, and the Program does not read them.
+    bool calibrate_p_less_drafts = false;
 };
 
 struct DFlashAppendContext {
@@ -136,7 +121,6 @@ struct DFlashAppendContext {
 struct DFlashEnvelopes {
     ops::SwaContextExecutionEnvelope local;
     ops::GqaContextExecutionEnvelope full;
-    ops::KVCacheAppendPrefixExecutionEnvelope append;
 };
 
 struct TargetVerifyFrameView {
@@ -149,7 +133,6 @@ struct TargetVerifyFrameView {
     Tensor target_hidden;
     Tensor target_logits;
     Tensor target_tokens;
-    bool dflash_target_verify = false;
     Tensor drafts;
     Tensor current_extents;
     Tensor frontiers;
@@ -165,23 +148,55 @@ struct TargetVerifyFrameView {
     Tensor fold_path;
     Tensor draft_selector_ids;
     Tensor draft_selector_q;
-    bool tree_verify = false;
+    // Optional FP32 [G,k,B] chain proposal calibration output; requires the draft selectors.
+    Tensor proposal_calibration;
+    bool tree_verify                       = false;
     const GdnReplayRecords* replay_records = nullptr;
-    const ops::SamplingConfig* sampling    = nullptr;
-    DFlashFeatureSink* feature_sink        = nullptr;
-    qwen3::ToolMaskExchange* tool_masks = nullptr;
+    // DFlash chain verification: the device rows of the previous round's deferred fold.
+    const ops::GdnDeferredFoldRows* gdn_fold = nullptr;
+    const ops::SamplingConfig* sampling      = nullptr;
+    DFlashFeatureSink* feature_sink          = nullptr;
+    qwen3::TokenMaskExchange* token_masks    = nullptr;
+};
+
+// The prefill owner's DFlash context append addresses the last ingress slot (max_concurrency - 1):
+// a decode batch sharing a unit with the owner holds at most max_concurrency - 1 other lanes.
+
+// Prefill cards: KV authority, rewrite checkpoint outputs and staging of one owner chunk, and
+// the owner's DFlash feature sink whose consumer appends the chunk to the drafter context.
+void attach_prefill_state(TextContext& card, PrefillContext& state,
+                          std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier);
+[[nodiscard]] DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state);
+
+// One DFlash round whose target forward also carries the prefill owner's next text chunk
+// (TextContext::mixed_prefill_verify). Always eager; `result` receives the owner's progress.
+struct DFlashMixedOwner {
+    PrefillContext* prefill = nullptr;
+    MixedPrefillSlice slice;
+    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier;
+    PrefillChunkResult result;
 };
 
 void configure_text_card(TextContext& card, const ExecutionCore& execution,
                          const ops::SamplingConfig* sampling, std::int32_t current_state_slot,
-                         std::int32_t rewrite_checkpoint_state_slot,
                          std::uint32_t mtp_proposal_extent);
 void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_store,
                           TextContext& card, TargetVerifyFrameView frame,
                           bool reset_workspace = true);
+// target_verify_accept's two halves around the target forward: binds the verify controls
+// (replay records, tool masks, sampling, tree) and returns the frame with its live sampler;
+// resolve accepts drafts and publishes the selected continuation hidden.
+[[nodiscard]] TargetVerifyFrameView
+target_verify_prepare(ExecutionCore& execution, TextContext& card, TargetVerifyFrameView frame);
+void target_verify_resolve(ExecutionCore& execution, Tensor& continuation_hidden_store,
+                           TextContext& card, TargetVerifyFrameView frame);
 
 [[nodiscard]] PrefillChunkResult prefill_text_chunk(
     PrefillContext& state, std::span<const TokenId> ids, std::uint32_t nominal_length,
+    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end);
+
+[[nodiscard]] PrefillChunkResult prefill_mrope_text_chunk(
+    PrefillContext& state, const qwen3::PreparedPromptData& prompt, std::uint32_t nominal_length,
     std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end);
 
 [[nodiscard]] PrefillChunkResult
@@ -232,10 +247,11 @@ void dflash_append_context(PrefillContext& state, const Tensor& features, const 
                            ops::KVCacheAppendPrefixExecutionEnvelope envelope);
 void capture_dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_size,
                                  std::uint32_t k, std::uint32_t verify_width,
-                                 DFlashEnvelopes envelopes,
-                                 DecodeGraphDefinition& definition);
+                                 DFlashEnvelopes envelopes, DecodeGraphDefinition& definition);
 void dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_size, std::uint32_t k,
                          std::uint32_t verify_width, DFlashEnvelopes envelopes,
                          DecodeGraphExecutable* executable);
+void dflash_mixed_batch(DFlashBatchContext& state, DFlashMixedOwner& owner, std::int32_t batch_size,
+                        std::uint32_t k, std::uint32_t verify_width, DFlashEnvelopes envelopes);
 
 } // namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule

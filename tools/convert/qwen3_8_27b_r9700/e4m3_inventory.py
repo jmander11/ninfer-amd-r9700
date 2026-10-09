@@ -17,7 +17,6 @@ from tools.convert.qwen3.common.inventory import (
 
 from . import source_inventory
 
-
 MODEL_ID = "qwen3.8-27b"
 WEIGHTS_ID = "r9700-f8e4m3-row-eval"
 TARGET_KEY = "qwen3_8_27b_r9700"
@@ -79,10 +78,9 @@ def validate_inventory() -> None:
     ):
         raise ValueError("rowwise-E4M3 evaluation inventory differs from the source plan")
     expected_counts = {BF16: 582, FP32: 96, I32: 1, F8E4M3_ROW_F32S: 439}
-    if FORMAT_COUNTS != expected_counts:
+    if expected_counts != FORMAT_COUNTS:
         raise ValueError(
-            "rowwise-E4M3 format counts differ: "
-            f"expected {expected_counts}, got {FORMAT_COUNTS}"
+            f"rowwise-E4M3 format counts differ: expected {expected_counts}, got {FORMAT_COUNTS}"
         )
     expected_bytes = {
         BF16: 58_647_008,
@@ -90,7 +88,7 @@ def validate_inventory() -> None:
         I32: 524_288,
         F8E4M3_ROW_F32S: 28_444_178_368,
     }
-    if FORMAT_ENCODED_BYTES != dict(sorted(expected_bytes.items())):
+    if dict(sorted(expected_bytes.items())) != FORMAT_ENCODED_BYTES:
         raise ValueError("rowwise-E4M3 encoded byte totals differ from the fixed plan")
     if TENSOR_ENCODED_BYTES != 28_503_368_096:
         raise ValueError("rowwise-E4M3 tensor payload byte total differs")

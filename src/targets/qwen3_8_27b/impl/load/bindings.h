@@ -118,7 +118,8 @@ struct DFlash2Plan {
 struct BindingPlan {
     qwen3::FrontendResourcePlan frontend;
     qwen3::StartupFeatures features;
-    std::vector<std::uint32_t> linear_prepared_widths;
+    // Token widths of FP8 Linear calls; the largest sizes each activation image.
+    std::vector<std::uint32_t> linear_widths;
 
     WeightPlan token_embedding;
     std::array<TextLayerPlan, kTextLayers> text_layers;
@@ -143,20 +144,22 @@ struct ArtifactLoadPlan {
 
 ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_profile,
                                qwen3::StartupFeatures features);
+// Format of the pinned-host `text/token_embedding` that `bind_artifact` binds for `profile`.
+[[nodiscard]] artifact::NumericFormat token_embedding_format(WeightsProfile profile);
 
 struct DensePostMixerPayload {
     Weight gate_up;
     Weight down;
     ops::LinearExecution* gate_up_execution = nullptr;
-    ops::LinearExecution* down_execution = nullptr;
+    ops::LinearExecution* down_execution    = nullptr;
 };
 
 struct FullAttentionProjectionPayload {
     Weight query_key;
     Weight gate_value;
-    ops::LinearExecution* query_key_execution = nullptr;
+    ops::LinearExecution* query_key_execution  = nullptr;
     ops::LinearExecution* gate_value_execution = nullptr;
-    ops::LinearExecution* output_execution = nullptr;
+    ops::LinearExecution* output_execution     = nullptr;
 };
 
 struct GdnInputProjectionPayload {
@@ -184,8 +187,8 @@ struct MtpAttentionPayload {
 
 using RuntimeModelView =
     qwen3::ModelView<FullAttentionProjectionPayload, GdnProjectionPayload, DensePostMixerPayload,
-                       MtpAttentionPayload, DensePostMixerPayload,
-                       qwen3::DFlash2Weights<kDFlash2Layers>, kFullAttentionLayers, kGdnLayers>;
+                     MtpAttentionPayload, DensePostMixerPayload,
+                     qwen3::DFlash2Weights<kDFlash2Layers>, kFullAttentionLayers, kGdnLayers>;
 using FullAttentionWeights = RuntimeModelView::FullLayer;
 using GdnWeights           = RuntimeModelView::GdnLayer;
 using MtpWeights           = RuntimeModelView::MtpLayer;
@@ -201,9 +204,7 @@ public:
     LoadedModelData& operator=(LoadedModelData&&)      = delete;
 
     artifact::MaterializedArtifact backing;
-    // Library-owned device resources are live before the registry's final
-    // capacity snapshot; borrowed by the Program's serialized FP8 projections.
-    std::unique_ptr<ops::LinearExecutionContext> linear_context;
+    // Borrowed by the Program's serialized FP8 projections.
     std::vector<std::unique_ptr<ops::LinearExecution>> prepared_linears;
     qwen3::FrontendResources frontend;
     RuntimeModelView runtime;

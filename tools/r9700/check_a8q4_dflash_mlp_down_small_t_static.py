@@ -7,7 +7,6 @@ import argparse
 import re
 from pathlib import Path
 
-
 MARKER = "a8q4g64_linear_dflash_mlp_down_t5_kernel"
 
 
@@ -31,7 +30,9 @@ def check(assembly: str) -> dict[str, int]:
         raise ValueError("T5 candidate kernel or metadata terminator is missing")
     block = assembly[begin:metadata_end]
     next_function = assembly.find("; -- Begin function", metadata_end)
-    resource_comment = assembly[metadata_end:next_function if next_function >= 0 else len(assembly)]
+    resource_comment = assembly[
+        metadata_end : next_function if next_function >= 0 else len(assembly)
+    ]
 
     dot8 = block.count("v_dot8_i32_iu4")
     weight_loads = block.count("global_load_b64")
@@ -66,13 +67,22 @@ def check(assembly: str) -> dict[str, int]:
     )
     if len(yaml) != 1:
         raise ValueError(f"expected one T5 YAML resource record, found {len(yaml)}")
-    maximum_workgroup, yaml_sgpr, sgpr_spills, yaml_vgpr, vgpr_spills, yaml_wave = map(
-        int, yaml[0]
-    )
+    maximum_workgroup, yaml_sgpr, sgpr_spills, yaml_vgpr, vgpr_spills, yaml_wave = map(int, yaml[0])
     expected = (33, 100, 0, 0, 1, 0, 16, 256, 102, 0, 33, 0, 32)
     actual = (
-        vgpr, sgpr, lds, private, wave32, scratch, occupancy, maximum_workgroup,
-        yaml_sgpr, sgpr_spills, yaml_vgpr, vgpr_spills, yaml_wave,
+        vgpr,
+        sgpr,
+        lds,
+        private,
+        wave32,
+        scratch,
+        occupancy,
+        maximum_workgroup,
+        yaml_sgpr,
+        sgpr_spills,
+        yaml_vgpr,
+        vgpr_spills,
+        yaml_wave,
     )
     if actual != expected:
         raise ValueError(f"T5 resource identity mismatch: expected {expected}, found {actual}")

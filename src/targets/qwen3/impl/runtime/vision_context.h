@@ -46,19 +46,19 @@ struct VisionScheduleConfig {
 // The production path passes no sink and performs no device transfer or synchronization.
 class VisionTraceSink {
 public:
-    virtual ~VisionTraceSink() = default;
+    virtual ~VisionTraceSink()                                                           = default;
     virtual void capture(std::string_view name, const Tensor& value, hipStream_t stream) = 0;
 };
 
 class VisionContext {
 public:
-    VisionContext(DeviceContext& device, const LoadedModelData& model);
+    VisionContext(DeviceContext& ctx, const LoadedModelData& weights);
 
     [[nodiscard]] static std::size_t output_transient_bytes(std::size_t merged_tokens);
     [[nodiscard]] static std::size_t workspace_bytes(const qwen3::VisionItemControl& item,
                                                      WeightsProfile weights_profile);
     [[nodiscard]] std::size_t workspace_bytes(std::size_t patches, std::size_t merged_tokens,
-                                               std::size_t segments) const;
+                                              std::size_t segments) const;
     [[nodiscard]] static std::size_t workspace_capacity_bytes(std::uint32_t max_merged_tokens,
                                                               std::uint32_t max_segments,
                                                               WeightsProfile weights_profile);
@@ -101,7 +101,7 @@ private:
 };
 
 struct VisionChunk {
-    std::int32_t length                       = 0;
+    std::int32_t length                     = 0;
     const qwen3::VisionItemControl* control = nullptr;
     Tensor embeddings;
 };
@@ -113,10 +113,24 @@ public:
                          const VisionPrefillPlan& plan, runtime::TransientRegion transient);
 
     [[nodiscard]] VisionChunk prepare_chunk(std::uint32_t begin, std::uint32_t nominal_length);
+    // Runs the Vision encode the chunk at `begin` would start with, if any, without preparing
+    // the chunk; prepare_chunk then finds the item encoded. Returns whether it encoded.
+    [[nodiscard]] bool encode_ahead(std::uint32_t begin, std::uint32_t nominal_length);
     [[nodiscard]] bool release_consumed_media_payload() noexcept;
     [[nodiscard]] double elapsed_seconds() const;
 
 private:
+    struct SelectedChunk {
+        std::uint32_t length                    = 0;
+        const VisionUseSpan* use                = nullptr;
+        const qwen3::VisionItemControl* control = nullptr;
+        Tensor output;
+    };
+
+    [[nodiscard]] SelectedChunk select_chunk(std::uint32_t begin,
+                                             std::uint32_t nominal_length) const;
+    // Encodes the selected use's item unless it is already the active item.
+    bool encode_selected(const SelectedChunk& selected);
     void encode_batch();
 
     DeviceContext& device_;

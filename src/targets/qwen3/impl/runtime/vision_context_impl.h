@@ -23,6 +23,7 @@
 #include <string>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
+// NOLINTNEXTLINE(misc-anonymous-namespace-in-header): single-TU fragment (runtime.hip)
 namespace {
 
 std::size_t checked_mul(std::size_t a, std::size_t b, const char* label) {
@@ -42,8 +43,8 @@ std::size_t checked_add(std::size_t a, std::size_t b, const char* label) {
 constexpr std::size_t kWorkspaceAlignment = 256;
 
 std::size_t aligned_linear_reserve(std::size_t bytes) {
-    return bytes == 0 ? 0 : checked_add(bytes, kWorkspaceAlignment - 1,
-                                        "linear workspace alignment");
+    return bytes == 0 ? 0
+                      : checked_add(bytes, kWorkspaceAlignment - 1, "linear workspace alignment");
 }
 
 struct VisionWorkspaceLayout {
@@ -225,14 +226,17 @@ std::size_t VisionContext::output_transient_bytes(std::size_t merged_tokens) {
 
 std::size_t VisionContext::workspace_bytes(std::size_t patches, std::size_t merged_tokens,
                                            std::size_t segments) const {
-    const auto layout = build_workspace_layout(patches, merged_tokens, segments);
+    const auto layout  = build_workspace_layout(patches, merged_tokens, segments);
     const auto reserve = [&](QType qtype, std::int32_t columns) {
-        return columns == 0 ? std::size_t{0} : ops::linear_workspace_capacity_bytes(
-            qtype, static_cast<std::int32_t>(patches), columns);
+        return columns == 0 ? std::size_t{0}
+                            : ops::linear_workspace_capacity_bytes(
+                                  qtype, static_cast<std::int32_t>(patches), columns);
     };
-    return checked_add(layout.bytes, aligned_linear_reserve(std::max(
-        reserve(QType::Q4G64_F16S, q4_workspace_columns_),
-        reserve(QType::W8G32_F16S, w8_workspace_columns_))), "aggregate Vision workspace");
+    return checked_add(
+        layout.bytes,
+        aligned_linear_reserve(std::max(reserve(QType::Q4G64_F16S, q4_workspace_columns_),
+                                        reserve(QType::W8G32_F16S, w8_workspace_columns_))),
+        "aggregate Vision workspace");
 }
 
 std::size_t VisionContext::workspace_capacity_bytes(std::uint32_t max_merged_tokens,
@@ -256,8 +260,8 @@ void VisionContext::encode(const VisionItemView& item, Tensor& output, Workspace
                            VisionTraceSink* trace) const {
     if (item.control == nullptr) { throw std::invalid_argument("Vision item control is null"); }
     const qwen3::VisionItemControl& control = *item.control;
-    const auto patches64                      = control.patch_count;
-    const auto tokens64                       = control.merged_count;
+    const auto patches64                    = control.patch_count;
+    const auto tokens64                     = control.merged_count;
     if (item.patches.size() !=
         checked_mul(patches64, VisionScheduleConfig::patch_dim, "patch elements")) {
         throw std::invalid_argument("Vision processor patch buffer has invalid shape");
@@ -270,24 +274,23 @@ void VisionContext::encode(const VisionItemView& item, Tensor& output, Workspace
     const VisionWorkspaceLayout layout = build_workspace_layout(
         patches64, tokens64, static_cast<std::size_t>(control.segment_count));
     const auto activation_reserve = [&](QType qtype, std::int32_t columns) {
-        return columns == 0
-                   ? std::size_t{0}
-                   : ops::linear_workspace_capacity_bytes(
-                         qtype, static_cast<std::int32_t>(patches64), columns);
+        return columns == 0 ? std::size_t{0}
+                            : ops::linear_workspace_capacity_bytes(
+                                  qtype, static_cast<std::int32_t>(patches64), columns);
     };
-    const std::size_t required = checked_add(
-        layout.bytes,
-        aligned_linear_reserve(std::max(
-            activation_reserve(QType::Q4G64_F16S, q4_workspace_columns_),
-            activation_reserve(QType::W8G32_F16S, w8_workspace_columns_))),
-        "workspace request");
+    const std::size_t required =
+        checked_add(layout.bytes,
+                    aligned_linear_reserve(
+                        std::max(activation_reserve(QType::Q4G64_F16S, q4_workspace_columns_),
+                                 activation_reserve(QType::W8G32_F16S, w8_workspace_columns_))),
+                    "workspace request");
     if (workspace.capacity() < required) {
         throw std::invalid_argument("Vision workspace capacity is too small for request");
     }
-    const auto patches  = static_cast<std::int32_t>(patches64);
-    const auto tokens   = static_cast<std::int32_t>(tokens64);
+    const auto patches = static_cast<std::int32_t>(patches64);
+    const auto tokens  = static_cast<std::int32_t>(tokens64);
     hipStream_t stream = ctx_.stream;
-    const auto capture  = [&](std::string_view name, const Tensor& value) {
+    const auto capture = [&](std::string_view name, const Tensor& value) {
         if (trace != nullptr) { trace->capture(name, value, stream); }
     };
     workspace.reset();
@@ -323,10 +326,13 @@ void VisionContext::encode(const VisionItemView& item, Tensor& output, Workspace
     for (std::size_t layer = 0; layer < blocks_.size(); ++layer) {
         const BlockW& block = blocks_[layer];
         const std::string layer_prefix =
-            trace == nullptr ? std::string{} : "block_" + (layer < 10 ? std::string("0") : "") +
-                                                   std::to_string(layer) + "/";
+            trace == nullptr
+                ? std::string{}
+                : "block_" + (layer < 10 ? std::string("0") : "") + std::to_string(layer) + "/";
         const auto capture_layer = [&](std::string_view stage, const Tensor& value) {
-            if (trace != nullptr) { trace->capture(layer_prefix + std::string(stage), value, stream); }
+            if (trace != nullptr) {
+                trace->capture(layer_prefix + std::string(stage), value, stream);
+            }
         };
         {
             Tensor attended = layout.attended.bind(backing);
@@ -489,8 +495,8 @@ VisionPrefillSession::VisionPrefillSession(DeviceContext& device, const LoadedMo
     for (int axis = 0; axis < 2; ++axis) {
         for (const VisionUseSpan& use : plan_.uses) {
             const auto& control = plan_.control->items[use.item_index];
-            const auto begin = control.position_ids.begin() +
-                               static_cast<std::ptrdiff_t>(axis * control.patch_count);
+            const auto begin    = control.position_ids.begin() +
+                                  static_cast<std::ptrdiff_t>(axis * control.patch_count);
             batch_control_.position_ids.insert(
                 batch_control_.position_ids.end(), begin,
                 begin + static_cast<std::ptrdiff_t>(control.patch_count));
@@ -544,30 +550,22 @@ void VisionPrefillSession::encode_batch() {
     final_item_encoded_ = true;
 }
 
-VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32_t nominal_length) {
+VisionPrefillSession::SelectedChunk
+VisionPrefillSession::select_chunk(std::uint32_t begin, std::uint32_t nominal_length) const {
     if (nominal_length == 0 || begin >= prompt_.token_ids.size()) {
         throw std::invalid_argument("Vision chunk range is empty or outside the prompt");
     }
     const std::uint64_t nominal_end64 =
         static_cast<std::uint64_t>(begin) + static_cast<std::uint64_t>(nominal_length);
-    std::uint32_t end = static_cast<std::uint32_t>(
+    const std::uint32_t end = static_cast<std::uint32_t>(
         std::min<std::uint64_t>(nominal_end64, prompt_.token_ids.size()));
-
-    const VisionUseSpan* active = nullptr;
-    for (const VisionUseSpan& use : plan_.uses) {
-        if (use.end <= begin) { continue; }
-        if (use.begin >= end) { break; }
-        if (active == nullptr) {
-            active = &use;
-        } else {
-            end = std::min(end, use.begin);
-            break;
-        }
+    const VisionChunkSelection selected =
+        select_vision_prefill_chunk(plan_.uses, begin, end - begin);
+    if (selected.length == 0) {
+        throw std::logic_error("Vision chunk cap made no forward progress");
     }
-    if (end <= begin) { throw std::logic_error("Vision chunk cap made no forward progress"); }
-    if (active == nullptr) {
-        return VisionChunk{static_cast<std::int32_t>(end - begin), nullptr, {}};
-    }
+    if (!selected.use_index) { return SelectedChunk{.length = selected.length}; }
+    const VisionUseSpan* active = &plan_.uses[*selected.use_index];
     if (active->item_index >= plan_.control->items.size() ||
         active->item_index >= prompt_.vision_items.size()) {
         throw std::logic_error("Vision prefill item index is out of range");
@@ -582,46 +580,72 @@ VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32
     if (control.merged_count > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
         throw std::overflow_error("Vision item output columns exceed int32");
     }
-    const std::size_t output_offset = checked_mul(
-        checked_mul(active->output_begin,
-                    static_cast<std::size_t>(VisionScheduleConfig::out_hidden),
-                    "item output offset elements"),
-        dtype_size(DType::BF16), "item output offset bytes");
-    Tensor output(transient_.data + output_offset, DType::BF16,
-                  {VisionScheduleConfig::out_hidden,
-                   static_cast<std::int32_t>(control.merged_count)});
+    const std::size_t output_offset =
+        checked_mul(checked_mul(active->output_begin,
+                                static_cast<std::size_t>(VisionScheduleConfig::out_hidden),
+                                "item output offset elements"),
+                    dtype_size(DType::BF16), "item output offset bytes");
+    Tensor output(
+        transient_.data + output_offset, DType::BF16,
+        {VisionScheduleConfig::out_hidden, static_cast<std::int32_t>(control.merged_count)});
+    return SelectedChunk{selected.length, active, &control, output};
+}
 
-    if (!active_item_ || *active_item_ != active->item_index) {
-        if (active_item_ && active->item_index <= *active_item_) {
-            throw std::logic_error("Vision items are not consumed in strictly increasing order");
-        }
-        if (aggregate_enabled_) {
-            if (!batch_encoded_) { encode_batch(); }
-        } else {
-            const std::size_t patch_offset = checked_mul(
-                control.patch_begin, static_cast<std::size_t>(VisionScheduleConfig::patch_dim),
-                "item patch offset");
-            const std::size_t patch_elements = checked_mul(
-                control.patch_count, static_cast<std::size_t>(VisionScheduleConfig::patch_dim),
-                "item patch elements");
-            if (patch_offset > prompt_.patches.size() ||
-                patch_elements > prompt_.patches.size() - patch_offset) {
-                throw std::invalid_argument("Vision item patch range exceeds prepared payload");
-            }
-            timers_.emplace_back(device_);
-            timers_.back().start();
-            context_.encode(
-                VisionItemView{
-                    std::span<const float>(prompt_.patches).subspan(patch_offset, patch_elements),
-                    &control},
-                output, workspace_);
-            timers_.back().record_stop();
-            workspace_.reset();
-            final_item_encoded_ = active->item_index == final_item_;
-        }
-        active_item_ = active->item_index;
+bool VisionPrefillSession::encode_selected(const SelectedChunk& selected) {
+    const VisionUseSpan* active = selected.use;
+    if (active == nullptr || (active_item_ && *active_item_ == active->item_index)) {
+        return false;
     }
-    return VisionChunk{static_cast<std::int32_t>(end - begin), &control, output};
+    if (active_item_ && active->item_index <= *active_item_) {
+        throw std::logic_error("Vision items are not consumed in strictly increasing order");
+    }
+    bool encoded = false;
+    if (aggregate_enabled_) {
+        if (!batch_encoded_) {
+            encode_batch();
+            encoded = true;
+        }
+    } else {
+        const qwen3::VisionItemControl& control = *selected.control;
+        const std::size_t patch_offset          = checked_mul(
+            control.patch_begin, static_cast<std::size_t>(VisionScheduleConfig::patch_dim),
+            "item patch offset");
+        const std::size_t patch_elements = checked_mul(
+            control.patch_count, static_cast<std::size_t>(VisionScheduleConfig::patch_dim),
+            "item patch elements");
+        if (patch_offset > prompt_.patches.size() ||
+            patch_elements > prompt_.patches.size() - patch_offset) {
+            throw std::invalid_argument("Vision item patch range exceeds prepared payload");
+        }
+        Tensor output = selected.output;
+        timers_.emplace_back(device_);
+        timers_.back().start();
+        context_.encode(
+            VisionItemView{
+                std::span<const float>(prompt_.patches).subspan(patch_offset, patch_elements),
+                &control},
+            output, workspace_);
+        timers_.back().record_stop();
+        workspace_.reset();
+        final_item_encoded_ = active->item_index == final_item_;
+        encoded             = true;
+    }
+    active_item_ = active->item_index;
+    return encoded;
+}
+
+bool VisionPrefillSession::encode_ahead(std::uint32_t begin, std::uint32_t nominal_length) {
+    return encode_selected(select_chunk(begin, nominal_length));
+}
+
+VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32_t nominal_length) {
+    const SelectedChunk selected = select_chunk(begin, nominal_length);
+    if (selected.use == nullptr) {
+        return VisionChunk{static_cast<std::int32_t>(selected.length), nullptr, {}};
+    }
+    (void)encode_selected(selected);
+    return VisionChunk{static_cast<std::int32_t>(selected.length), selected.control,
+                       selected.output};
 }
 
 bool VisionPrefillSession::release_consumed_media_payload() noexcept {

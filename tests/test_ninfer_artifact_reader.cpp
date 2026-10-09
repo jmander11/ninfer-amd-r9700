@@ -105,8 +105,8 @@ void test_registered_sizes() {
     constexpr StorageLayout direct = StorageLayout::ContiguousLeV1;
     constexpr StorageLayout rows   = StorageLayout::RowSplitK128V1;
     constexpr StorageLayout scaled = StorageLayout::RowScaledK128V1;
-    constexpr StorageLayout q4n16 = StorageLayout::R9700Q4G64N16K16V1;
-    constexpr StorageLayout w8n16 = StorageLayout::R9700W8G32N16K16V1;
+    constexpr StorageLayout q4n16  = StorageLayout::R9700Q4G64N16K16V1;
+    constexpr StorageLayout w8n16  = StorageLayout::R9700W8G32N16K16V1;
 
     const std::array<std::uint64_t, 2> shape_2x3 = {2, 3};
     const std::array<std::uint64_t, 1> shape_2   = {2};
@@ -120,6 +120,7 @@ void test_registered_sizes() {
         tensor_encoded_size(direct, NumericFormat::FP32, {}) != 4 ||
         tensor_encoded_size(direct, NumericFormat::I32, shape_2) != 8 ||
         tensor_encoded_size(q4n16, NumericFormat::Q4G64_F16S, q4_shape) != 1088 ||
+        tensor_encoded_size(rows, NumericFormat::Q4G64_F16S, q4_shape) != 1088 ||
         tensor_encoded_size(rows, NumericFormat::Q5G64_F16S, q5_shape) != 528 ||
         tensor_encoded_size(rows, NumericFormat::Q6G64_F16S, q6_shape) != 516 ||
         tensor_encoded_size(rows, NumericFormat::W8G32_F16S, w8_shape) != 264 ||
@@ -135,9 +136,6 @@ void test_registered_sizes() {
         fp8_geometry.encoded_bytes != 520) {
         throw std::runtime_error("FP8 row-scaled geometry is wrong");
     }
-    expect_artifact_error(
-        [&] { (void)tensor_encoded_size(rows, NumericFormat::Q4G64_F16S, q4_shape); },
-        "Q4 format in obsolete row-split layout");
     expect_artifact_error(
         [&] { (void)tensor_encoded_size(w8n16, NumericFormat::Q4G64_F16S, q4_shape); },
         "Q4 format in W8 tiled layout");
@@ -198,11 +196,15 @@ void test_normative_fixture() {
 
 void test_common_validation() {
     {
-        auto directory = normative_directory();
-        directory["objects"] = Json::array({{{"name", "w8_tiled"}, {"kind", "tensor"},
-            {"shape", {16, 1}}, {"format", "W8G32_F16S"},
-            {"layout", "r9700-w8g32-n16-k16-v1"}, {"offset", 0}, {"bytes", 2176}}});
-        auto fixture = write_fixture(directory, "w8_tiled");
+        auto directory       = normative_directory();
+        directory["objects"] = Json::array({{{"name", "w8_tiled"},
+                                             {"kind", "tensor"},
+                                             {"shape", {16, 1}},
+                                             {"format", "W8G32_F16S"},
+                                             {"layout", "r9700-w8g32-n16-k16-v1"},
+                                             {"offset", 0},
+                                             {"bytes", 2176}}});
+        auto fixture         = write_fixture(directory, "w8_tiled");
         Reader reader(fixture.path);
         const auto* tensor = std::get_if<TensorDescriptor>(reader.find("w8_tiled"));
         if (tensor == nullptr || tensor->layout != StorageLayout::R9700W8G32N16K16V1 ||

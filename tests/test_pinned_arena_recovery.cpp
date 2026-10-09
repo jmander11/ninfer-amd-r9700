@@ -9,10 +9,11 @@
 
 namespace {
 thread_local int allocation_budget = -1;
+
 void require(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
 }
-}
+} // namespace
 
 void* operator new(std::size_t bytes) {
     if (allocation_budget == 0) throw std::bad_alloc();
@@ -20,10 +21,15 @@ void* operator new(std::size_t bytes) {
     if (void* p = std::malloc(bytes ? bytes : 1)) return p;
     throw std::bad_alloc();
 }
+
 void* operator new[](std::size_t bytes) { return ::operator new(bytes); }
+
 void operator delete(void* p) noexcept { std::free(p); }
+
 void operator delete[](void* p) noexcept { std::free(p); }
+
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 int main() {
@@ -32,9 +38,10 @@ int main() {
         for (int fail_after = 0; fail_after < 5; ++fail_after) {
             ninfer::HostPinnedArena arena(16384);
             allocation_budget = fail_after;
-            void* block = nullptr;
-            try { block = arena.try_alloc(256); }
-            catch (const std::bad_alloc&) { ++failures_exercised; }
+            void* block       = nullptr;
+            try {
+                block = arena.try_alloc(256);
+            } catch (const std::bad_alloc&) { ++failures_exercised; }
             allocation_budget = -1;
             if (block) arena.free(block);
             require(arena.used() == 0, "failed allocation changed arena accounting");
@@ -62,7 +69,7 @@ int main() {
         allocation_budget = 0;
         for (std::size_t i = 0; i < blocks.size(); i += 2) arena.free(blocks[i]);
         allocation_budget = -1;
-        void* whole = arena.try_alloc(arena.capacity());
+        void* whole       = arena.try_alloc(arena.capacity());
         require(whole == arena.base(), "fragmented arena did not fully recover");
         arena.free(whole);
         std::cout << "pinned arena allocation recovery and allocation-free release: PASS\n";

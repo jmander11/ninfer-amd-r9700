@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import sys
 import time
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
 from tools.artifact.container import (
-    PREFIX_BYTES,
     PAYLOAD_ALIGNMENT,
+    PREFIX_BYTES,
     Artifact,
     ArtifactIdentity,
     ArtifactWriter,
@@ -40,10 +40,7 @@ from . import (
 )
 from .e4m3_rowwise import encode_e4m3_rowwise_chunks
 
-
-_SOURCE_SHARDS = tuple(
-    f"model-{index:05d}-of-00018.safetensors" for index in range(1, 19)
-)
+_SOURCE_SHARDS = tuple(f"model-{index:05d}-of-00018.safetensors" for index in range(1, 19))
 _EXPECTED_SOURCE_TENSORS = 1199
 _DISK_HEADROOM_BYTES = 1 << 30
 
@@ -113,9 +110,7 @@ def _source_shard_manifest(model: Path) -> SourceShardManifest:
 
 
 def _projected_file_bytes(preflight: Fp8HybridConversionPreflight) -> int:
-    identity = ArtifactIdentity(
-        fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID
-    )
+    identity = ArtifactIdentity(fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID)
     directory = encode_directory(identity, preflight.object_plan.objects)
     payload_offset = align_up(PREFIX_BYTES + len(directory), PAYLOAD_ALIGNMENT)
     last = preflight.object_plan.objects[-1]
@@ -181,9 +176,7 @@ def preflight_conversion(
 ) -> Fp8HybridConversionPreflight:
     model = Path(model_dir)
     fp8_hybrid_inventory.validate_inventory()
-    config_summary = source.validate_config(
-        family_conversion.load_json(model / "config.json")
-    )
+    config_summary = source.validate_config(family_conversion.load_json(model / "config.json"))
     source_preflight = source_recipe.preflight_sources(model)
     if (
         source_preflight.source_tensor_count != _EXPECTED_SOURCE_TENSORS
@@ -227,7 +220,7 @@ def preflight_summary(
         "--device",
         "cuda",
     ]
-    validation_argv = conversion_argv[:-2] + ["--validate-only"]
+    validation_argv = [*conversion_argv[:-2], "--validate-only"]
     return {
         "artifact_type": "ninfer_qwen3_8_27b_r9700_fp8_q4_hybrid_conversion_preflight",
         "schema_version": 1,
@@ -402,33 +395,33 @@ def convert(
     output.parent.mkdir(parents=True, exist_ok=True)
     resource_payloads = {resource.name: resource.data for resource in preflight.resources}
 
-    with ShardReader(preflight.model_dir) as reader:
-        with ArtifactWriter(
+    with (
+        ShardReader(preflight.model_dir) as reader,
+        ArtifactWriter(
             output,
             ArtifactIdentity(fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID),
             preflight.object_plan.specs,
-        ) as writer:
-            if writer.objects != preflight.object_plan.objects:
-                raise RuntimeError("FP8/Q4 hybrid writer plan differs from completed preflight")
-            for index, spec in enumerate(fp8_hybrid_inventory.OBJECT_SPECS, start=1):
-                if isinstance(spec, fp8_hybrid_inventory.ResourceSpec):
-                    payload = resource_payloads[spec.name]
-                else:
-                    tensor = source.materialize_tensor(spec, reader, preflight.draft)
-                    payload = _encode_tensor(tensor, spec, resolved_device)
-                writer.write(spec.name, payload)
-                if not isinstance(spec, fp8_hybrid_inventory.ResourceSpec):
-                    del tensor
-                del payload
-                print(
-                    f"[{index}/{len(fp8_hybrid_inventory.OBJECT_SPECS)}] {spec.name}",
-                    flush=True,
-                )
+        ) as writer,
+    ):
+        if writer.objects != preflight.object_plan.objects:
+            raise RuntimeError("FP8/Q4 hybrid writer plan differs from completed preflight")
+        for index, spec in enumerate(fp8_hybrid_inventory.OBJECT_SPECS, start=1):
+            if isinstance(spec, fp8_hybrid_inventory.ResourceSpec):
+                payload = resource_payloads[spec.name]
+            else:
+                tensor = source.materialize_tensor(spec, reader, preflight.draft)
+                payload = _encode_tensor(tensor, spec, resolved_device)
+            writer.write(spec.name, payload)
+            if not isinstance(spec, fp8_hybrid_inventory.ResourceSpec):
+                del tensor
+            del payload
+            print(
+                f"[{index}/{len(fp8_hybrid_inventory.OBJECT_SPECS)}] {spec.name}",
+                flush=True,
+            )
 
     report = family_conversion.build_conversion_report(
-        identity=ArtifactIdentity(
-            fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID
-        ),
+        identity=ArtifactIdentity(fp8_hybrid_inventory.MODEL_ID, fp8_hybrid_inventory.WEIGHTS_ID),
         target_key=fp8_hybrid_inventory.TARGET_KEY,
         recipe_id=fp8_hybrid_inventory.RECIPE_ID,
         repo_root=_repo_root(),
@@ -506,4 +499,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-    Artifact,

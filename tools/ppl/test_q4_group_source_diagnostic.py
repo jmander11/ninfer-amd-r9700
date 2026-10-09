@@ -1,17 +1,20 @@
-import json
 import hashlib
-from pathlib import Path
+import json
 import struct
 import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 
-from tools.ppl.q4_group_source_diagnostic import (
-    GROUPS, _atomic_new, preflight_payload, quantize_decode_q4,
-)
-from tools.ppl.compare_q4_group_source import _against, _load_bf16, _source_key
 from tools.convert.qwen3_8_27b_r9700.q4_row_scaled import quantize_dequantize
+from tools.ppl.compare_q4_group_source import _against, _load_bf16, _source_key
+from tools.ppl.q4_group_source_diagnostic import (
+    GROUPS,
+    _atomic_new,
+    preflight_payload,
+    quantize_decode_q4,
+)
 
 
 class Q4GroupSourceDiagnosticTest(unittest.TestCase):
@@ -26,10 +29,12 @@ class Q4GroupSourceDiagnosticTest(unittest.TestCase):
     def test_zero_underflow_and_chunking_are_stable(self) -> None:
         source = torch.zeros(5, 128, dtype=torch.bfloat16)
         source[1, 0] = torch.tensor(2.0**-126, dtype=torch.bfloat16)
-        self.assertTrue(torch.equal(
-            quantize_decode_q4(source, 128, row_chunk=1),
-            quantize_decode_q4(source, 128, row_chunk=5),
-        ))
+        self.assertTrue(
+            torch.equal(
+                quantize_decode_q4(source, 128, row_chunk=1),
+                quantize_decode_q4(source, 128, row_chunk=5),
+            )
+        )
 
     def test_invalid_geometry_and_bool_group_fail(self) -> None:
         source = torch.zeros(1, 128, dtype=torch.bfloat16)
@@ -66,18 +71,25 @@ class Q4GroupSourceDiagnosticTest(unittest.TestCase):
             common = {
                 "weights_id": "bf16-source",
                 "formula_profile": "checkpoint-direct-qwen3.8-source-bf16",
-                "schedule": "prefill", "prompt_tokens": 4, "skip_tokens": 2,
-                "tokens_scored": 2, "argmax_tokens": 2,
-                "source_config_sha256": "a", "source_index_sha256": "b",
-                "source_shards_sha256": {"shard": "c"}, "corpus_ids_sha256": "d",
+                "schedule": "prefill",
+                "prompt_tokens": 4,
+                "skip_tokens": 2,
+                "tokens_scored": 2,
+                "argmax_tokens": 2,
+                "source_config_sha256": "a",
+                "source_index_sha256": "b",
+                "source_shards_sha256": {"shard": "c"},
+                "corpus_ids_sha256": "d",
             }
             path.write_text(json.dumps(common))
             cell = dict(common)
-            cell.update({
-                "scheme": "bf16-reference",
-                "nll_sha256": hashlib.sha256(nll).hexdigest(),
-                "argmax_sha256": hashlib.sha256(argmax).hexdigest(),
-            })
+            cell.update(
+                {
+                    "scheme": "bf16-reference",
+                    "nll_sha256": hashlib.sha256(nll).hexdigest(),
+                    "argmax_sha256": hashlib.sha256(argmax).hexdigest(),
+                }
+            )
             (root / "results.json").write_text(json.dumps({"cells": [cell]}))
             report, nlls, argmax_values = _load_bf16(path)
             self.assertEqual(report, common)
@@ -85,8 +97,7 @@ class Q4GroupSourceDiagnosticTest(unittest.TestCase):
             self.assertEqual(argmax_values, [3, 4])
 
     def test_source_key_normalizes_shard_list_and_mapping(self) -> None:
-        common = {"config_sha256": "a", "index_sha256": "b",
-                  "corpus_ids_sha256": "c"}
+        common = {"config_sha256": "a", "index_sha256": "b", "corpus_ids_sha256": "c"}
         mapping = {"source": {**common, "shards_sha256": {"s1": "h1", "s2": "h2"}}}
         pairs = {"source": {**common, "shards_sha256": [["s2", "h2"], ["s1", "h1"]]}}
         self.assertEqual(_source_key(mapping), _source_key(pairs))
@@ -99,11 +110,12 @@ class Q4GroupSourceDiagnosticTest(unittest.TestCase):
 
         # Avoid source hashing here; the real-source preflight exercises it.
         from unittest.mock import patch
+
         identity = {"shard_count": 18}
-        with patch("tools.ppl.q4_group_source_diagnostic._source_identity",
-                   return_value=identity), patch(
-                       "tools.ppl.q4_group_source_diagnostic.validate_source_metadata"
-                   ):
+        with (
+            patch("tools.ppl.q4_group_source_diagnostic._source_identity", return_value=identity),
+            patch("tools.ppl.q4_group_source_diagnostic.validate_source_metadata"),
+        ):
             result = preflight_payload(Args(), {}, [0] * 8192)
         self.assertEqual(result["matrix_scope"]["raw_text_matrix_count"], 498)
         self.assertEqual(result["matrix_scope"]["logical_product_q4_matrix_count"], 322)

@@ -10,14 +10,22 @@ def trace_shapes(patches: int, tokens: int) -> dict[str, list[int]]:
         shapes[f"patch/{name}"] = [patches, 1152]
     for layer in range(27):
         for name, shape in (
-            ("norm1", [patches, 1152]), ("qkv_linear", [patches, 3456]),
-            ("qkv_bias", [patches, 3456]), ("q_rope", [patches, 16, 72]),
-            ("k_rope", [patches, 16, 72]), ("value", [patches, 16, 72]),
-            ("attention", [patches, 1152]), ("projection_linear", [patches, 1152]),
-            ("projection_bias", [patches, 1152]), ("attention_residual", [patches, 1152]),
-            ("norm2", [patches, 1152]), ("fc1_linear", [patches, 4304]),
-            ("fc1_bias", [patches, 4304]), ("gelu", [patches, 4304]),
-            ("fc2_linear", [patches, 1152]), ("fc2_bias", [patches, 1152]),
+            ("norm1", [patches, 1152]),
+            ("qkv_linear", [patches, 3456]),
+            ("qkv_bias", [patches, 3456]),
+            ("q_rope", [patches, 16, 72]),
+            ("k_rope", [patches, 16, 72]),
+            ("value", [patches, 16, 72]),
+            ("attention", [patches, 1152]),
+            ("projection_linear", [patches, 1152]),
+            ("projection_bias", [patches, 1152]),
+            ("attention_residual", [patches, 1152]),
+            ("norm2", [patches, 1152]),
+            ("fc1_linear", [patches, 4304]),
+            ("fc1_bias", [patches, 4304]),
+            ("gelu", [patches, 4304]),
+            ("fc2_linear", [patches, 1152]),
+            ("fc2_bias", [patches, 1152]),
             ("mlp_residual", [patches, 1152]),
         ):
             shapes[f"block_{layer:02d}/{name}"] = shape
@@ -64,40 +72,31 @@ SOURCE_FINAL_COSINE_MINIMUM = 0.97
 GROUP_ACTIVITY_FLOOR = 5.0e-2
 
 CRITERIA = {
-            "production_relative_rmse": PRODUCTION_RELATIVE_RMSE_LIMIT,
-            "production_cosine": PRODUCTION_COSINE_MINIMUM,
-            "production_final_relative_rmse": PRODUCTION_FINAL_RELATIVE_RMSE_LIMIT,
-            "local_relative_rmse": LOCAL_RELATIVE_RMSE_LIMIT,
-            "local_cosine": LOCAL_COSINE_MINIMUM,
-            "local_group_scaled_rmse": LOCAL_GROUP_SCALED_RMSE_LIMIT,
-            "local_group_cosine": LOCAL_GROUP_COSINE_MINIMUM,
-            "group_activity_floor": GROUP_ACTIVITY_FLOOR,
-            "preprocessing_absolute": PREPROCESSING_ABSOLUTE_LIMIT,
-            "preprocessing_relative_rmse": PREPROCESSING_RELATIVE_RMSE_LIMIT,
-            "position_weight_absolute": POSITION_WEIGHT_ABSOLUTE_LIMIT,
-            "source_relative_rmse": SOURCE_RELATIVE_RMSE_LIMIT,
-            "source_cosine": SOURCE_COSINE_MINIMUM,
-            "source_final_relative_rmse": SOURCE_FINAL_RELATIVE_RMSE_LIMIT,
-            "source_final_cosine": SOURCE_FINAL_COSINE_MINIMUM,
+    "production_relative_rmse": PRODUCTION_RELATIVE_RMSE_LIMIT,
+    "production_cosine": PRODUCTION_COSINE_MINIMUM,
+    "production_final_relative_rmse": PRODUCTION_FINAL_RELATIVE_RMSE_LIMIT,
+    "local_relative_rmse": LOCAL_RELATIVE_RMSE_LIMIT,
+    "local_cosine": LOCAL_COSINE_MINIMUM,
+    "local_group_scaled_rmse": LOCAL_GROUP_SCALED_RMSE_LIMIT,
+    "local_group_cosine": LOCAL_GROUP_COSINE_MINIMUM,
+    "group_activity_floor": GROUP_ACTIVITY_FLOOR,
+    "preprocessing_absolute": PREPROCESSING_ABSOLUTE_LIMIT,
+    "preprocessing_relative_rmse": PREPROCESSING_RELATIVE_RMSE_LIMIT,
+    "position_weight_absolute": POSITION_WEIGHT_ABSOLUTE_LIMIT,
+    "source_relative_rmse": SOURCE_RELATIVE_RMSE_LIMIT,
+    "source_cosine": SOURCE_COSINE_MINIMUM,
+    "source_final_relative_rmse": SOURCE_FINAL_RELATIVE_RMSE_LIMIT,
+    "source_final_cosine": SOURCE_FINAL_COSINE_MINIMUM,
 }
 
-def summarize(
-    comparisons: list[dict[str, object]], *, profile: str
-) -> dict[str, object]:
+
+def summarize(comparisons: list[dict[str, object]], *, profile: str) -> dict[str, object]:
     worst_relative = max(comparisons, key=lambda value: value["relative_rmse"])
     worst_cosine = min(comparisons, key=lambda value: value["cosine"])
-    worst_token_rmse = max(
-        comparisons, key=lambda value: value["tokens"]["worst_scaled_rmse"]
-    )
-    worst_token_cosine = min(
-        comparisons, key=lambda value: value["tokens"]["worst_cosine"]
-    )
-    worst_feature_rmse = max(
-        comparisons, key=lambda value: value["features"]["worst_scaled_rmse"]
-    )
-    worst_feature_cosine = min(
-        comparisons, key=lambda value: value["features"]["worst_cosine"]
-    )
+    worst_token_rmse = max(comparisons, key=lambda value: value["tokens"]["worst_scaled_rmse"])
+    worst_token_cosine = min(comparisons, key=lambda value: value["tokens"]["worst_cosine"])
+    worst_feature_rmse = max(comparisons, key=lambda value: value["features"]["worst_scaled_rmse"])
+    worst_feature_cosine = min(comparisons, key=lambda value: value["features"]["worst_cosine"])
     nonfinite = [
         value["name"]
         for value in comparisons
@@ -159,11 +158,7 @@ def summarize(
             if value["relative_rmse"] > SOURCE_FINAL_RELATIVE_RMSE_LIMIT
             or value["cosine"] < SOURCE_FINAL_COSINE_MINIMUM
         ]
-        result["passed"] = (
-            not nonfinite
-            and not failures
-            and not final_failures
-        )
+        result["passed"] = not nonfinite and not failures and not final_failures
         result["criterion_failures"] = [
             {"item": value["item"], "name": value["name"], "criterion": "source_general"}
             for value in failures
@@ -202,11 +197,7 @@ def summarize(
             for value in finals
             if value["relative_rmse"] > PRODUCTION_FINAL_RELATIVE_RMSE_LIMIT
         ]
-        result["passed"] = (
-            not nonfinite
-            and not failures
-            and not final_failures
-        )
+        result["passed"] = not nonfinite and not failures and not final_failures
         result["criterion_failures"] = [
             {
                 "item": value["item"],

@@ -16,7 +16,9 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from tools.bench.prepare_selected_decode_memory_profile import (
-    COUNTERS, REPO, validate_profile_build_receipt,
+    COUNTERS,
+    REPO,
+    validate_profile_build_receipt,
 )
 from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
 
@@ -50,7 +52,9 @@ def validate_prepared_closure(root: Path, plan_path: Path) -> None:
         try:
             int(parts[0], 16)
         except ValueError as error:
-            raise ValueError(f"prepared closure line {line_number} has an invalid digest") from error
+            raise ValueError(
+                f"prepared closure line {line_number} has an invalid digest"
+            ) from error
         relative = Path(parts[1])
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError(f"prepared closure line {line_number} has an invalid path")
@@ -59,7 +63,8 @@ def validate_prepared_closure(root: Path, plan_path: Path) -> None:
             raise ValueError("prepared closure has a duplicate path")
         entries[path] = parts[0]
     required = {
-        plan_path.resolve(), Path(__file__).resolve(),
+        plan_path.resolve(),
+        Path(__file__).resolve(),
         (REPO / "tools/bench/prepare_selected_decode_memory_profile.py").resolve(),
     }
     if not required.issubset(entries):
@@ -89,15 +94,20 @@ def ratio(a: Decimal, b: Decimal, label: str) -> float:
 
 
 def tables(connection: sqlite3.Connection, prefix: str) -> str:
-    rows = [row[0] for row in connection.execute(
-        "select name from sqlite_master where type='table' and name like ?", (prefix + "%",))]
+    rows = [
+        row[0]
+        for row in connection.execute(
+            "select name from sqlite_master where type='table' and name like ?", (prefix + "%",)
+        )
+    ]
     if len(rows) != 1:
         raise ValueError(f"database lacks one {prefix} table")
     return rows[0]
 
 
-def read_marker_counts(connection: sqlite3.Connection, marker_regions: str,
-                       events: str, strings: str) -> dict[str, int]:
+def read_marker_counts(
+    connection: sqlite3.Connection, marker_regions: str, events: str, strings: str
+) -> dict[str, int]:
     counts: dict[str, int] = defaultdict(int)
     query = f'''select e.extdata from "{marker_regions}" m
                 join "{events}" e on e.id=m.event_id
@@ -128,15 +138,20 @@ def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict
         marker_regions = tables(connection, "rocpd_region_")
         events = tables(connection, "rocpd_event_")
         strings = tables(connection, "rocpd_string_")
-        gpu = list(connection.execute(
-            f'''select name, product_name, extdata from "{agents}"
-                where type='GPU' and name='gfx1201' '''))
+        gpu = list(
+            connection.execute(
+                f'''select name, product_name, extdata from "{agents}"
+                where type='GPU' and name='gfx1201' '''
+            )
+        )
         if len(gpu) != 1 or gpu[0]["product_name"] != "AMD Radeon AI PRO R9700":
             raise ValueError("database lacks one R9700/gfx1201 agent")
         agent = json.loads(gpu[0]["extdata"])
         if (
-            agent.get("cu_count") != 64 or agent.get("max_waves_per_cu") != 32
-            or agent.get("wave_front_size") != 32 or agent.get("simd_count") != 128
+            agent.get("cu_count") != 64
+            or agent.get("max_waves_per_cu") != 32
+            or agent.get("wave_front_size") != 32
+            or agent.get("simd_count") != 128
         ):
             raise ValueError("database R9700 execution resources differ")
         process = list(connection.execute(f'''select command, environment from "{processes}"'''))
@@ -161,8 +176,9 @@ def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict
                 "region": str(row["region"]) if row["region"] is not None else None,
                 "symbol": str(row["symbol"]),
                 "grid_size": int(row["grid_size_x"] * row["grid_size_y"] * row["grid_size_z"]),
-                "workgroup_size": int(row["workgroup_size_x"] * row["workgroup_size_y"]
-                                      * row["workgroup_size_z"]),
+                "workgroup_size": int(
+                    row["workgroup_size_x"] * row["workgroup_size_y"] * row["workgroup_size_z"]
+                ),
                 "static_lds_bytes": int(row["group_segment_size"]),
                 "scratch_bytes": int(row["private_segment_size"]),
                 "vgpr": int(row["arch_vgpr_count"] + row["accum_vgpr_count"]),
@@ -171,12 +187,18 @@ def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict
                 raise ValueError("database has inconsistent dispatch metadata")
             regions[dispatch] = metadata
         marker_counts = read_marker_counts(connection, marker_regions, events, strings)
-        return regions, {
-            "name": gpu[0]["name"], "product_name": gpu[0]["product_name"],
-            "cu_count": agent["cu_count"], "simd_count": agent["simd_count"],
-            "max_waves_per_cu": agent["max_waves_per_cu"],
-            "wave_front_size": agent["wave_front_size"],
-        }, marker_counts
+        return (
+            regions,
+            {
+                "name": gpu[0]["name"],
+                "product_name": gpu[0]["product_name"],
+                "cu_count": agent["cu_count"],
+                "simd_count": agent["simd_count"],
+                "max_waves_per_cu": agent["max_waves_per_cu"],
+                "wave_front_size": agent["wave_front_size"],
+            },
+            marker_counts,
+        )
     finally:
         connection.close()
 
@@ -184,13 +206,22 @@ def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict
 def summarize(csv_path: Path, database: Path, command: list[str]) -> dict:
     regions, agent, marker_counts = read_database(database, command)
     expected_markers = expected_round_regions()
-    observed_markers = {name: count for name, count in marker_counts.items()
-                        if ".decode.ordinary_round " in name}
+    observed_markers = {
+        name: count for name, count in marker_counts.items() if ".decode.ordinary_round " in name
+    }
     if observed_markers != expected_markers:
         raise ValueError("marker trace lacks exact ordinary frontiers 8192..8447")
-    required = {"Dispatch_Id", "Kernel_Name", "Grid_Size", "Workgroup_Size",
-                "LDS_Block_Size", "Scratch_Size", "VGPR_Count", "Counter_Name",
-                "Counter_Value"}
+    required = {
+        "Dispatch_Id",
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Block_Size",
+        "Scratch_Size",
+        "VGPR_Count",
+        "Counter_Name",
+        "Counter_Value",
+    }
     values: dict[tuple[int, str], Decimal] = {}
     csv_metadata: dict[int, dict] = {}
     with csv_path.open(newline="", encoding="utf-8") as source:
@@ -200,10 +231,12 @@ def summarize(csv_path: Path, database: Path, command: list[str]) -> dict:
         for line, row in enumerate(reader, 2):
             dispatch = int(row["Dispatch_Id"])
             metadata = {
-                "symbol": row["Kernel_Name"], "grid_size": int(row["Grid_Size"]),
+                "symbol": row["Kernel_Name"],
+                "grid_size": int(row["Grid_Size"]),
                 "workgroup_size": int(row["Workgroup_Size"]),
                 "allocated_lds_bytes": int(row["LDS_Block_Size"]),
-                "scratch_bytes": int(row["Scratch_Size"]), "vgpr": int(row["VGPR_Count"]),
+                "scratch_bytes": int(row["Scratch_Size"]),
+                "vgpr": int(row["VGPR_Count"]),
             }
             if csv_metadata.setdefault(dispatch, metadata) != metadata:
                 raise ValueError("counter CSV has inconsistent dispatch metadata")
@@ -228,14 +261,12 @@ def summarize(csv_path: Path, database: Path, command: list[str]) -> dict:
             or csv_value["workgroup_size"] != db["workgroup_size"]
             or csv_value["scratch_bytes"] != db["scratch_bytes"]
             or csv_value["vgpr"] != db["vgpr"]
-            or csv_value["allocated_lds_bytes"]
-            != ((db["static_lds_bytes"] + 255) // 256) * 256
+            or csv_value["allocated_lds_bytes"] != ((db["static_lds_bytes"] + 255) // 256) * 256
         ):
             raise ValueError("counter CSV and database dispatch metadata differ")
     dispatch_regions = expected_dispatch_regions()
     decode = sorted(
-        dispatch for dispatch, metadata in regions.items()
-        if metadata["region"] in dispatch_regions
+        dispatch for dispatch, metadata in regions.items() if metadata["region"] in dispatch_regions
     )
     if not decode:
         raise ValueError("capture has no exact ROCTX ordinary-decode round dispatches")
@@ -251,33 +282,60 @@ def summarize(csv_path: Path, database: Path, command: list[str]) -> dict:
     for dispatch in decode:
         item = csv_metadata[dispatch]
         database_item = regions[dispatch]
-        inventory[(item["symbol"], item["grid_size"], item["workgroup_size"],
-                   database_item["static_lds_bytes"], item["allocated_lds_bytes"],
-                   item["scratch_bytes"], item["vgpr"])] += 1
+        inventory[
+            (
+                item["symbol"],
+                item["grid_size"],
+                item["workgroup_size"],
+                database_item["static_lds_bytes"],
+                item["allocated_lds_bytes"],
+                item["scratch_bytes"],
+                item["vgpr"],
+            )
+        ] += 1
     return {
         "ordinary_decode_model_layer_dispatch_count": len(decode),
         "measured_dispatch_count": len(counter_dispatches),
         "ignored_non_ordinary_round_dispatch_count": len(counter_dispatches) - len(decode),
         "ordinary_round_marker_inventory": observed_markers,
-        "dispatch_resource_inventory": [{
-            "symbol": key[0], "grid_size": key[1], "workgroup_size": key[2],
-            "static_lds_bytes": key[3], "allocated_lds_bytes": key[4],
-            "scratch_bytes": key[5], "vgpr": key[6],
-            "dispatch_count": count,
-        } for key, count in sorted(inventory.items())],
+        "dispatch_resource_inventory": [
+            {
+                "symbol": key[0],
+                "grid_size": key[1],
+                "workgroup_size": key[2],
+                "static_lds_bytes": key[3],
+                "allocated_lds_bytes": key[4],
+                "scratch_bytes": key[5],
+                "vgpr": key[6],
+                "dispatch_count": count,
+            }
+            for key, count in sorted(inventory.items())
+        ],
         "counter_sums": {name: str(totals[name]) for name in COUNTERS},
         "proxy_metrics": {
-            "gl2_hit_percent": ratio(totals["GL2C_HIT"], totals["GL2C_HIT"] + totals["GL2C_MISS"], "GL2 hit"),
-            "l0_vector_cache_hit_percent": ratio(totals["TCP_REQ"] - totals["TCP_REQ_MISS"], totals["TCP_REQ"], "L0 hit"),
-            "wave_dependency_wait_percent": ratio(totals["SQ_WAIT_ANY"], totals["SQ_WAVE_CYCLES"], "dependency wait"),
-            "wave_issue_wait_percent": ratio(totals["SQ_WAIT_INST_ANY"], totals["SQ_WAVE_CYCLES"], "issue wait"),
+            "gl2_hit_percent": ratio(
+                totals["GL2C_HIT"], totals["GL2C_HIT"] + totals["GL2C_MISS"], "GL2 hit"
+            ),
+            "l0_vector_cache_hit_percent": ratio(
+                totals["TCP_REQ"] - totals["TCP_REQ_MISS"], totals["TCP_REQ"], "L0 hit"
+            ),
+            "wave_dependency_wait_percent": ratio(
+                totals["SQ_WAIT_ANY"], totals["SQ_WAVE_CYCLES"], "dependency wait"
+            ),
+            "wave_issue_wait_percent": ratio(
+                totals["SQ_WAIT_INST_ANY"], totals["SQ_WAVE_CYCLES"], "issue wait"
+            ),
             "occupancy_percent": ratio(
                 totals["SQ_WAVE_CYCLES"],
-                totals["GRBM_GUI_ACTIVE"] * Decimal(agent["cu_count"])
-                * Decimal(agent["max_waves_per_cu"]), "occupancy",
+                totals["GRBM_GUI_ACTIVE"]
+                * Decimal(agent["cu_count"])
+                * Decimal(agent["max_waves_per_cu"]),
+                "occupancy",
             ),
             "relative_gl2_read_requests": str(totals["GL2C_EA_RDREQ"]),
-            "gl2_write_stall_instance_sum_per_grbm_active_cycle": float(totals["GL2C_MC_WRREQ_STALL"] / totals["GRBM_GUI_ACTIVE"]),
+            "gl2_write_stall_instance_sum_per_grbm_active_cycle": float(
+                totals["GL2C_MC_WRREQ_STALL"] / totals["GRBM_GUI_ACTIVE"]
+            ),
         },
         "agent": agent,
     }
@@ -292,17 +350,26 @@ def validate_benchmark_report(path: Path, record: dict, plan: dict, concurrency:
     load = value.get("load", {})
     selected_xattention = plan["selected_route"]["execution_profile"]["xattention_profile"]
     xattention_matches = (
-        config.get("xattention_qualification") is False
-        and not any(key in config for key in (
-            "xattention_profile", "xattention_find_block", "xattention_stride",
-            "xattention_tau_permille",
-        ))
-    ) if selected_xattention == "dense" else (
-        config.get("xattention_qualification") is True
-        and config.get("xattention_profile") == selected_xattention
-        and config.get("xattention_find_block") == 128
-        and config.get("xattention_stride") == 16
-        and config.get("xattention_tau_permille") == 900
+        (
+            config.get("xattention_qualification") is False
+            and not any(
+                key in config
+                for key in (
+                    "xattention_profile",
+                    "xattention_find_block",
+                    "xattention_stride",
+                    "xattention_tau_permille",
+                )
+            )
+        )
+        if selected_xattention == "dense"
+        else (
+            config.get("xattention_qualification") is True
+            and config.get("xattention_profile") == selected_xattention
+            and config.get("xattention_find_block") == 128
+            and config.get("xattention_stride") == 16
+            and config.get("xattention_tau_permille") == 900
+        )
     )
     validate_report_phase_timing(value)
     if (
@@ -319,8 +386,7 @@ def validate_benchmark_report(path: Path, record: dict, plan: dict, concurrency:
         or config.get("use_device_graph") is not True
         or config.get("decode_path") != "device_graph"
         or config.get("prefill_chunk") != plan["selected_route"]["prefill_chunk"]
-        or config.get("kv_value_group")
-        != plan["selected_route"]["cache_profile"]["value_group"]
+        or config.get("kv_value_group") != plan["selected_route"]["cache_profile"]["value_group"]
         or config.get("corpus_path") != plan["corpus"]["path"]
         or config.get("corpus_tokens") != plan["corpus"]["tokens"]
         or any(config.get(key) != expected for key, expected in plan["compiled_route"].items())
@@ -363,7 +429,8 @@ def analyze(plan_path: Path, root: Path) -> dict:
     plan = json.loads(plan_raw)
     if (
         plan.get("artifact_type") != "ninfer_r9700_selected_decode_memory_profile_plan"
-        or plan.get("schema_version") != 1 or plan.get("counters") != list(COUNTERS)
+        or plan.get("schema_version") != 1
+        or plan.get("counters") != list(COUNTERS)
         or plan.get("workload", {}).get("concurrency") != [1, 2, 3, 4]
         or plan.get("workload", {}).get("spec") != "none"
         or set(plan.get("runs", {})) != {"1", "2", "3", "4"}
@@ -374,7 +441,8 @@ def analyze(plan_path: Path, root: Path) -> dict:
     receipt_identity = plan.get("profile_build_receipt", {})
     receipt_path = Path(str(receipt_identity.get("path", "")))
     if (
-        not receipt_path.is_absolute() or not receipt_path.is_file()
+        not receipt_path.is_absolute()
+        or not receipt_path.is_file()
         or receipt_path.stat().st_size != receipt_identity.get("file_size_bytes")
         or sha(receipt_path) != receipt_identity.get("sha256")
     ):
@@ -388,16 +456,15 @@ def analyze(plan_path: Path, root: Path) -> dict:
         artifact=plan["artifact"],
         terminal_executable=plan["terminal_timing_executable"],
         marker_source=plan["ordinary_round_marker_source"],
-        selected_route=plan["selected_route"], compiled_route=plan["compiled_route"],
+        selected_route=plan["selected_route"],
+        compiled_route=plan["compiled_route"],
         hybrid_workspace_authority=plan.get("hybrid_shared_workspace_authority"),
     )
     if (
-        receipt.get("instrumentation_executable")
-        != plan.get("profile_benchmark_executable")
+        receipt.get("instrumentation_executable") != plan.get("profile_benchmark_executable")
         or receipt.get("cmake_cache") != plan.get("profile_cmake_cache")
         or receipt.get("compile_database") != plan.get("profile_compile_database")
-        or Path(plan["profile_benchmark_executable"]["path"]).resolve()
-        != profile_executable
+        or Path(plan["profile_benchmark_executable"]["path"]).resolve() != profile_executable
         or Path(plan["profile_cmake_cache"]["path"]).resolve() != cache_path
     ):
         raise ValueError("decode profile plan differs from instrumentation receipt")
@@ -405,22 +472,27 @@ def analyze(plan_path: Path, root: Path) -> dict:
         tool = plan.get(key, {})
         path = Path(str(tool.get("path", "")))
         if (
-            not path.is_absolute() or not path.is_file()
+            not path.is_absolute()
+            or not path.is_file()
             or path.stat().st_size != tool.get("file_size_bytes")
             or sha(path) != tool.get("sha256")
         ):
             raise ValueError(f"decode profile {key} bytes changed")
     corpus = plan["corpus"]
     corpus_path = Path(corpus["path"])
-    if (not corpus_path.is_file() or corpus_path.stat().st_size != corpus["file_size_bytes"]
-            or sha(corpus_path) != corpus["sha256"]):
+    if (
+        not corpus_path.is_file()
+        or corpus_path.stat().st_size != corpus["file_size_bytes"]
+        or sha(corpus_path) != corpus["sha256"]
+    ):
         raise ValueError("decode profile corpus bytes changed")
     summaries = {}
     for concurrency in range(1, 5):
         record = plan["runs"][str(concurrency)]
-        if not record.get("benchmark_command") or Path(
-            record["benchmark_command"][0]
-        ).resolve() != profile_executable:
+        if (
+            not record.get("benchmark_command")
+            or Path(record["benchmark_command"][0]).resolve() != profile_executable
+        ):
             raise ValueError("decode capture command does not use instrumentation executable")
         prefix = f"selected-decode-c{concurrency}"
         raw = root / f"raw-c{concurrency}"
@@ -430,29 +502,37 @@ def analyze(plan_path: Path, root: Path) -> dict:
             raise ValueError("decode capture lacks profile_standard/auto endpoint evidence")
         report_path = Path(record["output"]).resolve(strict=True)
         benchmark = validate_benchmark_report(report_path, record, plan, concurrency)
-        summary = summarize(raw / f"{prefix}_counter_collection.csv",
-                            raw / f"{prefix}_results.db", record["benchmark_command"])
+        summary = summarize(
+            raw / f"{prefix}_counter_collection.csv",
+            raw / f"{prefix}_results.db",
+            record["benchmark_command"],
+        )
         summary["benchmark_report"] = benchmark
         summary["proxy_metrics"]["relative_gl2_read_requests_per_output_token"] = float(
-            Decimal(summary["counter_sums"]["GL2C_EA_RDREQ"])
-            / Decimal(256 * concurrency)
+            Decimal(summary["counter_sums"]["GL2C_EA_RDREQ"]) / Decimal(256 * concurrency)
         )
-        summary["counter_csv"] = {"path": str(raw / f"{prefix}_counter_collection.csv"),
-                                  "sha256": sha(raw / f"{prefix}_counter_collection.csv")}
-        summary["database"] = {"path": str(raw / f"{prefix}_results.db"),
-                               "sha256": sha(raw / f"{prefix}_results.db")}
+        summary["counter_csv"] = {
+            "path": str(raw / f"{prefix}_counter_collection.csv"),
+            "sha256": sha(raw / f"{prefix}_counter_collection.csv"),
+        }
+        summary["database"] = {
+            "path": str(raw / f"{prefix}_results.db"),
+            "sha256": sha(raw / f"{prefix}_results.db"),
+        }
         summaries[f"c{concurrency}"] = summary
     if hashlib.sha256(plan_path.read_bytes()).hexdigest() != hashlib.sha256(plan_raw).hexdigest():
         raise ValueError("decode profile plan changed while analyzing")
     return {
         "artifact_type": "ninfer_r9700_selected_decode_memory_proxy_evidence",
-        "schema_version": 1, "status": "valid_proxy_attribution_only",
+        "schema_version": 1,
+        "status": "valid_proxy_attribution_only",
         "profile_timing_admissible": False,
         "plan": {"path": str(plan_path.resolve()), "sha256": sha(plan_path)},
         "terminal_timing_executable": plan["terminal_timing_executable"],
         "profile_benchmark_executable": plan["profile_benchmark_executable"],
         "profile_build_receipt": plan["profile_build_receipt"],
-        "selected_route": plan["selected_route"], "concurrency": summaries,
+        "selected_route": plan["selected_route"],
+        "concurrency": summaries,
         "physical_memory_bandwidth_bytes_per_second": None,
         "physical_peak_fraction": None,
         "stall_freedom": None,

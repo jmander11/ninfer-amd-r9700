@@ -5,16 +5,16 @@
 
 namespace ninfer::ops::detail {
 
-void bidirectional_gqa_attention_launch(
-    const Tensor& q, const Tensor& query_k, const Tensor& query_v,
-    const Tensor& context_lengths, const Tensor& valid_columns, const Tensor& table_rows,
-    float scale, const BidirectionalGqaBF16ContextView& context,
-    GqaContextExecutionEnvelope envelope, Tensor& out, hipStream_t stream) {
+void bidirectional_gqa_attention_launch(const Tensor& q, const Tensor& query_k,
+                                        const Tensor& query_v, const Tensor& context_lengths,
+                                        const Tensor& valid_columns, const Tensor& table_rows,
+                                        float scale, const BidirectionalGqaBF16ContextView& context,
+                                        GqaContextExecutionEnvelope envelope, Tensor& out,
+                                        hipStream_t stream) {
     const dim3 grid(r9700::kBidirectionalKvHeads, static_cast<unsigned int>(q.ne[2]),
                     static_cast<unsigned int>(q.ne[3]));
     r9700::bidirectional_gqa_bf16_kernel<<<grid, r9700::kBidirectionalBlock, 0, stream>>>(
-        static_cast<const hip_bfloat16*>(q.data),
-        static_cast<const hip_bfloat16*>(query_k.data),
+        static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(query_k.data),
         static_cast<const hip_bfloat16*>(query_v.data),
         static_cast<const std::int32_t*>(context_lengths.data),
         static_cast<const std::int32_t*>(valid_columns.data),

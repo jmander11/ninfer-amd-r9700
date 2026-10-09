@@ -12,18 +12,18 @@
 
 namespace ninfer::ops {
 
-inline constexpr std::int32_t kDflash2PathSelectTopK           = 16;
-inline constexpr std::int32_t kDflash2PathSelectRank           = 256;
-inline constexpr std::int32_t kDflash2PathSelectHidden         = 5120;
-inline constexpr std::int32_t kDflash2PathSelectCodebookRows   = 248320;
-inline constexpr std::int32_t kDflash2PathSelectShortlistRows  = 131072;
+inline constexpr std::int32_t kDflash2PathSelectTopK          = 16;
+inline constexpr std::int32_t kDflash2PathSelectRank          = 256;
+inline constexpr std::int32_t kDflash2PathSelectHidden        = 5120;
+inline constexpr std::int32_t kDflash2PathSelectCodebookRows  = 248320;
+inline constexpr std::int32_t kDflash2PathSelectShortlistRows = 131072;
 inline constexpr std::int32_t kDflash2PathSelectMaxBatch =
     static_cast<std::int32_t>(kMaximumConcurrency);
 inline constexpr std::int32_t kDflash2PathSelectMaxWidthWhenBatched = 16;
-inline constexpr int kDflash2PathSelectRngPurpose              = 16;
-inline constexpr std::int32_t kDflash2TreeFrontier             = 2;
-inline constexpr std::int32_t kDflash2TreeExpandWidth          = 16;
-inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
+inline constexpr int kDflash2PathSelectRngPurpose                   = 16;
+inline constexpr std::int32_t kDflash2TreeFrontier                  = 2;
+inline constexpr std::int32_t kDflash2TreeExpandWidth               = 16;
+inline constexpr std::int32_t kDflash2VerifyWidth                   = 12;
 
 /**
  * Op: dflash2_path_select
@@ -43,22 +43,26 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  *       + sum_{r=0}^{255} (pred_code[r, prev[t-1,b]] * h[r,t,b]) * succ_code[r, candidates[c]].
  *
  *   configs is a device-resident SamplingConfig[B] (same buffer the round copies into ingress).
- *   If configs[b].temperature <= 0 or configs[b].p_less != 0, path[t,b] is the candidate with
- *   the greatest score; equal scores select the lower token id. P-less temperature controls
- *   the target distribution, not the draft scores. If temperature > 0 and p_less == 0,
- *   the 16 scores are softmax-normalized
- *   after dividing by temperature and one candidate is drawn by inverse-CDF using
+ *   The draft temperature is configs[b].temperature, or configs[b].draft_temperature when
+ *   configs[b].p_less != 0 (the p-less temperature controls the target distribution). If it is
+ *   <= 0, path[t,b] is the candidate with the greatest score; equal scores select the lower
+ *   token id. Otherwise the 16 scores are softmax-normalized
+ *   after dividing by that temperature and one candidate is drawn by inverse-CDF using
  *
  *     u = splitmix64(configs[b].seed ^ seed_xor,
- *                    logical_positions[b] + position_offset + t + 1,
- *                    purpose=16) in [0,1).
+ *                    logical_positions[b] + position_offset + 1,
+ *                    purpose=16, hop=t) in [0,1),
+ *
+ *   keyed by the round's first position and the hop so a later round never reuses a draft
+ *   uniform.
  *
  *   Then prev[t,b] = path[t,b]. Candidate order does not affect the selected token.
  *   An internal force_greedy call may override temperature for an intermediate refinement pass.
  *   When selector_ids / selector_q are non-null they receive the 16 candidate token ids and
- *   the proposal distribution q: one-hot at the greedy/p-less pick, else the 16-way softmax.
- *   Truncated-sampling chain Leviathan accept uses this q; p-less accept ignores recorded q
- *   and uses one-hot at the drafted token. Null selectors also imply one-hot at path[t,b].
+ *   the proposal distribution q: one-hot at a greedy pick, else the 16-way softmax the draft
+ *   was drawn from. Chain accept uses this q for truncated-sampling Leviathan and p-less block
+ *   verification alike.
+ *   Null selectors imply one-hot at path[t,b].
  *
  * Logical shapes:
  *   logits is contiguous BF16 [V,T] or [V,T,B] with V>=16. hidden is contiguous BF16 [5120,T] or
@@ -71,7 +75,7 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  *   [T,B]. selector_ids is contiguous I32 [16,T] or [16,T,B] and
  *   selector_q is contiguous FP32 of the same shape; both null or both non-null. Every anchor
  *   and every selected token id is in [0, codebook_rows).
- *   T is any positive value at B=1; B=2..4 admits T=1..16.
+ *   T is any positive value at B=1; B=2..8 admits T=1..16.
  *
  * Supported domain:
  *   Projection preserves each sequence's C=1 Linear arithmetic route, independent of B.
@@ -84,8 +88,8 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  * Numeric:
  *   Top-k and greedy path ids are exact functions of the represented BF16 logits/scores. The
  *   score formula is evaluated by the oracle in FP64 from represented inputs and the logical FP32
- *   dequantized W_h. Stochastic draws are a function of (seeds[b], logical position, purpose); the Op does
- *   not promise a particular host RNG bitstream as a public numeric output.
+ *   dequantized W_h. Stochastic draws are a function of (seeds[b], logical position, purpose); the
+ * Op does not promise a particular host RNG bitstream as a public numeric output.
  *
  * Effects:
  *   Writes all of path. When selector tensors are provided, writes all of them. Inputs are
@@ -104,12 +108,11 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
 void dflash2_path_select(const Tensor& logits, const Tensor& hidden,
                          const Weight& hidden_projection, const Tensor& pred_code,
                          const Tensor& succ_code, const Tensor& anchors,
-                         const Tensor& logical_positions,
-                         const SamplingConfig* configs, Tensor& path, WorkspaceArena& workspace,
-                         hipStream_t stream, const Tensor* logit_token_ids = nullptr,
-                         Tensor* selector_ids = nullptr, Tensor* selector_q = nullptr,
-                         unsigned long long seed_xor = 0, std::int32_t position_offset = 0,
-                         bool force_greedy = false);
+                         const Tensor& logical_positions, const SamplingConfig* configs,
+                         Tensor& path, WorkspaceArena& workspace, hipStream_t stream,
+                         const Tensor* logit_token_ids = nullptr, Tensor* selector_ids = nullptr,
+                         Tensor* selector_q = nullptr, unsigned long long seed_xor = 0,
+                         std::int32_t position_offset = 0, bool force_greedy = false);
 
 /**
  * Op: dflash2_tree_select

@@ -57,13 +57,47 @@ selective-protected tiled-head DFlash donor. It copies represented payloads exac
 validates inventories, and reads back the complete output against its conversion receipt.
 `--validate PATH` repeats that check when needed. These identities do not promote a recipe.
 
+### Token embedding placement
+
+Every profile binds `text/token_embedding` with `TensorPlacement::MappedHost`: the binder plans it
+into one pinned host backing (not the device arena), and the materializer fills it from the same
+direct-I/O staging slots as device tensors and requires its device address to equal its host
+address. The load summary reports it as `mapped_host_bytes` (CLI `weight pinned host`,
+`server_start.artifact.mapped_host_bytes`); the freed VRAM (675,430,400 bytes for the Q4G64
+table, 1,350,860,800 for W8G32) goes to the automatic KV pool. `text/output_head` and all other
+tensors stay in VRAM. A quantized table is stored `row-split-k128-v1`, so one row is a contiguous
+run of codes (2,560 bytes for Q4G64) and of FP16 scales (160 bytes); there is no runtime
+repacking. `convert_fp8lut4` writes the embedding in that layout (an exact permutation of the
+base's N16K16 table), and `transcode_embedding_rows.py` revises an existing artifact.
+
+The table is only row-gathered, through two routes with bit-identical results
+(`hip_bfloat16(code * fp16 scale)`, or the stored BF16 value):
+
+- Generated tokens (ordinary decode, DFlash/MTP verify, the DFlash drafter block, MTP draft and
+  bridge steps, and the final MTP prefill column that holds the sampled token) have device-only
+  ids inside captured Device Graphs, so `ops::embedding` reads their rows in place through the
+  table's fixed unified address. At most a few dozen rows are read per round.
+- Prompt tokens are known on the host. Reading rows in place over PCIe cost 1.0% of C1 8K
+  prefill when the table was N16K16-tiled (one 8-byte word per 128-byte line). Instead the
+  Program-owned `PromptEmbeddingStaging` gathers a prefill window's distinct rows on the host
+  (`ops::stage_embedding_rows`, into a compact table of the same format plus one I32 slot per
+  token), copies that image on the load stream into a fixed device region sized for
+  `min(prefill_chunk, max_context) + 1` ids, and `ops::embedding` gathers the chunk and the
+  shifted MTP window from it. After a chunk is enqueued, and while it runs, the host stages the
+  next window of the same prompt and starts its copy behind the chunk's reads (an event recorded
+  after the last staged read), so only a prompt's first chunk stages synchronously. A chunk
+  reuses the staged image only if its window is a prefix of the staged ids.
+
 ### Selected local compact deployment
 
-The user-selected local profile retains `r9700-q4-fp8-selective-cap-n16k16-eval`
-(15,793,065,984 bytes) and its `r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval`
-companion (17,002,543,616 bytes). Both are installed under
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`, with exact identity
-as filename stem after `qwen3.8-27b-`. The adjacent README records executable creation/build/run
+The admitted production deployment is the FP8LUT4 Text recipe `r9700-fp8lut4` (below, GPTQ
+conversion), installed under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/` and named by
+`.env.example`/`compose.yaml`. Its conversion base, the Q4 selective-cap DFlash2 companion
+`r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval` (17,002,543,616 bytes), remains installed
+under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`, with exact
+identity as filename stem after `qwen3.8-27b-`; the companion-free selective-cap base and the
+donors below were deleted as superseded (2026-09-28) and are recreated only with the commands below. The adjacent README records executable creation/build/run
 commands; conversion receipts retain source paths and every payload origin/hash. Selection
 changes no stored bytes, and does not rename the provisional identities or waive BF16-source gates.
 
@@ -75,12 +109,61 @@ and `/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16` as source. The companion u
 `compose_fp8_capped_dflash` with that base and the installed selective-protected tiled-head
 Q4 DFlash donor described below. Outputs are create-only; do not reconvert on installation.
 
-Execution is global Q4 A8 with `NINFER_R9700_Q4_PREFILL_A4_FAMILIES=1`: only full-K
-N34816/K5120 Q4 calls at T>128 use the qualified A4 ping/pong/tail routes. Other Q4 calls,
-including ordinary decode and small speculative verify, stay A8. Protected FP8 projections
-remain FP8. This is a compile-time execution policy, not an artifact recipe or a runtime flag.
+Execution is uniform Q4 A8 (`NINFER_R9700_Q4_PREFILL_A4_FAMILIES=0`) for every Q4 call,
+including large prefill, ordinary decode and small speculative verify. Protected FP8 projections
+remain FP8. This is a compile-time execution policy, not an artifact recipe or a runtime flag;
+the nonzero mixed prefill A4 families remain evaluators.
 The current build/run configuration is G16, dense, chunk2048, W8 activation bits8;
 see `docs/performance.md` for quality tradeoffs and delivery evidence.
+
+### FP8LUT4 Text recipe
+
+`r9700-fp8lut4` (profile `R9700Fp8Lut4`, 16,752,796,160 bytes; admitted 2026-09-27, output head
+added 2026-09-28, protections reduced to 21 on 2026-09-30, see `docs/performance.md`) is the
+selective-cap DFlash2 companion with every Text-layer projection outside its 21 FP8 protections,
+and the target output head (248320 x 5120), re-encoded from the original BF16 checkpoint as
+`FP8LUT4` in `r9700-fp8lut4-n16k64-v1` (see `tensor-formats.md`), including GDN value_z. The
+protections are the `R9700Fp8Lut4` entries of `fp8_capped_selection.inc`, read by both the binder
+and the converter: the 5090 NVFP4 reference's BF16 set (attention query/key and gate/value at
+layers 3, 7, 11, 15, 19 and 23, attention output 3 and 7, GDN output 4) plus attention query/key
+and gate/value at layers 27, 31 and 51, kept as FP8 pairs so each layer's input projections share
+one route. They, the embedding, draft head, MTP, DFlash2 companion, Vision and resources are copied
+byte-exact from the base; the base's other five FP8 matrices (attention output 11, MLP gate/up and
+down at layers 62 and 63) are re-encoded like every other projection. MLP gate/up rows are stored
+gate/up interleaved in 16-row tiles (stored row `16 b + i` is gate feature `8 b + i` for `i < 8`,
+else up feature `8 b + i - 8`) so the projection publishes the SiLU-gated activation directly; no
+other object is permuted. The head runs through the `ops::linear` FP8LUT4 route at every width.
+
+The FP8LUT4 words except attention query/key are GPTQ-rounded: the BF16 reference
+(`tools/reference/qwen3_8_27b_bf16`) evaluates 128 calibration sequences of 2048 tokens
+layer-major, in lock-step with the object order, and each projection is rounded
+column-sequentially against its inputs' second moments (`fp8lut4_codec.Calibration`; mean-diagonal
+damping 0.3 for MLP down, 0.1 otherwise, chosen on held-out calibration sequences); the output
+head is rounded the same way against the second moment of the final-RMSNorm output (damping
+0.1). Attention gate/value and output joined on 2026-09-28; attention query/key keeps
+independent rounding: GPTQ there failed 8K multikey NIAH (5/10 sampled runs).
+The calibration set (`calibration_corpus.py`) is 64 windows of rendered opencode sessions, 20 of
+OpenWebUI conversations, 28 of llama.cpp sources and 16 of news text; no window shares a 32-token
+span with the PPL corpora, and its manifest records every input file. Conversion needs the GPU
+(~45 min), is create-only, and validates its readback; the installed file is
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/qwen3.8-27b-r9700-fp8lut4.ninfer`.
+
+```bash
+python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_fp8lut4 \
+  --base <qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer> \
+  --model /ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16 \
+  --calibration /ssdpool2nvme/local_llm/models/qwen3.8-27b-calibration/calibration-usage-128x2048.ids \
+  --out <new.ninfer>
+```
+
+`--reuse-layers <existing r9700-fp8lut4.ninfer>` copies each Text-layer object byte-exact from an
+artifact of the same calibration and damping whose receipt records the same rounding (GPTQ or
+independent) for it (digests checked against that receipt); the calibration pass, the head and
+any object whose rounding changed are encoded afresh.
+
+FP8LUT4 Linears run per-token E4M3 activations: prefill a 256-token x 128-row FP8 WMMA GEMM with the
+group scale folded into the decoded weight bytes, verification widths a small-T WMMA kernel, one
+token an FP8 dot4 GEMV. Quality and speed evidence are in `docs/performance.md`.
 
 `r9700-q4-selective-protected-n16k16-eval` is a separate source-derived evaluation base,
 not a production selection. It starts from the exact all-Q4 N16K16 artifact
@@ -277,19 +360,21 @@ mixed artifact with adaptive-A8 W8 execution is the Q4-containing leader at +0.0
 6.544746). Its three new NLL-at-least-10 positions are within the five-position 8K budget, so it
 is quality-eligible. The
 all-Q4+A8 row meets the capacity-speed tier at +0.039509 mean NLL and nine new severe positions.
-Both A8 profiles retain their quality evidence. Under the C=1..4 product cap, both recipes and
-both G16/G32 cache groups remain capacity candidates. The earlier mixed-recipe C7/C8 startup
-failures are retained as out-of-scope stress evidence and no longer exclude it. Fresh exact C=1..4
-capacity and whole-inference evidence is required for selection; the earlier C=1..8 manifests are
-historical rather than current product evidence.
+Both A8 profiles retain their quality evidence. Under the former C=1..4 product cap, both recipes
+and both G16/G32 cache groups remained capacity candidates. The earlier mixed-recipe C7/C8 startup
+failures were then retained as out-of-scope stress evidence and no longer excluded it. Fresh exact
+C=1..4 capacity and whole-inference evidence was required for that selection; the earlier C=1..8
+manifests are historical rather than current product evidence.
 Their historical mixed C=1..4 rows resolved G16 to 262,144/314,112/301,888/289,664 tokens and
 G32 to 262,144/326,656/313,984/301,248 tokens; these are retained facts, not reusable admission
 manifests.
 
 The C++ binder consumes Q4G64/W8G32 planes directly according to each explicit identity. Q4G64
-uses the Q4-only `r9700-q4g64-n16-k16-v1` persistent order; W8G32 remains row-split except
-the explicitly tiled selective-companion output head described above. The converter and explicit
-offline `transcode_q4_n16k16.py`/`transcode_w8_head.py` tools write these layouts; runtime binding never repacks. The
+matrices use the Q4-only `r9700-q4g64-n16-k16-v1` persistent order and the Q4G64 token
+embedding uses `row-split-k128-v1`; W8G32 remains row-split except the explicitly tiled
+selective-companion output head described above. The converter and explicit offline
+`transcode_q4_n16k16.py`/`transcode_embedding_rows.py`/`transcode_w8_head.py` tools write these
+layouts; runtime binding never repacks. The
 runtime quantizes represented BF16 activations into caller-owned, compile-selected A4G64 or A8G64
 evaluation scratch and launches the qualified native signed-INT4 WMMA route without hidden
 allocation or runtime weight repacking.
@@ -414,7 +499,7 @@ objects, for 1,190 objects total. This is an evaluation control only; it neither
 production DFlash matrix recipe nor authorizes production routing.
 
 These fixed canonical-Q4 companions are converter, binder, and historical evaluator controls;
-they do not select the production DFlash matrix recipe. After the base C=1..4 decision, a
+they do not select the production DFlash matrix recipe. After the base-artifact decision, a
 recipe-aware converter can append matrices derived directly from the real BF16 DFlash2
 checkpoint. `convert_dflash2_q4 --matrix-recipe` selects `canonical-q4g64` (default),
 `source-mse-q4g64`, or `source-mse-w8g32` consistently for preflight, conversion, and

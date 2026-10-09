@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -28,25 +29,26 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <cstring>
 #include <vector>
 
 namespace {
 
-constexpr std::uint32_t kHidden = 5120;
+constexpr std::uint32_t kHidden        = 5120;
 constexpr std::uint32_t kVocabPhysical = 248320;
-constexpr std::uint32_t kVocabValid = 248077;
+constexpr std::uint32_t kVocabValid    = 248077;
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
 void hip_check(hipError_t status, const char* expression, const char* file, int line) {
     if (status == hipSuccess) { return; }
     std::ostringstream message;
-    message << file << ':' << line << ": " << expression << ": "
-            << hipGetErrorString(status);
+    message << file << ':' << line << ": " << expression << ": " << hipGetErrorString(status);
     fail(message.str());
 }
 
@@ -58,19 +60,23 @@ public:
     explicit DeviceBuffer(std::size_t count) : count_(count) {
         HIP_CHECK(hipMalloc(&data_, count * sizeof(T)));
     }
-    DeviceBuffer(const DeviceBuffer&) = delete;
+
+    DeviceBuffer(const DeviceBuffer&)            = delete;
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
     ~DeviceBuffer() { (void)hipFree(data_); }
+
     [[nodiscard]] T* get() const noexcept { return data_; }
+
     [[nodiscard]] std::size_t size() const noexcept { return count_; }
 
 private:
-    T* data_ = nullptr;
+    T* data_           = nullptr;
     std::size_t count_ = 0;
 };
 
 std::uint16_t bf16_rne_bits(float value) {
-    std::uint32_t word = std::bit_cast<std::uint32_t>(value);
+    std::uint32_t word           = std::bit_cast<std::uint32_t>(value);
     const std::uint32_t absolute = word & 0x7fffffffU;
     if ((absolute & 0x7f800000U) != 0x7f800000U) {
         word += 0x7fffU + ((word >> 16U) & 1U);
@@ -123,8 +129,8 @@ void copy_to_device(DeviceBuffer<T>& destination, const std::vector<T>& source) 
 template <typename T>
 std::vector<T> copy_to_host(const DeviceBuffer<T>& source) {
     std::vector<T> result(source.size());
-    HIP_CHECK(hipMemcpy(result.data(), source.get(), result.size() * sizeof(T),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(result.data(), source.get(), result.size() * sizeof(T), hipMemcpyDeviceToHost));
     return result;
 }
 
@@ -178,7 +184,7 @@ std::vector<hip_bfloat16> bf16_fixture(std::size_t count, std::uint32_t seed) {
     std::vector<hip_bfloat16> result(count);
     for (std::size_t index = 0; index < count; ++index) {
         const auto wave = static_cast<std::int32_t>((index * 37U + seed * 13U) % 509U) - 254;
-        result[index] = bf16_from_bits(bf16_rne_bits(static_cast<float>(wave) / 31.0F));
+        result[index]   = bf16_from_bits(bf16_rne_bits(static_cast<float>(wave) / 31.0F));
     }
     return result;
 }
@@ -187,9 +193,7 @@ template <class Function>
 void require_invalid_argument(Function&& function, const char* label) {
     try {
         function();
-    } catch (const std::invalid_argument&) {
-        return;
-    }
+    } catch (const std::invalid_argument&) { return; }
     fail(std::string(label) + " did not reject its invalid public contract");
 }
 
@@ -207,7 +211,8 @@ void qualify_i32(hipStream_t stream) {
         std::vector<std::int32_t> indices_host(count);
         for (std::size_t index = 0; index < count; ++index) {
             expected[index] = 4096 + static_cast<std::int32_t>(index);
-            indices_host[index] = static_cast<std::int32_t>((index * 29U + rows) % source_host.size());
+            indices_host[index] =
+                static_cast<std::int32_t>((index * 29U + rows) % source_host.size());
         }
         for (std::size_t index = 0; index < source_host.size(); ++index) {
             source_host[index] = static_cast<std::int32_t>(index * 11U - 701U);
@@ -220,7 +225,8 @@ void qualify_i32(hipStream_t stream) {
         HIP_CHECK(i32_copy(first.get(), second.get(), count, stream));
         HIP_CHECK(i32_offset(second.get(), first.get(), count, -17, stream));
         HIP_CHECK(i32_fill(second.get(), count, 23, stream));
-        HIP_CHECK(i32_gather(source.get(), source.size(), indices.get(), gathered.get(), count, stream));
+        HIP_CHECK(
+            i32_gather(source.get(), source.size(), indices.get(), gathered.get(), count, stream));
         HIP_CHECK(hipStreamSynchronize(stream));
         for (std::int32_t& value : expected) { value -= 17; }
         require_exact(copy_to_host(first), expected, "I32 iota/copy/offset");
@@ -240,10 +246,10 @@ void qualify_bf16_movement_and_cast(hipStream_t stream) {
     using namespace ninfer::ops::r9700::eager;
     constexpr std::uint32_t destination_columns = 16;
     for (std::uint32_t rows = 1; rows <= 8; ++rows) {
-        const std::size_t elements = static_cast<std::size_t>(kHidden) * rows;
+        const std::size_t elements             = static_cast<std::size_t>(kHidden) * rows;
         const std::vector<hip_bfloat16> source = bf16_fixture(elements, rows);
-        std::vector<hip_bfloat16> destination(static_cast<std::size_t>(kHidden) * destination_columns,
-                                              bf16_from_bits(0x7d55U));
+        std::vector<hip_bfloat16> destination(
+            static_cast<std::size_t>(kHidden) * destination_columns, bf16_from_bits(0x7d55U));
         std::vector<std::int32_t> indices(rows);
         for (std::uint32_t row = 0; row < rows; ++row) {
             indices[row] = static_cast<std::int32_t>((rows * 3U + row * 5U) % destination_columns);
@@ -255,14 +261,14 @@ void qualify_bf16_movement_and_cast(hipStream_t stream) {
         copy_to_device(d_source, source);
         copy_to_device(d_destination, destination);
         copy_to_device(d_indices, indices);
-        ninfer::Tensor source_tensor(d_source.get(), ninfer::DType::BF16,
-                                     {static_cast<std::int32_t>(kHidden),
-                                      static_cast<std::int32_t>(rows)});
+        ninfer::Tensor source_tensor(
+            d_source.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
         ninfer::Tensor indices_tensor(d_indices.get(), ninfer::DType::I32,
                                       {static_cast<std::int32_t>(rows)});
-        ninfer::Tensor destination_tensor(d_destination.get(), ninfer::DType::BF16,
-                                          {static_cast<std::int32_t>(kHidden),
-                                           static_cast<std::int32_t>(destination_columns)});
+        ninfer::Tensor destination_tensor(
+            d_destination.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(destination_columns)});
         ninfer::ops::scatter(source_tensor, indices_tensor, destination_tensor, stream);
         HIP_CHECK(bf16_gather_columns(d_destination.get(), d_indices.get(), d_gather.get(), kHidden,
                                       rows, destination_columns, stream));
@@ -288,26 +294,28 @@ void qualify_bf16_movement_and_cast(hipStream_t stream) {
         std::vector<std::uint16_t> cast_expected(elements);
         for (std::size_t index = 0; index < elements; ++index) {
             const std::uint32_t sign = (index & 2U) == 0U ? 0U : 0x8000U;
-            const std::uint32_t exponent = 1U + static_cast<std::uint32_t>((index * 29U + rows) % 250U);
-            const std::uint32_t mantissa = static_cast<std::uint32_t>((index * 97U + rows * 19U) & 0x7fU);
+            const std::uint32_t exponent =
+                1U + static_cast<std::uint32_t>((index * 29U + rows) % 250U);
+            const std::uint32_t mantissa =
+                static_cast<std::uint32_t>((index * 97U + rows * 19U) & 0x7fU);
             const std::uint32_t upper = sign | (exponent << 7U) | mantissa;
             const std::uint32_t lower = (index & 1U) == 0U ? 0x8000U : 0x8001U;
-            fp32[index] = std::bit_cast<float>((upper << 16U) | lower);
-            cast_expected[index] = bf16_rne_bits(fp32[index]);
+            fp32[index]               = std::bit_cast<float>((upper << 16U) | lower);
+            cast_expected[index]      = bf16_rne_bits(fp32[index]);
         }
         DeviceBuffer<float> d_fp32(elements);
         DeviceBuffer<hip_bfloat16> d_cast(elements);
         DeviceBuffer<float> d_roundtrip(elements);
         copy_to_device(d_fp32, fp32);
-        ninfer::Tensor fp32_tensor(d_fp32.get(), ninfer::DType::FP32,
-                                   {static_cast<std::int32_t>(kHidden),
-                                    static_cast<std::int32_t>(rows)});
-        ninfer::Tensor cast_tensor(d_cast.get(), ninfer::DType::BF16,
-                                   {static_cast<std::int32_t>(kHidden),
-                                    static_cast<std::int32_t>(rows)});
-        ninfer::Tensor roundtrip_tensor(d_roundtrip.get(), ninfer::DType::FP32,
-                                        {static_cast<std::int32_t>(kHidden),
-                                         static_cast<std::int32_t>(rows)});
+        ninfer::Tensor fp32_tensor(
+            d_fp32.get(), ninfer::DType::FP32,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
+        ninfer::Tensor cast_tensor(
+            d_cast.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
+        ninfer::Tensor roundtrip_tensor(
+            d_roundtrip.get(), ninfer::DType::FP32,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
         ninfer::ops::cast_fp32_to_bf16(fp32_tensor, cast_tensor, stream);
         ninfer::ops::cast_bf16_to_fp32(cast_tensor, roundtrip_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
@@ -318,23 +326,23 @@ void qualify_bf16_movement_and_cast(hipStream_t stream) {
         }
         require_fp32_exact(copy_to_host(d_roundtrip), roundtrip_expected, "BF16-to-FP32 exact");
 
-        std::vector<hip_bfloat16> residual = bf16_fixture(elements, rows + 41U);
+        std::vector<hip_bfloat16> residual     = bf16_fixture(elements, rows + 41U);
         const std::vector<hip_bfloat16> addend = bf16_fixture(elements, rows + 83U);
         std::vector<std::uint16_t> residual_expected(elements);
         for (std::size_t index = 0; index < elements; ++index) {
             residual_expected[index] = bf16_rne_bits(static_cast<float>(residual[index]) +
-                                                      static_cast<float>(addend[index]));
+                                                     static_cast<float>(addend[index]));
         }
         DeviceBuffer<hip_bfloat16> d_residual(elements);
         DeviceBuffer<hip_bfloat16> d_addend(elements);
         copy_to_device(d_residual, residual);
         copy_to_device(d_addend, addend);
-        ninfer::Tensor addend_tensor(d_addend.get(), ninfer::DType::BF16,
-                                     {static_cast<std::int32_t>(kHidden),
-                                      static_cast<std::int32_t>(rows)});
-        ninfer::Tensor residual_tensor(d_residual.get(), ninfer::DType::BF16,
-                                       {static_cast<std::int32_t>(kHidden),
-                                        static_cast<std::int32_t>(rows)});
+        ninfer::Tensor addend_tensor(
+            d_addend.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
+        ninfer::Tensor residual_tensor(
+            d_residual.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
         ninfer::ops::residual_add(addend_tensor, residual_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
         require_bf16_exact(copy_to_host(d_residual), residual_expected, "BF16 residual add");
@@ -345,38 +353,38 @@ void qualify_mtp_pack_split(hipStream_t stream) {
     using ninfer::DType;
     using ninfer::Tensor;
     constexpr std::uint32_t packed_features = 2U * kHidden;
-    constexpr std::uint32_t attn_features = 14336;
-    constexpr std::array<std::uint16_t, 8> edge_bits{
-        0x0000U, 0x8000U, 0x0001U, 0x7f7fU, 0xff7fU, 0x7f80U, 0xff80U, 0x7fc1U};
+    constexpr std::uint32_t attn_features   = 14336;
+    constexpr std::array<std::uint16_t, 8> edge_bits{0x0000U, 0x8000U, 0x0001U, 0x7f7fU,
+                                                     0xff7fU, 0x7f80U, 0xff80U, 0x7fc1U};
 
     for (std::uint32_t tokens = 1; tokens <= 8; ++tokens) {
-        const std::size_t input_elements = static_cast<std::size_t>(kHidden) * tokens;
+        const std::size_t input_elements    = static_cast<std::size_t>(kHidden) * tokens;
         std::vector<hip_bfloat16> embedding = bf16_fixture(input_elements, 701U + tokens);
-        std::vector<hip_bfloat16> hidden = bf16_fixture(input_elements, 809U + tokens);
+        std::vector<hip_bfloat16> hidden    = bf16_fixture(input_elements, 809U + tokens);
         for (std::size_t index = 0; index < edge_bits.size() && index < input_elements; ++index) {
             embedding[index] = bf16_from_bits(edge_bits[index]);
-            hidden[index] = bf16_from_bits(edge_bits[edge_bits.size() - 1U - index]);
+            hidden[index]    = bf16_from_bits(edge_bits[edge_bits.size() - 1U - index]);
         }
         DeviceBuffer<hip_bfloat16> d_embedding(input_elements);
         DeviceBuffer<hip_bfloat16> d_hidden(input_elements);
         DeviceBuffer<hip_bfloat16> d_packed(static_cast<std::size_t>(packed_features) * tokens);
         copy_to_device(d_embedding, embedding);
         copy_to_device(d_hidden, hidden);
-        Tensor embedding_tensor(d_embedding.get(), DType::BF16,
-                                {static_cast<std::int32_t>(kHidden),
-                                 static_cast<std::int32_t>(tokens)});
-        Tensor hidden_tensor(d_hidden.get(), DType::BF16,
-                             {static_cast<std::int32_t>(kHidden),
-                              static_cast<std::int32_t>(tokens)});
-        Tensor packed_tensor(d_packed.get(), DType::BF16,
-                             {static_cast<std::int32_t>(packed_features),
-                              static_cast<std::int32_t>(tokens)});
+        Tensor embedding_tensor(
+            d_embedding.get(), DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(tokens)});
+        Tensor hidden_tensor(
+            d_hidden.get(), DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(tokens)});
+        Tensor packed_tensor(
+            d_packed.get(), DType::BF16,
+            {static_cast<std::int32_t>(packed_features), static_cast<std::int32_t>(tokens)});
         ninfer::ops::mtp_pack_fc_input(embedding_tensor, hidden_tensor, packed_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
-        std::vector<std::uint16_t> packed_expected(
-            static_cast<std::size_t>(packed_features) * tokens);
+        std::vector<std::uint16_t> packed_expected(static_cast<std::size_t>(packed_features) *
+                                                   tokens);
         for (std::uint32_t token = 0; token < tokens; ++token) {
-            const std::size_t input_base = static_cast<std::size_t>(token) * kHidden;
+            const std::size_t input_base  = static_cast<std::size_t>(token) * kHidden;
             const std::size_t output_base = static_cast<std::size_t>(token) * packed_features;
             for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
                 packed_expected[output_base + feature] = bf16_bits(embedding[input_base + feature]);
@@ -384,14 +392,13 @@ void qualify_mtp_pack_split(hipStream_t stream) {
                     bf16_bits(hidden[input_base + feature]);
             }
         }
-        require_bf16_exact(copy_to_host(d_packed), packed_expected,
-                           "public MTP FC input pack");
+        require_bf16_exact(copy_to_host(d_packed), packed_expected, "public MTP FC input pack");
 
-        const std::size_t attn_elements = static_cast<std::size_t>(attn_features) * tokens;
+        const std::size_t attn_elements      = static_cast<std::size_t>(attn_features) * tokens;
         std::vector<hip_bfloat16> attn_input = bf16_fixture(attn_elements, 907U + tokens);
         for (std::size_t index = 0; index < edge_bits.size(); ++index) {
-            const std::array<std::size_t, 4> boundary{
-                index, 6144U + index, 7168U + index, 13312U + index};
+            const std::array<std::size_t, 4> boundary{index, 6144U + index, 7168U + index,
+                                                      13312U + index};
             for (const std::size_t offset : boundary) {
                 attn_input[offset] = bf16_from_bits(edge_bits[index]);
             }
@@ -402,15 +409,13 @@ void qualify_mtp_pack_split(hipStream_t stream) {
         DeviceBuffer<hip_bfloat16> d_gate(6144U * tokens);
         DeviceBuffer<hip_bfloat16> d_value(1024U * tokens);
         copy_to_device(d_attn_input, attn_input);
-        Tensor attn_tensor(d_attn_input.get(), DType::BF16,
-                           {static_cast<std::int32_t>(attn_features),
-                            static_cast<std::int32_t>(tokens)});
+        Tensor attn_tensor(
+            d_attn_input.get(), DType::BF16,
+            {static_cast<std::int32_t>(attn_features), static_cast<std::int32_t>(tokens)});
         Tensor query_tensor(d_query.get(), DType::BF16,
                             {256, 24, static_cast<std::int32_t>(tokens)});
-        Tensor key_tensor(d_key.get(), DType::BF16,
-                          {256, 4, static_cast<std::int32_t>(tokens)});
-        Tensor gate_tensor(d_gate.get(), DType::BF16,
-                           {256, 24, static_cast<std::int32_t>(tokens)});
+        Tensor key_tensor(d_key.get(), DType::BF16, {256, 4, static_cast<std::int32_t>(tokens)});
+        Tensor gate_tensor(d_gate.get(), DType::BF16, {256, 24, static_cast<std::int32_t>(tokens)});
         Tensor value_tensor(d_value.get(), DType::BF16,
                             {256, 4, static_cast<std::int32_t>(tokens)});
         ninfer::ops::mtp_split_attn_in(attn_tensor, query_tensor, key_tensor, gate_tensor,
@@ -422,7 +427,8 @@ void qualify_mtp_pack_split(hipStream_t stream) {
                 const std::size_t source_base = static_cast<std::size_t>(token) * attn_features;
                 const std::size_t target_base = static_cast<std::size_t>(token) * count;
                 for (std::size_t index = 0; index < count; ++index) {
-                    expected[target_base + index] = bf16_bits(attn_input[source_base + begin + index]);
+                    expected[target_base + index] =
+                        bf16_bits(attn_input[source_base + begin + index]);
                 }
             }
             return expected;
@@ -442,8 +448,7 @@ void qualify_mtp_pack_split(hipStream_t stream) {
     Tensor embedding(shared_pack.get(), DType::BF16, {static_cast<std::int32_t>(kHidden), 1});
     Tensor hidden(shared_pack.get() + kHidden, DType::BF16,
                   {static_cast<std::int32_t>(kHidden), 1});
-    Tensor output(pack_output.get(), DType::BF16,
-                  {static_cast<std::int32_t>(packed_features), 1});
+    Tensor output(pack_output.get(), DType::BF16, {static_cast<std::int32_t>(packed_features), 1});
     Tensor wrong_embedding(shared_pack.get(), DType::BF16,
                            {static_cast<std::int32_t>(kHidden - 1U), 1});
     require_invalid_argument(
@@ -476,11 +481,15 @@ void qualify_mtp_pack_split(hipStream_t stream) {
         "MTP split output shape");
     Tensor query_input_overlap(split_input.get() + 1, DType::BF16, {256, 24, 1});
     require_invalid_argument(
-        [&] { ninfer::ops::mtp_split_attn_in(attn, query_input_overlap, key, gate, value, stream); },
+        [&] {
+            ninfer::ops::mtp_split_attn_in(attn, query_input_overlap, key, gate, value, stream);
+        },
         "MTP split input alias");
     Tensor key_query_overlap(split_query.get() + 512, DType::BF16, {256, 4, 1});
     require_invalid_argument(
-        [&] { ninfer::ops::mtp_split_attn_in(attn, query, key_query_overlap, gate, value, stream); },
+        [&] {
+            ninfer::ops::mtp_split_attn_in(attn, query, key_query_overlap, gate, value, stream);
+        },
         "MTP split output alias");
 }
 
@@ -491,18 +500,18 @@ void qualify_argmax(hipStream_t stream) {
         std::vector<hip_bfloat16> logits(count);
         std::vector<std::int32_t> expected(rows);
         for (std::uint32_t column = 0; column < rows; ++column) {
-            const std::size_t base = static_cast<std::size_t>(column) * kVocabPhysical;
+            const std::size_t base  = static_cast<std::size_t>(column) * kVocabPhysical;
             std::int32_t best_index = 0;
-            float best = -std::numeric_limits<float>::infinity();
+            float best              = -std::numeric_limits<float>::infinity();
             for (std::uint32_t row = 0; row < kVocabPhysical; ++row) {
                 float value = static_cast<float>((row * 17U + column * 31U) % 113U) / 16.0F - 3.0F;
                 if (row == 11U || row == 57U) { value = 31.0F + static_cast<float>(column); }
                 logits[base + row] = bf16_from_bits(bf16_rne_bits(value));
                 if (row < kVocabValid) {
                     const float represented = static_cast<float>(logits[base + row]);
-                    if (represented > best || (represented == best &&
-                                               static_cast<std::int32_t>(row) < best_index)) {
-                        best = represented;
+                    if (represented > best ||
+                        (represented == best && static_cast<std::int32_t>(row) < best_index)) {
+                        best       = represented;
                         best_index = static_cast<std::int32_t>(row);
                     }
                 }
@@ -512,9 +521,9 @@ void qualify_argmax(hipStream_t stream) {
         DeviceBuffer<hip_bfloat16> d_logits(count);
         DeviceBuffer<std::int32_t> d_output(rows);
         copy_to_device(d_logits, logits);
-        ninfer::Tensor logits_tensor(d_logits.get(), ninfer::DType::BF16,
-                                     {static_cast<std::int32_t>(kVocabPhysical),
-                                      static_cast<std::int32_t>(rows)});
+        ninfer::Tensor logits_tensor(
+            d_logits.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kVocabPhysical), static_cast<std::int32_t>(rows)});
         ninfer::Tensor output_tensor(d_output.get(), ninfer::DType::I32,
                                      {static_cast<std::int32_t>(rows)});
         ninfer::ops::argmax(logits_tensor, output_tensor, static_cast<std::int32_t>(kVocabValid),
@@ -522,27 +531,89 @@ void qualify_argmax(hipStream_t stream) {
         HIP_CHECK(hipStreamSynchronize(stream));
         require_exact(copy_to_host(d_output), expected, "BF16 deterministic argmax");
     }
-    if (argmax_bf16(nullptr, reinterpret_cast<std::int32_t*>(1), 1, 1, 1, stream) != hipErrorInvalidValue ||
-        argmax_bf16(reinterpret_cast<const hip_bfloat16*>(1), reinterpret_cast<std::int32_t*>(1),
-                    8, 9, 1, stream) != hipErrorInvalidValue) {
+    if (argmax_bf16(nullptr, reinterpret_cast<std::int32_t*>(1), 1, 1, 1, stream) !=
+            hipErrorInvalidValue ||
+        argmax_bf16(reinterpret_cast<const hip_bfloat16*>(1), reinterpret_cast<std::int32_t*>(1), 8,
+                    9, 1, stream) != hipErrorInvalidValue) {
         fail("argmax boundary did not reject malformed geometry");
     }
 }
 
 void qualify_normalization_and_activations(hipStream_t stream) {
     using namespace ninfer::ops::r9700::eager;
-    constexpr float eps = 1.0e-5F;
+    constexpr float eps                    = 1.0e-5F;
     const std::vector<hip_bfloat16> weight = bf16_fixture(kHidden, 97U);
-    const std::vector<hip_bfloat16> bias = bf16_fixture(kHidden, 101U);
+    const std::vector<hip_bfloat16> bias   = bf16_fixture(kHidden, 101U);
     DeviceBuffer<hip_bfloat16> d_weight(kHidden);
     DeviceBuffer<hip_bfloat16> d_bias(kHidden);
     copy_to_device(d_weight, weight);
     copy_to_device(d_bias, bias);
-    for (std::uint32_t rows = 1; rows <= 8; ++rows) {
-        const std::size_t elements = static_cast<std::size_t>(kHidden) * rows;
+    // Vision LayerNorm: 1152 features over one 1920x1080 image's 8256 patches and a ragged count.
+    for (const std::uint32_t rows : {8256U, 37U}) {
+        constexpr std::uint32_t kVisionFeatures = 1152;
+        const std::size_t elements              = static_cast<std::size_t>(kVisionFeatures) * rows;
+        const std::vector<hip_bfloat16> input   = bf16_fixture(elements, rows + 211U);
+        const std::vector<hip_bfloat16> vision_weight = bf16_fixture(kVisionFeatures, 223U);
+        const std::vector<hip_bfloat16> vision_bias   = bf16_fixture(kVisionFeatures, 227U);
+        DeviceBuffer<hip_bfloat16> d_input(elements);
+        DeviceBuffer<hip_bfloat16> d_output(elements);
+        DeviceBuffer<hip_bfloat16> d_vision_weight(kVisionFeatures);
+        DeviceBuffer<hip_bfloat16> d_vision_bias(kVisionFeatures);
+        copy_to_device(d_input, input);
+        copy_to_device(d_vision_weight, vision_weight);
+        copy_to_device(d_vision_bias, vision_bias);
+        const std::array<std::int32_t, 2> shape{static_cast<std::int32_t>(kVisionFeatures),
+                                                static_cast<std::int32_t>(rows)};
+        ninfer::Tensor input_tensor(d_input.get(), ninfer::DType::BF16, {shape[0], shape[1]});
+        ninfer::Tensor output_tensor(d_output.get(), ninfer::DType::BF16, {shape[0], shape[1]});
+        ninfer::Tensor weight_tensor(d_vision_weight.get(), ninfer::DType::BF16, {shape[0]});
+        ninfer::Tensor bias_tensor(d_vision_bias.get(), ninfer::DType::BF16, {shape[0]});
+        std::vector<double> expected(elements);
+        for (std::uint32_t row = 0; row < rows; ++row) {
+            const std::size_t base = static_cast<std::size_t>(row) * kVisionFeatures;
+            double sum             = 0.0;
+            for (std::uint32_t feature = 0; feature < kVisionFeatures; ++feature) {
+                sum += static_cast<float>(input[base + feature]);
+            }
+            const double mean = sum / kVisionFeatures;
+            double variance   = 0.0;
+            for (std::uint32_t feature = 0; feature < kVisionFeatures; ++feature) {
+                const double centered = static_cast<float>(input[base + feature]) - mean;
+                variance += centered * centered;
+            }
+            const double inverse = 1.0 / std::sqrt(variance / kVisionFeatures + 1.0e-6);
+            for (std::uint32_t feature = 0; feature < kVisionFeatures; ++feature) {
+                expected[base + feature] = (static_cast<float>(input[base + feature]) - mean) *
+                                               inverse *
+                                               static_cast<float>(vision_weight[feature]) +
+                                           static_cast<float>(vision_bias[feature]);
+            }
+        }
+        ninfer::ops::layer_norm(input_tensor, weight_tensor, bias_tensor, 1.0e-6F, output_tensor,
+                                stream);
+        hipEvent_t begin = nullptr;
+        hipEvent_t end   = nullptr;
+        HIP_CHECK(hipEventCreate(&begin));
+        HIP_CHECK(hipEventCreate(&end));
+        HIP_CHECK(hipEventRecord(begin, stream));
+        ninfer::ops::layer_norm(input_tensor, weight_tensor, bias_tensor, 1.0e-6F, output_tensor,
+                                stream);
+        HIP_CHECK(hipEventRecord(end, stream));
+        HIP_CHECK(hipEventSynchronize(end));
+        float elapsed_ms = 0.0F;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_ms, begin, end));
+        HIP_CHECK(hipEventDestroy(begin));
+        HIP_CHECK(hipEventDestroy(end));
+        require_bf16_close(copy_to_host(d_output), expected, "vision LayerNorm FP64 oracle");
+        std::cout << "vision LayerNorm D=1152 rows=" << rows << " time_ms=" << elapsed_ms << '\n';
+    }
+
+    // 25..127 rows are mixed decode/prefill units served by the one-token-per-wave route.
+    for (const std::uint32_t rows : {1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 25U, 57U, 127U}) {
+        const std::size_t elements            = static_cast<std::size_t>(kHidden) * rows;
         const std::vector<hip_bfloat16> input = bf16_fixture(elements, rows + 131U);
-        const std::vector<hip_bfloat16> up = bf16_fixture(elements, rows + 149U);
-        const std::vector<hip_bfloat16> gate = bf16_fixture(elements, rows + 167U);
+        const std::vector<hip_bfloat16> up    = bf16_fixture(elements, rows + 149U);
+        const std::vector<hip_bfloat16> gate  = bf16_fixture(elements, rows + 167U);
         DeviceBuffer<hip_bfloat16> d_input(elements);
         DeviceBuffer<hip_bfloat16> d_up(elements);
         DeviceBuffer<hip_bfloat16> d_gate(elements);
@@ -551,21 +622,21 @@ void qualify_normalization_and_activations(hipStream_t stream) {
         copy_to_device(d_input, input);
         copy_to_device(d_up, up);
         copy_to_device(d_gate, gate);
-        ninfer::Tensor input_tensor(d_input.get(), ninfer::DType::BF16,
-                                    {static_cast<std::int32_t>(kHidden),
-                                     static_cast<std::int32_t>(rows)});
-        ninfer::Tensor up_tensor(d_up.get(), ninfer::DType::BF16,
-                                 {static_cast<std::int32_t>(kHidden),
-                                  static_cast<std::int32_t>(rows)});
-        ninfer::Tensor gate_tensor(d_gate.get(), ninfer::DType::BF16,
-                                   {static_cast<std::int32_t>(kHidden),
-                                    static_cast<std::int32_t>(rows)});
-        ninfer::Tensor output_tensor(d_output.get(), ninfer::DType::BF16,
-                                     {static_cast<std::int32_t>(kHidden),
-                                      static_cast<std::int32_t>(rows)});
-        ninfer::Tensor mutable_tensor(d_mutable.get(), ninfer::DType::BF16,
-                                      {static_cast<std::int32_t>(kHidden),
-                                       static_cast<std::int32_t>(rows)});
+        ninfer::Tensor input_tensor(
+            d_input.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
+        ninfer::Tensor up_tensor(
+            d_up.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
+        ninfer::Tensor gate_tensor(
+            d_gate.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
+        ninfer::Tensor output_tensor(
+            d_output.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
+        ninfer::Tensor mutable_tensor(
+            d_mutable.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
         ninfer::Tensor weight_tensor(d_weight.get(), ninfer::DType::BF16,
                                      {static_cast<std::int32_t>(kHidden)});
         ninfer::Tensor bias_tensor(d_bias.get(), ninfer::DType::BF16,
@@ -576,17 +647,17 @@ void qualify_normalization_and_activations(hipStream_t stream) {
         std::vector<double> layer_expected(elements);
         for (std::uint32_t row = 0; row < rows; ++row) {
             const std::size_t base = static_cast<std::size_t>(row) * kHidden;
-            double sum = 0.0;
-            double sumsq = 0.0;
+            double sum             = 0.0;
+            double sumsq           = 0.0;
             for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
                 const double value = static_cast<float>(input[base + feature]);
                 sum += value;
                 sumsq += value * value;
             }
             const double rms_inverse = 1.0 / std::sqrt(sumsq / kHidden + eps);
-            const double l2_inverse = 1.0 / std::sqrt(sumsq + eps);
-            const double mean = sum / kHidden;
-            double variance = 0.0;
+            const double l2_inverse  = 1.0 / std::sqrt(sumsq + eps);
+            const double mean        = sum / kHidden;
+            double variance          = 0.0;
             for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
                 const double centered = static_cast<float>(input[base + feature]) - mean;
                 variance += centered * centered;
@@ -594,11 +665,12 @@ void qualify_normalization_and_activations(hipStream_t stream) {
             const double layer_inverse = 1.0 / std::sqrt(variance / kHidden + eps);
             for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
                 const double value = static_cast<float>(input[base + feature]);
-                rms_expected[base + feature] = value * rms_inverse *
-                    (1.0 + static_cast<float>(weight[feature]));
+                rms_expected[base + feature] =
+                    value * rms_inverse * (1.0 + static_cast<float>(weight[feature]));
                 l2_expected[base + feature] = value * l2_inverse;
-                layer_expected[base + feature] = (value - mean) * layer_inverse *
-                    static_cast<float>(weight[feature]) + static_cast<float>(bias[feature]);
+                layer_expected[base + feature] =
+                    (value - mean) * layer_inverse * static_cast<float>(weight[feature]) +
+                    static_cast<float>(bias[feature]);
             }
         }
         ninfer::ops::rmsnorm(input_tensor, weight_tensor, eps, true, output_tensor, stream);
@@ -617,13 +689,14 @@ void qualify_normalization_and_activations(hipStream_t stream) {
         std::vector<double> gelu_exact_expected(elements);
         std::vector<double> gelu_tanh_expected(elements);
         for (std::size_t index = 0; index < elements; ++index) {
-            const double g = static_cast<float>(gate[index]);
-            const double x = static_cast<float>(up[index]);
-            silu_expected[index] = (g / (1.0 + std::exp(-g))) * x;
-            sigmoid_expected[index] = x / (1.0 + std::exp(-g));
+            const double g             = static_cast<float>(gate[index]);
+            const double x             = static_cast<float>(up[index]);
+            silu_expected[index]       = (g / (1.0 + std::exp(-g))) * x;
+            sigmoid_expected[index]    = x / (1.0 + std::exp(-g));
             gelu_exact_expected[index] = 0.5 * x * (1.0 + std::erf(x / std::sqrt(2.0)));
-            gelu_tanh_expected[index] = 0.5 * x * (1.0 + std::tanh(
-                std::sqrt(2.0 / std::numbers::pi) * (x + 0.044715 * x * x * x)));
+            gelu_tanh_expected[index] =
+                0.5 * x *
+                (1.0 + std::tanh(std::sqrt(2.0 / std::numbers::pi) * (x + 0.044715 * x * x * x)));
         }
         ninfer::ops::silu_mul(gate_tensor, up_tensor, output_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
@@ -634,7 +707,7 @@ void qualify_normalization_and_activations(hipStream_t stream) {
         // production view directly against the same independent formula.
         std::vector<hip_bfloat16> packed(elements * 2U);
         for (std::uint32_t row = 0; row < rows; ++row) {
-            const std::size_t source = static_cast<std::size_t>(row) * kHidden;
+            const std::size_t source      = static_cast<std::size_t>(row) * kHidden;
             const std::size_t destination = static_cast<std::size_t>(row) * 2U * kHidden;
             std::copy_n(gate.begin() + static_cast<std::ptrdiff_t>(source), kHidden,
                         packed.begin() + static_cast<std::ptrdiff_t>(destination));
@@ -643,27 +716,56 @@ void qualify_normalization_and_activations(hipStream_t stream) {
         }
         DeviceBuffer<hip_bfloat16> d_packed(packed.size());
         copy_to_device(d_packed, packed);
-        ninfer::Tensor packed_tensor(d_packed.get(), ninfer::DType::BF16,
-                                     {static_cast<std::int32_t>(2U * kHidden),
-                                      static_cast<std::int32_t>(rows)});
-        const ninfer::Tensor strided_gate = packed_tensor.slice(
-            0, 0, static_cast<std::int32_t>(kHidden));
-        const ninfer::Tensor strided_up = packed_tensor.slice(
-            0, static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(kHidden));
+        ninfer::Tensor packed_tensor(
+            d_packed.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(2U * kHidden), static_cast<std::int32_t>(rows)});
+        const ninfer::Tensor strided_gate =
+            packed_tensor.slice(0, 0, static_cast<std::int32_t>(kHidden));
+        const ninfer::Tensor strided_up = packed_tensor.slice(0, static_cast<std::int32_t>(kHidden),
+                                                              static_cast<std::int32_t>(kHidden));
         ninfer::ops::silu_mul(strided_gate, strided_up, output_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
         require_bf16_close(copy_to_host(d_output), silu_expected,
                            "strided SiLU multiply FP64 oracle");
-        ninfer::Tensor overlapping_output(d_packed.get(), ninfer::DType::BF16,
-                                          {static_cast<std::int32_t>(kHidden),
-                                           static_cast<std::int32_t>(rows)});
+        ninfer::Tensor overlapping_output(
+            d_packed.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
         require_invalid_argument(
             [&] { ninfer::ops::silu_mul(strided_gate, strided_up, overlapping_output, stream); },
             "strided SiLU output/input overlap");
         copy_to_device(d_mutable, up);
         ninfer::ops::sigmoid_mul(gate_tensor, mutable_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
-        require_bf16_close(copy_to_host(d_mutable), sigmoid_expected, "sigmoid multiply FP64 oracle");
+        require_bf16_close(copy_to_host(d_mutable), sigmoid_expected,
+                           "sigmoid multiply FP64 oracle");
+        {
+            // FP32-source form: equals cast_fp32_to_bf16 then sigmoid_mul, bit for bit.
+            std::vector<float> wide(up.size());
+            for (std::size_t index = 0; index < wide.size(); ++index)
+                wide[index] = static_cast<float>(up[index]) *
+                              (1.0F + static_cast<float>(index % 7U) * 0.0009F);
+            DeviceBuffer<float> d_wide(wide.size());
+            HIP_CHECK(hipMemcpy(d_wide.get(), wide.data(), wide.size() * sizeof(float),
+                                hipMemcpyHostToDevice));
+            ninfer::Tensor wide_tensor(d_wide.get(), ninfer::DType::FP32,
+                                       {mutable_tensor.ne[0], mutable_tensor.ne[1],
+                                        mutable_tensor.ne[2], mutable_tensor.ne[3]});
+            DeviceBuffer<hip_bfloat16> d_fused(up.size());
+            ninfer::Tensor fused_tensor(d_fused.get(), ninfer::DType::BF16,
+                                        {mutable_tensor.ne[0], mutable_tensor.ne[1],
+                                         mutable_tensor.ne[2], mutable_tensor.ne[3]});
+            ninfer::ops::sigmoid_mul(gate_tensor, wide_tensor, fused_tensor, stream);
+            ninfer::ops::cast_fp32_to_bf16(wide_tensor, mutable_tensor, stream);
+            ninfer::ops::sigmoid_mul(gate_tensor, mutable_tensor, stream);
+            HIP_CHECK(hipStreamSynchronize(stream));
+            const auto fused = copy_to_host(d_fused), composed = copy_to_host(d_mutable);
+            if (std::memcmp(fused.data(), composed.data(), fused.size() * sizeof(hip_bfloat16)) !=
+                0)
+                fail("FP32-source sigmoid multiply differs from cast + sigmoid_mul");
+            require_invalid_argument(
+                [&] { ninfer::ops::sigmoid_mul(gate_tensor, wide_tensor, gate_tensor, stream); },
+                "FP32-source sigmoid output/gate overlap");
+        }
         copy_to_device(d_mutable, up);
         ninfer::ops::gelu(mutable_tensor, ninfer::ops::GeluMode::Exact, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
@@ -676,19 +778,19 @@ void qualify_normalization_and_activations(hipStream_t stream) {
     if (rmsnorm_bf16(nullptr, d_weight.get(), d_weight.get(), kHidden, 1, eps, false, stream) !=
             hipErrorInvalidValue ||
         l2norm_bf16(d_weight.get(), d_weight.get(), kHidden, 1,
-                     std::numeric_limits<float>::infinity(), stream) != hipErrorInvalidValue ||
+                    std::numeric_limits<float>::infinity(), stream) != hipErrorInvalidValue ||
         gelu_bf16(d_weight.get(), 1, static_cast<GeluMode>(7), stream) != hipErrorInvalidValue) {
         fail("normalization or activation boundary did not reject malformed input");
     }
     SiluMulStridedShape mismatched_shape{};
     mismatched_shape.extent[0] = 2;
     SiluMulStridedShape overflowing_shape{};
-    overflowing_shape.extent[0] = 2;
+    overflowing_shape.extent[0]      = 2;
     overflowing_shape.gate_stride[0] = std::numeric_limits<std::uint64_t>::max();
-    if (silu_mul_bf16_strided(d_weight.get(), d_weight.get(), d_weight.get(), 1,
-                              mismatched_shape, stream) != hipErrorInvalidValue ||
-        silu_mul_bf16_strided(d_weight.get(), d_weight.get(), d_weight.get(), 2,
-                              overflowing_shape, stream) != hipErrorInvalidValue) {
+    if (silu_mul_bf16_strided(d_weight.get(), d_weight.get(), d_weight.get(), 1, mismatched_shape,
+                              stream) != hipErrorInvalidValue ||
+        silu_mul_bf16_strided(d_weight.get(), d_weight.get(), d_weight.get(), 2, overflowing_shape,
+                              stream) != hipErrorInvalidValue) {
         fail("strided SiLU boundary did not reject malformed geometry");
     }
 }
@@ -704,9 +806,9 @@ void qualify_embedding(hipStream_t stream) {
     std::array<std::vector<hip_bfloat16>, ids.size()> expected_rows;
     for (std::size_t row = 0; row < ids.size(); ++row) {
         expected_rows[row] = bf16_fixture(kHidden, static_cast<std::uint32_t>(ids[row]));
-        HIP_CHECK(hipMemcpyAsync(d_table.get() + static_cast<std::size_t>(ids[row]) * kHidden,
-                                 expected_rows[row].data(), expected_rows[row].size() * sizeof(hip_bfloat16),
-                                 hipMemcpyHostToDevice, stream));
+        HIP_CHECK(hipMemcpyAsync(
+            d_table.get() + static_cast<std::size_t>(ids[row]) * kHidden, expected_rows[row].data(),
+            expected_rows[row].size() * sizeof(hip_bfloat16), hipMemcpyHostToDevice, stream));
     }
     HIP_CHECK(hipStreamSynchronize(stream));
     for (std::uint32_t rows = 1; rows <= 8; ++rows) {
@@ -716,19 +818,19 @@ void qualify_embedding(hipStream_t stream) {
         copy_to_device(d_ids, ids_host);
         ninfer::Tensor ids_tensor(d_ids.get(), ninfer::DType::I32,
                                   {static_cast<std::int32_t>(rows)});
-        ninfer::Tensor output_tensor(d_output.get(), ninfer::DType::BF16,
-                                     {static_cast<std::int32_t>(kHidden),
-                                      static_cast<std::int32_t>(rows)});
+        ninfer::Tensor output_tensor(
+            d_output.get(), ninfer::DType::BF16,
+            {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(rows)});
         ninfer::Weight table{};
-        table.qtype = ninfer::QType::BF16_CTRL;
-        table.layout = ninfer::QuantLayout::Contiguous;
-        table.ndim = 2;
-        table.shape[0] = static_cast<std::int32_t>(kVocabPhysical);
-        table.shape[1] = static_cast<std::int32_t>(kHidden);
+        table.qtype           = ninfer::QType::BF16_CTRL;
+        table.layout          = ninfer::QuantLayout::Contiguous;
+        table.ndim            = 2;
+        table.shape[0]        = static_cast<std::int32_t>(kVocabPhysical);
+        table.shape[1]        = static_cast<std::int32_t>(kHidden);
         table.padded_shape[0] = table.shape[0];
         table.padded_shape[1] = table.shape[1];
-        table.qdata = d_table.get();
-        table.payload_bytes = table_elements * sizeof(hip_bfloat16);
+        table.qdata           = d_table.get();
+        table.payload_bytes   = table_elements * sizeof(hip_bfloat16);
         ninfer::ops::embedding(ids_tensor, table, output_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
         std::vector<std::uint16_t> expected(static_cast<std::size_t>(kHidden) * rows);
@@ -749,15 +851,15 @@ void qualify_w8_embedding_product_shape(hipStream_t stream) {
     using ninfer::Tensor;
     using ninfer::Weight;
 
-    constexpr std::uint32_t group = 32;
+    constexpr std::uint32_t group  = 32;
     constexpr std::uint32_t padded = kHidden;
     constexpr std::uint32_t groups = padded / group;
-    constexpr std::array<std::int32_t, 8> ids{
-        0, 17, 513, 4096, 65535, 131071, 248076, 248319};
-    const std::size_t code_elements = static_cast<std::size_t>(kVocabPhysical) * padded;
+    constexpr std::array<std::int32_t, 8> ids{0, 17, 513, 4096, 65535, 131071, 248076, 248319};
+    const std::size_t code_elements  = static_cast<std::size_t>(kVocabPhysical) * padded;
     const std::size_t scale_elements = static_cast<std::size_t>(kVocabPhysical) * groups;
-    const std::size_t scale_offset = (code_elements + 255U) / 256U * 256U;
-    const std::size_t required_payload_bytes = scale_offset + scale_elements * sizeof(std::uint16_t);
+    const std::size_t scale_offset   = (code_elements + 255U) / 256U * 256U;
+    const std::size_t required_payload_bytes =
+        scale_offset + scale_elements * sizeof(std::uint16_t);
 
     // Own the complete product extents on device, but populate only the independently checked
     // high/last rows. This proves the 64-bit row arithmetic without mirroring 1.3 GiB on the host.
@@ -776,8 +878,8 @@ void qualify_w8_embedding_product_shape(hipStream_t stream) {
         std::vector<std::uint8_t> row_codes(padded);
         std::vector<std::uint16_t> row_scales(groups);
         for (std::uint32_t scale_group = 0; scale_group < groups; ++scale_group) {
-            const float scale_value = static_cast<float>(1U + (row + 3U * scale_group) % 7U) /
-                                      128.0F;
+            const float scale_value =
+                static_cast<float>(1U + (row + 3U * scale_group) % 7U) / 128.0F;
             row_scales[scale_group] =
                 std::bit_cast<std::uint16_t>(static_cast<_Float16>(scale_value));
         }
@@ -785,8 +887,8 @@ void qualify_w8_embedding_product_shape(hipStream_t stream) {
             const auto code = static_cast<std::int8_t>(
                 static_cast<std::int32_t>((row * 11U + feature * 17U) % 255U) - 127);
             row_codes[feature] = static_cast<std::uint8_t>(code);
-            const float scale = static_cast<float>(
-                std::bit_cast<_Float16>(row_scales[feature / group]));
+            const float scale =
+                static_cast<float>(std::bit_cast<_Float16>(row_scales[feature / group]));
             expected[selected * kHidden + feature] =
                 bf16_rne_bits(static_cast<float>(code) * scale);
         }
@@ -799,28 +901,26 @@ void qualify_w8_embedding_product_shape(hipStream_t stream) {
     }
 
     Tensor ids_tensor(d_ids.get(), DType::I32, {static_cast<std::int32_t>(ids.size())});
-    Tensor output_tensor(d_output.get(), DType::BF16,
-                         {static_cast<std::int32_t>(kHidden),
-                          static_cast<std::int32_t>(ids.size())});
+    Tensor output_tensor(
+        d_output.get(), DType::BF16,
+        {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(ids.size())});
     Weight table{};
-    table.payload = d_codes.get();
+    table.payload       = d_codes.get();
     table.payload_bytes = required_payload_bytes;
-    table.qdata = d_codes.get();
-    table.qdata_bytes = code_elements;
-    table.scales = d_scales.get();
-    table.scale_bytes = scale_elements * sizeof(std::uint16_t);
-    table.qtype = QType::W8G32_F16S;
+    table.qdata         = d_codes.get();
+    table.qdata_bytes   = code_elements;
+    table.scales        = d_scales.get();
+    table.scale_bytes   = scale_elements * sizeof(std::uint16_t);
+    table.qtype         = QType::W8G32_F16S;
     table.group_size = table.group = group;
-    table.layout = QuantLayout::RowSplit;
-    table.scale_dtype = DType::FP16;
-    table.ndim = 2;
-    table.n = table.shape[0] = table.padded_shape[0] =
-        static_cast<std::int32_t>(kVocabPhysical);
-    table.k = table.shape[1] = table.padded_shape[1] =
-        static_cast<std::int32_t>(kHidden);
+    table.layout                   = QuantLayout::RowSplit;
+    table.scale_dtype              = DType::FP16;
+    table.ndim                     = 2;
+    table.n = table.shape[0] = table.padded_shape[0] = static_cast<std::int32_t>(kVocabPhysical);
+    table.k = table.shape[1] = table.padded_shape[1] = static_cast<std::int32_t>(kHidden);
 
     hipEvent_t start = nullptr;
-    hipEvent_t stop = nullptr;
+    hipEvent_t stop  = nullptr;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
     HIP_CHECK(hipEventRecord(start, stream));
@@ -838,25 +938,287 @@ void qualify_w8_embedding_product_shape(hipStream_t stream) {
     try {
         ninfer::ops::embedding(ids_tensor, malformed, output_tensor, stream);
         fail("product W8 embedding accepted a short payload");
-    } catch (const std::invalid_argument&) {
-    }
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
+    } catch (const std::invalid_argument&) {}
     malformed = table;
     malformed.padded_shape[1] += 128;
     try {
         ninfer::ops::embedding(ids_tensor, malformed, output_tensor, stream);
         fail("product W8 embedding accepted incorrect K padding");
-    } catch (const std::invalid_argument&) {
-    }
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
+    } catch (const std::invalid_argument&) {}
 
-    const double resident_mib = static_cast<double>(
-        code_elements + scale_elements * sizeof(std::uint16_t) +
-        ids.size() * sizeof(std::int32_t) +
-        static_cast<std::size_t>(kHidden) * ids.size() * sizeof(hip_bfloat16)) /
+    const double resident_mib =
+        static_cast<double>(code_elements + scale_elements * sizeof(std::uint16_t) +
+                            ids.size() * sizeof(std::int32_t) +
+                            static_cast<std::size_t>(kHidden) * ids.size() * sizeof(hip_bfloat16)) /
         static_cast<double>(1U << 20U);
     std::cout << "w8-embedding-product: shape=[" << kVocabPhysical << ',' << kHidden
               << "] ids=0/17/513/4096/65535/131071/248076/248319"
               << " exact_code_times_fp16_scale=PASS short_payload=REJECT padding=REJECT"
               << " resident_mib=" << resident_mib << " kernel_ms=" << milliseconds << '\n';
+}
+
+// Production Q4G64 row-split token embedding at the product shape. Selected rows are encoded
+// from independent logical codes/scales; the oracle decodes those logical values, never the
+// stored planes.
+void qualify_q4_embedding_product_shape(hipStream_t stream) {
+    using ninfer::DType;
+    using ninfer::QType;
+    using ninfer::QuantLayout;
+    using ninfer::Tensor;
+    using ninfer::Weight;
+
+    constexpr std::uint32_t group  = 64;
+    constexpr std::uint32_t padded = kHidden;
+    constexpr std::uint32_t groups = padded / group;
+    constexpr std::array<std::int32_t, 9> ids{0, 17, 513, 4096, 65535, 131071, 248076, 248319, 17};
+    const std::size_t code_bytes     = static_cast<std::size_t>(kVocabPhysical) * padded / 2U;
+    const std::size_t scale_elements = static_cast<std::size_t>(kVocabPhysical) * groups;
+    const std::size_t scale_offset   = (code_bytes + 255U) / 256U * 256U;
+    const std::size_t payload_bytes  = scale_offset + scale_elements * sizeof(std::uint16_t);
+
+    std::vector<std::uint8_t> host_table(payload_bytes, 0);
+    auto* codes  = host_table.data();
+    auto* scales = reinterpret_cast<std::uint16_t*>(codes + scale_offset);
+
+    std::vector<std::uint16_t> expected(static_cast<std::size_t>(kHidden) * ids.size());
+    for (std::size_t selected = 0; selected < ids.size(); ++selected) {
+        const std::size_t row = static_cast<std::size_t>(ids[selected]);
+        for (std::uint32_t scale_group = 0; scale_group < groups; ++scale_group) {
+            const float scale_value =
+                static_cast<float>(1U + (row + 5U * scale_group) % 9U) / 64.0F;
+            scales[row * groups + scale_group] =
+                std::bit_cast<std::uint16_t>(static_cast<_Float16>(scale_value));
+        }
+        for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
+            const int code = static_cast<int>((row * 7U + feature * 3U) % 16U) - 8;
+            auto& packed   = codes[row * (padded / 2U) + feature / 2U];
+            packed         = static_cast<std::uint8_t>(
+                (packed & ((feature & 1U) == 0U ? 0xf0U : 0x0fU)) |
+                ((static_cast<std::uint32_t>(code) & 0x0fU) << ((feature & 1U) * 4U)));
+            const float scale_value =
+                static_cast<float>(1U + (row + 5U * (feature / group)) % 9U) / 64.0F;
+            const float scale = static_cast<float>(static_cast<_Float16>(scale_value));
+            expected[selected * kHidden + feature] =
+                bf16_rne_bits(static_cast<float>(code) * scale);
+        }
+    }
+
+    DeviceBuffer<std::uint8_t> d_table(payload_bytes);
+    copy_to_device(d_table, host_table);
+    DeviceBuffer<std::int32_t> d_ids(ids.size());
+    DeviceBuffer<hip_bfloat16> d_output(static_cast<std::size_t>(kHidden) * ids.size());
+    HIP_CHECK(hipMemcpyAsync(d_ids.get(), ids.data(), ids.size() * sizeof(ids.front()),
+                             hipMemcpyHostToDevice, stream));
+    Tensor ids_tensor(d_ids.get(), DType::I32, {static_cast<std::int32_t>(ids.size())});
+    Tensor output_tensor(
+        d_output.get(), DType::BF16,
+        {static_cast<std::int32_t>(kHidden), static_cast<std::int32_t>(ids.size())});
+    Weight table{};
+    table.payload       = d_table.get();
+    table.payload_bytes = payload_bytes;
+    table.qdata         = d_table.get();
+    table.qdata_bytes   = code_bytes;
+    table.scales        = d_table.get() + scale_offset;
+    table.scale_bytes   = scale_elements * sizeof(std::uint16_t);
+    table.qtype         = QType::Q4G64_F16S;
+    table.group_size = table.group = group;
+    table.layout                   = QuantLayout::RowSplit;
+    table.scale_dtype              = DType::FP16;
+    table.ndim                     = 2;
+    table.n = table.shape[0] = table.padded_shape[0] = static_cast<std::int32_t>(kVocabPhysical);
+    table.k = table.shape[1] = table.padded_shape[1] = static_cast<std::int32_t>(kHidden);
+
+    hipEvent_t start = nullptr;
+    hipEvent_t stop  = nullptr;
+    HIP_CHECK(hipEventCreate(&start));
+    HIP_CHECK(hipEventCreate(&stop));
+    HIP_CHECK(hipEventRecord(start, stream));
+    ninfer::ops::embedding(ids_tensor, table, output_tensor, stream);
+    HIP_CHECK(hipEventRecord(stop, stream));
+    HIP_CHECK(hipEventSynchronize(stop));
+    float milliseconds = 0.0F;
+    HIP_CHECK(hipEventElapsedTime(&milliseconds, start, stop));
+    HIP_CHECK(hipEventDestroy(stop));
+    HIP_CHECK(hipEventDestroy(start));
+    require_bf16_exact(copy_to_host(d_output), expected, "product Q4 embedding");
+    std::cout << "q4-embedding-product: shape=[" << kVocabPhysical << ',' << kHidden
+              << "] ids=0/17/513/4096/65535/131071/248076/248319/17"
+              << " exact_code_times_fp16_scale=PASS resident_mib="
+              << static_cast<double>(payload_bytes) / static_cast<double>(1U << 20U)
+              << " kernel_ms=" << milliseconds << '\n';
+}
+
+// Production Q4G64 row-split token embedding resident in pinned host memory, at the product shape,
+// through both routes the runtime uses: generated-token ids gathered on the device from the
+// table in place, and a prompt window staged by the host (distinct rows into a compact image),
+// copied to the device and gathered from there, including the shifted MTP window. Every row is
+// encoded from independent logical codes/scales and the oracle decodes those logical values.
+void qualify_q4_embedding_host_routes(hipStream_t stream) {
+    using ninfer::DType;
+    using ninfer::QType;
+    using ninfer::QuantLayout;
+    using ninfer::Tensor;
+    using ninfer::Weight;
+
+    constexpr std::uint32_t group    = 64;
+    constexpr std::uint32_t padded   = kHidden;
+    constexpr std::uint32_t groups   = padded / group;
+    constexpr std::size_t kWindow    = 4097; // prefill chunk 4096 plus the shifted MTP id
+    const std::size_t code_bytes     = static_cast<std::size_t>(kVocabPhysical) * padded / 2U;
+    const std::size_t scale_elements = static_cast<std::size_t>(kVocabPhysical) * groups;
+    const std::size_t scale_offset   = (code_bytes + 255U) / 256U * 256U;
+    const std::size_t payload_bytes  = scale_offset + scale_elements * sizeof(std::uint16_t);
+
+    // A prompt-like window: repeated boundary rows plus pseudo-random rows with repeats.
+    std::vector<std::int32_t> ids;
+    ids.reserve(kWindow);
+    constexpr std::array<std::int32_t, 9> boundary{0,      17,     513,    4096, 65535,
+                                                   131071, 248076, 248319, 15};
+    std::uint32_t state = 0x9e3779b9U;
+    while (ids.size() < kWindow) {
+        if (ids.size() % 64U < boundary.size()) {
+            ids.push_back(boundary[ids.size() % 64U]);
+        } else {
+            state = state * 1664525U + 1013904223U;
+            ids.push_back(static_cast<std::int32_t>(
+                (state >> 8U) % (ids.size() % 3U == 0U ? 4096U : kVocabPhysical)));
+        }
+    }
+
+    void* host_payload = nullptr;
+    HIP_CHECK(hipHostMalloc(&host_payload, payload_bytes));
+    std::memset(host_payload, 0, payload_bytes);
+    auto* codes             = static_cast<std::uint8_t*>(host_payload);
+    auto* scales            = reinterpret_cast<std::uint16_t*>(codes + scale_offset);
+    const auto logical_code = [](std::size_t row, std::uint32_t feature) {
+        // The word term distinguishes the four code words of a group.
+        return static_cast<int>((row * 11U + feature * 5U + (feature / 16U) * 3U + (row >> 7U)) %
+                                16U) -
+               8;
+    };
+    const auto logical_scale = [](std::size_t row, std::uint32_t scale_group) {
+        return static_cast<float>(static_cast<_Float16>(
+            static_cast<float>(1U + (row * 3U + 7U * scale_group) % 97U) / 1024.0F));
+    };
+    std::vector<bool> encoded(kVocabPhysical, false);
+    for (const std::int32_t id : ids) {
+        const std::size_t row = static_cast<std::size_t>(id);
+        if (encoded[row]) { continue; }
+        encoded[row] = true;
+        for (std::uint32_t scale_group = 0; scale_group < groups; ++scale_group) {
+            scales[row * groups + scale_group] = std::bit_cast<std::uint16_t>(
+                static_cast<_Float16>(logical_scale(row, scale_group)));
+        }
+        for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
+            auto& packed = codes[row * (padded / 2U) + feature / 2U];
+            packed       = static_cast<std::uint8_t>(
+                (packed & ((feature & 1U) == 0U ? 0xf0U : 0x0fU)) |
+                ((static_cast<std::uint32_t>(logical_code(row, feature)) & 0x0fU)
+                 << ((feature & 1U) * 4U)));
+        }
+    }
+    std::vector<std::uint16_t> expected(static_cast<std::size_t>(kHidden) * ids.size());
+    for (std::size_t column = 0; column < ids.size(); ++column) {
+        const std::size_t row = static_cast<std::size_t>(ids[column]);
+        for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
+            expected[column * kHidden + feature] =
+                bf16_rne_bits(static_cast<float>(logical_code(row, feature)) *
+                              logical_scale(row, feature / group));
+        }
+    }
+
+    Weight table{};
+    table.payload       = host_payload;
+    table.payload_bytes = payload_bytes;
+    table.qdata         = host_payload;
+    table.qdata_bytes   = code_bytes;
+    table.scales        = codes + scale_offset;
+    table.scale_bytes   = scale_elements * sizeof(std::uint16_t);
+    table.qtype         = QType::Q4G64_F16S;
+    table.group_size = table.group = group;
+    table.layout                   = QuantLayout::RowSplit;
+    table.scale_dtype              = DType::FP16;
+    table.ndim                     = 2;
+    table.n = table.shape[0] = table.padded_shape[0] = static_cast<std::int32_t>(kVocabPhysical);
+    table.k = table.shape[1] = table.padded_shape[1] = static_cast<std::int32_t>(kHidden);
+
+    const auto columns = static_cast<std::int32_t>(ids.size());
+    DeviceBuffer<hip_bfloat16> d_output(static_cast<std::size_t>(kHidden) * ids.size());
+    Tensor output_tensor(d_output.get(), DType::BF16,
+                         {static_cast<std::int32_t>(kHidden), columns});
+    hipEvent_t start = nullptr;
+    hipEvent_t stop  = nullptr;
+    HIP_CHECK(hipEventCreate(&start));
+    HIP_CHECK(hipEventCreate(&stop));
+    const auto timed = [&](auto&& body) {
+        HIP_CHECK(hipEventRecord(start, stream));
+        body();
+        HIP_CHECK(hipEventRecord(stop, stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+        float milliseconds = 0.0F;
+        HIP_CHECK(hipEventElapsedTime(&milliseconds, start, stop));
+        return milliseconds;
+    };
+
+    // Generated-token route: device ids, table read in place through its unified address.
+    DeviceBuffer<std::int32_t> d_ids(ids.size());
+    copy_to_device(d_ids, ids);
+    Tensor ids_tensor(d_ids.get(), DType::I32, {columns});
+    const float in_place_ms =
+        timed([&] { ninfer::ops::embedding(ids_tensor, table, output_tensor, stream); });
+    require_bf16_exact(copy_to_host(d_output), expected, "host-resident Q4 embedding in place");
+
+    // Prompt route: host-staged compact image, one H2D copy, gather from device memory.
+    const std::uint64_t capacity = ninfer::ops::embedding_stage_capacity_bytes(
+        QType::Q4G64_F16S, static_cast<std::int32_t>(kHidden), columns);
+    void* host_image = nullptr;
+    HIP_CHECK(hipHostMalloc(&host_image, capacity));
+    DeviceBuffer<std::uint8_t> d_image(capacity);
+    const auto staging_start                = std::chrono::steady_clock::now();
+    const ninfer::ops::EmbeddingStage stage = ninfer::ops::stage_embedding_rows(
+        ids, table, std::span<std::byte>(static_cast<std::byte*>(host_image), capacity));
+    const double staging_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - staging_start)
+            .count();
+    if (stage.ids != columns || stage.rows % 16 != 0 || stage.bytes > capacity) {
+        fail("prompt embedding stage has the wrong extent");
+    }
+    const float copy_ms = timed([&] {
+        HIP_CHECK(
+            hipMemcpyAsync(d_image.get(), host_image, stage.bytes, hipMemcpyHostToDevice, stream));
+    });
+    const ninfer::ops::StagedEmbedding staged =
+        ninfer::ops::staged_embedding(stage, table, d_image.get());
+    HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.size() * sizeof(hip_bfloat16), stream));
+    const float staged_ms =
+        timed([&] { ninfer::ops::embedding(staged.slots, staged.table, output_tensor, stream); });
+    require_bf16_exact(copy_to_host(d_output), expected, "host-staged Q4 prompt embedding");
+
+    // Shifted MTP window: slots [1,window) against ids [1,window).
+    Tensor shifted_output = output_tensor.slice(1, 0, columns - 1);
+    HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.size() * sizeof(hip_bfloat16), stream));
+    ninfer::ops::embedding(staged.slots.slice(0, 1, columns - 1), staged.table, shifted_output,
+                           stream);
+    HIP_CHECK(hipStreamSynchronize(stream));
+    std::vector<hip_bfloat16> shifted = copy_to_host(d_output);
+    shifted.resize(static_cast<std::size_t>(kHidden) * (ids.size() - 1U));
+    require_bf16_exact(shifted,
+                       std::vector<std::uint16_t>(expected.begin() + kHidden, expected.end()),
+                       "host-staged shifted Q4 prompt embedding");
+
+    HIP_CHECK(hipEventDestroy(stop));
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipHostFree(host_image));
+    HIP_CHECK(hipHostFree(host_payload));
+    std::cout << "q4-embedding-host-routes: shape=[" << kVocabPhysical << ',' << kHidden
+              << "] window=" << columns << " distinct_rows=" << stage.rows
+              << " exact_code_times_fp16_scale=PASS(in_place,staged,shifted)"
+              << " in_place_kernel_ms=" << in_place_ms << " host_stage_ms=" << staging_ms
+              << " h2d_ms=" << copy_ms
+              << " image_mib=" << static_cast<double>(stage.bytes) / static_cast<double>(1U << 20U)
+              << " staged_kernel_ms=" << staged_ms << '\n';
 }
 
 void qualify_public_extended_paths(hipStream_t stream) {
@@ -901,13 +1263,12 @@ void qualify_public_extended_paths(hipStream_t stream) {
     require_exact(copy_to_host(d_shifted), shifted_expected, "public position offset");
 
     // Structured request/lane movement and feature extraction use exact BF16 bit oracles.
-    constexpr std::uint32_t features = 64;
-    constexpr std::uint32_t width = 4;
-    constexpr std::uint32_t batch = 2;
+    constexpr std::uint32_t features    = 64;
+    constexpr std::uint32_t width       = 4;
+    constexpr std::uint32_t batch       = 2;
     constexpr std::uint32_t lanes_count = 3;
-    const auto source_host = bf16_fixture(features * width * batch, 211U);
-    std::vector<hip_bfloat16> lane_host(features * width * lanes_count,
-                                        bf16_from_bits(0x5a5aU));
+    const auto source_host              = bf16_fixture(features * width * batch, 211U);
+    std::vector<hip_bfloat16> lane_host(features * width * lanes_count, bf16_from_bits(0x5a5aU));
     const std::vector<std::int32_t> lanes{2, 0};
     const std::vector<std::int32_t> valid{3, 2};
     DeviceBuffer<hip_bfloat16> d_source(source_host.size());
@@ -928,7 +1289,8 @@ void qualify_public_extended_paths(hipStream_t stream) {
     Tensor valid_columns(d_valid.get(), DType::I32, {static_cast<std::int32_t>(batch)});
     ninfer::ops::scatter_bf16_batch(source, lane_ids, valid_columns, lane_storage, stream);
     for (std::uint32_t request = 0; request < batch; ++request) {
-        for (std::uint32_t column = 0; column < static_cast<std::uint32_t>(valid[request]); ++column) {
+        for (std::uint32_t column = 0; column < static_cast<std::uint32_t>(valid[request]);
+             ++column) {
             for (std::uint32_t feature = 0; feature < features; ++feature) {
                 lane_host[(static_cast<std::size_t>(lanes[request]) * width + column) * features +
                           feature] =
@@ -954,7 +1316,8 @@ void qualify_public_extended_paths(hipStream_t stream) {
     Tensor count_tensor(d_counts.get(), DType::I32, {static_cast<std::int32_t>(batch)});
     ninfer::ops::gather_bf16_path(lane_storage, lane_ids, path, count_tensor, stream);
     for (std::uint32_t request = 0; request < batch; ++request) {
-        for (std::uint32_t column = 0; column < static_cast<std::uint32_t>(counts[request]); ++column) {
+        for (std::uint32_t column = 0; column < static_cast<std::uint32_t>(counts[request]);
+             ++column) {
             const std::uint32_t source_column = static_cast<std::uint32_t>(
                 paths[static_cast<std::size_t>(request) * width + column]);
             if (source_column == column) { continue; }
@@ -962,7 +1325,8 @@ void qualify_public_extended_paths(hipStream_t stream) {
                 lane_host[(static_cast<std::size_t>(lanes[request]) * width + column) * features +
                           feature] =
                     lane_host[(static_cast<std::size_t>(lanes[request]) * width + source_column) *
-                                  features + feature];
+                                  features +
+                              feature];
             }
         }
     }
@@ -970,17 +1334,17 @@ void qualify_public_extended_paths(hipStream_t stream) {
     std::transform(lane_host.begin(), lane_host.end(), lane_expected.begin(), bf16_bits);
     require_bf16_exact(copy_to_host(d_lanes), lane_expected, "public path gather");
 
-    constexpr std::uint32_t source_features = 73;
+    constexpr std::uint32_t source_features    = 73;
     constexpr std::uint32_t extracted_features = 17;
-    constexpr std::uint32_t extract_columns = 3;
-    constexpr std::uint32_t extract_start = 11;
+    constexpr std::uint32_t extract_columns    = 3;
+    constexpr std::uint32_t extract_start      = 11;
     const auto extract_source = bf16_fixture(source_features * extract_columns, 223U);
     DeviceBuffer<hip_bfloat16> d_extract_source(extract_source.size());
     DeviceBuffer<hip_bfloat16> d_extract(extracted_features * extract_columns);
     copy_to_device(d_extract_source, extract_source);
-    Tensor extract_source_tensor(d_extract_source.get(), DType::BF16,
-                                 {static_cast<std::int32_t>(source_features),
-                                  static_cast<std::int32_t>(extract_columns)});
+    Tensor extract_source_tensor(
+        d_extract_source.get(), DType::BF16,
+        {static_cast<std::int32_t>(source_features), static_cast<std::int32_t>(extract_columns)});
     Tensor extract_tensor(d_extract.get(), DType::BF16,
                           {static_cast<std::int32_t>(extracted_features),
                            static_cast<std::int32_t>(extract_columns)});
@@ -996,15 +1360,37 @@ void qualify_public_extended_paths(hipStream_t stream) {
     }
     require_bf16_exact(copy_to_host(d_extract), extract_expected, "public feature extraction");
 
+    // Split: rows [0, extract_start) and [extract_start, source_features) of every column.
+    DeviceBuffer<hip_bfloat16> d_split_first(extract_start * extract_columns);
+    DeviceBuffer<hip_bfloat16> d_split_second((source_features - extract_start) * extract_columns);
+    Tensor split_first(
+        d_split_first.get(), DType::BF16,
+        {static_cast<std::int32_t>(extract_start), static_cast<std::int32_t>(extract_columns)});
+    Tensor split_second(d_split_second.get(), DType::BF16,
+                        {static_cast<std::int32_t>(source_features - extract_start),
+                         static_cast<std::int32_t>(extract_columns)});
+    ninfer::ops::split_bf16_columns(extract_source_tensor, split_first, split_second, stream);
+    HIP_CHECK(hipStreamSynchronize(stream));
+    std::vector<std::uint16_t> first_expected, second_expected;
+    for (std::uint32_t column = 0; column < extract_columns; ++column) {
+        for (std::uint32_t feature = 0; feature < source_features; ++feature) {
+            const auto bits = bf16_bits(
+                extract_source[static_cast<std::size_t>(column) * source_features + feature]);
+            (feature < extract_start ? first_expected : second_expected).push_back(bits);
+        }
+    }
+    require_bf16_exact(copy_to_host(d_split_first), first_expected, "public split first rows");
+    require_bf16_exact(copy_to_host(d_split_second), second_expected, "public split second rows");
+
     // Fused and gated norms are checked against the represented-input FP64 formula. L2 dump is
     // additionally checked against the production FP32 accumulation boundary it exposes.
     constexpr std::uint32_t norm_features = 64;
-    constexpr std::uint32_t norm_rows = 3;
-    constexpr float eps = 1.0e-5F;
-    const auto residual_input = bf16_fixture(norm_features * norm_rows, 227U);
-    const auto residual_delta = bf16_fixture(norm_features * norm_rows, 229U);
-    const auto norm_weight = bf16_fixture(norm_features, 233U);
-    const auto norm_gate = bf16_fixture(norm_features * norm_rows, 239U);
+    constexpr std::uint32_t norm_rows     = 3;
+    constexpr float eps                   = 1.0e-5F;
+    const auto residual_input             = bf16_fixture(norm_features * norm_rows, 227U);
+    const auto residual_delta             = bf16_fixture(norm_features * norm_rows, 229U);
+    const auto norm_weight                = bf16_fixture(norm_features, 233U);
+    const auto norm_gate                  = bf16_fixture(norm_features * norm_rows, 239U);
     DeviceBuffer<hip_bfloat16> d_residual_input(residual_input.size());
     DeviceBuffer<hip_bfloat16> d_residual_delta(residual_delta.size());
     DeviceBuffer<hip_bfloat16> d_norm_weight(norm_weight.size());
@@ -1017,35 +1403,35 @@ void qualify_public_extended_paths(hipStream_t stream) {
     copy_to_device(d_norm_weight, norm_weight);
     copy_to_device(d_norm_gate, norm_gate);
     copy_to_device(d_pair_input, residual_input);
-    Tensor residual_input_tensor(d_residual_input.get(), DType::BF16,
-                                 {static_cast<std::int32_t>(norm_features),
-                                  static_cast<std::int32_t>(norm_rows)});
-    Tensor residual_delta_tensor(d_residual_delta.get(), DType::BF16,
-                                 {static_cast<std::int32_t>(norm_features),
-                                  static_cast<std::int32_t>(norm_rows)});
+    Tensor residual_input_tensor(
+        d_residual_input.get(), DType::BF16,
+        {static_cast<std::int32_t>(norm_features), static_cast<std::int32_t>(norm_rows)});
+    Tensor residual_delta_tensor(
+        d_residual_delta.get(), DType::BF16,
+        {static_cast<std::int32_t>(norm_features), static_cast<std::int32_t>(norm_rows)});
     Tensor norm_weight_tensor(d_norm_weight.get(), DType::BF16,
                               {static_cast<std::int32_t>(norm_features)});
-    Tensor norm_gate_tensor(d_norm_gate.get(), DType::BF16,
-                            {static_cast<std::int32_t>(norm_features),
-                             static_cast<std::int32_t>(norm_rows)});
-    Tensor norm_output_tensor(d_norm_output.get(), DType::BF16,
-                              {static_cast<std::int32_t>(norm_features),
-                               static_cast<std::int32_t>(norm_rows)});
-    Tensor pair_input_tensor(d_pair_input.get(), DType::BF16,
-                             {static_cast<std::int32_t>(norm_features),
-                              static_cast<std::int32_t>(norm_rows)});
-    Tensor pair_output_tensor(d_pair_output.get(), DType::BF16,
-                              {static_cast<std::int32_t>(norm_features),
-                               static_cast<std::int32_t>(norm_rows)});
+    Tensor norm_gate_tensor(
+        d_norm_gate.get(), DType::BF16,
+        {static_cast<std::int32_t>(norm_features), static_cast<std::int32_t>(norm_rows)});
+    Tensor norm_output_tensor(
+        d_norm_output.get(), DType::BF16,
+        {static_cast<std::int32_t>(norm_features), static_cast<std::int32_t>(norm_rows)});
+    Tensor pair_input_tensor(
+        d_pair_input.get(), DType::BF16,
+        {static_cast<std::int32_t>(norm_features), static_cast<std::int32_t>(norm_rows)});
+    Tensor pair_output_tensor(
+        d_pair_output.get(), DType::BF16,
+        {static_cast<std::int32_t>(norm_features), static_cast<std::int32_t>(norm_rows)});
     std::vector<std::uint16_t> residual_exact(residual_input.size());
     std::vector<double> residual_norm_expected(residual_input.size());
     for (std::uint32_t row = 0; row < norm_rows; ++row) {
         const std::size_t base = static_cast<std::size_t>(row) * norm_features;
-        double sumsq = 0.0;
+        double sumsq           = 0.0;
         for (std::uint32_t feature = 0; feature < norm_features; ++feature) {
-            residual_exact[base + feature] = bf16_rne_bits(
-                static_cast<float>(residual_input[base + feature]) +
-                static_cast<float>(residual_delta[base + feature]));
+            residual_exact[base + feature] =
+                bf16_rne_bits(static_cast<float>(residual_input[base + feature]) +
+                              static_cast<float>(residual_delta[base + feature]));
             const double value = bf16_to_fp32(residual_exact[base + feature]);
             sumsq += value * value;
         }
@@ -1056,8 +1442,8 @@ void qualify_public_extended_paths(hipStream_t stream) {
                 (1.0 + static_cast<float>(norm_weight[feature]));
         }
     }
-    ninfer::ops::residual_rmsnorm(residual_delta_tensor, residual_input_tensor,
-                                  norm_weight_tensor, eps, norm_output_tensor, stream);
+    ninfer::ops::residual_rmsnorm(residual_delta_tensor, residual_input_tensor, norm_weight_tensor,
+                                  eps, norm_output_tensor, stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     require_bf16_exact(copy_to_host(d_residual_input), residual_exact,
                        "public fused residual publication");
@@ -1067,8 +1453,7 @@ void qualify_public_extended_paths(hipStream_t stream) {
     ninfer::ops::rmsnorm(pair_input_tensor, norm_weight_tensor, eps, true, pair_output_tensor,
                          stream);
     HIP_CHECK(hipStreamSynchronize(stream));
-    require_bf16_exact(copy_to_host(d_pair_input), residual_exact,
-                       "unfused residual publication");
+    require_bf16_exact(copy_to_host(d_pair_input), residual_exact, "unfused residual publication");
     std::vector<std::uint16_t> fused_bits(residual_input.size());
     for (std::size_t index = 0; index < fused_bits.size(); ++index) {
         fused_bits[index] = bf16_bits(fused_output[index]);
@@ -1080,17 +1465,17 @@ void qualify_public_extended_paths(hipStream_t stream) {
     std::vector<double> gated_expected(residual_input.size());
     for (std::uint32_t row = 0; row < norm_rows; ++row) {
         const std::size_t base = static_cast<std::size_t>(row) * norm_features;
-        double sumsq = 0.0;
+        double sumsq           = 0.0;
         for (std::uint32_t feature = 0; feature < norm_features; ++feature) {
             const double value = static_cast<float>(residual_input[base + feature]);
             sumsq += value * value;
         }
         const double inverse = 1.0 / std::sqrt(sumsq / norm_features + eps);
         for (std::uint32_t feature = 0; feature < norm_features; ++feature) {
-            const double z = static_cast<float>(norm_gate[base + feature]);
-            gated_expected[base + feature] =
-                static_cast<float>(residual_input[base + feature]) * inverse *
-                static_cast<float>(norm_weight[feature]) * z / (1.0 + std::exp(-z));
+            const double z                 = static_cast<float>(norm_gate[base + feature]);
+            gated_expected[base + feature] = static_cast<float>(residual_input[base + feature]) *
+                                             inverse * static_cast<float>(norm_weight[feature]) *
+                                             z / (1.0 + std::exp(-z));
         }
     }
     ninfer::ops::gated_rmsnorm(residual_input_tensor, norm_weight_tensor, norm_gate_tensor, eps,
@@ -1103,13 +1488,13 @@ void qualify_public_extended_paths(hipStream_t stream) {
     ninfer::ops::L2NormDump dump{d_sumsq.get(), d_inverse.get()};
     ninfer::ops::l2norm_dump(residual_input_tensor, eps, norm_output_tensor, stream, dump);
     HIP_CHECK(hipStreamSynchronize(stream));
-    const auto sums = copy_to_host(d_sumsq);
+    const auto sums     = copy_to_host(d_sumsq);
     const auto inverses = copy_to_host(d_inverse);
     for (std::uint32_t row = 0; row < norm_rows; ++row) {
         float sumsq = 0.0F;
         for (std::uint32_t feature = 0; feature < norm_features; ++feature) {
-            const float value = static_cast<float>(residual_input[
-                static_cast<std::size_t>(row) * norm_features + feature]);
+            const float value = static_cast<float>(
+                residual_input[static_cast<std::size_t>(row) * norm_features + feature]);
             sumsq = std::fma(value, value, sumsq);
         }
         if (std::bit_cast<std::uint32_t>(sums[row]) != std::bit_cast<std::uint32_t>(sumsq) ||
@@ -1121,72 +1506,57 @@ void qualify_public_extended_paths(hipStream_t stream) {
     // Every registered integer embedding codec is decoded independently from signed codes and
     // represented FP16 scales.
     constexpr std::uint32_t embed_vocab = 16;
-    constexpr std::uint32_t embed_features = 96;
-    constexpr std::uint32_t embed_padded = 128;
-    constexpr std::uint32_t embed_rows = 3;
-    constexpr std::uint32_t q6_groups = embed_padded / 64;
-    constexpr std::uint32_t w8_groups = embed_padded / 32;
+    // 104 features leave a partial final Q4 code word (scalar tail stores).
+    constexpr std::uint32_t embed_features = 104;
+    constexpr std::uint32_t embed_padded   = 128;
+    constexpr std::uint32_t embed_rows     = 3;
+    constexpr std::uint32_t q6_groups      = embed_padded / 64;
+    constexpr std::uint32_t w8_groups      = embed_padded / 32;
     const std::vector<std::int32_t> embed_ids{15, 1, 9};
-    std::vector<std::uint8_t> q4_codes(embed_vocab * embed_padded / 2, 0);
-    std::vector<std::uint16_t> q4_scales(embed_vocab * q6_groups);
-    std::vector<std::uint8_t> q4_codes_row(q4_codes.size(), 0);
-    std::vector<std::uint16_t> q4_scales_row(q4_scales.size());
+    // Q4 row-split storage is the logical row order: codes [vocab][Kpad/2], scales [vocab][G].
+    std::vector<std::uint8_t> q4_codes_row(embed_vocab * embed_padded / 2, 0);
+    std::vector<std::uint16_t> q4_scales_row(embed_vocab * q6_groups);
     std::vector<std::uint8_t> q6_low(embed_vocab * q6_groups * 32, 0);
     std::vector<std::uint8_t> q6_high(embed_vocab * q6_groups * 16, 0);
     std::vector<std::uint16_t> q6_scales(embed_vocab * q6_groups);
     std::vector<std::uint8_t> w8_codes(embed_vocab * embed_padded);
     std::vector<std::uint16_t> w8_scales(embed_vocab * w8_groups);
-    for (std::size_t logical_group = 0; logical_group < q4_scales.size(); ++logical_group) {
-        const std::size_t row = logical_group / q6_groups;
-        const std::size_t group = logical_group % q6_groups;
-        const std::size_t scale_index =
-            ((row >> 4U) * q6_groups + group) * 16U + (row & 15U);
-        const std::uint16_t scale = std::bit_cast<std::uint16_t>(static_cast<_Float16>(
-            0.0625F * static_cast<float>(1 + logical_group % 4)));
+    for (std::size_t logical_group = 0; logical_group < q4_scales_row.size(); ++logical_group) {
+        const std::uint16_t scale = std::bit_cast<std::uint16_t>(
+            static_cast<_Float16>(0.0625F * static_cast<float>(1 + logical_group % 4)));
         q4_scales_row[logical_group] = scale;
-        q4_scales[scale_index] = scale;
         for (std::uint32_t lane = 0; lane < 64; ++lane) {
-            const int signed_code =
-                static_cast<int>((logical_group * 13 + lane * 3) % 16) - 8;
-            const std::size_t pair = lane / 16U;
-            const std::size_t within = lane % 16U;
-            const std::size_t word_index =
-                (((row >> 4U) * q6_groups + group) * 4U + pair) * 16U +
-                (row & 15U);
-            auto& packed = q4_codes[word_index * 8U + within / 2U];
-            packed = static_cast<std::uint8_t>(
-                packed | ((static_cast<std::uint32_t>(signed_code) & 0x0fU)
-                           << ((lane & 1U) * 4U)));
-            auto& logical_packed = q4_codes_row[logical_group * 32U + lane / 2U];
-            logical_packed = static_cast<std::uint8_t>(
-                logical_packed | ((static_cast<std::uint32_t>(signed_code) & 0x0fU)
-                                  << ((lane & 1U) * 4U)));
+            const int signed_code = static_cast<int>((logical_group * 13 + lane * 3) % 16) - 8;
+            auto& logical_packed  = q4_codes_row[logical_group * 32U + lane / 2U];
+            logical_packed        = static_cast<std::uint8_t>(
+                logical_packed |
+                ((static_cast<std::uint32_t>(signed_code) & 0x0fU) << ((lane & 1U) * 4U)));
         }
     }
     for (std::size_t group = 0; group < q6_scales.size(); ++group) {
-        q6_scales[group] = std::bit_cast<std::uint16_t>(static_cast<_Float16>(
-            0.03125F * static_cast<float>(1 + group % 3)));
+        q6_scales[group] = std::bit_cast<std::uint16_t>(
+            static_cast<_Float16>(0.03125F * static_cast<float>(1 + group % 3)));
         for (std::uint32_t lane = 0; lane < 64; ++lane) {
-            const int signed_code = static_cast<int>((group * 17 + lane * 5) % 64) - 32;
+            const int signed_code    = static_cast<int>((group * 17 + lane * 5) % 64) - 32;
             const std::uint32_t code = static_cast<std::uint32_t>(signed_code) & 0x3fU;
-            auto& low = q6_low[group * 32 + lane / 2];
+            auto& low                = q6_low[group * 32 + lane / 2];
             low = static_cast<std::uint8_t>(low | ((code & 0x0fU) << ((lane & 1U) * 4U)));
             const std::uint32_t high_position = lane * 2U;
-            q6_high[group * 16 + high_position / 8U] = static_cast<std::uint8_t>(
-                q6_high[group * 16 + high_position / 8U] |
-                (((code >> 4U) & 0x03U) << (high_position & 7U)));
+            q6_high[group * 16 + high_position / 8U] =
+                static_cast<std::uint8_t>(q6_high[group * 16 + high_position / 8U] |
+                                          (((code >> 4U) & 0x03U) << (high_position & 7U)));
         }
     }
     for (std::size_t group = 0; group < w8_scales.size(); ++group) {
-        w8_scales[group] = std::bit_cast<std::uint16_t>(static_cast<_Float16>(
-            0.015625F * static_cast<float>(1 + group % 5)));
+        w8_scales[group] = std::bit_cast<std::uint16_t>(
+            static_cast<_Float16>(0.015625F * static_cast<float>(1 + group % 5)));
     }
     for (std::size_t index = 0; index < w8_codes.size(); ++index) {
         w8_codes[index] = static_cast<std::uint8_t>(
             static_cast<std::int8_t>(static_cast<int>((index * 11 + 7) % 255) - 127));
     }
-    DeviceBuffer<std::uint8_t> d_q4_codes(q4_codes.size());
-    DeviceBuffer<std::uint16_t> d_q4_scales(q4_scales.size());
+    DeviceBuffer<std::uint8_t> d_q4_codes(q4_codes_row.size());
+    DeviceBuffer<std::uint16_t> d_q4_scales(q4_scales_row.size());
     DeviceBuffer<std::uint8_t> d_q6_low(q6_low.size());
     DeviceBuffer<std::uint8_t> d_q6_high(q6_high.size());
     DeviceBuffer<std::uint16_t> d_q6_scales(q6_scales.size());
@@ -1194,49 +1564,45 @@ void qualify_public_extended_paths(hipStream_t stream) {
     DeviceBuffer<std::uint16_t> d_w8_scales(w8_scales.size());
     DeviceBuffer<std::int32_t> d_embed_ids(embed_ids.size());
     DeviceBuffer<hip_bfloat16> d_embed_output(embed_features * embed_rows);
-    copy_to_device(d_q4_codes, q4_codes);
-    copy_to_device(d_q4_scales, q4_scales);
+    copy_to_device(d_q4_codes, q4_codes_row);
+    copy_to_device(d_q4_scales, q4_scales_row);
     copy_to_device(d_q6_low, q6_low);
     copy_to_device(d_q6_high, q6_high);
     copy_to_device(d_q6_scales, q6_scales);
     copy_to_device(d_w8_codes, w8_codes);
     copy_to_device(d_w8_scales, w8_scales);
     copy_to_device(d_embed_ids, embed_ids);
-    Tensor embed_ids_tensor(d_embed_ids.get(), DType::I32,
-                            {static_cast<std::int32_t>(embed_rows)});
-    Tensor embed_output_tensor(d_embed_output.get(), DType::BF16,
-                               {static_cast<std::int32_t>(embed_features),
-                                static_cast<std::int32_t>(embed_rows)});
+    Tensor embed_ids_tensor(d_embed_ids.get(), DType::I32, {static_cast<std::int32_t>(embed_rows)});
+    Tensor embed_output_tensor(
+        d_embed_output.get(), DType::BF16,
+        {static_cast<std::int32_t>(embed_features), static_cast<std::int32_t>(embed_rows)});
     Weight q4{};
-    q4.qtype = QType::Q4G64_F16S;
-    q4.layout = QuantLayout::Q4N16K16;
-    q4.ndim = 2;
+    q4.qtype  = QType::Q4G64_F16S;
+    q4.layout = QuantLayout::RowSplit;
+    q4.ndim   = 2;
     q4.n = q4.shape[0] = q4.padded_shape[0] = embed_vocab;
     q4.k = q4.shape[1] = embed_features;
     q4.padded_shape[1] = embed_padded;
     q4.group_size = q4.group = 64;
-    q4.scale_dtype = DType::FP16;
-    q4.qdata = d_q4_codes.get();
-    q4.qdata_bytes = q4_codes.size();
-    q4.scales = d_q4_scales.get();
-    q4.scale_bytes = q4_scales.size() * sizeof(std::uint16_t);
-    q4.payload_bytes = ((q4.qdata_bytes + 255U) / 256U) * 256U + q4.scale_bytes;
+    q4.scale_dtype           = DType::FP16;
+    q4.qdata                 = d_q4_codes.get();
+    q4.qdata_bytes           = q4_codes_row.size();
+    q4.scales                = d_q4_scales.get();
+    q4.scale_bytes           = q4_scales_row.size() * sizeof(std::uint16_t);
+    q4.payload_bytes         = ((q4.qdata_bytes + 255U) / 256U) * 256U + q4.scale_bytes;
     ninfer::ops::embedding(embed_ids_tensor, q4, embed_output_tensor, stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     std::vector<std::uint16_t> q4_expected(embed_features * embed_rows);
     for (std::uint32_t token = 0; token < embed_rows; ++token) {
         const std::size_t row = static_cast<std::size_t>(embed_ids[token]);
         for (std::uint32_t feature = 0; feature < embed_features; ++feature) {
-            const std::size_t group = feature / 64U;
-            const std::uint8_t packed =
-                q4_codes_row[row * (embed_padded / 2U) + feature / 2U];
-            const std::uint32_t nibble =
-                (feature & 1U) == 0U ? packed & 0x0fU : packed >> 4U;
-            const int code = (nibble & 0x08U) != 0U ? static_cast<int>(nibble) - 16
-                                                    : static_cast<int>(nibble);
+            const std::size_t group    = feature / 64U;
+            const std::uint8_t packed  = q4_codes_row[row * (embed_padded / 2U) + feature / 2U];
+            const std::uint32_t nibble = (feature & 1U) == 0U ? packed & 0x0fU : packed >> 4U;
+            const int code =
+                (nibble & 0x08U) != 0U ? static_cast<int>(nibble) - 16 : static_cast<int>(nibble);
             const float scale =
-                static_cast<float>(std::bit_cast<_Float16>(
-                    q4_scales_row[row * q6_groups + group]));
+                static_cast<float>(std::bit_cast<_Float16>(q4_scales_row[row * q6_groups + group]));
             q4_expected[static_cast<std::size_t>(token) * embed_features + feature] =
                 bf16_rne_bits(static_cast<float>(code) * scale);
         }
@@ -1247,54 +1613,54 @@ void qualify_public_extended_paths(hipStream_t stream) {
     try {
         ninfer::ops::embedding(embed_ids_tensor, malformed_q4, embed_output_tensor, stream);
         fail("public Q4 embedding accepted a short code plane");
-    } catch (const std::invalid_argument&) {
-    }
-    malformed_q4 = q4;
-    malformed_q4.layout = QuantLayout::RowSplit;
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
+    } catch (const std::invalid_argument&) {}
+    malformed_q4        = q4;
+    malformed_q4.layout = QuantLayout::Q4N16K16;
     try {
         ninfer::ops::embedding(embed_ids_tensor, malformed_q4, embed_output_tensor, stream);
-        fail("public Q4 embedding accepted the retired RowSplit layout");
-    } catch (const std::invalid_argument&) {
-    }
-    Tensor aliased_q4_output(d_q4_codes.get(), DType::BF16,
-                             {static_cast<std::int32_t>(embed_features),
-                              static_cast<std::int32_t>(embed_rows)});
+        fail("public Q4 embedding accepted the retired Q4N16K16 layout");
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
+    } catch (const std::invalid_argument&) {}
+    Tensor aliased_q4_output(
+        d_q4_codes.get(), DType::BF16,
+        {static_cast<std::int32_t>(embed_features), static_cast<std::int32_t>(embed_rows)});
     try {
         ninfer::ops::embedding(embed_ids_tensor, q4, aliased_q4_output, stream);
         fail("public Q4 embedding accepted output/code aliasing");
-    } catch (const std::invalid_argument&) {
-    }
+        // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
+    } catch (const std::invalid_argument&) {}
 
     Weight q6{};
-    q6.qtype = QType::Q6G64_F16S;
-    q6.layout = QuantLayout::RowSplit;
-    q6.ndim = 2;
-    q6.shape[0] = embed_vocab;
-    q6.shape[1] = embed_features;
+    q6.qtype           = QType::Q6G64_F16S;
+    q6.layout          = QuantLayout::RowSplit;
+    q6.ndim            = 2;
+    q6.shape[0]        = embed_vocab;
+    q6.shape[1]        = embed_features;
     q6.padded_shape[0] = embed_vocab;
     q6.padded_shape[1] = embed_padded;
     q6.group_size = q6.group = 64;
-    q6.scale_dtype = DType::FP16;
-    q6.qdata = d_q6_low.get();
-    q6.qhigh = d_q6_high.get();
-    q6.scales = d_q6_scales.get();
-    q6.high_plane_bytes = q6_high.size();
+    q6.scale_dtype           = DType::FP16;
+    q6.qdata                 = d_q6_low.get();
+    q6.qhigh                 = d_q6_high.get();
+    q6.scales                = d_q6_scales.get();
+    q6.high_plane_bytes      = q6_high.size();
     ninfer::ops::embedding(embed_ids_tensor, q6, embed_output_tensor, stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     std::vector<std::uint16_t> q6_expected(embed_features * embed_rows);
     for (std::uint32_t token = 0; token < embed_rows; ++token) {
         for (std::uint32_t feature = 0; feature < embed_features; ++feature) {
-            const std::size_t group = static_cast<std::size_t>(embed_ids[token]) * q6_groups +
-                                      feature / 64;
-            const std::uint32_t lane = feature % 64;
+            const std::size_t group =
+                static_cast<std::size_t>(embed_ids[token]) * q6_groups + feature / 64;
+            const std::uint32_t lane    = feature % 64;
             const std::uint8_t low_byte = q6_low[group * 32 + lane / 2];
-            const std::uint32_t low = (lane & 1U) != 0U ? low_byte >> 4U : low_byte & 0x0fU;
+            const std::uint32_t low     = (lane & 1U) != 0U ? low_byte >> 4U : low_byte & 0x0fU;
             const std::uint32_t high_position = lane * 2U;
             const std::uint32_t high =
                 (q6_high[group * 16 + high_position / 8U] >> (high_position & 7U)) & 0x03U;
             const std::uint32_t code = low | high << 4U;
-            const int signed_code = (code & 0x20U) != 0U ? static_cast<int>(code) - 64 :
-                                                          static_cast<int>(code);
+            const int signed_code =
+                (code & 0x20U) != 0U ? static_cast<int>(code) - 64 : static_cast<int>(code);
             const float scale = static_cast<float>(std::bit_cast<_Float16>(q6_scales[group]));
             q6_expected[static_cast<std::size_t>(token) * embed_features + feature] =
                 bf16_rne_bits(static_cast<float>(signed_code) * scale);
@@ -1303,26 +1669,26 @@ void qualify_public_extended_paths(hipStream_t stream) {
     require_bf16_exact(copy_to_host(d_embed_output), q6_expected, "public Q6 embedding");
 
     Weight w8{};
-    w8.qtype = QType::W8G32_F16S;
-    w8.layout = QuantLayout::RowSplit;
-    w8.ndim = 2;
-    w8.shape[0] = embed_vocab;
-    w8.shape[1] = embed_features;
+    w8.qtype           = QType::W8G32_F16S;
+    w8.layout          = QuantLayout::RowSplit;
+    w8.ndim            = 2;
+    w8.shape[0]        = embed_vocab;
+    w8.shape[1]        = embed_features;
     w8.padded_shape[0] = embed_vocab;
     w8.padded_shape[1] = embed_padded;
     w8.group_size = w8.group = 32;
-    w8.scale_dtype = DType::FP16;
-    w8.qdata = d_w8_codes.get();
-    w8.scales = d_w8_scales.get();
+    w8.scale_dtype           = DType::FP16;
+    w8.qdata                 = d_w8_codes.get();
+    w8.scales                = d_w8_scales.get();
     ninfer::ops::embedding(embed_ids_tensor, w8, embed_output_tensor, stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     std::vector<std::uint16_t> w8_expected(embed_features * embed_rows);
     for (std::uint32_t token = 0; token < embed_rows; ++token) {
         const std::size_t row = static_cast<std::size_t>(embed_ids[token]);
         for (std::uint32_t feature = 0; feature < embed_features; ++feature) {
-            const auto code = static_cast<std::int8_t>(w8_codes[row * embed_padded + feature]);
-            const float scale = static_cast<float>(std::bit_cast<_Float16>(
-                w8_scales[row * w8_groups + feature / 32]));
+            const auto code   = static_cast<std::int8_t>(w8_codes[row * embed_padded + feature]);
+            const float scale = static_cast<float>(
+                std::bit_cast<_Float16>(w8_scales[row * w8_groups + feature / 32]));
             w8_expected[static_cast<std::size_t>(token) * embed_features + feature] =
                 bf16_rne_bits(static_cast<float>(code) * scale);
         }
@@ -1343,11 +1709,13 @@ int main() {
         qualify_normalization_and_activations(stream);
         qualify_embedding(stream);
         qualify_w8_embedding_product_shape(stream);
+        qualify_q4_embedding_product_shape(stream);
+        qualify_q4_embedding_host_routes(stream);
         qualify_argmax(stream);
         qualify_public_extended_paths(stream);
         HIP_CHECK(hipStreamDestroy(stream));
-        std::cout << "r9700_eager_op_qualification: PASS rows=T1..8 D=" << kHidden
-                  << " vocab=" << kVocabValid << '/' << kVocabPhysical
+        std::cout << "r9700_eager_op_qualification: PASS rows=T1..8 (norms also T25/57/127) D="
+                  << kHidden << " vocab=" << kVocabValid << '/' << kVocabPhysical
                   << " mtp_pack_split=exact" << '\n';
         return 0;
     } catch (const std::exception& error) {

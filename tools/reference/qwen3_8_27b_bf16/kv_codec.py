@@ -7,11 +7,10 @@ CPU tests; neither implementation imports the product cache or its kernels.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 import struct
-from typing import Sequence
-
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 E4M3FN_MAX = 448.0
 VALUE_CODE_MAX = 7
@@ -191,18 +190,15 @@ def encode_value_group(source: Sequence[float], group_size: int) -> EncodedValue
         codes = (0,) * group_size
         return EncodedValueGroup(group_size, 0, codes, pack_signed_int4(codes))
 
-    codes = tuple(
-        max(-7, min(7, round_nearest_even(_float32(value / scale))))
-        for value in values
-    )
+    codes = tuple(max(-7, min(7, round_nearest_even(_float32(value / scale)))) for value in values)
     return EncodedValueGroup(group_size, scale_bits, codes, pack_signed_int4(codes))
 
 
 __all__ = [
     "E4M3FN_MAX",
-    "EncodedValueGroup",
     "VALUE_CODE_MAX",
     "VALUE_GROUPS",
+    "EncodedValueGroup",
     "decode_e4m3fn",
     "encode_e4m3fn",
     "encode_value_group",

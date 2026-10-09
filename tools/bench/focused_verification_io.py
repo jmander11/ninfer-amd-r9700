@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Publication contract for the selected-route focused GPU verification."""
 
 from __future__ import annotations
@@ -10,7 +9,6 @@ import stat
 from pathlib import Path
 
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
-
 
 ARTIFACT_TYPE = "ninfer_r9700_post_terminal_focused_verification"
 
