@@ -884,6 +884,75 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
         }
     }
 
+    // Regression: a masked position (probability exactly zero) must contribute nothing even when
+    // its stored value-scale bytes are non-finite. This is exactly the not-yet-written tail of a KV
+    // page at a decode frontier; fmaf(0.0F, NaN, sum) previously poisoned the attention output, the
+    // KV append transaction, and the whole engine.
+    if (!timing_only && context >= 2U) {
+        const std::size_t masked_from = context / 2U;
+        std::vector<float> masked_probability = probability_corpus;
+        for (unsigned head = 0; head < kQueryHeads; ++head) {
+            for (std::size_t logical = masked_from; logical < context; ++logical) {
+                masked_probability[static_cast<std::size_t>(head) * context + logical] = 0.0F;
+            }
+        }
+        std::vector<std::uint16_t> masked_scales = actual_scales;
+        for (std::size_t logical = masked_from; logical < context; ++logical) {
+            const std::size_t physical = host_physical_token(logical, pages, physical_tokens);
+            for (unsigned head = 0; head < kKvHeads; ++head) {
+                for (unsigned group = 0; group < Layout<Group, ScaleTokenFastest>::kGroups;
+                     ++group) {
+                    masked_scales[host_scale_offset<Group, ScaleTokenFastest>(physical, head, group,
+                                                                             physical_tokens)] =
+                        0x7e00U;  // positive half NaN
+                }
+            }
+        }
+        DeviceBuffer<std::uint16_t> d_masked_scales(scale_size);
+        DeviceBuffer<float> d_masked_probability(static_cast<std::size_t>(kQueryHeads) * context);
+        HIP_CHECK(hipMemcpy(d_masked_scales.get(), masked_scales.data(),
+                            scale_size * sizeof(std::uint16_t), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_masked_probability.get(), masked_probability.data(),
+                            masked_probability.size() * sizeof(float), hipMemcpyHostToDevice));
+        auto masked_args = pv_args;
+        masked_args.probabilities = d_masked_probability.get();
+        masked_args.value_scale_bits = d_masked_scales.get();
+        HIP_CHECK(ninfer::ops::r9700::kv::int4_kv_pv_vector(masked_args, nullptr));
+        std::vector<float> masked_pv(base_query.size());
+        HIP_CHECK(hipMemcpy(masked_pv.data(), d_pv_output.get(),
+                            masked_pv.size() * sizeof(float), hipMemcpyDeviceToHost));
+        for (unsigned query_head = 0; query_head < kQueryHeads; ++query_head) {
+            const unsigned kv_head = query_head / kQueriesPerKv;
+            for (unsigned feature = 0; feature < kDimension; ++feature) {
+                double expected = 0.0;
+                for (std::size_t logical = 0; logical < masked_from; ++logical) {
+                    const std::size_t physical =
+                        host_physical_token(logical, pages, physical_tokens);
+                    const std::uint8_t packed = actual_values[host_value_offset<Group, VTokenFastest>(
+                        physical, kv_head, feature / Group, (feature % Group) / 2U, physical_tokens)];
+                    int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
+                    code = code >= 8 ? code - 16 : code;
+                    const std::uint16_t bits =
+                        actual_scales[host_scale_offset<Group, ScaleTokenFastest>(
+                            physical, kv_head, feature / Group, physical_tokens)];
+                    _Float16 scale{};
+                    std::memcpy(&scale, &bits, sizeof(bits));
+                    expected += static_cast<double>(masked_probability[
+                                    static_cast<std::size_t>(query_head) * context + logical]) *
+                                static_cast<double>(code) * static_cast<float>(scale);
+                }
+                const float actual = masked_pv[query_head * kDimension + feature];
+                if (!std::isfinite(actual) ||
+                    std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
+                    std::ostringstream os;
+                    os << "A3 masked-position PV regression at head=" << query_head
+                       << " feature=" << feature << ": got " << actual << " expected " << expected;
+                    fail(os.str());
+                }
+            }
+        }
+    }
+
     const auto launch_qk_wmma = [&] {
         const ninfer::ops::r9700::kv::Fp8KvQkArgs args{
             .query = d_query.get(), .key_codes = d_keys.get(), .page_table = d_pages.get(),

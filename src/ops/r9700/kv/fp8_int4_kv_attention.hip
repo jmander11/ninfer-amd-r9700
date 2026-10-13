@@ -374,12 +374,21 @@ __device__ __forceinline__ void pv_vector_body(const float* probabilities, const
             for (unsigned i = 0; i < kLoadAhead; ++i) {
                 int code = static_cast<int>((packed[i] >> ((feature & 1U) * 4U)) & 0x0fU);
                 code = code >= 8 ? code - 16 : code;
-                const float value = static_cast<float>(code) * __half2float(__ushort_as_half(bits[i]));
+                // A masked position (probability exactly zero) contributes nothing. Its value and
+                // scale bytes can belong to a KV page that has not been written yet, so they must
+                // never reach the accumulator: fmaf(0.0F, NaN, sum) would corrupt the result.
+                const float value = probability[i] != 0.0F
+                                        ? static_cast<float>(code) *
+                                              __half2float(__ushort_as_half(bits[i]))
+                                        : 0.0F;
                 sum = fmaf(probability[i], value, sum);
                 if constexpr (PairedFeatures) {
                     int other = static_cast<int>(packed[i] >> 4U);
                     other = other >= 8 ? other - 16 : other;
-                    const float other_value = static_cast<float>(other) * __half2float(__ushort_as_half(bits[i]));
+                    const float other_value = probability[i] != 0.0F
+                                                  ? static_cast<float>(other) *
+                                                        __half2float(__ushort_as_half(bits[i]))
+                                                  : 0.0F;
                     paired_sum = fmaf(probability[i], other_value, paired_sum);
                 }
             }
@@ -390,13 +399,21 @@ __device__ __forceinline__ void pv_vector_body(const float* probabilities, const
             int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
             code = code >= 8 ? code - 16 : code;
             const std::uint16_t bits = scales[int4_offset<Group,VToken,SToken>(physical,kvh,feature,gridDim.x / q_to_kv,physical_tokens,true)];
-            sum = fmaf(probabilities[static_cast<std::size_t>(qh) * context + base],
-                       static_cast<float>(code) * __half2float(__ushort_as_half(bits)), sum);
+            const float probability = probabilities[static_cast<std::size_t>(qh) * context + base];
+            // A masked position contributes nothing; its value/scale bytes may be uninitialized.
+            const float value = probability != 0.0F
+                                    ? static_cast<float>(code) *
+                                          __half2float(__ushort_as_half(bits))
+                                    : 0.0F;
+            sum = fmaf(probability, value, sum);
             if constexpr (PairedFeatures) {
                 int other = static_cast<int>(packed >> 4U);
                 other = other >= 8 ? other - 16 : other;
-                paired_sum = fmaf(probabilities[static_cast<std::size_t>(qh) * context + base],
-                    static_cast<float>(other) * __half2float(__ushort_as_half(bits)), paired_sum);
+                const float other_value = probability != 0.0F
+                                              ? static_cast<float>(other) *
+                                                    __half2float(__ushort_as_half(bits))
+                                              : 0.0F;
+                paired_sum = fmaf(probability, other_value, paired_sum);
             }
         }
     }
