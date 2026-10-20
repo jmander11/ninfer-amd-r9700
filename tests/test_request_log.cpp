@@ -39,18 +39,21 @@ int main() {
                                          .cycle_exclusions           = 17,
                                          .discarded_tool_calls       = 0,
                                          .discarded_reasoning_tokens = 6568,
+                                         .framing_repairs            = 1,
+                                         .discarded_content_tokens   = 570,
                                          .generated_tokens           = 7000,
                                          .remaining_tokens           = 25000};
     failures +=
         check(format_recovery_event(103, recovery_event) ==
                   "[req 103] recovery event=retry_triggered cause=repeated_reasoning attempts=1"
                   " cycle_exclusions=17 discarded_tool_calls=0 discarded_reasoning_tokens=6568"
-                  " gen=7000 remaining=25000",
+                  " framing_repairs=1 discarded_content_tokens=570 gen=7000 remaining=25000",
               "reasoning recovery log lost request identity or accounting");
     for (const auto& [kind, name] : std::vector<std::pair<ninfer::RecoveryEventKind, std::string>>{
              {ninfer::RecoveryEventKind::CycleExclusion, "cycle_exclusion"},
              {ninfer::RecoveryEventKind::RetryStarted, "retry_started"},
              {ninfer::RecoveryEventKind::RetryPrefillComplete, "retry_prefill_complete"},
+             {ninfer::RecoveryEventKind::ReplayDiscarded, "replay_discarded"},
              {ninfer::RecoveryEventKind::Finished, "finished"},
              {ninfer::RecoveryEventKind::Exhausted, "exhausted"}}) {
         recovery_event.kind                 = kind;
@@ -145,7 +148,7 @@ int main() {
                       "server record artifact type mismatch");
     failures += check(server.at("schema_version") == kRequestLogSchemaVersion,
                       "server record schema mismatch");
-    failures += check(kRequestLogSchemaVersion == 25, "request-log schema is not version 25");
+    failures += check(kRequestLogSchemaVersion == 26, "request-log schema is not version 26");
     failures += check(server.at("event") == "server_start", "server event mismatch");
     failures += check(server.at("server").at("public_model_id") == "deployment-alias",
                       "resolved public model id missing");
@@ -633,6 +636,35 @@ int main() {
                           recovery_line.at("cause") == "reasoning_cycle" &&
                           recovery_line.at("cycle_exclusions") == 4,
                       "recovery event JSON mismatch");
+
+    cycle_recovery.kind            = ninfer::RecoveryEventKind::RetryStarted;
+    cycle_recovery.enable_thinking = false;
+    cycle_recovery.sampling        = ninfer::ResolvedSamplingParameters{.temperature       = 1.5F,
+                                                                        .top_k             = 0,
+                                                                        .top_p             = 1.0F,
+                                                                        .min_p             = 0.0F,
+                                                                        .presence_penalty  = 0.0F,
+                                                                        .frequency_penalty = 0.0F,
+                                                                        .seed              = 20261020,
+                                                                        .p_less            = false};
+    const Json retry_line =
+        Json::parse(format_recovery_event_json("serve-test", 4101, 7, cycle_recovery));
+    failures += check(retry_line.at("sampling") == Json{{"temperature", 1.5},
+                                                        {"top_k", 0},
+                                                        {"top_p", 1.0},
+                                                        {"min_p", 0.0},
+                                                        {"presence_penalty", 0.0},
+                                                        {"frequency_penalty", 0.0},
+                                                        {"seed", 20261020},
+                                                        {"p_less", false}},
+                      "retry sampling log loses the actual profile");
+    failures += check(retry_line.at("enable_thinking") == false,
+                      "retry log loses native non-thinking mode");
+    failures +=
+        check(format_recovery_event(7, cycle_recovery)
+                      .find("p_less=0 temperature=1.5 top_k=0 top_p=1 min_p=0 presence_penalty=0 "
+                            "frequency_penalty=0 seed=20261020") != std::string::npos,
+              "console retry log loses the actual profile");
 
     failures += check(format_request_start(context).find("thinking=off") != std::string::npos,
                       "human request log omits resolved thinking mode");

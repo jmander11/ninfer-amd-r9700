@@ -506,10 +506,12 @@ struct OutputDelta {
     OutputChannel channel = OutputChannel::Content;
     std::string text;
     // With OutputOptions::top_logprobs: the tokens committed to this channel by the round that
-    // produced the delta. Records are token-aligned rather than text-aligned: text held back for a
-    // stop-string or UTF-8 boundary arrives in a later delta, so text may be empty here, and a
-    // token trimmed by a stop string still has its record. Tokens that publish to no channel
-    // (reasoning markers, tool-call markup, stop tokens) have no record.
+    // produced the delta. A publication gate may withhold records with their text and release
+    // them unchanged in a later delta. Records are token-aligned rather than text-aligned: text
+    // held back for a stop-string or UTF-8 boundary arrives in a later delta, so text may be empty
+    // here, and a token trimmed by a stop string still has its record. Tokens that publish to no
+    // channel (reasoning markers, tool-call markup, stop tokens whose text is not published) have
+    // no record; raw output publishes stop-token text, so those tokens have content records.
     std::vector<TokenLogprob> logprobs;
     std::optional<ToolCallDelta> tool_call;
 };
@@ -524,6 +526,7 @@ enum class RecoveryEventKind : std::uint8_t {
     RetryTriggered,
     RetryStarted,
     RetryPrefillComplete,
+    ReplayDiscarded,
     Finished,
     Exhausted,
 };
@@ -537,8 +540,13 @@ struct RecoveryEvent {
     std::uint32_t cycle_exclusions           = 0;
     std::uint32_t discarded_tool_calls       = 0;
     std::uint32_t discarded_reasoning_tokens = 0;
+    std::uint32_t framing_repairs            = 0;
+    std::uint32_t discarded_content_tokens   = 0;
     std::size_t generated_tokens             = 0;
     std::uint32_t remaining_tokens           = 0;
+    // Present on RetryStarted: the actual complete profile for that attempt.
+    std::optional<ResolvedSamplingParameters> sampling;
+    std::optional<bool> enable_thinking;
 };
 
 class OutputSink {
@@ -627,6 +635,9 @@ struct GenerationRecoveryStats {
     // True exclusion count for the request. CycleExclusion RecoveryEvents are published at
     // powers of two and are not this total.
     std::uint32_t cycle_exclusions = 0;
+    // Corroborated reasoning replay omitted from answer publication; tokens remain in usage/KV.
+    std::uint32_t framing_repairs          = 0;
+    std::uint32_t discarded_content_tokens = 0;
 };
 
 // A schema-relative JSON Pointer and, for a tool failure, its index in the submitted

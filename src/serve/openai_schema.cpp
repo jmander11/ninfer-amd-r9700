@@ -674,11 +674,14 @@ Json usage_to_json(const CompletionUsage& usage, const CompletionTimings* timing
           {"tok_s", json_decimal3(timings->predicted_per_second)},
           {"ms_per_token", json_decimal3(timings->predicted_per_token_ms)}}}};
     if (timings->recovery.discarded_tool_calls != 0 ||
-        timings->recovery.discarded_reasoning_tokens != 0) {
+        timings->recovery.discarded_reasoning_tokens != 0 ||
+        timings->recovery.discarded_content_tokens != 0 || timings->recovery.framing_repairs != 0) {
         const auto& recovery = timings->recovery;
         ninfer["recovery"]   = {{"attempts", recovery.attempts},
                                 {"discarded_tool_calls", recovery.discarded_tool_calls},
                                 {"discarded_reasoning_tokens", recovery.discarded_reasoning_tokens},
+                                {"framing_repairs", recovery.framing_repairs},
+                                {"discarded_content_tokens", recovery.discarded_content_tokens},
                                 {"prefill_tokens", recovery.prefill_tokens},
                                 {"prefill_samples", recovery.prefill_samples},
                                 {"prepare_ms", json_decimal3(recovery.prepare_seconds * 1000.0)},

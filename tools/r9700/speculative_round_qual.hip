@@ -327,14 +327,14 @@ BlockLaws p_less_block_laws(const hip_bfloat16* row_logits, int token_domain, in
     return laws;
 }
 
-// tau = max{i : eta_i <= h_i}; eta_i is keyed by the round's first position with sub-key i.
+// tau = max{i : eta_i < h_i}; eta_i is keyed by the round's first position with sub-key i.
 int block_tau(const BlockLaws& laws, unsigned long long seed, int length) {
     int tau = 0;
     for (int i = 1; i < static_cast<int>(laws.h.size()); ++i) {
         const float eta =
             uniform(seed, length + 1, ninfer::ops::kSamplePurposeSpeculativeBlockAccept,
                     static_cast<unsigned int>(i));
-        if (static_cast<double>(eta) <= laws.h[static_cast<std::size_t>(i)]) { tau = i; }
+        if (static_cast<double>(eta) < laws.h[static_cast<std::size_t>(i)]) { tau = i; }
     }
     return tau;
 }
@@ -1225,6 +1225,190 @@ void run_p_less_block_statistics(ninfer::DeviceContext& device, int physical_row
             label + ": accepted length differs from the Algorithm 2 enumeration");
 }
 
+// Regression: this RNG key produces exactly zero. With target law concentrated on token 0
+// and a one-hot proposal on token 1, no draft can be accepted, including when eta == 0.
+// Expected publication follows the independent FP64 target support, not the block-tau helper.
+void qualify_zero_acceptance(ninfer::DeviceContext& device) {
+    constexpr unsigned long long seed = 13539153ULL;
+    require(uniform(seed, 1, ninfer::ops::kSamplePurposeSpeculativeBlockAccept, 1) == 0.0F,
+            "zero-acceptance fixture does not reach the RNG endpoint");
+    for (const int tokens : {64, kRealVocabulary}) {
+        for (const int k : {1, 7}) {
+            const int columns = k + 1;
+            std::vector<hip_bfloat16> logits(static_cast<std::size_t>(tokens) * columns, bf16(-24));
+            for (int column = 0; column < columns; ++column) logits[column * tokens] = bf16(10);
+            ninfer::ops::SamplingConfig config{};
+            config.temperature = 1.5F;
+            config.p_less      = 1;
+            config.seed        = seed;
+            std::vector<double> represented_logits(static_cast<std::size_t>(tokens), -24.0);
+            represented_logits[0] = 10.0;
+            const auto law        = sampling_reference::p_less(represented_logits, config);
+            require(law.ids == std::vector<int>{0} && law.probabilities == std::vector<double>{1.0},
+                    "zero-acceptance fixture must have a singleton independent target law");
+            const std::vector<int> targets(static_cast<std::size_t>(columns), 0);
+            const std::vector<int> drafts(static_cast<std::size_t>(k), 1);
+            const std::vector<float> proposal(static_cast<std::size_t>(k), 1.0F);
+            ninfer::DeviceBuffer d_logits(logits.size() * sizeof(hip_bfloat16));
+            ninfer::DeviceBuffer d_targets(targets.size() * sizeof(int));
+            ninfer::DeviceBuffer d_drafts(drafts.size() * sizeof(int));
+            ninfer::DeviceBuffer d_selector_ids(drafts.size() * sizeof(int));
+            ninfer::DeviceBuffer d_proposal(proposal.size() * sizeof(float));
+            ninfer::DeviceBuffer d_config(sizeof(config));
+            ninfer::DeviceBuffer d_extent(sizeof(int)), d_length(sizeof(int)),
+                d_anchor(sizeof(int));
+            ninfer::DeviceBuffer d_licensed(targets.size() * sizeof(int));
+            ninfer::DeviceBuffer d_count(sizeof(int)), d_accepted(sizeof(int));
+            d_logits.copy_from_host(logits.data(), logits.size() * sizeof(hip_bfloat16));
+            d_targets.copy_from_host(targets.data(), targets.size() * sizeof(int));
+            d_drafts.copy_from_host(drafts.data(), drafts.size() * sizeof(int));
+            d_selector_ids.copy_from_host(drafts.data(), drafts.size() * sizeof(int));
+            d_proposal.copy_from_host(proposal.data(), proposal.size() * sizeof(float));
+            d_config.copy_from_host(&config, sizeof(config));
+            d_extent.copy_from_host(&k, sizeof(k));
+            ninfer::Tensor target(d_targets.data(), ninfer::DType::I32, {columns, 1});
+            ninfer::Tensor logit(d_logits.data(), ninfer::DType::BF16, {tokens, columns, 1});
+            ninfer::Tensor draft(d_drafts.data(), ninfer::DType::I32, {k, 1});
+            ninfer::Tensor extent(d_extent.data(), ninfer::DType::I32, {1});
+            ninfer::Tensor length(d_length.data(), ninfer::DType::I32, {1});
+            ninfer::Tensor anchor(d_anchor.data(), ninfer::DType::I32, {1});
+            ninfer::Tensor licensed(d_licensed.data(), ninfer::DType::I32, {columns, 1});
+            ninfer::Tensor count(d_count.data(), ninfer::DType::I32, {1});
+            ninfer::Tensor accepted(d_accepted.data(), ninfer::DType::I32, {1});
+            ninfer::Tensor selector_ids(d_selector_ids.data(), ninfer::DType::I32, {1, k, 1});
+            ninfer::Tensor selector_q(d_proposal.data(), ninfer::DType::FP32, {1, k, 1});
+            const auto bytes =
+                ninfer::ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(tokens, k, k,
+                                                                                       1, 1);
+            ninfer::DeviceArena workspace(std::max<std::size_t>(bytes, 1));
+            for (const bool selector : {false, true}) {
+                const int initial_length = 0;
+                d_length.copy_from_host(&initial_length, sizeof(initial_length));
+                ninfer::ops::speculative_accept_greedy_drafts(
+                    target, logit, draft, extent, length, anchor, licensed, count, accepted, tokens,
+                    static_cast<const ninfer::ops::SamplingConfig*>(d_config.data()), workspace,
+                    device.stream, selector ? &selector_ids : nullptr,
+                    selector ? &selector_q : nullptr);
+                device.synchronize();
+                require_equal(copy_from<int>(d_accepted, 1), std::vector<int>{0},
+                              "zero-probability draft acceptance");
+                require_equal(copy_from<int>(d_count, 1), std::vector<int>{1},
+                              "zero-acceptance licensed count");
+                require_equal(copy_from<int>(d_licensed, 1), law.ids,
+                              "zero-acceptance emitted token");
+                require_equal(copy_from<int>(d_anchor, 1), law.ids, "zero-acceptance anchor");
+                require_equal(copy_from<int>(d_length, 1), std::vector<int>{1},
+                              "zero-acceptance committed length");
+            }
+        }
+    }
+    std::cout << "p-less zero-probability acceptance: small/product vocabulary, K1/K7, "
+                 "proposal laws PASS\n";
+}
+
+// Independent regression for the semantic empty-support Dirac law. At column0 p'=(.5,.5),
+// column1's flat vocabulary is removed by the1/1024 floor and becomes Dirac0. With one-hot
+// drafts0,0: h1=0, h2=.5. The fixed RNG draws reject both and the correction is exactly token1.
+void qualify_empty_p_less_support(ninfer::DeviceContext& device) {
+    constexpr int k = 2, columns = 3;
+    constexpr unsigned long long seed = 8ULL;
+    require(uniform(seed, 1, ninfer::ops::kSamplePurposeSpeculativeBlockAccept, 1) < 0.5F &&
+                uniform(seed, 1, ninfer::ops::kSamplePurposeSpeculativeBlockAccept, 2) > 0.5F,
+            "empty-support fixture RNG changed");
+    for (const int tokens : {127, 2048, 248077}) {
+        const bool excluded_singleton = tokens == 127;
+        std::vector<hip_bfloat16> logits(static_cast<std::size_t>(tokens) * columns, bf16(-128));
+        logits[0] = logits[1] = bf16(0);
+        std::fill(logits.begin() + tokens, logits.begin() + 2 * tokens, bf16(0));
+        logits[2 * tokens + 2] = bf16(10);
+        if (excluded_singleton) {
+            logits[0] = bf16(10);
+            std::fill(logits.begin() + tokens, logits.begin() + 2 * tokens, bf16(-128));
+            logits[tokens] = bf16(10);
+        }
+        ninfer::ops::SamplingConfig config{};
+        config.temperature     = 1.5F;
+        config.p_less          = 1;
+        config.seed            = seed;
+        config.typical_exclude = excluded_singleton ? 0 : -1;
+        std::vector<double> first(static_cast<std::size_t>(tokens), -128.0);
+        first[0] = first[1] = 0;
+        if (excluded_singleton) first[0] = 10;
+        const auto p0                = sampling_reference::p_less(first, config);
+        auto later_config            = config;
+        later_config.typical_exclude = -1;
+        std::vector<double> second(static_cast<std::size_t>(tokens),
+                                   excluded_singleton ? -128.0 : 0.0);
+        if (excluded_singleton) second[0] = 10;
+        const auto p1 = sampling_reference::p_less(second, later_config);
+        const std::vector<int> expected_first =
+            excluded_singleton ? std::vector<int>{1} : std::vector<int>{0, 1};
+        const std::vector<double> expected_probs =
+            excluded_singleton ? std::vector<double>{1.0} : std::vector<double>{0.5, 0.5};
+        require(p0.ids == expected_first && p0.probabilities == expected_probs &&
+                    p1.ids == std::vector<int>{0} && p1.probabilities == std::vector<double>{1.0},
+                "empty-support fixture does not have the independent target laws");
+        const std::vector<int> targets{excluded_singleton ? 1 : 0, 0, 2};
+        const std::vector<int> drafts{excluded_singleton ? 1 : 0, 0};
+        const std::vector<float> proposal{1.0F, 1.0F};
+        ninfer::DeviceBuffer d_logits(logits.size() * sizeof(hip_bfloat16));
+        ninfer::DeviceBuffer d_targets(targets.size() * sizeof(int)),
+            d_drafts(drafts.size() * sizeof(int));
+        ninfer::DeviceBuffer d_ids(drafts.size() * sizeof(int)),
+            d_q(proposal.size() * sizeof(float));
+        ninfer::DeviceBuffer d_config(sizeof(config)), d_extent(sizeof(int)), d_length(sizeof(int));
+        ninfer::DeviceBuffer d_anchor(sizeof(int)), d_licensed(columns * sizeof(int));
+        ninfer::DeviceBuffer d_count(sizeof(int)), d_accepted(sizeof(int));
+        d_logits.copy_from_host(logits.data(), logits.size() * sizeof(hip_bfloat16));
+        d_targets.copy_from_host(targets.data(), targets.size() * sizeof(int));
+        d_drafts.copy_from_host(drafts.data(), drafts.size() * sizeof(int));
+        d_ids.copy_from_host(drafts.data(), drafts.size() * sizeof(int));
+        d_q.copy_from_host(proposal.data(), proposal.size() * sizeof(float));
+        d_config.copy_from_host(&config, sizeof(config));
+        d_extent.copy_from_host(&k, sizeof(k));
+        ninfer::Tensor target(d_targets.data(), ninfer::DType::I32, {columns, 1});
+        ninfer::Tensor logit(d_logits.data(), ninfer::DType::BF16, {tokens, columns, 1});
+        ninfer::Tensor draft(d_drafts.data(), ninfer::DType::I32, {k, 1});
+        ninfer::Tensor extent(d_extent.data(), ninfer::DType::I32, {1});
+        ninfer::Tensor length(d_length.data(), ninfer::DType::I32, {1});
+        ninfer::Tensor anchor(d_anchor.data(), ninfer::DType::I32, {1});
+        ninfer::Tensor licensed(d_licensed.data(), ninfer::DType::I32, {columns, 1});
+        ninfer::Tensor count(d_count.data(), ninfer::DType::I32, {1});
+        ninfer::Tensor accepted(d_accepted.data(), ninfer::DType::I32, {1});
+        ninfer::Tensor selector_ids(d_ids.data(), ninfer::DType::I32, {1, k, 1});
+        ninfer::Tensor selector_q(d_q.data(), ninfer::DType::FP32, {1, k, 1});
+        const auto bytes = ninfer::ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
+            tokens, k, k, 1, 1);
+        ninfer::DeviceArena workspace(std::max<std::size_t>(bytes, 1));
+        for (const bool selector : {false, true}) {
+            const int initial_length = 0;
+            d_length.copy_from_host(&initial_length, sizeof(initial_length));
+            ninfer::ops::speculative_accept_greedy_drafts(
+                target, logit, draft, extent, length, anchor, licensed, count, accepted, tokens,
+                static_cast<const ninfer::ops::SamplingConfig*>(d_config.data()), workspace,
+                device.stream, selector ? &selector_ids : nullptr,
+                selector ? &selector_q : nullptr);
+            device.synchronize();
+            const int expected_accept = excluded_singleton ? 2 : 0;
+            const int expected_count  = expected_accept + 1;
+            const std::vector<int> expected_ids =
+                excluded_singleton ? std::vector<int>{1, 0, 2} : std::vector<int>{1};
+            require_equal(copy_from<int>(d_accepted, 1), std::vector<int>{expected_accept},
+                          "empty-support Dirac accepted length");
+            require_equal(copy_from<int>(d_count, 1), std::vector<int>{expected_count},
+                          "empty-support Dirac licensed count");
+            require_equal(copy_from<int>(d_licensed, expected_count), expected_ids,
+                          "empty-support Dirac licensed IDs");
+            require_equal(copy_from<int>(d_anchor, 1), std::vector<int>{expected_ids.back()},
+                          "empty-support Dirac anchor");
+            require_equal(copy_from<int>(d_length, 1), std::vector<int>{expected_count},
+                          "empty-support Dirac committed length");
+        }
+    }
+    std::cout << "p-less empty-support Dirac verification: V127/V2048/V248077, implicit/explicit q "
+                 "PASS\n";
+}
+
 void qualify_nonfinite_status(ninfer::DeviceContext& device) {
     constexpr int k = 2, columns = k + 1, batch = 3;
     for (const int tokens : {127, kRealVocabulary}) {
@@ -2102,6 +2286,8 @@ int main() {
                   << " wave=" << device.props.warpSize << '\n';
         qualify_prepare(device);
         qualify_nonfinite_status(device);
+        qualify_zero_acceptance(device);
+        qualify_empty_p_less_support(device);
         for (int k = 1; k <= 8; ++k) {
             for (int batch = 1; batch <= static_cast<int>(ninfer::kMaximumConcurrency); ++batch) {
                 run_chain_case(device, 64, k, batch, true, false);

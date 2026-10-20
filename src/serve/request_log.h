@@ -17,7 +17,7 @@
 
 namespace ninfer::serve {
 
-inline constexpr int kRequestLogSchemaVersion        = 25;
+inline constexpr int kRequestLogSchemaVersion        = 26;
 inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log";
 
 // Closed wire names shared by the request log and the GET /metrics exposition.
@@ -89,6 +89,8 @@ inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log
         return "retry_started";
     case ninfer::RecoveryEventKind::RetryPrefillComplete:
         return "retry_prefill_complete";
+    case ninfer::RecoveryEventKind::ReplayDiscarded:
+        return "replay_discarded";
     case ninfer::RecoveryEventKind::Finished:
         return "finished";
     case ninfer::RecoveryEventKind::Exhausted:

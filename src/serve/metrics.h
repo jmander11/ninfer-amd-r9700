@@ -127,6 +127,8 @@ inline constexpr std::string_view kMetricFamilies[] = {
     "ninfer_recovery_cycle_exclusions_total",
     "ninfer_recovery_discarded_reasoning_tokens_total",
     "ninfer_recovery_discarded_tool_calls_total",
+    "ninfer_recovery_framing_repairs_total",
+    "ninfer_recovery_discarded_content_tokens_total",
     "ninfer_recovery_attempts",
     "ninfer_response_store_records",
     "ninfer_response_store_bytes",

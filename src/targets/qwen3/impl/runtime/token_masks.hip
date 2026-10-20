@@ -224,7 +224,7 @@ ops::SamplingConfig TokenMaskExchange::root_into(const OutputSession* output,
                                                  hipStream_t stream) {
     config.allowed_token_words         = nullptr;
     config.allowed_token_column_stride = 0;
-    if (output && output->has_token_grammar()) {
+    if (output && output->has_token_masks()) {
         const std::array<TokenId, 1> token{0};
         const std::array<std::int32_t, 1> parent{-1};
         output->fill_token_masks(token, parent, {root_mask(row), kWords});
@@ -344,7 +344,7 @@ void TokenMaskExchange::fill(bool tree) {
         config.allowed_token_words = nullptr;
         config.allowed_token_column_stride = 0;
         mail_mask_words_[row]              = 0U;
-        if (row >= outputs_.size() || !outputs_[row] || !outputs_[row]->has_token_grammar()) {
+        if (row >= outputs_.size() || !outputs_[row] || !outputs_[row]->has_token_masks()) {
             continue;
         }
         const std::int32_t count_value = mail_counts_[row];

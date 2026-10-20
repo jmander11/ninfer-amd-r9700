@@ -159,18 +159,23 @@ constexpr const char* kPrefixPaths[]   = {
 constexpr const char* kPrefixSources[] = {"none", "vram_resident", "host_ram", "host_disk",
                                           "unknown"};
 constexpr const char* kRecoveryKinds[] = {
-    "cycle_exclusion",        "retry_triggered", "retry_started",
-    "retry_prefill_complete", "finished",        "exhausted",
+    "cycle_exclusion",  "retry_triggered", "retry_started", "retry_prefill_complete",
+    "replay_discarded", "finished",        "exhausted",
 };
-// Direct causes carried verbatim by non-exhausted events.
+// Direct causes carried verbatim by recovery events.
 constexpr const char* kDirectRecoveryCauses[] = {
-    "reasoning_cycle", "repeated_reasoning", "duplicate_tool_call", "cancelled",
-    "tool_calls",      "output_limit",       "context_capacity",    "stop",
+    "reasoning_cycle",     "repeated_reasoning",
+    "duplicate_tool_call", "reasoning_replay",
+    "repeated_content",    "cancelled",
+    "tool_calls",          "output_limit",
+    "context_capacity",    "stop",
 };
 constexpr const char* kRecoveryCauses[] = {
     "reasoning_cycle",
     "repeated_reasoning",
     "duplicate_tool_call",
+    "repeated_content",
+    "reasoning_replay",
     "cancelled",
     "tool_calls",
     "output_limit",
@@ -331,12 +336,14 @@ template <std::size_t N>
         return 2;
     case ninfer::RecoveryEventKind::RetryPrefillComplete:
         return 3;
-    case ninfer::RecoveryEventKind::Finished:
+    case ninfer::RecoveryEventKind::ReplayDiscarded:
         return 4;
-    case ninfer::RecoveryEventKind::Exhausted:
+    case ninfer::RecoveryEventKind::Finished:
         return 5;
+    case ninfer::RecoveryEventKind::Exhausted:
+        return 6;
     }
-    return 5;
+    return 6;
 }
 
 [[nodiscard]] const char* yn(bool value) { return value ? "true" : "false"; }
@@ -433,11 +440,15 @@ struct Series {
     std::uint64_t recovery_cycle_exclusions           = 0;
     std::uint64_t recovery_discarded_reasoning_tokens = 0;
     std::uint64_t recovery_discarded_tool_calls       = 0;
+    std::uint64_t recovery_framing_repairs            = 0;
+    std::uint64_t recovery_discarded_content_tokens   = 0;
     CountHistogram recovery_attempts;
 };
 
 void observe_terminal_recovery(Series& series, const ninfer::GenerationRecoveryStats& stats) {
     series.recovery_cycle_exclusions += stats.cycle_exclusions;
+    series.recovery_framing_repairs += stats.framing_repairs;
+    series.recovery_discarded_content_tokens += stats.discarded_content_tokens;
     series.recovery_discarded_reasoning_tokens += stats.discarded_reasoning_tokens;
     series.recovery_discarded_tool_calls += stats.discarded_tool_calls;
     if (stats.attempts > 0) {
@@ -988,6 +999,11 @@ std::string render_text(const MetricsSnapshotData& data) {
               series.recovery_discarded_reasoning_tokens);
     w.counter("ninfer_recovery_discarded_tool_calls_total", "Tool calls discarded by recovery.",
               series.recovery_discarded_tool_calls);
+    w.counter("ninfer_recovery_framing_repairs_total", "Consumed reasoning-replay closing frames.",
+              series.recovery_framing_repairs);
+    w.counter("ninfer_recovery_discarded_content_tokens_total",
+              "Corroborated replay tokens withheld from answer publication.",
+              series.recovery_discarded_content_tokens);
     w.histogram("ninfer_recovery_attempts", "Recovery attempts on terminal requests.",
                 series.recovery_attempts);
 
@@ -1161,6 +1177,8 @@ Json render_json(const MetricsSnapshotData& data) {
           {"cycle_exclusions", series.recovery_cycle_exclusions},
           {"discarded_reasoning_tokens", series.recovery_discarded_reasoning_tokens},
           {"discarded_tool_calls", series.recovery_discarded_tool_calls},
+          {"framing_repairs", series.recovery_framing_repairs},
+          {"discarded_content_tokens", series.recovery_discarded_content_tokens},
           {"attempts", summary(series.recovery_attempts)}}},
         {"generation",
          {{"requests_total", requests_total},

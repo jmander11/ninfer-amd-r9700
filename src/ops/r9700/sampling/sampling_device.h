@@ -1181,10 +1181,14 @@ __device__ __forceinline__ float sampling_p_less_q_at(int v, int draft_id, const
     return sampling_selector_q(q_ids, q_vals, q_n, v);
 }
 
-__device__ __forceinline__ float
-sampling_p_less_prob(const hip_bfloat16* logits, std::int64_t base, int token, std::int32_t vocab,
-                     const SamplingConfig& cfg, const SamplingPLessGate& gate, float admitted) {
-    if (!(admitted > 0.0f) || !sampling_p_less_in_domain(token, vocab, cfg)) { return 0.0f; }
+__device__ __forceinline__ float sampling_p_less_prob(const hip_bfloat16* logits, std::int64_t base,
+                                                      int token, std::int32_t vocab,
+                                                      const SamplingConfig& cfg,
+                                                      const SamplingPLessGate& gate, float admitted,
+                                                      int fallback) {
+    if (!sampling_p_less_in_domain(token, vocab, cfg)) { return 0.0f; }
+    // Empty support is the sampler's Dirac fallback law, not a zero measure.
+    if (!(admitted > 0.0f)) { return token == fallback ? 1.0f : 0.0f; }
     const float e =
         sampling_p_less_draw_exp(token, static_cast<float>(logits[base + token]), gate, cfg);
     return e > 0.0f ? e / admitted : 0.0f;

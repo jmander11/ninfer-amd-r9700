@@ -4425,8 +4425,7 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
                 mixed != nullptr ? std::min(remaining, step_cap)
                                  : schedule::select_prefill_chunk(remaining, step_tokens);
             const bool final_candidate = staged.cursor + nominal == staged.prompt_tokens;
-            if (final_candidate && request.output != nullptr &&
-                request.output->has_token_grammar()) {
+            if (final_candidate && request.output != nullptr && request.output->has_token_masks()) {
                 // Another prefilling request may have written the shared root row since this
                 // request's admission. A mixed round's matcher answers only after the runner
                 // publishes, so this host fill does not overlap it.
@@ -5473,7 +5472,8 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             std::span<const std::uint32_t>(text_target_columns.data(), lanes.size()),
             static_cast<std::int32_t>(lanes.size()), static_cast<std::int32_t>(width),
             static_cast<std::int32_t>(live_w), TextConfig::token_domain,
-            dflash_uses_tree_verify(batch_k, live_w));
+            dflash_uses_tree_verify(batch_k, live_w), token_masks->published_sampling(),
+            io.dflash_decode->selector_ids, io.dflash_decode->selector_q);
         token_masks->finish_round();
         if (calibrate_p_less) {
             const std::size_t row_values =

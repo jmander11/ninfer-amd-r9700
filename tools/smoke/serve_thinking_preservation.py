@@ -19,7 +19,7 @@ class TestFailure(RuntimeError):
 
 
 REQUEST_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
-REQUEST_LOG_SCHEMA_VERSION = 24
+REQUEST_LOG_SCHEMA_VERSION = 26
 
 
 def free_port() -> int:

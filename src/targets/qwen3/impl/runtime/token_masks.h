@@ -51,6 +51,12 @@ public:
                                                      const Tensor& valid_columns,
                                                      hipStream_t stream);
     void acquire(hipStream_t stream);
+
+    // Read only after round synchronization, before finish_round; diagnostic target sampling.
+    [[nodiscard]] const ops::SamplingConfig* published_sampling() const noexcept {
+        return static_cast<const ops::SamplingConfig*>(sampling_.data);
+    }
+
     void arm();
     void disarm() noexcept;
     // Disarms, then reports a grammar failure or a missing reply of the synchronized round.

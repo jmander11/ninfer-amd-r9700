@@ -88,7 +88,7 @@ __device__ __forceinline__ void speculative_chain_hop_q_for_target(const std::in
 // column i and q_i the law draft d_i was drawn from: p_0 = 1,
 // p_i = min(p_{i-1} p'_{i-1}(d_{i-1}) / q_{i-1}(d_{i-1}), 1), h_extent = p_extent and, for
 // i < extent, h_i = Z_i / (Z_i + 1 - p_i) with Z_i = sum_x max(p_i p'_i(x) - q_i(x), 0).
-// tau = max{i : eta_i <= h_i}; the caller then samples max(p_tau p'_tau - q_tau, 0) at column
+// tau = max{i : eta_i < h_i}; the caller then samples max(p_tau p'_tau - q_tau, 0) at column
 // tau (tau < extent) or the bonus from p'_extent. The selector q is supported on at most
 // selector_k candidates S, so Z_i = p_i (1 - p'_i(S)) + sum_{x in S} max(p_i p'_i(x) - q_i(x), 0);
 // a null selector is one-hot at the draft, which reduces to token verification's acceptance.
@@ -146,7 +146,8 @@ speculative_p_less_block_verify(int extent, const std::int32_t* row_drafts,
         }
         const float eta = sampling_uniform(seed, length + 1, kSamplePurposeSpeculativeBlockAccept,
                                            static_cast<unsigned int>(i));
-        if (eta <= h) {
+        // The finite RNG includes zero. A zero-probability draft must never be accepted.
+        if (eta < h) {
             tau        = i;
             tau_weight = p_i;
         }
@@ -355,7 +356,8 @@ __launch_bounds__(kSamplerBlock) __global__ void speculative_accept_greedy_draft
                 return sampling_p_less_prob(
                     row_logits, static_cast<std::int64_t>(i) * physical_rows, token, token_domain,
                     column_config(i), sampling_p_less_gate(col_moments[i], cfg.temperature),
-                    col_admitted[i]);
+                    col_admitted[i],
+                    sampling_p_less_support_fallback(col_moments[i], column_config(i)));
             };
             int tau     = 0;
             float tau_w = 1.0f;
@@ -1062,9 +1064,10 @@ __launch_bounds__(kSamplerBlock) __global__ void speculative_sampling_p_less_mas
             const SamplingConfig c = column_config(i);
             const SamplingPLessGate g =
                 sampling_p_less_gate(sampling_p_less_load_global(workspace, i), cfg.temperature);
-            return sampling_p_less_prob(row_logits, static_cast<std::int64_t>(i) * physical_rows,
-                                        token, token_domain, c, g,
-                                        sampling_p_less_load_admitted(workspace, i));
+            return sampling_p_less_prob(
+                row_logits, static_cast<std::int64_t>(i) * physical_rows, token, token_domain, c, g,
+                sampling_p_less_load_admitted(workspace, i),
+                sampling_p_less_support_fallback(sampling_p_less_load_global(workspace, i), c));
         };
         int tau     = 0;
         float tau_w = 1.0f;

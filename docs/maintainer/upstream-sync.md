@@ -6,6 +6,29 @@ Upstream is the RTX 5090/CUDA `dylanbrodiefafard/ninfer` repository’s `experim
 
 Reconciled through upstream `7142d4280123d9df507f863c1ae3d16f50e6476e` (2026-10-19), advanced from `edaad03a` (2026-10-17), `62687bd3` (2026-10-16), `17c504c9` (2026-10-12), `d5c38cda` (2026-10-09), `6e5b576e` (2026-10-06), `f0d3922e` (2026-10-04), `945515ea` (2026-10-04), `48eb0b01` (2026-10-03), `593c2d0c` (2026-10-03), `574a8d91` (2026-10-02), `f7f70d89` (2026-10-02), `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`, `49c896dd`) by the dispositions below. The next sync reviews upstream changes after `7142d428` against current AMD behavior.
 
+## Selective published-stop logprob port (2026-10-19)
+
+Ported `fedd87a4ab81584b2d603004a2c3a85ba584d50c`: a stop token whose bytes are
+published receives its output-channel attribution and therefore its token-logprob record.
+Raw output covers both a terminating model stop and a model-stop token emitted with model
+defaults disabled. Normal serving still withholds stop-token text and its logprob; this
+change does not expose the terminal EOS score in ordinary HTTP responses. The native
+Qwen3 frontend retains the existing reasoning/tool transitions and recovery policy.
+The native port also attributes raw tool markup to content, including a published stop
+inside an open call; raw output publishes these bytes without structured-tool filtering.
+
+Verification: warnings-as-errors incremental Release build; three focused frontend and
+recovery tests; affected frontend/test translation units pass clang-tidy with zero
+diagnostics. The open/closed raw-tool regressions fail against the upstream-only port
+and pass with the native extension. Astra reviewed the final source; formatting and
+source whitespace checks pass. Evidence: `profiles/agent-quality/20261019/stop-logprob-*`.
+No GPU arithmetic, sampler default or running container image is changed by this port.
+
+The fetched upstream `experimental` tip was `c3bb9dfc`; its history does not
+contain the recorded `7142d428` object. This is a selective source port, not a full sync:
+the recorded reconciliation baseline is unchanged. A future full sync must first map the
+previous dispositions onto the fetched history before advancing it.
+
 ## `edaad03a..7142d428` (3 upstream commits, reconciled 2026-10-19)
 
 | Source | AMD disposition |

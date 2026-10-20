@@ -988,6 +988,19 @@ int test_response_serialization() {
                                   .at("recovery")
                                   .at("discarded_reasoning_tokens") == 5,
                       "reasoning-only recovery lost accounting without a discarded tool");
+    recovery.discarded_reasoning_tokens = 0;
+    recovery.framing_repairs            = 1;
+    recovery.discarded_content_tokens   = 570;
+    recovered = make_completion_timings(10, 800, 0.25, 1.0, 0, 0, 0, 0, 0, recovery);
+    const auto replay_recovered =
+        Json::parse(make_chat_completion_response("replay-recovered", "m", 111, "answer", "thought",
+                                                  "stop", CompletionUsage{10, 800}, &recovered));
+    const auto& replay_usage = replay_recovered.at("usage");
+    const auto& replay_stats = replay_usage.at("prompt_tokens_details").at("ninfer").at("recovery");
+    failures += check(replay_usage.at("completion_tokens") == 800 &&
+                          replay_stats.at("discarded_content_tokens") == 570 &&
+                          replay_stats.at("framing_repairs") == 1,
+                      "withheld replay lost accounting or changed completion usage");
     failures += check(prefill_eval_tokens(10, 6) == 4 && prefill_eval_tokens(4, 6) == 0,
                       "prefill_eval_tokens clamps reused to the prompt");
     CompletionTimings one_token = make_completion_timings(10, 1, 0.25, 1.0);

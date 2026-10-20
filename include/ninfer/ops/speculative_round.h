@@ -73,8 +73,9 @@ void speculative_prepare_verify_ids(const Tensor& anchors, const Tensor& drafts,
  *   verification (Sun et al. 2024, Algorithm 2) instead of the per-hop test: with p'_i the
  *   p-less law of column i, p_0 = 1, p_i = min(p_{i-1} p'_{i-1}(d)/q_{i-1}(d), 1),
  *   h_i = Z_i/(Z_i + 1 - p_i) with Z_i = sum_x max(p_i p'_i(x) - q_i(x), 0) and h_extent =
- *   p_extent, it accepts tau = max{i : eta_i <= h_i} drafts and samples the correction from
- *   max(p_tau p'_tau - q_tau, 0), or the bonus from p'_extent when tau = extent. eta_i uses
+ *   p_extent, it accepts tau = max{i : eta_i < h_i} drafts and samples the correction from
+ *   max(p_tau p'_tau - q_tau, 0), or the bonus from p'_extent when tau = extent. The strict
+ *   comparison preserves zero acceptance with the finite RNG in [0,1). eta_i uses
  *   purpose kSamplePurposeSpeculativeBlockAccept at the round's first position with sub-key i.
  *   A one-hot q gives token verification's acceptance length.
  *   Only hop 0 applies the cycle-exit restriction p' of sampling.h (V without a typical exclude,

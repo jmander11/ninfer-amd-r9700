@@ -227,7 +227,7 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
     base->summary.service_work_quanta =
         projected_service_work(base->summary, prompt, 0, projected_step_tokens(), cold_vision_uses,
                                base->rewrite_checkpoint);
-    if (prompt.generation_recovery && base->sampling.p_less) {
+    if (prompt.generation_recovery) {
         base->summary.service_work_quanta +=
             qwen3::GenerationRecoveryContext::maximum_attempts *
             (schedule::prefill_chunk_count(reserved_context_tokens, projected_step_tokens()) +
@@ -373,7 +373,7 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
                                plan.vision ? std::span<const VisionUseSpan>(plan.vision->uses)
                                            : std::span<const VisionUseSpan>{},
                                plan.rewrite_checkpoint_capture);
-    if (prompt.generation_recovery && plan.sampling.p_less) {
+    if (prompt.generation_recovery) {
         plan.summary.service_work_quanta +=
             qwen3::GenerationRecoveryContext::maximum_attempts *
             (schedule::prefill_chunk_count(plan.summary.prompt_tokens +

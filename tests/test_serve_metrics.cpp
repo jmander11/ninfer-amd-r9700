@@ -61,20 +61,22 @@ GenerationOutcome success_outcome() {
     outcome.reasoning_tokens  = 0;
     outcome.finish_reason     = ninfer::FinishReason::StopToken;
     outcome.tool_calls.resize(2);
-    outcome.metrics.speculative_backend         = ninfer::SpeculativeBackend::Mtp;
-    outcome.metrics.speculative_accepted_tokens = 6;
-    outcome.metrics.speculative_draft_tokens    = 12;
-    outcome.metrics.speculative_rounds          = 3;
-    outcome.metrics.prefix_cache_hit_tokens     = 40;
-    outcome.metrics.prefix_reuse_path           = ninfer::PrefixReusePath::AppendAtFrontier;
-    outcome.metrics.prefix_reuse_source         = ninfer::PrefixReuseSource::HostRam;
-    outcome.metrics.recovery.cycle_exclusions   = 4;
-    outcome.metrics.queued_seconds              = 0.2;
-    outcome.metrics.copy_hold_seconds           = 0.05;
-    outcome.metrics.decode_seconds              = 1.0;
-    outcome.metrics.ttft_seconds                = 0.3;
-    outcome.metrics.total_seconds               = 1.4;
-    outcome.metrics.prefill_seconds             = 0.1;
+    outcome.metrics.speculative_backend               = ninfer::SpeculativeBackend::Mtp;
+    outcome.metrics.speculative_accepted_tokens       = 6;
+    outcome.metrics.speculative_draft_tokens          = 12;
+    outcome.metrics.speculative_rounds                = 3;
+    outcome.metrics.prefix_cache_hit_tokens           = 40;
+    outcome.metrics.prefix_reuse_path                 = ninfer::PrefixReusePath::AppendAtFrontier;
+    outcome.metrics.prefix_reuse_source               = ninfer::PrefixReuseSource::HostRam;
+    outcome.metrics.recovery.cycle_exclusions         = 4;
+    outcome.metrics.recovery.framing_repairs          = 1;
+    outcome.metrics.recovery.discarded_content_tokens = 570;
+    outcome.metrics.queued_seconds                    = 0.2;
+    outcome.metrics.copy_hold_seconds                 = 0.05;
+    outcome.metrics.decode_seconds                    = 1.0;
+    outcome.metrics.ttft_seconds                      = 0.3;
+    outcome.metrics.total_seconds                     = 1.4;
+    outcome.metrics.prefill_seconds                   = 0.1;
     return outcome;
 }
 
@@ -315,6 +317,19 @@ int main() {
     failures += check(contains(recovery, "ninfer_recovery_cycle_exclusions_total 8\n"),
                       "terminal cycle exclusions did not add the true total");
 
+    ninfer::RecoveryEvent replay_event;
+    replay_event.kind  = ninfer::RecoveryEventKind::ReplayDiscarded;
+    replay_event.cause = "reasoning_replay";
+    metrics.observe_recovery_event(replay_event);
+    const auto replay_metrics = metrics.snapshot(inputs);
+    failures += check(contains(replay_metrics.prometheus_text(),
+                               "ninfer_recovery_events_total{cause=\"reasoning_"
+                               "replay\",kind=\"replay_discarded\"} 1\n") &&
+                          contains(replay_metrics.prometheus_text(),
+                                   "ninfer_recovery_framing_repairs_total 2\n") &&
+                          contains(replay_metrics.prometheus_text(),
+                                   "ninfer_recovery_discarded_content_tokens_total 1140\n"),
+                      "replay event or terminal discard counters were lost");
     const auto cause = [](std::string_view kind, std::string_view detail) {
         return std::string(ninfer::serve::prometheus_recovery_cause(kind, detail));
     };
@@ -328,6 +343,7 @@ int main() {
             cause("exhausted", qwen::kRecoveryPrologueExhausted) == "prologue" &&
             cause("exhausted", qwen::kRecoveryLaneExhausted) == "lane_rebuild" &&
             cause("retry_triggered", "repeated_reasoning") == "repeated_reasoning" &&
+            cause("exhausted", "repeated_content") == "repeated_content" &&
             cause("finished", "tool_calls") == "tool_calls" &&
             cause("exhausted", "garbage") == "other",
         "exhausted causes did not map to the closed set");

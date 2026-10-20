@@ -96,11 +96,16 @@ bool TokenGrammarState::accept(xgrammar::GrammarMatcher& matcher, TokenId token)
     return matcher.AcceptToken(token);
 }
 
-void TokenGrammarState::preview(std::span<const TokenId> tokens) {
+void TokenGrammarState::preview(std::span<const TokenId> tokens,
+                                std::span<const std::uint8_t> ignored_framing) {
     if (preview_) { throw std::logic_error("token grammar already has a preview"); }
+    if (!ignored_framing.empty() && ignored_framing.size() != tokens.size()) {
+        throw std::invalid_argument("token grammar framing shape mismatch");
+    }
     auto candidate = committed_.Fork();
-    for (const auto token : tokens) {
-        if (!accept(candidate, token)) {
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        if (!ignored_framing.empty() && ignored_framing[i]) { continue; }
+        if (!accept(candidate, tokens[i])) {
             throw std::logic_error("generated token violates the declared token grammar");
         }
     }
@@ -128,10 +133,16 @@ void TokenGrammarState::record_upload(std::size_t bytes) const noexcept {
 
 void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                                    std::span<const std::int32_t> parents,
-                                   std::span<std::uint32_t> words) const {
+                                   std::span<std::uint32_t> words, TokenId replay_close,
+                                   std::span<const std::uint8_t> replay_close_allowed) const {
     if (tokens.empty() || tokens.size() != parents.size() ||
         words.size() != tokens.size() * mask_words) {
         throw std::invalid_argument("invalid token grammar verification mask shape");
+    }
+    if (!replay_close_allowed.empty() &&
+        (replay_close_allowed.size() != tokens.size() || replay_close < 0 ||
+         static_cast<std::size_t>(replay_close) >= mask_words * 32)) {
+        throw std::invalid_argument("invalid replay framing mask shape");
     }
     const auto started      = std::chrono::steady_clock::now();
     std::uint64_t evaluated = 0;
@@ -143,9 +154,12 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
             if (parent < 0 || static_cast<std::size_t>(parent) >= node) {
                 throw std::invalid_argument("token grammar tree parent must precede child");
             }
-            if (nodes[parent]) {
-                auto child = nodes[parent]->Fork();
-                if (accept(child, tokens[node]) && !child.IsTerminated()) {
+            const auto& parent_node = nodes[static_cast<std::size_t>(parent)];
+            if (parent_node) {
+                auto child         = parent_node->Fork();
+                const bool framing = !replay_close_allowed.empty() &&
+                                     replay_close_allowed[parent] && tokens[node] == replay_close;
+                if ((framing || accept(child, tokens[node])) && !child.IsTerminated()) {
                     nodes[node].emplace(std::move(child));
                 }
             }
@@ -164,6 +178,10 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                       .strides     = nullptr,
                       .byte_offset = 0};
         (void)nodes[node]->FillNextTokenBitmask(&mask);
+        if (!replay_close_allowed.empty() && replay_close_allowed[node]) {
+            output[static_cast<std::size_t>(replay_close) / 32] |=
+                std::uint32_t{1} << (static_cast<unsigned>(replay_close) % 32);
+        }
         ++evaluated;
     }
     ++work_.mask_calls;

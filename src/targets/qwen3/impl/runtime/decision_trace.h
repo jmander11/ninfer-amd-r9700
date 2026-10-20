@@ -4,13 +4,19 @@
 // NINFER_DFLASH_DECISION_TRACE_OUT to an explicit path records the represented BF16
 // top-two decision at each ordinary decode step and every live DFlash target-verify
 // column. The synchronous device copies deliberately perturb execution, so this trace
-// is diagnostic-only and rejects Device Graph execution.
+// is diagnostic-only and rejects Device Graph execution. NINFER_SAMPLING_CAPTURE_PREFIX
+// additionally saves complete sampling inputs for watched licensed rounds.
 
 #include "core/device.h"
 #include "core/tensor.h"
 #include <ninfer/targets/qwen3/round_state.h>
 
 #include <hip/hip_runtime.h>
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <bit>
+#include <charconv>
 
 #include <cmath>
 #include <cstdint>
@@ -101,7 +107,135 @@ inline const std::string& output_path() {
     return path;
 }
 
-inline bool enabled() { return !output_path().empty(); }
+inline const std::string& capture_prefix() {
+    static const std::string prefix = [] {
+        const char* value = std::getenv("NINFER_SAMPLING_CAPTURE_PREFIX");
+        return value == nullptr ? std::string{} : std::string(value);
+    }();
+    return prefix;
+}
+
+inline std::vector<std::int32_t> parse_watch_tokens(std::string_view value) {
+    std::vector<std::int32_t> result;
+    while (!value.empty()) {
+        const auto comma   = value.find(',');
+        const auto part    = value.substr(0, comma);
+        std::int32_t token = -1;
+        const auto parsed  = std::from_chars(part.data(), part.data() + part.size(), token);
+        if (parsed.ec != std::errc{} || parsed.ptr != part.data() + part.size() || token < 0)
+            throw std::invalid_argument(
+                "NINFER_SAMPLING_CAPTURE_TOKENS requires nonnegative comma-separated IDs");
+        result.push_back(token);
+        if (comma == std::string_view::npos) break;
+        value.remove_prefix(comma + 1);
+        if (value.empty()) throw std::invalid_argument("empty sampling capture token ID");
+    }
+    if (result.empty()) throw std::invalid_argument("empty sampling capture watch list");
+    return result;
+}
+
+inline const std::vector<std::int32_t>& watch_tokens() {
+    static const auto tokens = [] {
+        const char* value = std::getenv("NINFER_SAMPLING_CAPTURE_TOKENS");
+        return parse_watch_tokens(value == nullptr ? "248046,248044" : value);
+    }();
+    return tokens;
+}
+
+inline bool watched(std::span<const std::int32_t> tokens) {
+    if (capture_prefix().empty()) return false;
+    return std::any_of(tokens.begin(), tokens.end(), [](std::int32_t token) {
+        return std::find(watch_tokens().begin(), watch_tokens().end(), token) !=
+               watch_tokens().end();
+    });
+}
+
+inline bool enabled() { return !output_path().empty() || !capture_prefix().empty(); }
+
+inline void write_capture_bytes(const std::filesystem::path& path, const void* data,
+                                std::size_t bytes) {
+    const auto status = std::filesystem::symlink_status(path);
+    if (std::filesystem::exists(status) || std::filesystem::is_symlink(status))
+        throw std::runtime_error("sampling capture refuses to overwrite " + path.string());
+    std::ofstream file;
+    file.exceptions(std::ios::badbit | std::ios::failbit);
+    file.open(path, std::ios::binary);
+    file.write(static_cast<const char*>(data), static_cast<std::streamsize>(bytes));
+}
+
+// The caller has synchronized the actual sampling operation and has not released token masks.
+// Only watched licensed rounds reach here. Binary rows contain the logical vocabulary only.
+inline void capture_sampling(nlohmann::json metadata, const ops::SamplingConfig& cfg,
+                             std::span<const std::uint16_t> logits, std::size_t physical_rows,
+                             std::int32_t columns, std::int32_t token_domain) {
+    static_assert(std::endian::native == std::endian::little);
+    static std::mutex mutex;
+    static std::uint64_t ordinal = 0;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (columns <= 0 || token_domain <= 0 ||
+        physical_rows < static_cast<std::size_t>(token_domain) ||
+        logits.size() < physical_rows * static_cast<std::size_t>(columns))
+        throw std::logic_error("invalid sampling capture logits");
+    const std::string stem                    = capture_prefix() + "-" + std::to_string(ordinal++);
+    const std::filesystem::path manifest_path = stem + ".json";
+    const std::filesystem::path logits_path   = stem + ".bf16";
+    std::vector<std::uint16_t> compact;
+    compact.reserve(static_cast<std::size_t>(columns) * static_cast<std::size_t>(token_domain));
+    for (std::int32_t col = 0; col < columns; ++col) {
+        const auto begin = logits.begin() + static_cast<std::ptrdiff_t>(
+                                                static_cast<std::size_t>(col) * physical_rows);
+        compact.insert(compact.end(), begin, begin + token_domain);
+    }
+    write_capture_bytes(logits_path, compact.data(), compact.size() * sizeof(compact[0]));
+    metadata["artifact_type"]             = "ninfer_sampling_decision_capture";
+    metadata["schema_version"]            = 1;
+    metadata["diagnostic_only"]           = true;
+    metadata["execution"]                 = "eager";
+    metadata["publication"]               = "op_licensed_before_output_session";
+    metadata["token_domain"]              = token_domain;
+    metadata["columns"]                   = columns;
+    metadata["source_physical_rows"]      = physical_rows;
+    metadata["source_column_pitch_bytes"] = physical_rows * sizeof(std::uint16_t);
+    metadata["logits"]                    = {{"file", logits_path.filename().string()},
+                                             {"dtype", "bf16_le"},
+                                             {"shape", {columns, token_domain}}};
+    metadata["config"] = {{"temperature", cfg.temperature},
+                          {"p_less", cfg.p_less},
+                          {"seed", cfg.seed},
+                          {"typical_exclude", cfg.typical_exclude},
+                          {"draft_temperature", cfg.draft_temperature},
+                          {"top_k", cfg.top_k},
+                          {"top_p", cfg.top_p},
+                          {"min_p", cfg.min_p},
+                          {"presence_penalty", cfg.presence_penalty},
+                          {"frequency_penalty", cfg.frequency_penalty},
+                          {"token_counts_present", cfg.token_counts != nullptr},
+                          {"allowed_token_column_stride", cfg.allowed_token_column_stride}};
+    auto& suppressed = metadata["config"]["suppressed_tokens"] = nlohmann::json::array();
+    if (cfg.suppressed_token_count < 0 ||
+        cfg.suppressed_token_count > ops::SamplingConfig::kMaximumSuppressedTokens)
+        throw std::logic_error("invalid sampling capture suppression count");
+    for (std::int32_t i = 0; i < cfg.suppressed_token_count; ++i)
+        suppressed.push_back(cfg.suppressed_tokens[i]);
+    metadata["allowed_token_words"] = nullptr;
+    if (cfg.allowed_token_words != nullptr) {
+        const std::size_t words = (static_cast<std::size_t>(token_domain) + 31U) / 32U;
+        std::vector<std::uint32_t> masks(words * static_cast<std::size_t>(columns));
+        for (std::int32_t col = 0; col < columns; ++col)
+            HIP_CHECK(hipMemcpy(masks.data() + static_cast<std::size_t>(col) * words,
+                                cfg.allowed_token_words + static_cast<std::int64_t>(col) *
+                                                              cfg.allowed_token_column_stride,
+                                words * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        const std::filesystem::path masks_path = stem + ".mask.u32";
+        write_capture_bytes(masks_path, masks.data(), masks.size() * sizeof(masks[0]));
+        metadata["allowed_token_words"] = {{"file", masks_path.filename().string()},
+                                           {"dtype", "u32_le"},
+                                           {"shape", {columns, words}}};
+    }
+    metadata["watch_tokens"]  = watch_tokens();
+    const std::string encoded = metadata.dump(2) + "\n";
+    write_capture_bytes(manifest_path, encoded.data(), encoded.size());
+}
 
 inline std::string ranked_json(const RankedBf16& ranked) {
     std::ostringstream out;
@@ -175,9 +309,10 @@ inline void require_eager(bool use_device_graph) {
     if (!enabled()) { return; }
     if (use_device_graph) {
         throw std::invalid_argument(
-            "NINFER_DFLASH_DECISION_TRACE_OUT requires eager execution (--no-device-graph)");
+            "sampling/target decision diagnostics require eager execution (--no-device-graph)");
     }
-    (void)writer();
+    if (!output_path().empty()) (void)writer();
+    if (!capture_prefix().empty()) (void)watch_tokens();
 }
 
 inline void require_bf16_logits(const Tensor& logits, std::int32_t columns,
@@ -211,6 +346,18 @@ inline void record_ordinary(const Tensor& logits, const qwen3::OrdinaryDecodeIng
                           host.data() + static_cast<std::size_t>(row) * stride, stride),
                       token_domain);
         const std::int32_t input_position = ingress.cache_positions[static_cast<std::size_t>(row)];
+        const auto sampled                = egress.sampled_tokens[static_cast<std::size_t>(row)];
+        if (watched(std::span<const std::int32_t>(&sampled, 1))) {
+            nlohmann::json capture = {{"kind", "ordinary"},
+                                      {"lane", ingress.lanes[static_cast<std::size_t>(row)]},
+                                      {"logical_position", input_position},
+                                      {"rng_purpose", ops::kSamplePurposeDecode},
+                                      {"licensed_tokens", {sampled}}};
+            capture_sampling(std::move(capture), ingress.sampling[static_cast<std::size_t>(row)],
+                             std::span<const std::uint16_t>(
+                                 host.data() + static_cast<std::size_t>(row) * stride, stride),
+                             stride, 1, token_domain);
+        }
         std::ostringstream event;
         event << "{\"kind\":\"ordinary\",\"logits_stage\":\"pre_sample\",\"lane\":"
               << ingress.lanes[static_cast<std::size_t>(row)]
@@ -224,7 +371,7 @@ inline void record_ordinary(const Tensor& logits, const qwen3::OrdinaryDecodeIng
                       : "false")
               << ",\"next_frontier\":" << absolute_frontier(input_position)
               << ",\"decision\":" << ranked_json(ranked) << '}';
-        writer().append(event.str());
+        if (!output_path().empty()) writer().append(event.str());
     }
 }
 
@@ -234,8 +381,12 @@ inline void record_dflash(const Tensor& logits, const Tensor& target_argmax,
                           const qwen3::DFlashDecodeEgress& egress,
                           std::span<const std::uint32_t> live_columns, std::int32_t batch_size,
                           std::int32_t verify_width, std::int32_t physical_verify_width,
-                          std::int32_t token_domain, bool tree_verify) {
+                          std::int32_t token_domain, bool tree_verify,
+                          const ops::SamplingConfig* target_sampling, const Tensor& selector_ids,
+                          const Tensor& selector_q) {
     if (!enabled()) { return; }
+    if (!capture_prefix().empty() && tree_verify)
+        throw std::invalid_argument("sampling decision capture supports chain verification only");
     if (batch_size <= 0 || verify_width <= 0 || physical_verify_width < 2 ||
         physical_verify_width > verify_width ||
         live_columns.size() != static_cast<std::size_t>(batch_size) ||
@@ -274,6 +425,65 @@ inline void record_dflash(const Tensor& logits, const Tensor& target_argmax,
         const std::int32_t accepted = egress.accepted_drafts[static_cast<std::size_t>(row)];
         const std::int32_t accepted_column = resolved_accepted_column(
             tree_verify, accepted, egress.accepted_column[static_cast<std::size_t>(row)]);
+        const std::span<const std::int32_t> licensed(egress.licensed_tokens.data() +
+                                                         static_cast<std::size_t>(row) *
+                                                             static_cast<std::size_t>(verify_width),
+                                                     static_cast<std::size_t>(licensed_count));
+        if (watched(licensed)) {
+            if (target_sampling == nullptr)
+                throw std::logic_error("missing actual target sampling config");
+            ops::SamplingConfig cfg;
+            HIP_CHECK(hipMemcpy(&cfg, target_sampling + row, sizeof(cfg), hipMemcpyDeviceToHost));
+            const auto extent = ingress.proposal_extents[static_cast<std::size_t>(row)];
+            if (extent < 0 || count != static_cast<std::uint32_t>(extent + 1))
+                throw std::logic_error("sampling capture chain extent mismatch");
+            nlohmann::json capture = {
+                {"kind", "dflash_chain"},
+                {"lane", ingress.lanes[static_cast<std::size_t>(row)]},
+                {"base_frontier", base},
+                {"proposal_extent", extent},
+                {"accepted_drafts", accepted},
+                {"licensed_tokens", std::vector<std::int32_t>(licensed.begin(), licensed.end())},
+                {"drafts", nlohmann::json::array()},
+                {"selector_ids", nlohmann::json::array()},
+                {"selector_q", nlohmann::json::array()},
+                {"cache_positions", nlohmann::json::array()}};
+            const auto flat =
+                static_cast<std::size_t>(row) * static_cast<std::size_t>(verify_width);
+            for (std::uint32_t col = 0; col < count; ++col) {
+                capture["cache_positions"].push_back(host_positions[flat + col]);
+                if (col > 0) capture["drafts"].push_back(host_verify_ids[flat + col]);
+            }
+            if (selector_ids.dtype != DType::I32 || selector_q.dtype != DType::FP32 ||
+                selector_ids.ne[0] != selector_q.ne[0] || selector_ids.ne[1] < extent ||
+                selector_q.ne[1] < extent || selector_ids.ne[2] <= row || selector_q.ne[2] <= row ||
+                selector_ids.data == nullptr || selector_q.data == nullptr)
+                throw std::logic_error("invalid sampling capture selector tensors");
+            capture["selector_source_strides_bytes"] = {{"ids", selector_ids.nb},
+                                                        {"q", selector_q.nb}};
+            for (std::int32_t hop = 0; hop < extent; ++hop) {
+                std::vector<std::int32_t> ids(static_cast<std::size_t>(selector_ids.ne[0]));
+                std::vector<float> probabilities(ids.size());
+                const auto* id_source = static_cast<const unsigned char*>(selector_ids.data) +
+                                        static_cast<std::size_t>(row) * selector_ids.nb[2] +
+                                        static_cast<std::size_t>(hop) * selector_ids.nb[1];
+                const auto* q_source  = static_cast<const unsigned char*>(selector_q.data) +
+                                        static_cast<std::size_t>(row) * selector_q.nb[2] +
+                                        static_cast<std::size_t>(hop) * selector_q.nb[1];
+                HIP_CHECK(hipMemcpy(ids.data(), id_source, ids.size() * sizeof(ids[0]),
+                                    hipMemcpyDeviceToHost));
+                HIP_CHECK(hipMemcpy(probabilities.data(), q_source,
+                                    probabilities.size() * sizeof(probabilities[0]),
+                                    hipMemcpyDeviceToHost));
+                capture["selector_ids"].push_back(ids);
+                capture["selector_q"].push_back(probabilities);
+            }
+            capture_sampling(
+                std::move(capture), cfg,
+                std::span<const std::uint16_t>(host_logits.data() + flat * stride,
+                                               static_cast<std::size_t>(count) * stride),
+                stride, static_cast<std::int32_t>(count), token_domain);
+        }
         std::ostringstream event;
         event << "{\"kind\":\"dflash\",\"lane\":" << ingress.lanes[static_cast<std::size_t>(row)]
               << ",\"token_domain\":" << token_domain << ",\"verify_width\":" << verify_width
@@ -310,7 +520,7 @@ inline void record_dflash(const Tensor& logits, const Tensor& target_argmax,
                   << ",\"decision\":" << ranked_json(ranked) << '}';
         }
         event << "]}";
-        writer().append(event.str());
+        if (!output_path().empty()) writer().append(event.str());
     }
 }
 

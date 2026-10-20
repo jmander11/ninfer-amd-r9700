@@ -385,7 +385,19 @@ std::string format_recovery_event(std::uint64_t request_id, const ninfer::Recove
         << " cycle_exclusions=" << event.cycle_exclusions
         << " discarded_tool_calls=" << event.discarded_tool_calls
         << " discarded_reasoning_tokens=" << event.discarded_reasoning_tokens
+        << " framing_repairs=" << event.framing_repairs
+        << " discarded_content_tokens=" << event.discarded_content_tokens
         << " gen=" << event.generated_tokens << " remaining=" << event.remaining_tokens;
+    if (event.sampling) {
+        const auto& sampling = *event.sampling;
+        out << " p_less=" << sampling.p_less << " temperature=" << sampling.temperature
+            << " top_k=" << sampling.top_k << " top_p=" << sampling.top_p
+            << " min_p=" << sampling.min_p << " presence_penalty=" << sampling.presence_penalty
+            << " frequency_penalty=" << sampling.frequency_penalty << " seed=" << sampling.seed;
+    }
+    if (event.enable_thinking.has_value()) {
+        out << " thinking=" << (*event.enable_thinking ? "on" : "off");
+    }
     if (event.kind == ninfer::RecoveryEventKind::CycleExclusion) {
         out << " action=exclude_one_root_token log_cadence=powers_of_two";
     }
@@ -745,6 +757,8 @@ std::string format_request_done_json(const std::string& server_instance_id, std:
     record["recovery"] = Json{{"attempts", recovery.attempts},
                               {"discarded_tool_calls", recovery.discarded_tool_calls},
                               {"discarded_reasoning_tokens", recovery.discarded_reasoning_tokens},
+                              {"framing_repairs", recovery.framing_repairs},
+                              {"discarded_content_tokens", recovery.discarded_content_tokens},
                               {"prefill_samples", recovery.prefill_samples},
                               {"prefill_tokens", recovery.prefill_tokens},
                               {"prepare_seconds", recovery.prepare_seconds},
@@ -784,8 +798,12 @@ std::string format_recovery_event_json(const std::string& server_instance_id,
     record["cycle_exclusions"]           = event.cycle_exclusions;
     record["discarded_tool_calls"]       = event.discarded_tool_calls;
     record["discarded_reasoning_tokens"] = event.discarded_reasoning_tokens;
+    record["framing_repairs"]            = event.framing_repairs;
+    record["discarded_content_tokens"]   = event.discarded_content_tokens;
     record["generated_tokens"]           = event.generated_tokens;
     record["remaining_tokens"]           = event.remaining_tokens;
+    if (event.sampling) { record["sampling"] = sampler_json(*event.sampling); }
+    if (event.enable_thinking.has_value()) { record["enable_thinking"] = *event.enable_thinking; }
     return record.dump();
 }
 

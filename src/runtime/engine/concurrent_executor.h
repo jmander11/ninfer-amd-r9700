@@ -18,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -206,8 +207,8 @@ public:
 
         std::shared_ptr<Request> request;
         try {
-            auto output = instance_.loaded->frontend.make_output_session(prompt, options.stop,
-                                                                         options.output);
+            auto output = instance_.loaded->frontend.make_output_session(
+                prompt, options.stop, options.output, generation_recovery_);
             configure_output_suppression(output, options.execution,
                                          !output.model_stop_tokens_allowed());
             request = std::make_shared<Request>(request_id, std::move(prompt), std::move(output),
@@ -534,8 +535,10 @@ private:
               options(std::move(request_options)), delivery(output_delivery), deadline(limit),
               submitted(submit_time), pending_since(submit_time),
               stop_suppression_active(!output.model_stop_tokens_allowed()) {
-            if (generation_recovery && options.execution.sampling.p_less && !options.output.raw) {
-                recovery_context = output.generation_recovery_context();
+            if (generation_recovery && !options.output.raw) {
+                recovery_context         = output.generation_recovery_context();
+                guard_repeated_reasoning = true;
+                guard_repeated_content   = true;
             }
         }
 
@@ -577,10 +580,16 @@ private:
         GenerationRecoveryStats recovery;
         std::uint32_t cycle_exclusions = 0;
         std::string recovery_cause;
-        bool recovery_pending                = false;
-        std::size_t recovery_reasoning_begin = 0;
-        std::size_t recovery_generated_begin = 0;
-        RepeatedReasoningSpan reasoning_cycle;
+        std::optional<ResolvedSamplingParameters> recovery_sampling;
+        bool recovery_pending = false;
+        bool replay_recovery  = false;
+        targets::qwen3::PublishedOutput withheld_replacement;
+        std::uint32_t withheld_content_tokens = 0;
+        std::size_t recovery_reasoning_begin  = 0;
+        RepeatedChannelSpan reasoning_cycle;
+        RepeatedChannelSpan content_cycle;
+        bool guard_repeated_reasoning           = false;
+        bool guard_repeated_content             = false;
         std::uint32_t previous_reasoning_tokens = 0;
         GenerationTimings initial_timings;
         double previous_decode_seconds = 0.0;
@@ -755,6 +764,16 @@ private:
     void append_output(const std::shared_ptr<Request>& request,
                        targets::qwen3::PublishedOutput output, bool notify = true,
                        bool accept_tools = false) {
+        if (request->replay_recovery && request->recovery.attempts != 0 && !accept_tools) {
+            for (auto& delta : output) {
+                if (delta.tool_call || delta.channel == OutputChannel::Content) {
+                    request->withheld_replacement.push_back(std::move(delta));
+                }
+            }
+            std::erase_if(output, [](const auto& delta) {
+                return delta.tool_call || delta.channel == OutputChannel::Content;
+            });
+        }
         if (output.empty()) { return; }
         for (OutputDelta& delta : output) {
             if (delta.tool_call) {
@@ -863,6 +882,7 @@ private:
     // NOLINTNEXTLINE(performance-unnecessary-value-param): lifetime copy, see above
     void complete_error(std::shared_ptr<Request> request, std::exception_ptr error) {
         end_copy_hold(request);
+        discard_replacement(request);
         request->recovery.cycle_exclusions = request->cycle_exclusions;
         error = attach_recovery_stats(std::move(error), request->recovery);
         release_planning_state(request);
@@ -879,6 +899,12 @@ private:
         request->cv.notify_one();
     }
 
+    static void discard_replacement(const std::shared_ptr<Request>& request) {
+        request->recovery.discarded_content_tokens += request->withheld_content_tokens;
+        request->withheld_content_tokens = 0;
+        request->withheld_replacement.clear();
+    }
+
     void
     publish_recovery(const std::shared_ptr<Request>& request, RecoveryEventKind kind,
                      // NOLINTNEXTLINE(performance-unnecessary-value-param): moved into the event
@@ -890,8 +916,14 @@ private:
                             .discarded_tool_calls = request->recovery.discarded_tool_calls,
                             .discarded_reasoning_tokens =
                                 request->recovery.discarded_reasoning_tokens,
-                            .generated_tokens = request->generated.size(),
+                            .framing_repairs          = request->recovery.framing_repairs,
+                            .discarded_content_tokens = request->recovery.discarded_content_tokens,
+                            .generated_tokens         = request->generated.size(),
                             .remaining_tokens = request->budget ? request->budget->remaining() : 0};
+        if (kind == RecoveryEventKind::RetryStarted) {
+            event.sampling        = request->recovery_sampling;
+            event.enable_thinking = request->output.in_reasoning();
+        }
         {
             std::lock_guard lock(request->mutex);
             request->recovery_events.push_back(std::move(event));
@@ -903,6 +935,14 @@ private:
     // (for example slots_[lane]).
     // NOLINTNEXTLINE(performance-unnecessary-value-param): lifetime copy, see above
     void complete_success(std::shared_ptr<Request> request, FinishReason reason) {
+        auto replacement = std::move(request->withheld_replacement);
+        request->withheld_replacement.clear();
+        request->withheld_content_tokens = 0;
+        if (reason == FinishReason::Cancelled) {
+            std::erase_if(replacement,
+                          [](const auto& delta) { return delta.tool_call.has_value(); });
+        }
+        append_output(request, std::move(replacement), false, true);
         if (reason != FinishReason::Cancelled && !request->pending_tool_events.empty()) {
             auto events = std::move(request->pending_tool_events);
             request->pending_tool_events.clear();
@@ -1010,13 +1050,17 @@ private:
     void complete_cancelled(std::shared_ptr<Request> request) {
         if (!request->output.terminal()) {
             (void)request->output.preview_terminal(FinishReason::Cancelled);
-            append_output(request, request->output.commit_preview(), false);
+            auto published = request->output.commit_preview();
+            (void)filter_reasoning_replay(request, published, FinishReason::Cancelled);
+            append_output(request, std::move(published), false);
         }
         complete_success(request, FinishReason::Cancelled);
     }
 
-    void recovery_exhausted(const std::shared_ptr<Request>& request, const std::string& detail) {
-        publish_recovery(request, RecoveryEventKind::Exhausted, detail);
+    void recovery_exhausted(const std::shared_ptr<Request>& request, const std::string& detail,
+                            std::string_view cause = {}) {
+        publish_recovery(request, RecoveryEventKind::Exhausted,
+                         cause.empty() ? detail : std::string(cause));
         const auto lane = *request->lane;
         instance_.program->abort_lane(lane);
         if (prefill_lane_ && *prefill_lane_ == lane) {
@@ -1175,6 +1219,9 @@ private:
         // pin its frontier as a turn rollback.
         execution.capture_context_checkpoint = false;
         execution.suppressed_token_count     = 0;
+        if (request->replay_recovery) {
+            execution.sampling = targets::qwen3::replay_recovery_sampling(execution.sampling);
+        }
 
         const bool reuse_enabled = execution.allow_prefix_reuse && !execution.force_cold_prefill;
         const bool lane_retained = reuse_enabled && instance_.program->retain_reusable_lane(lane);
@@ -1198,11 +1245,19 @@ private:
             copied ? std::span<const TokenId>(prefix) : std::span<const TokenId>{},
             original_prefix);
         if (selected.data() != prefix.data()) { prefix = std::move(original_prefix); }
-        const auto insert =
-            request->recovery_context->recovery_insert(request->output.tool_calls(), attempt);
+        const auto calls  = request->recovery_cause == "duplicate_tool_call"
+                                ? request->output.tool_calls()
+                                : std::span<const ToolCall>{};
+        const auto insert = request->recovery_context->recovery_insert(
+            calls, attempt,
+            request->recovery_cause == "reasoning_replay"
+                ? targets::qwen3::GenerationRecoveryNotice::ReasoningReplay
+            : request->recovery_cause == "repeated_content"
+                ? targets::qwen3::GenerationRecoveryNotice::RepeatedContent
+                : targets::qwen3::GenerationRecoveryNotice::RepeatedReasoning);
         auto spliced = instance_.loaded->frontend.splice_recovery_prompt(
             std::move(prefix), request->recovery_context->input(), insert,
-            request->recovery_context);
+            request->recovery_context, !request->replay_recovery);
         request->recovery.prepare_seconds +=
             std::chrono::duration<double>(Clock::now() - started).count();
 
@@ -1238,7 +1293,8 @@ private:
         }
 
         auto session = instance_.loaded->frontend.make_output_session(
-            *spliced, request->options.stop, request->options.output);
+            *spliced, request->options.stop, request->options.output, generation_recovery_,
+            &request->output);
         configure_output_suppression(session, execution, !session.model_stop_tokens_allowed());
         auto base = instance_.program->plan_request_base(*spliced, execution);
         const bool pages_ok =
@@ -1301,6 +1357,7 @@ private:
         request->output                 = std::move(session);
         request->resident_prompt_tokens = spliced_tokens;
         request->recovery.attempts      = attempt;
+        request->recovery_sampling      = execution.sampling;
         request->recovery_pending       = false;
         publish_recovery(request, RecoveryEventKind::RetryStarted, request->recovery_cause);
         // The failed attempt may end mid-word. Keep it visible, but do not
@@ -1311,8 +1368,9 @@ private:
             append_output(request, std::move(separator));
         }
         request->recovery_reasoning_begin = request->reasoning.size();
-        request->recovery_generated_begin = request->generated.size();
         request->reasoning_cycle          = {};
+        request->content_cycle            = {};
+        request->guard_repeated_content   = true;
         request->stop_suppression_active  = !request->output.model_stop_tokens_allowed();
 
         using Route = targets::qwen3::RecoveryPrefillRoute;
@@ -1341,22 +1399,44 @@ private:
         }
     }
 
-    bool recover_persistent_reasoning(const std::shared_ptr<Request>& request) {
-        if (!request->recovery_context || !request->output.in_reasoning() ||
-            !request->content.empty() || request->options.execution.sampling.temperature <= 0) {
+    bool recover_persistent_reasoning(const std::shared_ptr<Request>& request,
+                                      targets::qwen3::PublishedOutput& published,
+                                      FinishReason reason) {
+        if (!request->guard_repeated_reasoning || !request->reasoning_cycle.detected() ||
+            (reason != FinishReason::None &&
+             !generation_recovery_allowed_at_finish(reason, request->generated,
+                                                    request->options.stop))) {
             return false;
         }
-        const auto current =
-            std::span<const TokenId>(request->generated).subspan(request->recovery_generated_begin);
-        if (!request->reasoning_cycle.observe(current)) { return false; }
+        return recover_unpublished_attempt(request, published, "repeated_reasoning");
+    }
+
+    bool recover_unpublished_attempt(const std::shared_ptr<Request>& request,
+                                     targets::qwen3::PublishedOutput& published,
+                                     std::string_view cause) {
+        if (cause == "reasoning_replay") { request->replay_recovery = true; }
+        discard_replacement(request);
+        // A confirmed failed attempt cannot publish its answer/tool tail. Genuine
+        // reasoning remains visible; the next attempt is separated explicitly.
+        std::erase_if(published, [](const auto& delta) {
+            return delta.tool_call || delta.channel != OutputChannel::Reasoning;
+        });
+        append_output(request, std::move(published));
+        request->pending_tool_events.clear();
+        request->recovery.discarded_tool_calls +=
+            static_cast<std::uint32_t>(request->output.tool_calls().size());
         request->recovery.discarded_reasoning_tokens += request->output.reasoning_tokens();
-        request->recovery_cause = "repeated_reasoning";
+        request->recovery_cause = cause;
         publish_recovery(request, RecoveryEventKind::RetryTriggered, request->recovery_cause);
+        if (!request->recovery_context || !request->content.empty()) {
+            recovery_exhausted(
+                request, "confirmed repetition has no supported unpublished retry context", cause);
+            return true;
+        }
         if (request->recovery.attempts >=
                 targets::qwen3::GenerationRecoveryContext::maximum_attempts ||
             request->budget->remaining() == 0) {
-            recovery_exhausted(request,
-                               "persistent reasoning exhausted its retry or output-token budget");
+            recovery_exhausted(request, "no retry or output-token budget remains");
             return true;
         }
         request->decode_ready     = false;
@@ -1366,23 +1446,92 @@ private:
         return true;
     }
 
+    bool filter_reasoning_replay(const std::shared_ptr<Request>& request,
+                                 targets::qwen3::PublishedOutput& published, FinishReason reason) {
+        const bool caller_terminated =
+            reason != FinishReason::None && !generation_recovery_allowed_at_finish(
+                                                reason, request->generated, request->options.stop);
+        auto publication = request->output.filter_reasoning_replay(std::move(published), reason,
+                                                                   caller_terminated);
+        published        = std::move(publication.output);
+        request->recovery.framing_repairs += publication.framing_repairs;
+        request->recovery.discarded_content_tokens += publication.discarded_content_tokens;
+        request->withheld_content_tokens -=
+            std::min(request->withheld_content_tokens, publication.discarded_content_tokens);
+        if (publication.discarded_content_tokens != 0) {
+            request->recovery_cause = "reasoning_replay";
+            publish_recovery(request, RecoveryEventKind::ReplayDiscarded, "reasoning_replay");
+        }
+        if (!publication.retry_required || caller_terminated) { return false; }
+        return recover_unpublished_attempt(request, published, "reasoning_replay");
+    }
+
+    static void observe_repetition(const std::shared_ptr<Request>& request,
+                                   std::span<const TokenId> tokens) {
+        const auto channels = request->output.preview_token_channels();
+        if (request->replay_recovery && request->recovery.attempts != 0) {
+            request->withheld_content_tokens += static_cast<std::uint32_t>(
+                std::count(channels.begin(), channels.end(), OutputChannel::Content));
+        }
+        if (request->guard_repeated_reasoning) {
+            request->reasoning_cycle.observe(tokens, channels, OutputChannel::Reasoning);
+        }
+        if (!request->guard_repeated_content) { return; }
+        if (!request->output.preview_free_text_content()) {
+            // Native publication knows that literal closing markup is still
+            // argument data. Conservatively end answer monitoring for this response.
+            request->guard_repeated_content = false;
+            request->content_cycle          = {};
+            return;
+        }
+        request->content_cycle.observe(tokens, channels, OutputChannel::Content);
+    }
+
+    bool fail_repeated_content(const std::shared_ptr<Request>& request) {
+        if (!request->guard_repeated_content || !request->content_cycle.detected()) {
+            return false;
+        }
+        if (request->replay_recovery && request->content.empty()) {
+            targets::qwen3::PublishedOutput unpublished;
+            return recover_unpublished_attempt(request, unpublished, "repeated_content");
+        }
+        // Prose may already be visible. Preserve it and report an explicit
+        // failure rather than concatenating a replacement or claiming success.
+        request->recovery_cause = "repeated_content";
+        recovery_exhausted(request,
+                           "persistent repeated answer text; published content cannot be retried",
+                           "repeated_content");
+        return true;
+    }
+
     void finish_generation(const std::shared_ptr<Request>& request, FinishReason reason) {
         if (!generation_recovery_allowed_at_finish(reason, request->generated,
                                                    request->options.stop)) {
             complete_success(request, reason);
             return;
         }
-        // An explicit caller stop still wins. A budget boundary containing the
-        // third repeated passage must not silently disguise recovery exhaustion
-        // as a normal length finish merely because it is the last licensed round.
-        if ((reason == FinishReason::OutputLimit || reason == FinishReason::ContextCapacity) &&
-            recover_persistent_reasoning(request)) {
+        if (request->replay_recovery && request->recovery.attempts != 0 &&
+            (reason == FinishReason::OutputLimit || reason == FinishReason::ContextCapacity) &&
+            request->output.tool_calls().empty() &&
+            std::none_of(request->withheld_replacement.begin(), request->withheld_replacement.end(),
+                         [](const auto& delta) {
+                             return !delta.tool_call && delta.channel == OutputChannel::Content &&
+                                    std::any_of(
+                                        delta.text.begin(), delta.text.end(),
+                                        [](unsigned char byte) { return std::isspace(byte) == 0; });
+                         })) {
+            discard_replacement(request);
+            recovery_exhausted(
+                request, "replacement exhausted its budget without answer or complete tool call",
+                "output_budget");
             return;
         }
+        if (fail_repeated_content(request)) { return; }
         const auto calls = request->output.tool_calls();
         const auto reasoning =
             std::string_view(request->reasoning).substr(request->recovery_reasoning_begin);
         if (request->recovery_context && request->recovery_context->repeats(calls, reasoning)) {
+            discard_replacement(request);
             request->pending_tool_events.clear();
             request->recovery.discarded_tool_calls += static_cast<std::uint32_t>(calls.size());
             request->recovery.discarded_reasoning_tokens += request->output.reasoning_tokens();
@@ -1410,7 +1559,9 @@ private:
         if (cancel_at_boundary) {
             (void)request->output.preview_terminal(FinishReason::Cancelled);
             instance_.program->resolve_prefill_lane(lane, true);
-            append_output(request, request->output.commit_preview(), false);
+            auto published = request->output.commit_preview();
+            (void)filter_reasoning_replay(request, published, FinishReason::Cancelled);
+            append_output(request, std::move(published), false);
             complete_success(request, FinishReason::Cancelled);
             return true;
         }
@@ -1430,10 +1581,15 @@ private:
         request->budget->commit(1);
         ChannelLogprobs token_logprobs =
             collect_token_logprobs(*request, round.logprobs, 0, tokens);
+        observe_repetition(request, tokens);
         auto published = request->output.commit_preview();
         attach_token_logprobs(published, std::move(token_logprobs));
         if (!decision.finished()) { synchronize_stop_suppression(request, lane); }
         if (!request->first_token) { request->first_token = Clock::now(); }
+        if (filter_reasoning_replay(request, published, decision.finish_reason)) { return true; }
+        if (recover_persistent_reasoning(request, published, decision.finish_reason)) {
+            return true;
+        }
         append_output(request, std::move(published), !decision.finished());
         if (decision.finished()) {
             finish_generation(request, decision.finish_reason);
@@ -3011,17 +3167,24 @@ private:
                 token_logprobs =
                     collect_token_logprobs(*request, round.logprobs, first_slot, row_tokens);
             }
+            if (!cancelled[row]) {
+                const auto row_tokens = round.tokens.subspan(
+                    row * round.row_stride, static_cast<std::size_t>(accepted[row]));
+                observe_repetition(request, row_tokens);
+            }
             auto published = request->output.commit_preview();
             attach_token_logprobs(published, std::move(token_logprobs));
             if (!terminal[row]) { synchronize_stop_suppression(request, lane); }
             if (!request->first_token && accepted[row] != 0) {
                 request->first_token = Clock::now();
             }
+            if (filter_reasoning_replay(request, published, finish_reasons[row])) { continue; }
+            if (recover_persistent_reasoning(request, published, finish_reasons[row])) { continue; }
             append_output(request, std::move(published), terminal[row] == 0);
             if (terminal[row]) {
                 finish_generation(request, finish_reasons[row]);
             } else {
-                recover_persistent_reasoning(request);
+                (void)fail_repeated_content(request);
             }
         }
         if (owner_step) {
