@@ -115,14 +115,17 @@ int main(int argc, char** argv) {
         }
         const Json& config = manifest.at("engine");
         ninfer::EngineOptions options;
-        options.artifact_path       = argv[1];
-        options.max_context         = config.value("max_context", 262144U);
-        options.max_concurrency     = config.value("max_concurrency", 6U);
-        options.kv_capacity         = ninfer::KvCapacityPolicy::automatic();
-        options.prefill_chunk       = config.value("prefill_chunk", 2048U);
-        options.use_device_graph    = config.value("device_graph", false);
-        options.generation_recovery = config.value("recovery", false);
-        const std::string backend   = config.value("backend", "dflash");
+        options.artifact_path    = argv[1];
+        options.max_context      = config.value("max_context", 262144U);
+        options.max_concurrency  = config.value("max_concurrency", 6U);
+        options.kv_capacity      = ninfer::KvCapacityPolicy::automatic();
+        options.prefill_chunk    = config.value("prefill_chunk", 2048U);
+        options.use_device_graph = config.value("device_graph", false);
+        options.kv_ram_capacity_bytes =
+            config.value("kv_ram_capacity_mib", std::size_t{0}) * 1024U * 1024U;
+        options.kv_ram_system_prompts = config.value("kv_ram_system_prompts", 0U);
+        options.generation_recovery   = config.value("recovery", false);
+        const std::string backend     = config.value("backend", "dflash");
         if (backend == "dflash") {
             options.speculative.backend        = ninfer::SpeculativeBackend::DFlash;
             options.speculative.draft_tokens   = config.value("draft_tokens", 7U);
@@ -132,8 +135,11 @@ int main(int argc, char** argv) {
                 options.speculative.dflash_p_less_draft_temperature =
                     config.at("draft_temperature").get<float>();
             }
+        } else if (backend == "mtp") {
+            options.speculative.backend      = ninfer::SpeculativeBackend::Mtp;
+            options.speculative.draft_tokens = config.value("draft_tokens", 3U);
         } else if (backend != "none") {
-            throw std::invalid_argument("diagnostic backend must be dflash or none");
+            throw std::invalid_argument("diagnostic backend must be dflash, mtp, or none");
         }
         ninfer::Engine engine(options);
         std::ofstream(output_root / "manifest.json") << manifest.dump(2) << '\n';
@@ -211,8 +217,8 @@ int main(int argc, char** argv) {
             ninfer::RequestOptions request;
             request.execution.requested_output_tokens =
                 item.value("max_tokens", body.value("max_tokens", 8192U));
-            request.execution.allow_prefix_reuse = false;
-            request.execution.cache_write        = false;
+            request.execution.allow_prefix_reuse = item.value("allow_prefix_reuse", false);
+            request.execution.cache_write        = item.value("cache_write", false);
             request.execution.sampling.p_less    = item.value("p_less", true);
             request.execution.sampling.temperature =
                 item.value("temperature", body.value("temperature", 1.5F));
@@ -245,15 +251,17 @@ int main(int argc, char** argv) {
                                         {"frequency_penalty", sampling.frequency_penalty}};
                 const auto result    = handle.wait(&sink);
                 evidence["generated_token_ids"] = result.generated_token_ids;
-                evidence["content"]             = result.content;
-                evidence["reasoning"]           = result.reasoning;
-                evidence["finish_reason"]       = static_cast<int>(result.finish_reason);
-                evidence["reasoning_tokens"]    = result.reasoning_tokens;
-                evidence["recovery_attempts"]   = result.recovery.attempts;
-                evidence["recovery"]            = recovery_records(result.recovery);
-                evidence["content_logprobs"]    = records(result.content_logprobs);
-                evidence["reasoning_logprobs"]  = records(result.reasoning_logprobs);
-                evidence["tool_calls"]          = Json::array();
+                evidence["cache_stats"] = {{"source", static_cast<int>(result.prefix_reuse_source)},
+                                           {"reused_tokens", result.reused_prompt_tokens}};
+                evidence["content"]     = result.content;
+                evidence["reasoning"]   = result.reasoning;
+                evidence["finish_reason"]      = static_cast<int>(result.finish_reason);
+                evidence["reasoning_tokens"]   = result.reasoning_tokens;
+                evidence["recovery_attempts"]  = result.recovery.attempts;
+                evidence["recovery"]           = recovery_records(result.recovery);
+                evidence["content_logprobs"]   = records(result.content_logprobs);
+                evidence["reasoning_logprobs"] = records(result.reasoning_logprobs);
+                evidence["tool_calls"]         = Json::array();
                 for (const auto& call : result.tool_calls) {
                     evidence["tool_calls"].push_back(
                         {{"name", call.name}, {"arguments", call.arguments_json}});
@@ -270,8 +278,15 @@ int main(int argc, char** argv) {
                 evidence["recovery_attempts"] = error.recovery().attempts;
                 evidence["recovery"]          = recovery_records(error.recovery());
             }
-            evidence["stream_output"]   = std::move(sink.output);
-            evidence["recovery_events"] = std::move(sink.recovery);
+            evidence["stream_output"]       = std::move(sink.output);
+            evidence["recovery_events"]     = std::move(sink.recovery);
+            const auto stats                = engine.runtime_stats();
+            evidence["system_prompt_cache"] = {
+                {"limit", stats.kv_ram_system_prompt_limit},
+                {"entries", stats.kv_ram_system_prompt_entries},
+                {"used_bytes", stats.kv_ram_system_prompt_used_bytes},
+                {"restores", stats.kv_ram_system_prompt_restores},
+                {"evictions", stats.kv_ram_system_prompt_evictions}};
             evidence["seconds"] =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             std::ofstream(output_root / (label + ".json")) << evidence.dump(2) << '\n';

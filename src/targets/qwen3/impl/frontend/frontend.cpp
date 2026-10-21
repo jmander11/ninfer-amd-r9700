@@ -332,6 +332,7 @@ std::unique_ptr<PreparedPromptData> make_text_prompt_data(fi::EncodedChat encode
     PreparedPromptData& result = *prepared;
     result.token_ids.assign(encoded.input_ids.begin(), encoded.input_ids.end());
     result.turn_closure_frontiers      = std::move(encoded.turn_closure_frontiers);
+    result.system_prompt_frontier      = encoded.system_prompt_frontier;
     result.identity.rewrite_checkpoint = encoded.rewrite_checkpoint;
     result.final_assistant_token_begin = encoded.final_assistant_token_begin;
     assign_text_positions(result);
@@ -365,6 +366,7 @@ std::unique_ptr<PreparedPromptData> make_media_prompt_data(fi::ProcessedInput pr
     result.prepare.vision_tokens       = processed.stats.vision_tokens;
     result.prepare.attention_pairs     = processed.stats.attention_pairs;
     result.turn_closure_frontiers      = std::move(processed.turn_closure_frontiers);
+    result.system_prompt_frontier      = processed.system_prompt_frontier;
     result.prepare.patch_bytes         = processed.stats.patch_bytes;
     result.identity.rewrite_checkpoint = processed.rewrite_checkpoint;
     result.final_assistant_token_begin = processed.final_assistant_token_begin;
@@ -1927,7 +1929,8 @@ std::string_view Frontend::token_bytes(TokenId token) const {
 }
 
 PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptInput input,
-                                              frontend_internal::EncodedHistoryCache& cache) {
+                                              frontend_internal::EncodedHistoryCache& cache,
+                                              bool cache_system_prompt) {
     const auto start               = Clock::now();
     const PromptOptions& options   = input.options;
     const bool tool_output_enabled = !options.output_constraint && enables_tool_output(input);
@@ -1946,6 +1949,8 @@ PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptIn
         data->generation_recovery = recovery;
         return PreparedPrompt(std::move(data));
     };
+    auto rendering                        = render_options(options);
+    rendering.mark_system_prompt          = cache_system_prompt;
     std::vector<fi::ChatMessage> messages = convert_messages(std::move(input.messages));
     const bool has_media =
         std::any_of(messages.begin(), messages.end(),
@@ -1959,14 +1964,13 @@ PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptIn
                                 frontend.impl_->processor);
         fi::ProcessedInput processed;
         try {
-            processed = processor.process(messages, render_options(options));
+            processed = processor.process(messages, rendering);
         } catch (const fi::ProcessorError& error) { throw_processor_error(error); }
         return finish(
             make_media_prompt_data(std::move(processed), options, tool_output_enabled, start));
     }
-    fi::EncodedChat encoded =
-        fi::encode_chat_with_cache(*frontend.impl_->tokenizer, frontend.impl_->chat_template,
-                                   messages, render_options(options), cache);
+    fi::EncodedChat encoded = fi::encode_chat_with_cache(
+        *frontend.impl_->tokenizer, frontend.impl_->chat_template, messages, rendering, cache);
     return finish(make_text_prompt_data(std::move(encoded), options, tool_output_enabled, start));
 }
 

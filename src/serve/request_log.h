@@ -17,7 +17,7 @@
 
 namespace ninfer::serve {
 
-inline constexpr int kRequestLogSchemaVersion        = 26;
+inline constexpr int kRequestLogSchemaVersion        = 27;
 inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log";
 
 // Closed wire names shared by the request log and the GET /metrics exposition.

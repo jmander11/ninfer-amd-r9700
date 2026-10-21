@@ -351,6 +351,10 @@ void test_multimodal_prefill_service_projection() {
     prompt.token_ids.resize(8192);
     expect(q3::detail::projected_prefill_work(prompt, 0, 8192, {}, 100) == 3,
            "rewrite split of aligned 8192 tokens reserves both irregular tail steps");
+    expect(q3::detail::projected_prefill_work(prompt, 0, 8192, {}, std::nullopt, 100) == 3,
+           "system split reserves the exact additional irregular prefill steps");
+    expect(q3::detail::projected_prefill_work(prompt, 100, 8192, {}, std::nullopt, 100) == 2,
+           "restored system frontier does not reserve a boundary behind the suffix");
     prompt.vision_items.resize(1);
     prompt.turn_closure_frontiers = {100};
     expect(q3::detail::projected_prefill_work(prompt, 0, 8192, {}, std::nullopt) == 3,

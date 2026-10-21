@@ -187,6 +187,135 @@ int qualify_disk_restart(const std::filesystem::path& artifact,
     return 0;
 }
 
+// Exercise boundary capture during interleaved prefill/decode, cancellation, and subsequent
+// reusable restores through the public Engine. The exact GPU cancellation phase is not forced.
+int qualify_system_prompts(const std::filesystem::path& artifact, std::string_view backend) {
+    require(backend == "none" || backend == "dflash" || backend == "mtp",
+            "system cache backend must be none, dflash, or mtp");
+    ninfer::EngineOptions options;
+    options.artifact_path         = artifact;
+    options.max_context           = 8192;
+    options.kv_capacity           = ninfer::KvCapacityPolicy::explicit_capacity(16384);
+    options.max_concurrency       = 2;
+    options.prefill_chunk         = 512;
+    options.mixed_forward         = 512;
+    options.kv_ram_capacity_bytes = 2ULL << 30;
+    options.kv_ram_system_prompts = 2;
+    options.generation_recovery   = false;
+    if (backend != "none") {
+        options.speculative.backend       = backend == "dflash" ? ninfer::SpeculativeBackend::DFlash
+                                                                : ninfer::SpeculativeBackend::Mtp;
+        options.speculative.draft_tokens  = backend == "dflash" ? 7 : 3;
+        options.speculative.proposal_head = ninfer::ProposalHead::Optimized;
+    }
+    std::string system = "You are a concise technical assistant. Follow the user's instruction.\n";
+    for (unsigned i = 0; i < 80; ++i) {
+        system += "Archive entry " + std::to_string(i) +
+                  ": cedar trees grow beside the river. This is background context.\n";
+    }
+    const auto input = [&](std::string user, unsigned system_variant = 0) {
+        ninfer::PromptInput value;
+        value.options.enable_thinking = false;
+        ninfer::ChatMessage instruction;
+        instruction.role = ninfer::ChatRole::System;
+        instruction.parts.push_back(ninfer::MessagePart{
+            .text = (system_variant != 0 ? "Additional instruction " +
+                                               std::to_string(system_variant) + ": be precise.\n"
+                                         : "") +
+                    system});
+        value.messages.push_back(std::move(instruction));
+        ninfer::ChatMessage message;
+        message.parts.push_back(ninfer::MessagePart{.text = std::move(user)});
+        value.messages.push_back(std::move(message));
+        return value;
+    };
+    auto request                              = request_options();
+    request.execution.cache_write             = true;
+    request.execution.requested_output_tokens = 32;
+    const std::string question                = "Name the capital of France.";
+    ninfer::GenerationResult cold;
+    {
+        ninfer::Engine engine(options);
+        cold = engine.generate(engine.prepare(input(question)), request);
+        require(cold.reused_prompt_tokens == 0, "fresh Engine unexpectedly reused a prefix");
+    }
+    ninfer::Engine engine(options);
+    (void)engine.generate(engine.prepare(input("What is three plus five?")), request);
+    auto warm = engine.generate(engine.prepare(input(question)), request);
+    require_same_output(warm, cold);
+    require(warm.system_prompt_cache_hit_tokens > 0 &&
+                warm.system_prompt_cache_hit_tokens == warm.reused_prompt_tokens,
+            "sequential different-user request did not restore the system snapshot");
+    const auto boundary = warm.reused_prompt_tokens;
+    // Queue all admissions before the first cold prefill completes. Only the first computes
+    // the shared system prefix; later FIFO admissions must refresh their RAM plans.
+    auto prompt_a            = engine.prepare(input("What is three plus five?", 1));
+    auto prompt_b            = engine.prepare(input(question, 1));
+    auto prompt_c            = engine.prepare(input("Give the chemical symbol for oxygen.", 1));
+    auto first               = engine.submit(std::move(prompt_a), request);
+    auto queued_b            = engine.submit(std::move(prompt_b), request);
+    auto queued_c            = engine.submit(std::move(prompt_c), request);
+    const auto first_result  = first.wait();
+    const auto queued_result = queued_b.wait();
+    const auto queued_third  = queued_c.wait();
+    require(first_result.system_prompt_cache_hit_tokens == 0 &&
+                queued_result.system_prompt_cache_hit_tokens > 0 &&
+                queued_third.system_prompt_cache_hit_tokens ==
+                    queued_result.system_prompt_cache_hit_tokens,
+            "queued first-user variants did not share the newly captured system prefix");
+    // Ordinary decode batch shape can change floating-point rounding; queued behavior is
+    // checked by exact source/frontier and completion. Exact cache parity is sequential above.
+    require(queued_result.prefix_reuse_source == ninfer::PrefixReuseSource::HostRam &&
+                queued_third.prefix_reuse_source == ninfer::PrefixReuseSource::HostRam &&
+                queued_result.generated_token_ids.size() == 32 &&
+                queued_third.generated_token_ids.size() == 32,
+            "queued same-system admissions did not complete with RAM reuse");
+    const auto captures                           = engine.runtime_stats().kv_ram_captures;
+    auto long_decode                              = request;
+    long_decode.execution.requested_output_tokens = 128;
+    auto decode = engine.submit(engine.prepare(input("Count the integers in order.")), long_decode);
+    // This different system is a cold capture. It must stop exactly at the unaligned system
+    // boundary while another lane decodes; DFlash takes the mixed-target-forward route.
+    auto mixed =
+        engine.submit(engine.prepare(input("Give the chemical symbol for oxygen.", 2)), request);
+    // The third admission can use the retained snapshot while the earlier chats decode.
+    auto active_shared =
+        engine.submit(engine.prepare(input("Write the integer after forty-one.")), request);
+    const auto mixed_result  = mixed.wait();
+    const auto decode_result = decode.wait();
+    const auto active_result = active_shared.wait();
+    require(active_result.system_prompt_cache_hit_tokens == boundary,
+            "new job beside active chats did not reuse the retained system snapshot");
+    require(mixed_result.generated_token_ids.size() == 32 &&
+                decode_result.generated_token_ids.size() == 128,
+            "concurrent system capture failed to complete both requests");
+    require(engine.runtime_stats().kv_ram_system_prompt_entries == 2 &&
+                engine.runtime_stats().kv_ram_captures > captures,
+            "mixed prefill did not retain its second system prefix");
+    CancelAfterOutput sink;
+    const ninfer::CancellationView cancellation([&] { return sink.requested; });
+    const auto cancelled = engine.generate(engine.prepare(input("List the days of the week.")),
+                                           long_decode, &sink, cancellation);
+    require(sink.requested && cancelled.finish_reason == ninfer::FinishReason::Cancelled,
+            "system-cache cancellation was not observed");
+    warm = engine.generate(engine.prepare(input(question)), request);
+    require_same_output(warm, cold);
+    const auto stats = engine.runtime_stats();
+    require(stats.kv_ram_system_prompt_entries == 2 && stats.kv_ram_system_prompt_restores >= 3 &&
+                stats.kv_cache_fallbacks == 0 &&
+                stats.kv_ram_used_bytes <= stats.kv_ram_capacity_bytes,
+            "retained system state/budget was lost after concurrent or cancelled work");
+    std::cout << "system_prompt_cache: PASS backend=" << backend << " C2 boundary=" << boundary
+              << " entries=" << stats.kv_ram_system_prompt_entries
+              << " restores=" << stats.kv_ram_system_prompt_restores
+              << " bytes=" << stats.kv_ram_system_prompt_used_bytes
+              << " cold_ttft_s=" << cold.timings.first_token_seconds
+              << " warm_ttft_s=" << warm.timings.first_token_seconds
+              << "; queued same-system admissions, active-chat reuse, exact cold greedy output, "
+                 "mixed capture, cancellation, no fallback\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -195,6 +324,8 @@ int main(int argc, char** argv) {
             << "usage: ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer\n"
                "       ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer --disk-dir "
                "NEW_DIRECTORY\n"
+               "       ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer --system-prompts "
+               "none|dflash|mtp\n"
                "Manual real-model check: ordinary greedy C1, 16-token requests, "
                "8 GiB RAM cache.\n"
                "Cancellation starts after the first nonempty stream delta; "
@@ -206,6 +337,9 @@ int main(int argc, char** argv) {
     }
     try {
         if (argc == 4) {
+            if (std::string_view(argv[2]) == "--system-prompts") {
+                return qualify_system_prompts(argv[1], argv[3]);
+            }
             require(std::string_view(argv[2]) == "--disk-dir", "expected --disk-dir NEW_DIRECTORY");
             return qualify_disk_restart(argv[1], argv[3]);
         }

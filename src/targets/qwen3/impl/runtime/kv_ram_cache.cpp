@@ -446,9 +446,11 @@ RamRestoredHost host_from_header(const void* block, const HeaderView& header) {
 
 } // namespace
 
-KVRamCache::KVRamCache(std::size_t capacity_bytes) : arena_(capacity_bytes) {}
+KVRamCache::KVRamCache(std::size_t capacity_bytes, std::uint32_t system_prompt_limit)
+    : arena_(capacity_bytes), system_prompt_limit_(system_prompt_limit) {}
 
-KVRamCache::KVRamCache(HostPinnedArena&& arena) : arena_(std::move(arena)) {}
+KVRamCache::KVRamCache(HostPinnedArena&& arena, std::uint32_t system_prompt_limit)
+    : arena_(std::move(arena)), system_prompt_limit_(system_prompt_limit) {}
 
 KVRamCache::~KVRamCache() {
     // Teardown must remain allocation-free, including after host-memory pressure.
@@ -897,13 +899,67 @@ void KVRamCache::release(std::uint64_t entry_id) {
     bump_version();
 }
 
+void KVRamCache::wait_entry_copies_on_stream(std::uint64_t entry_id, hipStream_t stream) {
+    std::lock_guard lock(io_mutex_);
+    wait_copies_on_stream(require(entry_id), stream);
+}
+
+bool KVRamCache::is_system_prompt(std::uint64_t entry_id) const {
+    std::lock_guard lock(io_mutex_);
+    return require(entry_id).system_prompt;
+}
+
+bool KVRamCache::has_system_prompt(const PreparedPromptData& prompt, PrefixHash128 hash) const {
+    if (!prompt.system_prompt_frontier) { return false; }
+    std::lock_guard lock(io_mutex_);
+    for (const auto id : fifo_) {
+        const auto& record = require(id);
+        if (!record.system_prompt || record.execution_frontier != *prompt.system_prompt_frontier ||
+            record.hash_f != hash) {
+            continue;
+        }
+        const auto host = host_from_header(record.block, read_header(record.block, record.bytes));
+        if (prefix_matches(prompt, host.ledger, host.identity, record.execution_frontier)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool KVRamCache::evict_system_prompt_locked() {
+    std::optional<std::uint64_t> victim;
+    for (const auto id : fifo_) {
+        const auto& record = require(id);
+        if (!record.system_prompt || record.pinned || record.io_pins != 0) { continue; }
+        if (!victim || record.last_used < require(*victim).last_used) { victim = id; }
+    }
+    if (!victim) { return false; }
+    ++system_evictions_;
+    ++evictions_;
+    retire_locked(*victim);
+    return true;
+}
+
+bool KVRamCache::evict_system_prompt() {
+    std::lock_guard lock(io_mutex_);
+    reap_retired_locked();
+    return evict_system_prompt_locked();
+}
+
 void KVRamCache::consume(std::uint64_t entry_id) {
     std::lock_guard lock(io_mutex_);
     reap_retired_locked();
-    const Record& record = require(entry_id);
+    Record& record = require(entry_id);
     if (!record.pinned) { throw std::logic_error("RAM cache consume requires a claimed entry"); }
     ++restores_;
-    retire_locked(entry_id);
+    if (record.system_prompt) {
+        record.pinned    = false;
+        record.last_used = ++system_clock_;
+        ++system_restores_;
+        bump_version();
+    } else {
+        retire_locked(entry_id);
+    }
 }
 
 void KVRamCache::release_restored(std::uint64_t entry_id) {
@@ -914,6 +970,10 @@ void KVRamCache::release_restored(std::uint64_t entry_id) {
     }
     record.pinned = false;
     ++restores_;
+    if (record.system_prompt) {
+        record.last_used = ++system_clock_;
+        ++system_restores_;
+    }
     bump_version();
 }
 
@@ -933,14 +993,18 @@ std::vector<std::uint64_t> KVRamCache::unpinned_ids() const {
     ids.reserve(fifo_.size());
     for (std::uint64_t id : fifo_) {
         const Record& record = require(id);
-        if (!record.pinned && record.io_pins == 0) { ids.push_back(id); }
+        if (!record.system_prompt && !record.pinned && record.io_pins == 0) { ids.push_back(id); }
     }
     return ids;
 }
 
 std::vector<std::uint64_t> KVRamCache::fifo_ids() const {
     std::lock_guard lock(io_mutex_);
-    return {fifo_.begin(), fifo_.end()};
+    std::vector<std::uint64_t> ids;
+    for (const auto id : fifo_) {
+        if (!require(id).system_prompt) { ids.push_back(id); }
+    }
+    return ids;
 }
 
 void KVRamCache::pin_for_io(std::uint64_t entry_id) {
@@ -1113,16 +1177,29 @@ KvRamSnapshot KVRamCache::snapshot() const noexcept {
     std::lock_guard lock(io_mutex_);
     std::size_t used = 0;
     for (const auto& entry : records_) { used += entry.second.bytes; }
+    std::size_t system_entries = 0, system_bytes = 0;
+    for (const auto id : fifo_) {
+        const auto& record = require(id);
+        if (record.system_prompt) {
+            ++system_entries;
+            system_bytes += record.bytes;
+        }
+    }
     return KvRamSnapshot{
-        .capacity_bytes = arena_.capacity(),
-        .used_bytes     = used,
-        .entry_count    = fifo_.size(),
-        .captures       = captures_,
-        .restores       = restores_,
-        .evictions      = evictions_,
-        .drops          = drops_,
-        .save_seconds   = save_seconds_,
-        .load_seconds   = load_seconds_,
+        .capacity_bytes           = arena_.capacity(),
+        .used_bytes               = used,
+        .entry_count              = fifo_.size(),
+        .captures                 = captures_,
+        .restores                 = restores_,
+        .evictions                = evictions_,
+        .drops                    = drops_,
+        .system_prompt_limit      = system_prompt_limit_,
+        .system_prompt_entries    = system_entries,
+        .system_prompt_used_bytes = system_bytes,
+        .system_prompt_restores   = system_restores_,
+        .system_prompt_evictions  = system_evictions_,
+        .save_seconds             = save_seconds_,
+        .load_seconds             = load_seconds_,
     };
 }
 
@@ -1282,6 +1359,25 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
     }
 
     void* block = nullptr;
+    {
+        std::lock_guard lock(io_mutex_);
+        if (source.system_prompt) {
+            if (system_prompt_limit_ == 0) {
+                ++drops_;
+                return {RamCaptureStatus::Dropped};
+            }
+            const auto count = [&] {
+                return std::count_if(fifo_.begin(), fifo_.end(),
+                                     [&](auto id) { return require(id).system_prompt; });
+            };
+            while (static_cast<std::uint64_t>(count()) >= system_prompt_limit_) {
+                if (!evict_system_prompt_locked()) {
+                    ++drops_;
+                    return {RamCaptureStatus::Dropped};
+                }
+            }
+        }
+    }
     {
         // The arena is shared with the disk worker, whose last I/O unpin frees retired blocks.
         std::lock_guard lock(io_mutex_);
@@ -1485,6 +1581,8 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         if (next_id_ == 0) { throw std::logic_error("RAM cache entry id overflow"); }
         Record record;
         record.id                  = next_id_++;
+        record.system_prompt       = source.system_prompt;
+        record.last_used           = 0;
         record.hash_f              = source.hash_f;
         record.hash_c              = source.hash_c;
         record.hash_c_valid        = source.hash_c_valid;
@@ -1508,6 +1606,7 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         record.disk_entry_id = source.disk_entry_id;
         record.copies_start  = copies_start;
         std::lock_guard lock(io_mutex_);
+        record.last_used          = source.system_prompt ? ++system_clock_ : 0;
         const auto [it, inserted] = records_.emplace(record.id, record);
         if (!inserted) { throw std::logic_error("RAM cache entry id already exists"); }
         copies_start = nullptr;
@@ -1599,6 +1698,7 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
             }
         }
         if (target.tail_hidden != nullptr &&
+            (header.tail_hidden_valid || header.tail_hidden_bytes != 0) &&
             header.tail_hidden_bytes != target.tail_hidden->bytes()) {
             throw std::logic_error("RAM entry hidden geometry mismatch");
         }

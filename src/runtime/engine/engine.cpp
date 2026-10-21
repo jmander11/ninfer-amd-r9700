@@ -180,7 +180,8 @@ PreparedPrompt Engine::prepare(PromptInput input) const {
     const auto& target = impl_->active;
     if (target == nullptr) { throw std::logic_error("Engine target is not active"); }
     auto prepared = targets::qwen3::EncodedHistoryPrepare::prepare(
-        target->loaded->frontend, std::move(input), impl_->host_encode_cache);
+        target->loaded->frontend, std::move(input), impl_->host_encode_cache,
+        impl_->options.kv_ram_system_prompts != 0);
     PromptSummary info = prepared.summary();
     if (info.prompt_tokens > target->capacity) {
         throw RequestError(RequestErrorKind::ContextLengthExceeded,

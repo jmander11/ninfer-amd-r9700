@@ -104,18 +104,23 @@ int main() {
     metrics.attach(options, load, memory, "id \"quoted\"\nline", environment);
 
     ScrapeInputs inputs;
-    inputs.stats.kv_ram_used_bytes             = 4096;
-    inputs.stats.gpu_kv_main_capacity_pages    = 128;
-    inputs.stats.gpu_kv_main_entitled_pages    = 40;
-    inputs.stats.gpu_kv_spec_capacity_pages    = 16;
-    inputs.stats.kv_disk_spill_active          = true;
-    inputs.stats.kv_disk_defrag_active         = true;
-    inputs.stats.kv_disk_storage_bytes         = 8388608;
-    inputs.stats.kv_disk_restore_active        = true;
-    inputs.stats.kv_disk_pending_jobs          = 3;
-    inputs.stats.kv_disk_spill_elapsed_seconds = 12.165;
-    const auto snapshot                        = metrics.snapshot(inputs);
-    const std::string text                     = snapshot.prometheus_text();
+    inputs.stats.kv_ram_system_prompt_limit      = 4;
+    inputs.stats.kv_ram_system_prompt_entries    = 2;
+    inputs.stats.kv_ram_system_prompt_used_bytes = 2048;
+    inputs.stats.kv_ram_system_prompt_restores   = 7;
+    inputs.stats.kv_ram_system_prompt_evictions  = 3;
+    inputs.stats.kv_ram_used_bytes               = 4096;
+    inputs.stats.gpu_kv_main_capacity_pages      = 128;
+    inputs.stats.gpu_kv_main_entitled_pages      = 40;
+    inputs.stats.gpu_kv_spec_capacity_pages      = 16;
+    inputs.stats.kv_disk_spill_active            = true;
+    inputs.stats.kv_disk_defrag_active           = true;
+    inputs.stats.kv_disk_storage_bytes           = 8388608;
+    inputs.stats.kv_disk_restore_active          = true;
+    inputs.stats.kv_disk_pending_jobs            = 3;
+    inputs.stats.kv_disk_spill_elapsed_seconds   = 12.165;
+    const auto snapshot                          = metrics.snapshot(inputs);
+    const std::string text                       = snapshot.prometheus_text();
     failures += check(contains(text, "ninfer_kv_disk_spill_active 1\n") &&
                           contains(text, "ninfer_kv_disk_defrag_active 1\n") &&
                           contains(text, "ninfer_kv_disk_storage_bytes 8388608\n") &&
@@ -154,6 +159,12 @@ int main() {
     failures += check(sum_at != std::string::npos && text.find(',', sum_at) != sum_at,
                       "phase histogram sum is missing");
 
+    failures += check(contains(text, "ninfer_kv_ram_system_prompt_limit 4\n") &&
+                          contains(text, "ninfer_kv_ram_system_prompt_entries 2\n") &&
+                          contains(text, "ninfer_kv_ram_system_prompt_used_bytes 2048\n") &&
+                          contains(text, "ninfer_kv_ram_system_prompt_restores_total 7\n") &&
+                          contains(text, "ninfer_kv_ram_system_prompt_evictions_total 3\n"),
+                      "system prefix occupancy/LRU counters were lost");
     inputs.stats.kv_cache_fallbacks = 10;
     const std::string first         = metrics.snapshot(inputs).prometheus_text();
     inputs.stats.kv_cache_fallbacks = 20;

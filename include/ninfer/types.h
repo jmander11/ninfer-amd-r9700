@@ -149,7 +149,9 @@ struct EngineOptions {
     std::optional<std::uint32_t> mixed_forward;
     std::uint32_t mixed_forward_rounds = 1;
     std::size_t kv_ram_capacity_bytes  = 0;
-    std::size_t kv_disk_capacity_bytes = 0;
+    // Retained system-prefix LRU entries, sharing kv_ram_capacity_bytes; zero disables.
+    std::uint32_t kv_ram_system_prompts = 0;
+    std::size_t kv_disk_capacity_bytes  = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
     // Filled from the loaded artifact at Engine construction for the KV-disk fingerprint.
@@ -165,6 +167,13 @@ struct EngineOptions {
     bool generation_recovery = true;
     LoadProgress load_progress;
 };
+
+inline void validate_kv_system_prompt_options(std::size_t ram_capacity_bytes,
+                                              std::uint32_t system_prompts) {
+    if (system_prompts != 0 && ram_capacity_bytes == 0) {
+        throw std::invalid_argument("--kv-ram-system-prompts requires --kv-ram-capacity");
+    }
+}
 
 inline void validate_kv_disk_options(std::size_t ram_capacity_bytes,
                                      std::size_t disk_capacity_bytes,
@@ -685,11 +694,13 @@ struct GenerationResult {
     std::vector<std::string> undeclared_tool_call_names;
     GenerationRecoveryStats recovery;
     ConstraintStats constraint;
-    std::uint32_t reasoning_tokens        = 0;
-    FinishReason finish_reason            = FinishReason::None;
-    std::uint32_t reused_prompt_tokens    = 0;
-    PrefixReusePath prefix_reuse_path     = PrefixReusePath::FullReset;
-    PrefixReuseSource prefix_reuse_source = PrefixReuseSource::None;
+    std::uint32_t reasoning_tokens     = 0;
+    FinishReason finish_reason         = FinishReason::None;
+    std::uint32_t reused_prompt_tokens = 0;
+    // Tokens restored specifically from a retained system-prefix RAM entry.
+    std::uint32_t system_prompt_cache_hit_tokens = 0;
+    PrefixReusePath prefix_reuse_path            = PrefixReusePath::FullReset;
+    PrefixReuseSource prefix_reuse_source        = PrefixReuseSource::None;
     // Absolute staged-checkpoint head frontiers this request restored or wrote;
     // 0 if none. restored is the matching ladder or turn-rollback F (the same
     // length as reused_prompt_tokens on those paths). captured is the advertised
@@ -811,25 +822,30 @@ struct RuntimeStats {
     // Tokens committed by decode rounds; the first token emitted by prefill is excluded.
     std::uint64_t committed_decode_tokens = 0;
     // Decode batch executions and the sum of their batch sizes.
-    std::uint64_t decode_rounds         = 0;
-    std::uint64_t decode_row_rounds     = 0;
-    std::uint32_t running_requests      = 0;
-    std::uint32_t prefilling_requests   = 0;
-    std::uint32_t decode_ready_requests = 0;
-    std::uint32_t waiting_requests      = 0;
-    std::uint64_t kv_ram_captures       = 0;
-    std::uint64_t kv_ram_restores       = 0;
-    std::uint64_t kv_ram_evictions      = 0;
-    std::uint64_t kv_ram_drops          = 0;
-    double kv_ram_save_seconds          = 0;
-    double kv_ram_load_seconds          = 0;
-    std::size_t kv_ram_capacity_bytes   = 0;
-    std::size_t kv_ram_used_bytes       = 0;
-    std::size_t kv_ram_entry_count      = 0;
-    std::uint64_t kv_disk_captures      = 0;
-    std::uint64_t kv_disk_restores      = 0;
-    std::uint64_t kv_disk_evictions     = 0;
-    std::uint64_t kv_disk_drops         = 0;
+    std::uint64_t decode_rounds                  = 0;
+    std::uint64_t decode_row_rounds              = 0;
+    std::uint32_t running_requests               = 0;
+    std::uint32_t prefilling_requests            = 0;
+    std::uint32_t decode_ready_requests          = 0;
+    std::uint32_t waiting_requests               = 0;
+    std::uint32_t kv_ram_system_prompt_limit     = 0;
+    std::size_t kv_ram_system_prompt_entries     = 0;
+    std::size_t kv_ram_system_prompt_used_bytes  = 0;
+    std::uint64_t kv_ram_system_prompt_restores  = 0;
+    std::uint64_t kv_ram_system_prompt_evictions = 0;
+    std::uint64_t kv_ram_captures                = 0;
+    std::uint64_t kv_ram_restores                = 0;
+    std::uint64_t kv_ram_evictions               = 0;
+    std::uint64_t kv_ram_drops                   = 0;
+    double kv_ram_save_seconds                   = 0;
+    double kv_ram_load_seconds                   = 0;
+    std::size_t kv_ram_capacity_bytes            = 0;
+    std::size_t kv_ram_used_bytes                = 0;
+    std::size_t kv_ram_entry_count               = 0;
+    std::uint64_t kv_disk_captures               = 0;
+    std::uint64_t kv_disk_restores               = 0;
+    std::uint64_t kv_disk_evictions              = 0;
+    std::uint64_t kv_disk_drops                  = 0;
     std::array<std::uint64_t, kKvDiskDropReasonCount> kv_disk_drop_reasons{};
     double kv_disk_save_seconds        = 0;
     double kv_disk_load_seconds        = 0;

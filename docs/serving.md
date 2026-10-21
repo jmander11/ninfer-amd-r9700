@@ -311,6 +311,8 @@ Wire captures remain accurate with recovery enabled, but streamed reasoning can 
 
 The server emits live `[req N] recovery` console records for streaming and non-streaming requests on all three HTTP surfaces. `retry_triggered` identifies `repeated_reasoning`, `reasoning_replay`, `repeated_content` or `duplicate_tool_call`; `replay_discarded` records held replay omission; `retry_started` marks the retry prefill, and `retry_prefill_complete` marks its completion. `exhausted` is a warning before the request error. `finished` reports the terminal outcome (including cancellation or output limits), not a claim that the task succeeded. Records include started attempt count, cumulative discarded reasoning/tool/content counts and framing repairs, generated tokens and remaining output budget. `cycle_exclusion` means one root-token exclusion was armed for sampling, not that a retry occurred or that it changed the counterfactual draw. To bound traffic these records appear at counts 1, 2, 4, 8, ...; terminal recovery records include the exact cumulative count. These diagnostics contain no prompt, reasoning, tool arguments, or token text, and never enter HTTP model-output chunks. Tool grammar is continuously enforced rather than a recovery trigger; its normal operation does not emit recovery events.
 
+With `--kv-ram-system-prompts N`, the RAM cache can retain N distinct rendered system prefixes even when the first user message differs. The feature defaults to zero/off and shares `--kv-ram-capacity`; it does not enable disk caching. `/metrics.json` exposes `kv_ram.system_prompts` with `limit`, `entries`, `used_bytes`, `restores`, and `evictions`. Prometheus exposes the corresponding `ninfer_kv_ram_system_prompt_limit`, `_entries`, `_used_bytes`, `_restores_total`, and `_evictions_total` series. The per-request completion log includes `system_cached=Ntok` and structured `result.system_prompt_cache_hit_tokens`: the number restored specifically from a retained system-prefix entry for the initial prefill, not a sum across recovery attempts. A longer conversation-prefix hit can win instead and is reported in the existing `cache` count and `reuse_source`. These are cache observations, not a claim that every system prompt fits or that every restore improves latency.
+
 ### Response object and usage
 
 A terminal wire response has `object: "response"`, one of `completed`, `incomplete`, or `cancelled` in `status`, and a typed `output` array. NInfer may emit:
@@ -641,7 +643,7 @@ rate(ninfer_speculative_accepted_tokens_total[5m])
   --request-log-jsonl profiles/bench/run/server.requests.jsonl
 ```
 
-Every line is one `ninfer_serve_request_log` schema-v26 JSON object. All events carry `timestamp_unix_ms` and a process-unique `server_instance_id`; request IDs are monotonic only within that server instance.
+Every line is one `ninfer_serve_request_log` schema-v27 JSON object. All events carry `timestamp_unix_ms` and a process-unique `server_instance_id`; request IDs are monotonic only within that server instance.
 
 | Event | Contents |
 |---|---|

@@ -341,6 +341,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
       vision_enabled(plan.features.vision), use_device_graph(plan.use_device_graph),
       kv_payload_bytes(plan.persistent.kv_payload_bytes),
       kv_ram_capacity_bytes(plan.kv_ram_capacity_bytes),
+      kv_ram_system_prompts(plan.kv_ram_system_prompts),
       expected_graph_definition_count(plan.graph_definition_count),
       expected_graph_executable_count(plan.graph_executable_count),
       kv_disk_capacity_bytes(plan.kv_disk_capacity_bytes),
@@ -571,7 +572,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
         if (kv_ram_arena == nullptr || kv_ram_arena->capacity() != kv_ram_capacity_bytes) {
             throw std::invalid_argument("KV RAM cache host arena does not match the sequence plan");
         }
-        kv_ram_cache_.emplace(std::move(*kv_ram_arena));
+        kv_ram_cache_.emplace(std::move(*kv_ram_arena), kv_ram_system_prompts);
     }
     if (kv_disk_capacity_bytes != 0) {
         const PagedKVPool& text_pool    = decoder->text_kv.pool();
@@ -1101,26 +1102,31 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(
         if (host_input_consumed) { prompt.release_media_payload(); }
 
         RequestControl::Prefill prefill{
-            .prompt                      = std::move(prompt),
-            .vision_plan                 = std::move(request_plan.vision),
-            .vision                      = nullptr,
-            .transient                   = transient,
-            .rewrite_checkpoint_capture  = request_plan.rewrite_checkpoint_capture,
-            .base                        = base,
-            .cursor                      = base,
-            .prompt_tokens               = prompt_tokens,
-            .initial_mtp_extent          = initial_mtp_extent,
-            .elapsed_seconds             = 0.0,
-            .host_input_consumed_pending = host_input_consumed,
-            .prepare_mtp                 = request_plan.prepare_mtp,
-            .reuse                       = request_plan.reuse,
-            .reuse_source                = request_plan.reuse_source,
-            .mtp_bridge                  = request_plan.mtp_bridge,
-            .capture_context_checkpoints = request_plan.capture_context_checkpoints,
+            .prompt                         = std::move(prompt),
+            .vision_plan                    = std::move(request_plan.vision),
+            .vision                         = nullptr,
+            .transient                      = transient,
+            .rewrite_checkpoint_capture     = request_plan.rewrite_checkpoint_capture,
+            .base                           = base,
+            .cursor                         = base,
+            .prompt_tokens                  = prompt_tokens,
+            .initial_mtp_extent             = initial_mtp_extent,
+            .elapsed_seconds                = 0.0,
+            .host_input_consumed_pending    = host_input_consumed,
+            .prepare_mtp                    = request_plan.prepare_mtp,
+            .reuse                          = request_plan.reuse,
+            .reuse_source                   = request_plan.reuse_source,
+            .system_prompt_cache_hit_tokens = request_plan.system_prompt_cache_hit_tokens,
+            .mtp_bridge                     = request_plan.mtp_bridge,
+            .capture_context_checkpoints    = request_plan.capture_context_checkpoints,
         };
         request.prefill.emplace(std::move(prefill));
         request.prompt_tokens = prompt_tokens;
         auto& staged          = *request.prefill;
+        if (request_plan.capture_system_prompt && staged.prompt.system_prompt_frontier &&
+            *staged.prompt.system_prompt_frontier > base) {
+            staged.system_prompt_capture = staged.prompt.system_prompt_frontier;
+        }
         if (staged.vision_plan) {
             staged.vision = std::make_unique<schedule::VisionPrefillSession>(
                 device, model, work, staged.prompt, *staged.vision_plan, staged.transient);
@@ -1873,6 +1879,91 @@ void ProgramImplCore::fork_retained_lane(std::uint32_t destination, std::uint32_
 void ProgramImplCore::evict_retained_lane(std::uint32_t lane) noexcept {
     if (!has_retained_lane(lane)) { return; }
     clear_lane(sequences[lane], requests[lane]);
+}
+
+void ProgramImplCore::capture_system_prompt(SequenceState& sequence,
+                                            RequestControl::Prefill& staged,
+                                            std::uint32_t processed_tokens) {
+    const auto frontier = staged.cursor;
+    if (!kv_ram_cache_ || frontier == 0 || frontier >= staged.prompt_tokens) { return; }
+    if (!sequence.kv) { throw std::logic_error("system capture requires mapped sequence KV"); }
+    auto& kv  = *sequence.kv;
+    auto& ram = *kv_ram_cache_;
+    try {
+        qwen3::detail::ResidentPrefixIdentity identity = sequence.prefix_identity;
+        identity.truncate(frontier + 1);
+        qwen3::detail::RamCaptureSource source;
+        source.system_prompt      = true;
+        source.execution_frontier = frontier;
+        source.ledger_frontier    = frontier + 1;
+        source.rope_delta         = sequence.rope_delta;
+        source.text_kv_valid      = frontier;
+        // MTP column F-1 was prepared with lookahead token F, which belongs to the new user.
+        // Keep only the independent columns; BeforeSuffix regenerates the bridge column.
+        source.mtp_kv_valid            = staged.prepare_mtp ? frontier - 1 : 0;
+        source.dflash_context_frontier = dflash ? frontier : 0;
+        source.tail_hidden_valid       = staged.prepare_mtp;
+        Tensor mtp_hidden;
+        if (staged.prepare_mtp) {
+            mtp_hidden =
+                prefill_hidden.slice(1, static_cast<std::int32_t>(processed_tokens - 1), 1);
+            source.tail_hidden = &mtp_hidden;
+        }
+        source.ledger   = std::span<const TokenId>(sequence.ledger).first(frontier + 1);
+        source.identity = &identity;
+        source.hash_f =
+            sequence.prefix_hashes.at(sequence.ledger, sequence.prefix_identity, frontier);
+        if (ram.has_system_prompt(staged.prompt, source.hash_f)) { return; }
+        source.text           = &kv.text;
+        source.text_pool      = &decoder->text_kv.pool();
+        source.text_semantics = decoder->text_kv.fingerprint();
+        source.text_pages     = ninfer::pages_for_tokens(frontier);
+        if (kv.backend) {
+            source.backend      = &*kv.backend;
+            source.backend_pool = backend_kv_pool();
+            source.backend_pages =
+                ninfer::pages_for_tokens(dflash ? frontier : source.mtp_kv_valid);
+            if (speculative_backend == SpeculativeBackend::Mtp) {
+                source.backend_semantics = decoder->mtp_cache()->fingerprint();
+            }
+        }
+        source.gdn = &decoder->linear_attention;
+        source.gdn_current_slot =
+            LinearStateSlots::current_state_slot(sequence.lane, max_concurrency);
+        if (dflash) {
+            source.dflash_local = &dflash->local;
+            source.dflash_lane  = static_cast<std::int32_t>(sequence.lane);
+        }
+        device.order_copy_after_compute();
+        source.stream = device.copy_stream;
+        for (;;) {
+            const auto captured = ram.capture(source);
+            if (captured.status == qwen3::detail::RamCaptureStatus::Captured) {
+                // The next compute may overwrite GDN/cyclic state or the last copied KV page.
+                // The copy stream owns any H2D readers; compute waits before reusing those bytes.
+                ram.wait_entry_copies_on_stream(captured.entry_id, device.stream);
+                return;
+            }
+            if (captured.status == qwen3::detail::RamCaptureStatus::Dropped) { return; }
+            if (ram.retired_fence_pending()) {
+                ram.record_drop();
+                return;
+            }
+            if (kv_disk_cache_) {
+                const auto reclaimed = kv_disk_cache_->reclaim_ram_entry(false, {});
+                if (reclaimed == qwen3::detail::RamReclaim::Evicted ||
+                    reclaimed == qwen3::detail::RamReclaim::Retry) {
+                    continue;
+                }
+            } else {
+                const auto victims = ram.unpinned_ids();
+                if (!victims.empty() && ram.evict_one_unpinned(victims.front())) { continue; }
+            }
+            if (ram.evict_system_prompt()) { continue; }
+            ram.record_drop();
+            return;
+        }
+    } catch (const std::bad_alloc&) { ram.record_drop(); }
 }
 
 bool ProgramImplCore::capture_cuts_at_rewrite(const SequenceState& sequence) const noexcept {
@@ -2800,6 +2891,7 @@ void ProgramImplCore::finish_ram_restore(std::uint64_t entry_id, runtime::CacheR
     if (!kv_ram_cache_) {
         throw std::logic_error("RAM restore completion requires an enabled RAM tier");
     }
+    if (kv_ram_cache_->is_system_prompt(entry_id)) { intent = runtime::CacheReadIntent::Fork; }
     if (intent == runtime::CacheReadIntent::Consume) {
         kv_ram_cache_->consume(entry_id);
     } else {
@@ -4332,7 +4424,9 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
     const runtime::BeginSummary summary{.prompt_tokens        = staged.prompt_tokens,
                                         .reused_prompt_tokens = staged.base,
                                         .prefix_reuse_path    = staged.reuse,
-                                        .prefix_reuse_source  = staged.reuse_source};
+                                        .prefix_reuse_source  = staged.reuse_source,
+                                        .system_prompt_cache_hit_tokens =
+                                            staged.system_prompt_cache_hit_tokens};
     bool host_input_consumed              = staged.host_input_consumed_pending;
     staged.host_input_consumed_pending    = false;
     std::uint32_t processed_prompt_tokens = 0;
@@ -4421,9 +4515,12 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
             std::uint32_t step_tokens = prefill_step_tokens(decode_waiting);
             if (step_cap != 0) { step_tokens = std::min(step_tokens, step_cap); }
             const std::uint32_t remaining = staged.prompt_tokens - staged.cursor;
-            const std::uint32_t nominal =
-                mixed != nullptr ? std::min(remaining, step_cap)
-                                 : schedule::select_prefill_chunk(remaining, step_tokens);
+            std::uint32_t nominal = mixed != nullptr
+                                        ? std::min(remaining, step_cap)
+                                        : schedule::select_prefill_chunk(remaining, step_tokens);
+            if (staged.system_prompt_capture && staged.cursor < *staged.system_prompt_capture) {
+                nominal = std::min(nominal, *staged.system_prompt_capture - staged.cursor);
+            }
             const bool final_candidate = staged.cursor + nominal == staged.prompt_tokens;
             if (final_candidate && request.output != nullptr && request.output->has_token_masks()) {
                 // Another prefilling request may have written the shared root row since this
@@ -4492,6 +4589,10 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
             }
             if (speculative_backend == SpeculativeBackend::DFlash) {
                 sequence.dflash_context_frontier = staged.cursor;
+            }
+            if (staged.system_prompt_capture && staged.cursor == *staged.system_prompt_capture) {
+                capture_system_prompt(sequence, staged, result.processed_tokens);
+                staged.system_prompt_capture.reset();
             }
             maybe_freeze_context_checkpoint(sequence, request, result.processed_tokens);
             if (staged.rewrite_checkpoint_capture &&

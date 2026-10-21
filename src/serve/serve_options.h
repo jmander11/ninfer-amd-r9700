@@ -35,9 +35,10 @@ struct ServeOptions {
     std::uint32_t pending_timeout_ms   = 300000;
     std::uint32_t prefill_chunk        = kDefaultPrefillChunk;
     std::optional<std::uint32_t> mixed_forward; // unset => automatic (Engine resolves)
-    std::uint32_t mixed_forward_rounds = 1;
-    std::size_t kv_ram_capacity_bytes  = 0;
-    std::size_t kv_disk_capacity_bytes = 0;
+    std::uint32_t mixed_forward_rounds  = 1;
+    std::size_t kv_ram_capacity_bytes   = 0;
+    std::uint32_t kv_ram_system_prompts = 0;
+    std::size_t kv_disk_capacity_bytes  = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress     = KvDiskCompress::Off;
     std::uint32_t log_stats_interval_ms = 5000; // 0 disables periodic Engine throughput logs

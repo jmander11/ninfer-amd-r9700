@@ -66,6 +66,8 @@ services:
       - auto
       - --kv-ram-capacity
       - "${NINFER_RAM_CACHE_MIB:-12288}"
+      - --kv-ram-system-prompts
+      - "${NINFER_SYSTEM_PROMPTS:-0}"
       - --kv-disk-capacity
       - "${NINFER_DISK_CACHE_MIB:-25600}"
       - --kv-disk-location

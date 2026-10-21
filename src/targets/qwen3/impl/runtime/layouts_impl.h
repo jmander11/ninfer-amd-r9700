@@ -847,6 +847,7 @@ void validate_target_options(DeviceContext& device, const EngineOptions& options
     }
     qwen3::detail::validate_configured_context_checkpoint_marks(options.context_checkpoint_marks,
                                                                 options.speculative.backend);
+    validate_kv_system_prompt_options(options.kv_ram_capacity_bytes, options.kv_ram_system_prompts);
     validate_kv_disk_options(options.kv_ram_capacity_bytes, options.kv_disk_capacity_bytes,
                              options.kv_disk_location);
 }
@@ -907,6 +908,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
     impl->use_device_graph         = inputs.use_device_graph;
     impl->device                   = inputs.device;
     impl->kv_ram_capacity_bytes    = inputs.kv_ram_capacity_bytes;
+    impl->kv_ram_system_prompts    = inputs.kv_ram_system_prompts;
     impl->kv_disk_capacity_bytes   = inputs.kv_disk_capacity_bytes;
     impl->kv_disk_location         = inputs.kv_disk_location;
     impl->kv_disk_compress         = inputs.kv_disk_compress;
@@ -1034,6 +1036,7 @@ make_sequence_planner_impl(DeviceContext& device, const EngineOptions& options,
         .use_device_graph         = options.use_device_graph,
         .device                   = options.device,
         .kv_ram_capacity_bytes    = options.kv_ram_capacity_bytes,
+        .kv_ram_system_prompts    = options.kv_ram_system_prompts,
         .kv_disk_capacity_bytes   = options.kv_disk_capacity_bytes,
         .kv_disk_location         = options.kv_disk_location,
         .kv_disk_compress         = options.kv_disk_compress,

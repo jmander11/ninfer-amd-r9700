@@ -203,6 +203,82 @@ struct HiddenCapture {
     HiddenCapture& operator=(const HiddenCapture&) = delete;
 };
 
+void system_prompt_lru(ninfer::DeviceContext& device, const ninfer::Fp8KInt4VPagedKVSpec& spec) {
+    CopyFixture fixture(spec);
+    auto allocation = fixture.pool->reserve(1);
+    allocation.materialize_pages(1, device.stream);
+    paint_allocation(*fixture.pool, allocation, 0x31, device.stream);
+    ninfer::DeviceBuffer hidden(256);
+    hidden.fill(0x52);
+    ninfer::Tensor tensor(hidden.data(), ninfer::DType::U8, {256});
+    device.synchronize_all();
+    HiddenCapture a(fixture, allocation, 1001, tensor, device.copy_stream);
+    HiddenCapture b(fixture, allocation, 2001, tensor, device.copy_stream);
+    HiddenCapture c(fixture, allocation, 3001, tensor, device.copy_stream);
+    a.source.system_prompt = b.source.system_prompt = c.source.system_prompt = true;
+    // A true system boundary has no sampling hidden; its user suffix will produce one.
+    a.source.tail_hidden       = nullptr;
+    a.source.tail_hidden_valid = false;
+    q3::detail::KVRamCache disabled(8ULL << 20);
+    require(disabled.capture(a.source).status == q3::detail::RamCaptureStatus::Dropped,
+            "system cache is not opt-in");
+    q3::detail::KVRamCache cache(8ULL << 20, 2);
+    const auto first  = cache.capture(a.source);
+    const auto second = cache.capture(b.source);
+    require(first.status == q3::detail::RamCaptureStatus::Captured &&
+                second.status == q3::detail::RamCaptureStatus::Captured,
+            "system prefix capture failed");
+    cache.wait_entry_copies_on_stream(first.entry_id, device.stream);
+    cache.wait_entry_copies_on_stream(second.entry_id, device.stream);
+    paint_allocation(*fixture.pool, allocation, 0x71, device.stream);
+    HIP_CHECK(hipMemsetAsync(hidden.data(), 0x72, hidden.size(), device.stream));
+    device.synchronize_all();
+    auto different_user                   = prompt_data(1001, 9);
+    different_user.token_ids[6]           = 900001;
+    different_user.token_ids[7]           = 900002;
+    different_user.system_prompt_frontier = 6;
+    auto match = cache.plan_match(different_user, q3::detail::prefix_hash_chain(different_user));
+    require(match && match->entry_id == first.entry_id && match->reuse_base == 6,
+            "system match required the first user token to agree");
+    auto destination = fixture.pool->reserve(1);
+    destination.materialize_pages(1, device.stream);
+    q3::detail::RamRestoreTarget target;
+    target.text           = &destination;
+    target.text_pool      = fixture.pool.get();
+    target.text_semantics = fixture.semantics;
+    target.text_dst_pages = 1;
+    target.tail_hidden    = &tensor;
+    target.stream         = device.copy_stream;
+    cache.claim(first.entry_id);
+    const auto restored = cache.unpack_device(first.entry_id, target);
+    require(!restored.tail_hidden_valid, "system prefix invented a sampling hidden");
+    device.synchronize_all();
+    cache.consume(first.entry_id);
+    verify_allocation(*fixture.pool, destination, 0x31, "system prefix restore", 1);
+    require(all_bytes_equal(hidden, 0x72), "system restore wrote an absent sampling hidden");
+    require(cache.snapshot().system_prompt_entries == 2 &&
+                cache.snapshot().system_prompt_restores == 1,
+            "system hit consumed the retained source");
+    const auto third = cache.capture(c.source);
+    device.synchronize_all();
+    require(third.status == q3::detail::RamCaptureStatus::Captured &&
+                cache.plan_match(a.prompt, q3::detail::prefix_hash_chain(a.prompt)) &&
+                !cache.plan_match(b.prompt, q3::detail::prefix_hash_chain(b.prompt)) &&
+                cache.snapshot().system_prompt_entries == 2 &&
+                cache.snapshot().system_prompt_evictions == 1 &&
+                cache.snapshot().used_bytes <= cache.snapshot().capacity_bytes,
+            "system quota did not evict the least recently restored prefix");
+    require(cache.fifo_ids().empty() && cache.unpinned_ids().empty(),
+            "system anchors entered ordinary FIFO/disk eviction");
+    q3::detail::KVRamCache pinned(8ULL << 20, 1);
+    const auto held = pinned.capture(a.source);
+    pinned.claim(held.entry_id);
+    require(pinned.capture(b.source).status == q3::detail::RamCaptureStatus::Dropped &&
+                pinned.is_claimed(held.entry_id),
+            "LRU evicted an in-flight restore source");
+    pinned.release(held.entry_id);
+}
+
 // All three cache planes may use different physical page orders. Forked pages must be
 // independent even when the logical page list spans several physical runs.
 void source_preserving_reads(ninfer::DeviceContext& device, ninfer::Fp8KInt4VPagedKVSpec spec) {
@@ -927,6 +1003,7 @@ int main() {
                 "unpinned FIFO entry was not evicted for the replacement image");
 
         head_major_host_transfer_oracle(device);
+        system_prompt_lru(device, text_spec);
         source_preserving_reads(device, text_spec);
         auto mixed_spec                = text_spec;
         mixed_spec.plane_layouts.key   = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor;

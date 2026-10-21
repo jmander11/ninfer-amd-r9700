@@ -3,6 +3,7 @@
 ## Compose: server with persistent prefix caching
 
 `compose.yaml` builds this checkout and runs the selected DFlash artifact with temperature **1.5**, **12 GiB pinned RAM prefix cache**, **25 GiB disk cache**, chunk 2048, C6/adaptive K up to 7 and a 262144-token context limit. The cache options use MiB: `NINFER_RAM_CACHE_MIB=12288` and `NINFER_DISK_CACHE_MIB=25600`. Cache sizes are capacities, not upfront disk allocations.
+Set `NINFER_SYSTEM_PROMPTS=N` to opt into retaining up to N system prefixes inside the RAM cache budget; the default is `0` (off). First-user content may differ. This does not allocate another cache or enable the disk tier. Startup must use an image containing `--kv-ram-system-prompts`.
 
 A bind mount stores disk prefixes under `./.cache/ninfer/prefix` by default. Set `NINFER_DISK_CACHE_DIR` to choose another host cache directory; use a separate directory for each model/server deployment. This host directory survives container replacement and `docker compose down --volumes`. Disk cache is prefix reuse, not active-context offload. Disk format v8 requires a fresh directory when upgrading from earlier formats. RAM contents do not survive restart; durable disk entries can be restored for the same model fingerprint.
 
