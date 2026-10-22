@@ -2,6 +2,7 @@
 #include "product/context_checkpoint_format.h"
 #include "product/speculative_options.h"
 #include "serve/console_log.h"
+#include "serve/openai_schema.h"
 
 #include <hip/hip_runtime.h>
 #include <nlohmann/json.hpp>
@@ -155,6 +156,10 @@ Json request_json(const RequestLogContext& context) {
                 {"tool_count", context.tool_count},
                 {"tool_choice", tool_choice_name(context.tool_choice)},
                 {"has_tool_history", context.has_tool_history},
+                {"thinking_token_budget", context.thinking_token_budget
+                                              ? Json(*context.thinking_token_budget)
+                                              : Json(nullptr)},
+                {"thinking_token_budget_param", context.thinking_token_budget_param},
                 {"enable_thinking", context.enable_thinking},
                 {"preserve_thinking", context.preserve_thinking},
                 {"preserve_thinking_semantic_change", context.preserve_thinking_semantic_change},
@@ -322,6 +327,8 @@ RequestLogContext make_request_log_context(std::uint64_t id, std::string protoco
     context.tool_count                         = request.tools.size();
     context.tool_choice                        = request.tool_choice;
     context.has_tool_history                   = request.has_tool_history();
+    context.thinking_token_budget              = prepared.thinking_token_budget;
+    context.thinking_token_budget_param        = request.thinking_token_budget_param;
     context.enable_thinking                    = prepared.enable_thinking;
     context.preserve_thinking                  = prepared.preserve_thinking;
     context.preserve_thinking_semantic_change  = prepared.preserve_thinking_semantic_change;
@@ -531,6 +538,8 @@ std::string format_throughput(const ThroughputReport& report) {
         << "tok/s running=" << report.scheduler.running_requests
         << " prefilling=" << report.scheduler.prefilling_requests
         << " decode_ready=" << report.scheduler.decode_ready_requests
+        << " kv_blocked=" << report.scheduler.kv_growth_blocked_requests
+        << " kv_suspended=" << report.scheduler.kv_suspended_requests
         << " waiting=" << report.scheduler.waiting_requests << " avg_decode_batch=";
     if (report.decode_rounds == 0) {
         out << "n/a";
@@ -601,16 +610,20 @@ std::string format_server_start_json(
     Json artifact_size = nullptr;
     if (artifact_size_bytes.has_value()) { artifact_size = *artifact_size_bytes; }
 
-    record["server"]   = Json{{"host", options.host},
-                              {"port", options.port},
-                              {"public_model_id", public_model_id},
-                              {"api_key_configured", !options.api_key.empty()},
-                              {"cors_enabled", options.enable_cors},
-                              {"max_request_bytes", options.max_request_bytes},
-                              {"request_log_jsonl", options.request_log_jsonl},
-                              {"default_output_tokens", options.default_max_tokens},
-                              {"default_thinking", options.enable_thinking},
-                              {"default_preserve_thinking", options.preserve_thinking}};
+    record["server"] =
+        Json{{"host", options.host},
+             {"port", options.port},
+             {"public_model_id", public_model_id},
+             {"api_key_configured", !options.api_key.empty()},
+             {"cors_enabled", options.enable_cors},
+             {"max_request_bytes", options.max_request_bytes},
+             {"request_log_jsonl", options.request_log_jsonl},
+             {"default_output_tokens", options.default_max_tokens},
+             {"default_thinking", options.enable_thinking},
+             {"default_thinking_token_budget", options.default_thinking_token_budget
+                                                   ? Json(*options.default_thinking_token_budget)
+                                                   : Json(nullptr)},
+             {"default_preserve_thinking", options.preserve_thinking}};
     record["artifact"] = Json{{"path", options.artifact_path},
                               {"size_bytes", std::move(artifact_size)},
                               {"target", load.target},
@@ -756,6 +769,7 @@ std::string format_request_done_json(const std::string& server_instance_id, std:
              {"tool_call_count", outcome.tool_calls.size()},
              {"ignored_qwen_tool_call_names", outcome.ignored_qwen_tool_call_names}};
     const ninfer::GenerationRecoveryStats& recovery = outcome.metrics.recovery;
+    record["reasoning_limit"] = reasoning_limit_json(outcome.metrics.reasoning_limit);
     record["recovery"] = Json{{"attempts", recovery.attempts},
                               {"discarded_tool_calls", recovery.discarded_tool_calls},
                               {"discarded_reasoning_tokens", recovery.discarded_reasoning_tokens},
@@ -811,10 +825,14 @@ std::string format_recovery_event_json(const std::string& server_instance_id,
 
 std::string format_request_error_json(const std::string& server_instance_id,
                                       std::uint64_t timestamp, const RequestLogContext& context,
-                                      const std::string& message) {
+                                      const std::string& message,
+                                      const ninfer::ReasoningLimitStats* reasoning_limit) {
     Json record       = event_base(server_instance_id, timestamp, "request_error");
     record["request"] = request_json(context);
     record["error"]   = Json{{"message", message}};
+    if (reasoning_limit && reasoning_limit->budget_tokens != 0) {
+        record["reasoning_limit"] = reasoning_limit_json(*reasoning_limit);
+    }
     return record.dump();
 }
 
@@ -989,9 +1007,11 @@ void JsonlRequestLog::write_recovery(std::uint64_t request_id, const ninfer::Rec
 }
 
 void JsonlRequestLog::write_request_error(const RequestLogContext& context,
-                                          const std::string& message) {
+                                          const std::string& message,
+                                          const ninfer::ReasoningLimitStats* reasoning_limit) {
     if (!enabled()) { return; }
-    append(format_request_error_json(server_instance_id_, unix_time_ms(), context, message));
+    append(format_request_error_json(server_instance_id_, unix_time_ms(), context, message,
+                                     reasoning_limit));
 }
 
 void JsonlRequestLog::write_throughput(const ThroughputReport& report) {

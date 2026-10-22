@@ -96,10 +96,9 @@ int main() {
             failures += check(
                 error.param == expected && error.message.find("selected") != std::string::npos,
                 "named tool selection lost the original wire index, schema field, or name");
-            failures += check(
-                to_prompt_input(request, ResolvedPromptSemantics{}, {}).options.tool_jsons.size() ==
-                    1,
-                "named tool diagnostic fixture did not select one Engine tool");
+            failures += check(to_prompt_input(request, ResolvedRequestSemantics{}, {})
+                                      .options.tool_jsons.size() == 1,
+                              "named tool diagnostic fixture did not select one Engine tool");
         }
         chat.output_constraint =
             ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonSchema, "{}"};

@@ -97,14 +97,26 @@ bool TokenGrammarState::accept(xgrammar::GrammarMatcher& matcher, TokenId token)
 }
 
 void TokenGrammarState::preview(std::span<const TokenId> tokens,
-                                std::span<const std::uint8_t> ignored_framing) {
+                                std::span<const std::uint8_t> ignored_framing,
+                                std::span<const std::uint8_t> reasoning_closes) {
     if (preview_) { throw std::logic_error("token grammar already has a preview"); }
     if (!ignored_framing.empty() && ignored_framing.size() != tokens.size()) {
         throw std::invalid_argument("token grammar framing shape mismatch");
     }
+    if (!reasoning_closes.empty() && reasoning_closes.size() != tokens.size()) {
+        throw std::invalid_argument("token grammar reasoning-close shape mismatch");
+    }
     auto candidate = committed_.Fork();
     for (std::size_t i = 0; i < tokens.size(); ++i) {
         if (!ignored_framing.empty() && ignored_framing[i]) { continue; }
+        if (!reasoning_closes.empty() && reasoning_closes[i]) {
+            if (!grammar_->starts_in_reasoning) {
+                throw std::logic_error("reasoning close requires an initial reasoning grammar");
+            }
+            // The already qualified any_text body may end in a byte/marker prefix.
+            // Finish that semantic phase with the actual committed close token.
+            candidate = xgrammar::GrammarMatcher(grammar_->compiled);
+        }
         if (!accept(candidate, tokens[i])) {
             throw std::logic_error("generated token violates the declared token grammar");
         }
@@ -134,7 +146,8 @@ void TokenGrammarState::record_upload(std::size_t bytes) const noexcept {
 void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                                    std::span<const std::int32_t> parents,
                                    std::span<std::uint32_t> words, TokenId replay_close,
-                                   std::span<const std::uint8_t> replay_close_allowed) const {
+                                   std::span<const std::uint8_t> replay_close_allowed,
+                                   std::span<const std::uint8_t> reasoning_close_allowed) const {
     if (tokens.empty() || tokens.size() != parents.size() ||
         words.size() != tokens.size() * mask_words) {
         throw std::invalid_argument("invalid token grammar verification mask shape");
@@ -143,6 +156,12 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
         (replay_close_allowed.size() != tokens.size() || replay_close < 0 ||
          static_cast<std::size_t>(replay_close) >= mask_words * 32)) {
         throw std::invalid_argument("invalid replay framing mask shape");
+    }
+    if (!reasoning_close_allowed.empty() &&
+        (reasoning_close_allowed.size() != tokens.size() || replay_close < 0 ||
+         static_cast<std::size_t>(replay_close) >= mask_words * 32 ||
+         !grammar_->starts_in_reasoning)) {
+        throw std::invalid_argument("invalid semantic reasoning-close mask shape");
     }
     const auto started      = std::chrono::steady_clock::now();
     std::uint64_t evaluated = 0;
@@ -159,6 +178,10 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                 auto child         = parent_node->Fork();
                 const bool framing = !replay_close_allowed.empty() &&
                                      replay_close_allowed[parent] && tokens[node] == replay_close;
+                if (!reasoning_close_allowed.empty() && reasoning_close_allowed[parent] &&
+                    tokens[node] == replay_close) {
+                    child = xgrammar::GrammarMatcher(grammar_->compiled);
+                }
                 if ((framing || accept(child, tokens[node])) && !child.IsTerminated()) {
                     nodes[node].emplace(std::move(child));
                 }
@@ -178,6 +201,14 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                       .strides     = nullptr,
                       .byte_offset = 0};
         (void)nodes[node]->FillNextTokenBitmask(&mask);
+        if (!reasoning_close_allowed.empty() && reasoning_close_allowed[node]) {
+            auto closed = xgrammar::GrammarMatcher(grammar_->compiled);
+            if (!closed.AcceptToken(replay_close)) {
+                throw std::logic_error("initial reasoning grammar rejects its canonical close");
+            }
+            output[static_cast<std::size_t>(replay_close) / 32] |=
+                std::uint32_t{1} << (static_cast<unsigned>(replay_close) % 32);
+        }
         if (!replay_close_allowed.empty() && replay_close_allowed[node]) {
             output[static_cast<std::size_t>(replay_close) / 32] |=
                 std::uint32_t{1} << (static_cast<unsigned>(replay_close) % 32);
@@ -460,8 +491,8 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
             std::chrono::duration<double>(std::chrono::steady_clock::now() - compile_started)
                 .count();
         stats.compile_wait_seconds = compile_wait_seconds;
-        return std::make_shared<const TokenGrammarData>(
-            TokenGrammarData{std::move(completed_definitions), std::move(compiled), stats});
+        return std::make_shared<const TokenGrammarData>(TokenGrammarData{
+            std::move(completed_definitions), std::move(compiled), stats, starts_in_reasoning});
     } catch (const xgrammar::JSONSchemaCompileError& error) {
         if (constraint && prepared_constraint) {
             const auto pointer = prepared_constraint->source_pointer(error.pointer);

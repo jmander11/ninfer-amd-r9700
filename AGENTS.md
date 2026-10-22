@@ -96,10 +96,14 @@ Other `-eval` identities remain evaluation and conversion-base artifacts. DFlash
 codebook and private fixed BF16 state.
 
 The workload is one R9700, one resident model instance, and a startup-fixed one to eight active
-requests. The Engine forms one compact decode batch per round boundary with bounded FIFO ingress
-and no preemption; one prefill owner at a time advances either prefill-first or in startup-fixed
+resident requests. The Engine forms one compact decode batch per round boundary with bounded FIFO
+ingress. With RAM enabled, output reservations grow in windows of at most 8192 tokens and settled
+active continuations may suspend to secured RAM under KV pressure; RAM off retains full-lifetime
+GPU entitlement. A completion cohort whose target-produced lifetime envelopes jointly fit GPU capacity and dynamic
+window-end RAM credits for other residents guarantee a feasible evacuation path; live images are never optional cache or disk-spill victims. Total logical
+requests remain bounded by concurrency plus pending capacity. One prefill owner at a time advances either prefill-first or in startup-fixed
 slices, which under DFlash share a decode round's target forward (mixed round). Large-scale or
-preemptive continuous batching, priority/QoS scheduling, additional checkpoint targets, and
+general preemptive continuous batching, priority/QoS scheduling, additional checkpoint targets, and
 retargeting to another execution platform are outside the current product. This is a trusted local, single-owner project, and requirements from a different
 workload, trust model, or deployment model are out of scope until the contract is explicitly
 changed.

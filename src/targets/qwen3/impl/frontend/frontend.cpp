@@ -528,6 +528,11 @@ struct DecoderState {
     std::string tool_marker_pending;
     std::uint64_t decoded_bytes    = 0;
     std::uint32_t reasoning_tokens = 0;
+    ReasoningLimitStats reasoning_limit;
+    // IDs consisting only of a pending textual close prefix. Charged conservatively
+    // until the complete marker proves they were framing rather than body.
+    std::uint32_t reasoning_marker_tokens = 0;
+    bool reasoning_limit_retry_pending    = false;
 };
 
 // Only generated IDs in this response can establish the replay. Once the first
@@ -782,6 +787,48 @@ void feed_token_bytes(DecoderState& state, std::string_view bytes, const StopPol
     if (text.empty()) { return; }
     feed_decoded_text(state, text, policy, emitted, committed_tokens, best_match,
                       tool_output_enabled);
+}
+
+// A native close must not complete an unfinished UTF-8 sequence or absorb a
+// textual marker prefix. Both pending fragments remain in the reasoning channel.
+void flush_reasoning_fragments(DecoderState& state, const StopPolicy& policy,
+                               PublishedOutput& emitted, std::uint32_t committed_tokens,
+                               StopMatch* match, bool tool_output_enabled) {
+    if (!state.utf8_pending.empty()) {
+        state.utf8_pending.clear();
+        feed_decoded_text(state, kUtf8Replacement, policy, emitted, committed_tokens, match,
+                          tool_output_enabled);
+    }
+    if (!state.think_marker_pending.empty()) {
+        feed_channel(state, OutputChannel::Reasoning, state.think_marker_pending, policy, emitted,
+                     committed_tokens, match);
+        state.think_marker_pending.clear();
+    }
+    state.reasoning_marker_tokens = 0;
+}
+
+void charge_reasoning_token(DecoderState& state, std::string_view bytes, bool canonical_close,
+                            bool stop_token) {
+    auto& limit = state.reasoning_limit;
+    if (!state.in_reasoning || limit.budget_tokens == 0 || canonical_close || stop_token) {
+        return;
+    }
+    ++limit.used_tokens;
+    const std::string candidate = state.think_marker_pending + std::string(bytes);
+    if (state.utf8_pending.empty() && !candidate.empty() && kThinkClose.starts_with(candidate)) {
+        ++state.reasoning_marker_tokens;
+        if (candidate == kThinkClose) {
+            limit.used_tokens -= state.reasoning_marker_tokens;
+            state.reasoning_marker_tokens = 0;
+        }
+    } else if (state.utf8_pending.empty() && candidate.starts_with(kThinkClose)) {
+        // The current ID contains closing framing followed by answer text, but
+        // contributes no reasoning body. Earlier mixed body/marker IDs stay charged.
+        limit.used_tokens -= state.reasoning_marker_tokens + 1;
+        state.reasoning_marker_tokens = 0;
+    } else {
+        state.reasoning_marker_tokens = 0;
+    }
 }
 
 void terminalize(DecoderState& state, const StopPolicy& policy, PublishedOutput& emitted,
@@ -1049,7 +1096,8 @@ public:
           preserve_special(output.raw || output.preserve_special_tokens),
           preserve_model_stops(output.raw || output.preserve_special_tokens), raw(output.raw),
           tool_output_enabled(tool_output_enabled_), reasoning_end_token(reasoning_end_token_) {
-        state.in_reasoning            = starts_in_reasoning && !output.raw;
+        state.reasoning_limit.budget_tokens = output.thinking_token_budget.value_or(0);
+        state.in_reasoning                  = starts_in_reasoning && !output.raw;
         state.require_initial_content = !output.raw && (state.in_reasoning || tool_output_enabled);
         grammar_data                  = std::move(grammar);
         state.constrained_content     = grammar_data && grammar_data->definitions.empty();
@@ -1073,11 +1121,12 @@ public:
     std::shared_ptr<const fi::Tokenizer> tokenizer;
     StopPolicy policy;
     std::vector<TokenId> model_stop_tokens;
-    bool preserve_special       = false;
-    bool preserve_model_stops   = false;
-    bool raw                    = false;
-    bool tool_output_enabled    = false;
-    TokenId reasoning_end_token = -1;
+    bool preserve_special                      = false;
+    bool preserve_model_stops                  = false;
+    bool raw                                   = false;
+    bool tool_output_enabled                   = false;
+    TokenId reasoning_end_token                = -1;
+    runtime::ReasoningLimitAction limit_action = runtime::ReasoningLimitAction::Close;
     DecoderState state;
     DecoderState preview_state;
     ReasoningReplayState replay;
@@ -1087,6 +1136,7 @@ public:
     std::vector<TokenId> reasoning_history;
     std::size_t committed_reasoning_size = 0;
     std::vector<std::uint8_t> preview_ignored_framing;
+    std::vector<std::uint8_t> preview_reasoning_closes;
     std::uint32_t preview_replay_discarded = 0;
     std::uint32_t preview_replay_repairs   = 0;
     std::uint32_t replay_discarded         = 0;
@@ -1161,6 +1211,7 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
     impl_->preview_replay = impl_->replay;
     impl_->reasoning_history.resize(impl_->committed_reasoning_size);
     impl_->preview_ignored_framing.clear();
+    impl_->preview_reasoning_closes.clear();
     impl_->preview_replay_discarded = 0;
     impl_->preview_replay_repairs   = 0;
     impl_->preview_output.clear();
@@ -1174,8 +1225,10 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
                               bool reject_generated_round = false) {
         impl_->preview_channels.resize(count);
         impl_->preview_ignored_framing.resize(count);
+        impl_->preview_reasoning_closes.resize(count);
         if (impl_->token_grammar) {
-            impl_->token_grammar->preview(tokens.first(count), impl_->preview_ignored_framing);
+            impl_->token_grammar->preview(tokens.first(count), impl_->preview_ignored_framing,
+                                          impl_->preview_reasoning_closes);
         }
         if (impl_->grammar_data && !impl_->grammar_data->definitions.empty() && !impl_->raw) {
             impl_->preview_tools = impl_->tools;
@@ -1200,6 +1253,15 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
                                    impl_->grammar_data != nullptr) &&
             !impl_->preview_replay.close_allowed() && token == impl_->reasoning_end_token) {
             throw std::logic_error("sampler selected a reasoning close outside reasoning");
+        }
+        if (impl_->preview_state.in_reasoning &&
+            impl_->preview_state.reasoning_limit.budget_tokens != 0 &&
+            impl_->preview_state.reasoning_limit.used_tokens >=
+                impl_->preview_state.reasoning_limit.budget_tokens &&
+            token != impl_->reasoning_end_token &&
+            std::find(impl_->policy.token_ids.begin(), impl_->policy.token_ids.end(), token) ==
+                impl_->policy.token_ids.end()) {
+            throw std::logic_error("sampler crossed the reasoning-token boundary without a close");
         }
         if (impl_->preview_state.in_reasoning) { ++impl_->preview_state.reasoning_tokens; }
 
@@ -1228,6 +1290,7 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
         const bool repair_close =
             impl_->preview_replay.close_allowed() && token == impl_->reasoning_end_token;
         impl_->preview_ignored_framing.push_back(repair_close ? 1 : 0);
+        impl_->preview_reasoning_closes.push_back(0);
         if (repair_close && !stop_token) {
             impl_->preview_replay_discarded =
                 static_cast<std::uint32_t>(impl_->preview_replay.matched);
@@ -1250,9 +1313,38 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
         const bool was_end_suppressed = suppress_reasoning_end(impl_->preview_state, impl_->raw,
                                                                impl_->grammar_data != nullptr);
         const bool was_stripping      = impl_->preview_state.strip_content_leading;
-        const bool was_tool = in_tool_region(impl_->preview_state, impl_->tool_output_enabled);
+        const bool was_tool    = in_tool_region(impl_->preview_state, impl_->tool_output_enabled);
+        const bool had_content = impl_->preview_state.has_non_whitespace_content;
+        const bool semantic_close = was_reasoning &&
+                                    impl_->preview_state.reasoning_limit.budget_tokens != 0 &&
+                                    impl_->preview_state.reasoning_limit.used_tokens >=
+                                        impl_->preview_state.reasoning_limit.budget_tokens &&
+                                    token == impl_->reasoning_end_token;
+        const bool forced_close   = semantic_close && !stop_token;
+        if (semantic_close) { impl_->preview_reasoning_closes.back() = 1; }
+        if (was_reasoning && token == impl_->reasoning_end_token &&
+            impl_->preview_state.reasoning_limit.budget_tokens != 0) {
+            flush_reasoning_fragments(impl_->preview_state, impl_->policy, impl_->preview_output,
+                                      count, &match, impl_->tool_output_enabled);
+        }
+        charge_reasoning_token(impl_->preview_state, bytes, token == impl_->reasoning_end_token,
+                               stop_token);
         feed_token_bytes(impl_->preview_state, bytes, impl_->policy, impl_->preview_output, count,
                          &match, impl_->tool_output_enabled);
+        // A budget replacement needs semantic answer evidence, not diagnostic EOS bytes.
+        if (model_stop && stop_token && impl_->preview_state.reasoning_limit.budget_tokens != 0) {
+            impl_->preview_state.has_non_whitespace_content = had_content;
+        }
+        if (forced_close && !match.found) { ++impl_->preview_state.reasoning_limit.forced_closes; }
+        const bool at_reasoning_limit = impl_->preview_state.in_reasoning &&
+                                        impl_->preview_state.reasoning_limit.budget_tokens != 0 &&
+                                        impl_->preview_state.reasoning_limit.used_tokens >=
+                                            impl_->preview_state.reasoning_limit.budget_tokens;
+        if (at_reasoning_limit) {
+            flush_reasoning_fragments(impl_->preview_state, impl_->policy, impl_->preview_output,
+                                      count, &match, impl_->tool_output_enabled);
+            impl_->preview_state.reasoning_limit.limit_reached = true;
+        }
         const auto channel =
             attributed_channel(was_reasoning, was_tool, was_stripping, impl_->preview_state, bytes,
                                stop_token && !impl_->policy.publish_stop_token, impl_->raw,
@@ -1286,6 +1378,20 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
             terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count,
                         impl_->tool_output_enabled);
             return complete(count, FinishReason::StopToken);
+        }
+
+        if (at_reasoning_limit || forced_close) {
+            if (count == budget_remaining) {
+                terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count,
+                            impl_->tool_output_enabled);
+                return complete(count, limit_reason);
+            }
+            if (at_reasoning_limit && impl_->limit_action == runtime::ReasoningLimitAction::Retry &&
+                impl_->preview_state.reasoning_limit.retries == 0) {
+                impl_->preview_state.reasoning_limit_retry_pending = true;
+            }
+            // The following target position must be sampled with the new mask.
+            return complete(count, FinishReason::None);
         }
 
         if (impl_->preview_replay.retry_required) {
@@ -1458,6 +1564,29 @@ bool OutputSession::in_reasoning() const noexcept {
     return impl_ != nullptr && impl_->state.in_reasoning;
 }
 
+ReasoningLimitStats OutputSession::reasoning_limit_stats() const noexcept {
+    return impl_ ? impl_->state.reasoning_limit : ReasoningLimitStats{};
+}
+
+bool OutputSession::reasoning_limit_retry_required() const noexcept {
+    return impl_ && !impl_->state.terminal && impl_->state.reasoning_limit_retry_pending;
+}
+
+std::optional<TokenId> OutputSession::reasoning_limit_forced_close_token() const noexcept {
+    if (impl_ && impl_->limit_action == runtime::ReasoningLimitAction::Close &&
+        impl_->state.in_reasoning && impl_->state.reasoning_limit.budget_tokens != 0 &&
+        impl_->state.reasoning_limit.used_tokens >= impl_->state.reasoning_limit.budget_tokens &&
+        !impl_->state.terminal) {
+        return impl_->reasoning_end_token;
+    }
+    return std::nullopt;
+}
+
+bool OutputSession::has_answer_content() const noexcept {
+    return impl_ && impl_->state.reasoning_limit.budget_tokens != 0 &&
+           impl_->state.has_non_whitespace_content && !impl_->tools.selected_tool;
+}
+
 bool OutputSession::preview_free_text_content() const noexcept {
     return impl_ && impl_->preview_ready && !impl_->raw &&
            !impl_->preview_state.constrained_content && !impl_->preview_tools.selected_tool;
@@ -1506,7 +1635,8 @@ bool OutputSession::has_token_grammar() const noexcept {
 }
 
 bool OutputSession::has_token_masks() const noexcept {
-    return has_token_grammar() || (impl_ && impl_->replay.enabled && impl_->replay.active);
+    return has_token_grammar() || (impl_ && ((impl_->replay.enabled && impl_->replay.active) ||
+                                             impl_->state.reasoning_limit.budget_tokens != 0));
 }
 
 std::vector<std::string> unconstrained_tool_call_names(std::string_view text,
@@ -1569,7 +1699,7 @@ void OutputSession::fill_token_masks(std::span<const TokenId> tokens,
                                      std::span<const std::int32_t> parents,
                                      std::span<std::uint32_t> words) const {
     if (!has_token_masks()) { throw std::logic_error("output session has no token mask policy"); }
-    if (!impl_->replay.enabled) {
+    if (!impl_->replay.enabled && impl_->state.reasoning_limit.budget_tokens == 0) {
         impl_->token_grammar->fill_masks(tokens, parents, words);
         return;
     }
@@ -1585,6 +1715,7 @@ void OutputSession::fill_token_masks(std::span<const TokenId> tokens,
 
     std::vector<Hypothesis> nodes(tokens.size());
     std::vector<std::uint8_t> allowed(tokens.size());
+    std::vector<std::uint8_t> reasoning_closes(tokens.size());
     nodes[0].decoder = impl_->state;
     nodes[0].replay  = impl_->replay;
     const StopPolicy no_stops;
@@ -1614,6 +1745,13 @@ void OutputSession::fill_token_masks(std::span<const TokenId> tokens,
                 const bool was_tool      = in_tool_region(decoder, impl_->tool_output_enabled);
                 const bool was_stripping = decoder.strip_content_leading;
                 PublishedOutput ignored;
+                if (was_reasoning && token == impl_->reasoning_end_token &&
+                    decoder.reasoning_limit.budget_tokens != 0) {
+                    flush_reasoning_fragments(decoder, no_stops, ignored, 1, nullptr,
+                                              impl_->tool_output_enabled);
+                }
+                charge_reasoning_token(decoder, bytes, token == impl_->reasoning_end_token,
+                                       model_stop);
                 feed_token_bytes(decoder, bytes, no_stops, ignored, 1, nullptr,
                                  impl_->tool_output_enabled);
                 const auto channel =
@@ -1646,11 +1784,18 @@ void OutputSession::fill_token_masks(std::span<const TokenId> tokens,
                 }
             }
         }
-        allowed[node] = nodes[node].replay.close_allowed() ? 1 : 0;
+        allowed[node]           = nodes[node].replay.close_allowed() ? 1 : 0;
+        const auto& limit_state = nodes[node].decoder;
+        reasoning_closes[node] =
+            limit_state.in_reasoning && limit_state.reasoning_limit.budget_tokens != 0 &&
+            limit_state.reasoning_limit.used_tokens >= limit_state.reasoning_limit.budget_tokens;
     }
     if (impl_->token_grammar) {
         impl_->token_grammar->fill_masks(tokens, parents, words, impl_->reasoning_end_token,
-                                         allowed);
+                                         allowed,
+                                         impl_->grammar_data->starts_in_reasoning
+                                             ? std::span<const std::uint8_t>(reasoning_closes)
+                                             : std::span<const std::uint8_t>{});
     } else {
         if (words.size() != tokens.size() * fi::TokenGrammarState::mask_words) {
             throw std::invalid_argument("invalid replay token mask shape");
@@ -1663,6 +1808,22 @@ void OutputSession::fill_token_masks(std::span<const TokenId> tokens,
                     ~(std::uint32_t{1} << (token % 32));
             }
         }
+    }
+    const auto close = static_cast<std::size_t>(impl_->reasoning_end_token);
+    for (std::size_t node = 0; node < nodes.size(); ++node) {
+        const auto& state = nodes[node].decoder;
+        if (!state.in_reasoning || state.reasoning_limit.budget_tokens == 0 ||
+            state.reasoning_limit.used_tokens < state.reasoning_limit.budget_tokens) {
+            continue;
+        }
+        auto row = words.subspan(node * fi::TokenGrammarState::mask_words,
+                                 fi::TokenGrammarState::mask_words);
+        if ((row[close / 32] & (std::uint32_t{1} << (close % 32))) == 0) {
+            throw RequestError(RequestErrorKind::InvalidOutputConstraint,
+                               "reasoning-limit close conflicts with output grammar");
+        }
+        std::fill(row.begin(), row.end(), 0);
+        row[close / 32] = std::uint32_t{1} << (close % 32);
     }
 }
 
@@ -1806,6 +1967,26 @@ encode_round_trip(const fi::Tokenizer& tokenizer, std::string_view text, std::st
     return ids;
 }
 
+std::optional<std::vector<TokenId>>
+encode_recovery_fragment(const fi::Tokenizer& tokenizer,
+                         const fi::CompiledChatTemplate& chat_template, const PromptInput& source,
+                         std::span<const ChatMessage> insert, std::string& fragment,
+                         std::string& decoded) {
+    std::vector<ChatMessage> owned(insert.begin(), insert.end());
+    const fi::ChatRenderOptions options{
+        .add_generation_prompt = false,
+        .enable_thinking       = source.options.enable_thinking,
+        .reasoning_effort      = source.options.reasoning_effort,
+        .preserve_thinking     = source.options.preserve_thinking,
+        .add_vision_id         = false,
+        .tool_jsons            = {},
+    };
+    const auto rendered =
+        chat_template.render_fragment(convert_messages(std::move(owned)), options);
+    fragment = rendered.text;
+    return encode_round_trip(tokenizer, fragment, decoded, rendered.literal_spans);
+}
+
 bool insert_enables_tool_output(const PromptInput& source, std::span<const ChatMessage> insert) {
     if (enables_tool_output(source)) { return true; }
     return std::any_of(insert.begin(), insert.end(), [](const ChatMessage& message) {
@@ -1815,6 +1996,68 @@ bool insert_enables_tool_output(const PromptInput& source, std::span<const ChatM
 }
 
 } // namespace
+
+std::uint32_t Frontend::recovery_prompt_token_bound(const PreparedPrompt& prompt,
+                                                    const GenerationRecoveryContext& context,
+                                                    std::uint32_t maximum_attempts) const {
+    if (!impl_ || !prompt.data_ || maximum_attempts > GenerationRecoveryContext::maximum_attempts) {
+        throw std::invalid_argument("invalid bounded recovery envelope");
+    }
+    const auto original = checked_token_count(prompt.data_->token_ids.size());
+    if (maximum_attempts == 0) { return original; }
+    std::array<std::vector<TokenId>, 2> prologues;
+    std::array<std::size_t, 2> closes{};
+    const std::array prologue_text{kRecoveryThinkingPrologue, kRecoveryNonThinkingPrologue};
+    const std::array close_text{kRecoveryTurnClose, kRecoveryContentTurnClose};
+    for (std::size_t phase = 0; phase != 2; ++phase) {
+        std::string decoded;
+        auto opener = encode_round_trip(*impl_->tokenizer, prologue_text[phase], decoded);
+        auto close  = encode_round_trip(*impl_->tokenizer, close_text[phase], decoded);
+        if (!opener || !close) {
+            throw std::invalid_argument("native recovery framing cannot round-trip");
+        }
+        prologues[phase] = std::move(*opener);
+        closes[phase]    = close->size();
+    }
+    std::array<std::optional<std::uint64_t>, 2> growth;
+    for (std::size_t phase = 0; phase != 2; ++phase) {
+        const auto& ids = prologues[phase];
+        if (prompt.data_->token_ids.size() >= ids.size() &&
+            std::equal(ids.rbegin(), ids.rend(), prompt.data_->token_ids.rbegin())) {
+            growth[phase] = 0;
+        }
+    }
+    if (!growth[0] && !growth[1]) {
+        throw std::invalid_argument("recovery envelope requires a native generation prologue");
+    }
+    for (std::uint32_t attempt = 1; attempt <= maximum_attempts; ++attempt) {
+        std::size_t maximum_fragment = 0;
+        for (const auto& insert : context.recovery_insert_variants(attempt)) {
+            std::string fragment, decoded;
+            const auto ids = encode_recovery_fragment(*impl_->tokenizer, impl_->chat_template,
+                                                      context.input(), insert, fragment, decoded);
+            if (!ids) { throw std::invalid_argument("native recovery feedback cannot round-trip"); }
+            maximum_fragment = std::max(maximum_fragment, ids->size());
+        }
+        std::array<std::optional<std::uint64_t>, 2> next;
+        for (std::size_t prior = 0; prior != 2; ++prior) {
+            const auto prior_growth = growth[prior];
+            if (!prior_growth) { continue; }
+            for (std::size_t phase = 0; phase != 2; ++phase) {
+                const auto value =
+                    *prior_growth + closes[prior] + maximum_fragment + prologues[phase].size();
+                next[phase] = std::max(next[phase].value_or(0), value);
+            }
+        }
+        growth = next;
+    }
+    const auto bound = static_cast<std::uint64_t>(original) +
+                       std::max(growth[0].value_or(0), growth[1].value_or(0));
+    if (bound > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::invalid_argument("recovery envelope exceeds the target token domain");
+    }
+    return static_cast<std::uint32_t>(bound);
+}
 
 std::optional<PreparedPrompt> Frontend::splice_recovery_prompt(
     std::vector<TokenId> prefix, const PromptInput& source, std::span<const ChatMessage> insert,
@@ -1845,20 +2088,9 @@ std::optional<PreparedPrompt> Frontend::splice_recovery_prompt(
         const auto close_ids = encode_round_trip(*impl_->tokenizer, close_text, close_decoded);
         if (!close_ids) { return std::nullopt; }
 
-        std::vector<ChatMessage> owned(insert.begin(), insert.end());
-        const fi::ChatRenderOptions fragment_options{
-            .add_generation_prompt = false,
-            .enable_thinking       = source.options.enable_thinking,
-            .reasoning_effort      = source.options.reasoning_effort,
-            .preserve_thinking     = source.options.preserve_thinking,
-            .add_vision_id         = false,
-            .tool_jsons            = {},
-        };
-        const fi::RenderedFragment rendered_fragment = impl_->chat_template.render_fragment(
-            convert_messages(std::move(owned)), fragment_options);
-        const std::string& fragment = rendered_fragment.text;
-        const auto fragment_ids = encode_round_trip(*impl_->tokenizer, fragment, fragment_decoded,
-                                                    rendered_fragment.literal_spans);
+        std::string fragment;
+        const auto fragment_ids = encode_recovery_fragment(
+            *impl_->tokenizer, impl_->chat_template, source, insert, fragment, fragment_decoded);
         if (!fragment_ids ||
             !recovery_suffix_tokens_ok(prefix, prior_ids, *close_ids, *fragment_ids, prior_text,
                                        prior_decoded, close_text, close_decoded, fragment,
@@ -1899,14 +2131,28 @@ std::optional<PreparedPrompt> Frontend::splice_recovery_prompt(
 OutputSession Frontend::make_output_session(const PreparedPrompt& prompt,
                                             const StopPolicy& caller_stop,
                                             const OutputOptions& output, bool generation_recovery,
-                                            const OutputSession* recovery_source) const {
+                                            const OutputSession* recovery_source,
+                                            runtime::ReasoningLimitAction action) const {
     if (prompt.data_ == nullptr) { throw std::invalid_argument("prepared prompt is empty"); }
+    if (output.thinking_token_budget &&
+        (*output.thinking_token_budget == 0 || output.raw ||
+         (!prompt.data_->starts_in_reasoning && !recovery_source))) {
+        throw std::invalid_argument(
+            "thinking_token_budget requires positive budget and thinking output");
+    }
     StopPolicy policy = merge_stop_policy(*impl_->tokenizer, caller_stop);
     if (output.raw) { policy.publish_stop_token = true; }
-    auto session = OutputSession(std::make_unique<OutputSession::Impl>(
+    auto session                = OutputSession(std::make_unique<OutputSession::Impl>(
         impl_->tokenizer, std::move(policy), output, prompt.data_->starts_in_reasoning,
         prompt.data_->tool_output_enabled, impl_->reasoning_end_token, impl_->defaults.token_ids,
         prompt.data_->token_grammar, prompt.data_->generation_recovery, generation_recovery));
+    session.impl_->limit_action = action;
+    if (recovery_source && recovery_source->impl_) {
+        session.impl_->state.reasoning_limit = recovery_source->impl_->state.reasoning_limit;
+        if (recovery_source->impl_->state.reasoning_limit_retry_pending) {
+            ++session.impl_->state.reasoning_limit.retries;
+        }
+    }
     if (generation_recovery && recovery_source && recovery_source->impl_ &&
         recovery_source->impl_->replay.repaired && recovery_source->impl_->replay.reference &&
         !output.raw && !session.impl_->state.constrained_content) {

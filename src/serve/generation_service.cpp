@@ -80,9 +80,10 @@ void reject_unavailable_context_checkpoint_capture(bool capture_requested, bool 
 ApiError request_error_to_api_error(const ninfer::RequestError& exception,
                                     const GenerationRequest* request) {
     ApiError error;
-    error.param    = "messages";
-    error.message  = exception.what();
-    error.recovery = exception.recovery();
+    error.param           = "messages";
+    error.message         = exception.what();
+    error.recovery        = exception.recovery();
+    error.reasoning_limit = exception.reasoning_limit();
     switch (exception.kind()) {
     case ninfer::RequestErrorKind::CacheWriteConflict:
         error.status = 400;
@@ -462,13 +463,14 @@ PreparedRequest GenerationService::prepare(const GenerationRequest& request,
     reject_unavailable_context_checkpoint_capture(request.capture_context_checkpoint,
                                                   options_.allow_prefix_reuse,
                                                   options_.speculative.backend);
+    const ResolvedRequestSemantics semantics =
+        resolve_request_semantics(request, options_, prompt_capabilities_);
     PreparedRequest prepared;
-    ninfer::RequestOptions request_options = to_request_options(request, options_);
-    prepared.include_usage                 = request.include_usage;
-    prepared.tool_capable                  = request.uses_tools();
-    prepared.tool_name_max_length          = request.tool_name_max_length;
-    const ResolvedPromptSemantics semantics =
-        resolve_prompt_semantics(request, options_, prompt_capabilities_);
+    ninfer::RequestOptions request_options     = to_request_options(request, options_, semantics);
+    prepared.include_usage                     = request.include_usage;
+    prepared.tool_capable                      = request.uses_tools();
+    prepared.tool_name_max_length              = request.tool_name_max_length;
+    prepared.thinking_token_budget             = semantics.thinking_token_budget;
     prepared.enable_thinking                   = semantics.enable_thinking;
     prepared.preserve_thinking                 = semantics.preserve_thinking;
     prepared.preserve_thinking_semantic_change = request.preserve_thinking_semantic_change;
@@ -540,8 +542,8 @@ int GenerationService::count_prompt_tokens(const GenerationRequest& request,
     }
     const Clock::time_point deadline =
         Clock::now() + std::chrono::milliseconds(options_.pending_timeout_ms);
-    const ResolvedPromptSemantics semantics =
-        resolve_prompt_semantics(request, options_, prompt_capabilities_);
+    const ResolvedRequestSemantics semantics =
+        resolve_request_semantics(request, options_, prompt_capabilities_);
     HostInputLease host_input;
     if (request_has_media) { host_input = acquire_media_input(deadline, is_cancelled); }
     try {
@@ -566,7 +568,7 @@ GenerationService::score_candidates(const CandidateScoreRequest& request,
                                     std::function<bool()> is_cancelled) const {
     const auto lifetime = acquire_request_lifetime();
     const auto semantics =
-        resolve_prompt_semantics(request.context, options_, prompt_capabilities_);
+        resolve_request_semantics(request.context, options_, prompt_capabilities_);
     try {
         auto input = to_prompt_input(
             request.context, semantics,
@@ -633,15 +635,16 @@ GenerationService::run(PreparedRequest& prepared, std::uint64_t request_id, cons
         result = prepared.generation.wait(public_sink, cancellation);
     } catch (const ninfer::RequestError& exception) { throw_request_error(exception); }
     GenerationOutcome outcome;
-    outcome.text               = std::move(result.content);
-    outcome.reasoning          = std::move(result.reasoning);
-    outcome.content_logprobs   = to_logprob_entries(*engine_, result.content_logprobs);
-    outcome.prompt_tokens      = static_cast<int>(result.prompt.prompt_tokens);
-    outcome.completion_tokens  = static_cast<int>(result.generated_token_ids.size());
-    outcome.reasoning_tokens   = static_cast<int>(result.reasoning_tokens);
-    outcome.finish_reason      = result.finish_reason;
-    outcome.metrics.recovery   = result.recovery;
-    outcome.metrics.constraint = result.constraint;
+    outcome.text                    = std::move(result.content);
+    outcome.reasoning               = std::move(result.reasoning);
+    outcome.content_logprobs        = to_logprob_entries(*engine_, result.content_logprobs);
+    outcome.prompt_tokens           = static_cast<int>(result.prompt.prompt_tokens);
+    outcome.completion_tokens       = static_cast<int>(result.generated_token_ids.size());
+    outcome.reasoning_tokens        = static_cast<int>(result.reasoning_tokens);
+    outcome.finish_reason           = result.finish_reason;
+    outcome.metrics.reasoning_limit = result.reasoning_limit;
+    outcome.metrics.recovery        = result.recovery;
+    outcome.metrics.constraint      = result.constraint;
 
     outcome.metrics.prepare_seconds     = prepared.prepare_seconds;
     outcome.metrics.prepare_cpu_seconds = prepared.prepare_cpu_seconds;

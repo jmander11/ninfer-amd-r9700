@@ -1,10 +1,15 @@
 #include "ninfer/engine.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <condition_variable>
+#include <mutex>
+#include <iomanip>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -316,6 +321,351 @@ int qualify_system_prompts(const std::filesystem::path& artifact, std::string_vi
     return 0;
 }
 
+// Deliberately exceeds the initial 8192-token output reservation in two lanes while
+// the shared pool fits only one completed context. This is a pressure/lifecycle
+// regression, not a token-parity oracle across different compact batch sizes.
+int qualify_chunked_pressure(const std::filesystem::path& artifact, std::string_view backend,
+                             bool reasoning = false) {
+    require(backend == "none" || backend == "dflash", "expected none or dflash backend");
+    ninfer::EngineOptions options;
+    options.artifact_path         = artifact;
+    options.max_context           = 16384;
+    options.kv_capacity           = ninfer::KvCapacityPolicy::explicit_capacity(18432);
+    options.max_concurrency       = 2;
+    options.kv_ram_capacity_bytes = 8ULL << 30;
+    options.speculative.backend =
+        backend == "none" ? ninfer::SpeculativeBackend::None : ninfer::SpeculativeBackend::DFlash;
+    if (backend == "dflash") {
+        options.speculative.draft_tokens   = 7;
+        options.speculative.adaptive_draft = true;
+        options.speculative.proposal_head  = ninfer::ProposalHead::Optimized;
+    }
+    options.generation_recovery = false;
+    ninfer::Engine engine(options);
+    std::atomic<bool> stalled{false};
+    std::jthread observer([&](std::stop_token stop) {
+        auto previous = engine.runtime_stats();
+        auto changed  = std::chrono::steady_clock::now();
+        while (!stop.stop_requested()) {
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            const auto now = engine.runtime_stats();
+            if (now.computed_prefill_tokens != previous.computed_prefill_tokens ||
+                now.committed_decode_tokens != previous.committed_decode_tokens) {
+                changed = std::chrono::steady_clock::now();
+            }
+            std::cerr << "pressure prefill=" << now.computed_prefill_tokens
+                      << " decode=" << now.committed_decode_tokens
+                      << " ready=" << now.decode_ready_requests
+                      << " blocked=" << now.kv_growth_blocked_requests
+                      << " suspended=" << now.kv_suspended_requests
+                      << " extensions=" << now.kv_window_extensions
+                      << " captures=" << now.kv_live_suspensions
+                      << " restores=" << now.kv_live_resumes << std::endl;
+            if (std::chrono::steady_clock::now() - changed > std::chrono::seconds(45)) {
+                stalled.store(true);
+            }
+            previous = now;
+        }
+    });
+    const ninfer::CancellationView cancellation([&] { return stalled.load(); });
+    auto long_options                              = request_options(false);
+    long_options.execution.cache_write             = false;
+    long_options.execution.requested_output_tokens = 12000;
+    // Positive-temperature penalties exercise live sampler-count preservation and
+    // rebinding in addition to counter-based position RNG and target state.
+    long_options.execution.sampling.p_less            = false;
+    long_options.execution.sampling.temperature       = 0.7F;
+    long_options.execution.sampling.presence_penalty  = 0.2F;
+    long_options.execution.sampling.frequency_penalty = 0.1F;
+    std::vector<ninfer::TokenId> first_prompt(256, 198);
+    std::vector<ninfer::TokenId> second_prompt(256, 198);
+    first_prompt.front()    = 1000;
+    second_prompt.front()   = 2000;
+    const auto prepare_long = [&](const std::vector<ninfer::TokenId>& raw) {
+        if (!reasoning) { return engine.prepare_tokens(raw); }
+        ninfer::PromptInput input;
+        input.options.enable_thinking = true;
+        ninfer::ChatMessage message;
+        message.parts.push_back(ninfer::MessagePart{
+            .text = "Derive the sum of fourth powers of integers from 1 to 1000 in two independent "
+                    "ways, checking each algebraic identity. Then enumerate the fourth powers "
+                    "of the first thousand integers with intermediate arithmetic. Case " +
+                    std::to_string(raw.front())});
+        input.messages.push_back(std::move(message));
+        return engine.prepare(std::move(input));
+    };
+    if (reasoning) {
+        long_options.output.raw                     = false;
+        long_options.output.preserve_special_tokens = false;
+        long_options.output.thinking_token_budget   = 32;
+    }
+    auto first               = engine.submit(prepare_long(first_prompt), long_options);
+    auto second              = engine.submit(prepare_long(second_prompt), long_options);
+    auto replacement_options = request_options(false);
+    replacement_options.execution.cache_write = false;
+    auto replacement = engine.submit(engine.prepare_tokens({3000, 198, 198}), replacement_options);
+    const auto first_result       = first.wait(nullptr, cancellation);
+    const auto second_result      = second.wait(nullptr, cancellation);
+    const auto replacement_result = replacement.wait(nullptr, cancellation);
+    require(!stalled.load(), "pressure made no prefill/decode progress for 45 seconds");
+    if (reasoning) {
+        for (const auto* result : {&first_result, &second_result}) {
+            require(result->reasoning_limit.used_tokens == 32 &&
+                        result->reasoning_limit.forced_closes == 1 &&
+                        result->reasoning_limit.forced_tokens.size() == 1 &&
+                        result->reasoning_limit.retries == 0 && result->recovery.attempts == 0,
+                    "real pressure lost the cumulative cap or forced close across suspension");
+        }
+    }
+    require(first_result.generated_token_ids.size() == 12000 &&
+                second_result.generated_token_ids.size() == 12000,
+            "chunk boundary shortened a request or failed to resume it");
+    require(first_result.finish_reason == ninfer::FinishReason::OutputLimit &&
+                second_result.finish_reason == ninfer::FinishReason::OutputLimit,
+            "chunk pressure changed the lifetime output-limit reason");
+    require(replacement_result.generated_token_ids.size() == 16,
+            "queued replacement did not complete under chunk pressure");
+    auto stats = engine.runtime_stats();
+    require(stats.kv_execution_window_tokens == 8192 && stats.kv_window_extensions > 0,
+            "RAM-enabled requests did not use chunked output reservations");
+    require(stats.kv_live_suspensions > 0 && stats.kv_live_resumes > 0,
+            "bounded pool did not exercise active RAM suspension and resume");
+    require(stats.running_requests == 0 && stats.kv_suspended_requests == 0 &&
+                stats.kv_growth_blocked_requests == 0,
+            "pressure run leaked admitted or blocked live requests");
+    // A new request after all transfers tests released credit/page ownership.
+    const auto after = engine.generate(engine.prepare_tokens(first_prompt), replacement_options);
+    require(after.generated_token_ids.size() == 16,
+            "post-pressure request could not use released live resources");
+    std::cout << "chunked_pressure: PASS backend=" << backend << " reasoning=" << reasoning
+              << " C2 pool18432 context16384 output12000x2 plus queued replacement; extensions="
+              << stats.kv_window_extensions << " suspensions=" << stats.kv_live_suspensions
+              << " resumes=" << stats.kv_live_resumes
+              << "; lifecycle/budget check, not cross-batch numerical parity\n";
+    return 0;
+}
+
+// Timed raw-token scheduling workload: full 32k ceilings stay in accounting,
+// while cancellation bounds the experiment independently of generated EOS.
+int qualify_chunked_throughput(const std::filesystem::path& artifact, std::string_view backend,
+                               bool completion = false) {
+    require(backend == "none" || backend == "dflash", "expected none or dflash backend");
+    ninfer::EngineOptions options;
+    options.artifact_path         = artifact;
+    options.max_context           = 262144;
+    options.max_concurrency       = 8;
+    options.kv_capacity           = ninfer::KvCapacityPolicy::automatic();
+    options.kv_ram_capacity_bytes = 12ULL << 30;
+    options.kv_ram_system_prompts = 2;
+    options.generation_recovery   = false;
+    options.pending_timeout_ms    = completion ? 1800000 : 900000;
+    options.speculative.backend =
+        backend == "none" ? ninfer::SpeculativeBackend::None : ninfer::SpeculativeBackend::DFlash;
+    options.speculative.draft_tokens   = 7;
+    options.speculative.adaptive_draft = true;
+    options.speculative.proposal_head  = ninfer::ProposalHead::Optimized;
+    ninfer::Engine engine(options);
+    std::cerr << "throughput loaded backend=" << backend
+              << " pool_tokens=" << engine.memory_summary().kv_capacity << std::endl;
+    std::array<ninfer::GenerationHandle, 8> handles;
+    std::array<ninfer::GenerationResult, 8> results;
+    std::array<std::exception_ptr, 8> errors{};
+    auto request                              = request_options(false);
+    request.execution.cache_write             = false;
+    request.execution.requested_output_tokens = 32768;
+    request.execution.sampling.p_less         = true;
+    request.execution.sampling.temperature    = 1.5F;
+    std::array<ninfer::PreparedPrompt, 8> prompts;
+    for (std::size_t i = 0; i < prompts.size(); ++i) {
+        std::vector<ninfer::TokenId> prompt(60000, 198);
+        prompt.front() = static_cast<ninfer::TokenId>(1000 + i);
+        prompts[i]     = engine.prepare_tokens(std::move(prompt));
+    }
+    using Clock         = std::chrono::steady_clock;
+    const auto initial  = engine.runtime_stats();
+    const auto started  = Clock::now();
+    const auto deadline = started + std::chrono::seconds(completion ? 1800 : 300);
+    std::mutex client_mutex;
+    std::condition_variable client_changed;
+    std::size_t client_done = 0;
+    std::array<Clock::time_point, 8> client_completed{};
+    for (std::size_t i = 0; i < handles.size(); ++i) {
+        request.execution.sampling.seed = 17 + i;
+        handles[i]                      = engine.submit(std::move(prompts[i]), request);
+    }
+    std::vector<std::jthread> clients;
+    for (std::size_t i = 0; i < handles.size(); ++i) {
+        clients.emplace_back([&, i] {
+            try {
+                results[i] = handles[i].wait(nullptr, ninfer::CancellationView([deadline] {
+                                                 return Clock::now() >= deadline;
+                                             }));
+            } catch (...) { errors[i] = std::current_exception(); }
+            {
+                const std::lock_guard lock(client_mutex);
+                client_completed[i] = Clock::now();
+                ++client_done;
+            }
+            client_changed.notify_one();
+        });
+    }
+    auto midpoint                           = initial;
+    double midpoint_seconds                 = 0;
+    std::uint32_t sampled_peak_active       = 0;
+    std::uint32_t sampled_peak_decode_ready = 0;
+    while (Clock::now() < deadline) {
+        if (completion) {
+            std::unique_lock lock(client_mutex);
+            if (client_changed.wait_until(
+                    lock, std::min(deadline, Clock::now() + std::chrono::seconds(5)),
+                    [&] { return client_done == handles.size(); })) {
+                break;
+            }
+        } else {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
+        const auto now            = engine.runtime_stats();
+        sampled_peak_active       = std::max(sampled_peak_active, now.running_requests);
+        sampled_peak_decode_ready = std::max(sampled_peak_decode_ready, now.decode_ready_requests);
+        const double seconds      = std::chrono::duration<double>(Clock::now() - started).count();
+        if (midpoint_seconds == 0 && seconds >= 150) {
+            midpoint         = now;
+            midpoint_seconds = seconds;
+        }
+        std::cerr << "sample seconds=" << seconds << " prefill=" << now.computed_prefill_tokens
+                  << " decode=" << now.committed_decode_tokens << " rounds=" << now.decode_rounds
+                  << " rows=" << now.decode_row_rounds << " active=" << now.running_requests
+                  << " prefilling=" << now.prefilling_requests
+                  << " ready=" << now.decode_ready_requests << " waiting=" << now.waiting_requests
+                  << " blocked=" << now.kv_growth_blocked_requests
+                  << " suspended=" << now.kv_suspended_requests << " ram=" << now.kv_ram_used_bytes
+                  << std::endl;
+    }
+    const auto sampled           = engine.runtime_stats();
+    const double sampled_seconds = std::chrono::duration<double>(Clock::now() - started).count();
+    clients.clear();
+    const double makespan_seconds =
+        std::chrono::duration<double>(
+            *std::max_element(client_completed.begin(), client_completed.end()) - started)
+            .count();
+    auto drained         = engine.runtime_stats();
+    const auto quiescent = [](const auto& stats) {
+        return stats.running_requests == 0 && stats.prefilling_requests == 0 &&
+               stats.decode_ready_requests == 0 && stats.waiting_requests == 0 &&
+               stats.kv_suspended_requests == 0 && stats.kv_growth_blocked_requests == 0;
+    };
+    if (completion) {
+        const auto settle_deadline = Clock::now() + std::chrono::seconds(5);
+        while (!quiescent(drained) && Clock::now() < settle_deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            drained = engine.runtime_stats();
+        }
+        require(quiescent(drained), "completion workload did not reach quiescent final accounting");
+    }
+    require(drained.running_requests == 0 && drained.waiting_requests == 0 &&
+                drained.kv_suspended_requests == 0 && drained.kv_growth_blocked_requests == 0,
+            "timed throughput cancellation did not release all admitted requests");
+    const double drain_seconds =
+        std::chrono::duration<double>(Clock::now() - started).count() - sampled_seconds;
+    for (const auto& error : errors)
+        if (error) std::rethrow_exception(error);
+    const auto measured      = completion ? drained : sampled;
+    const auto decode        = measured.committed_decode_tokens - initial.committed_decode_tokens;
+    const auto rounds        = measured.decode_rounds - initial.decode_rounds;
+    const auto rows          = measured.decode_row_rounds - initial.decode_row_rounds;
+    const auto steady_decode = sampled.committed_decode_tokens - midpoint.committed_decode_tokens;
+    const auto steady_rounds = sampled.decode_rounds - midpoint.decode_rounds;
+    const auto steady_rows   = sampled.decode_row_rounds - midpoint.decode_row_rounds;
+    std::size_t cancelled    = 0;
+    std::size_t completed    = 0;
+    std::size_t emitted      = 0;
+    double ttft              = 0;
+    std::size_t started_requests = 0;
+    for (const auto& result : results) {
+        emitted += result.generated_token_ids.size();
+        cancelled += result.finish_reason == ninfer::FinishReason::Cancelled;
+        completed += result.finish_reason == ninfer::FinishReason::OutputLimit;
+        if (!result.generated_token_ids.empty()) {
+            ttft += result.timings.first_token_seconds;
+            ++started_requests;
+        }
+    }
+    require(cancelled + completed == handles.size(),
+            "timed raw workload ended with an unexpected stop/context outcome");
+    if (completion) {
+        std::cout << std::setprecision(10) << "chunked_throughput_completion backend=" << backend
+                  << " C=8 prompt=60000x8 max_output=32768 safety_deadline_seconds=1800"
+                  << " pool_tokens=" << engine.memory_summary().kv_capacity
+                  << " window=" << sampled.kv_execution_window_tokens
+                  << " makespan_seconds=" << makespan_seconds
+                  << " observer_elapsed_seconds=" << sampled_seconds << " total_elapsed_seconds="
+                  << std::chrono::duration<double>(Clock::now() - started).count() << " prefill="
+                  << drained.computed_prefill_tokens - initial.computed_prefill_tokens
+                  << " decode=" << decode
+                  << " decode_tok_s=" << static_cast<double>(decode) / makespan_seconds
+                  << " returned_tokens=" << emitted
+                  << " output_tok_s=" << static_cast<double>(emitted) / makespan_seconds
+                  << " avg_decode_batch=" << (rounds ? static_cast<double>(rows) / rounds : 0)
+                  << " sampled_peak_active_requests=" << sampled_peak_active
+                  << " sampled_peak_decode_ready=" << sampled_peak_decode_ready
+                  << " peak_actual_decode_batch=unavailable"
+                  << " started=" << started_requests
+                  << " avg_ttft=" << (started_requests ? ttft / started_requests : 0)
+                  << " cancelled=" << cancelled << " output_limit=" << completed
+                  << " drain_seconds=" << drain_seconds
+                  << " drained_active=" << drained.running_requests
+                  << " extensions=" << drained.kv_window_extensions
+                  << " suspensions=" << drained.kv_live_suspensions
+                  << " resumes=" << drained.kv_live_resumes
+                  << " ram_save_seconds=" << drained.kv_ram_save_seconds
+                  << " ram_load_seconds=" << drained.kv_ram_load_seconds
+                  << " censored=" << (completed != handles.size() || makespan_seconds >= 1800)
+                  << '\n';
+        for (std::size_t i = 0; i < results.size(); ++i) {
+            std::cout << "client index=" << i << " completed_seconds="
+                      << std::chrono::duration<double>(client_completed[i] - started).count()
+                      << " generated=" << results[i].generated_token_ids.size()
+                      << " ttft=" << results[i].timings.first_token_seconds << '\n';
+        }
+        require(completed == handles.size() && makespan_seconds < 1800,
+                "completion workload failed/censored at safety deadline; no completion throughput "
+                "claim");
+        for (const auto& result : results) {
+            require(result.generated_token_ids.size() == 32768 &&
+                        result.finish_reason == ninfer::FinishReason::OutputLimit,
+                    "completion workload stopped before the original 32768-token ceiling");
+        }
+        require(drained.computed_prefill_tokens - initial.computed_prefill_tokens == 8ULL * 60000,
+                "completion workload did not evaluate all eight original cold prompts");
+        require(decode == 8ULL * (32768 - 1) && emitted == 8ULL * 32768,
+                "completion workload committed token accounting differs from exact eight-request "
+                "ceiling");
+        return 0;
+    }
+
+    std::cout << std::setprecision(8) << "chunked_throughput backend=" << backend
+              << " C=8 prompt=60000x8 max_output=32768"
+              << " pool_tokens=" << engine.memory_summary().kv_capacity
+              << " window=" << sampled.kv_execution_window_tokens << " seconds=" << sampled_seconds
+              << " decode=" << decode
+              << " decode_tok_s=" << static_cast<double>(decode) / sampled_seconds
+              << " avg_batch=" << (rounds ? static_cast<double>(rows) / rounds : 0)
+              << " second_half_tok_s="
+              << static_cast<double>(steady_decode) / (sampled_seconds - midpoint_seconds)
+              << " second_half_batch="
+              << (steady_rounds ? static_cast<double>(steady_rows) / steady_rounds : 0)
+              << " started=" << started_requests
+              << " avg_ttft=" << (started_requests ? ttft / started_requests : 0)
+              << " returned_tokens=" << emitted << " cancelled=" << cancelled
+              << " output_limit=" << completed << " drain_seconds=" << drain_seconds
+              << " drained_active=" << drained.running_requests
+              << " extensions=" << sampled.kv_window_extensions
+              << " suspensions=" << sampled.kv_live_suspensions
+              << " resumes=" << sampled.kv_live_resumes << '\n';
+    return 0;
+}
+
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -326,6 +676,16 @@ int main(int argc, char** argv) {
                "NEW_DIRECTORY\n"
                "       ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer --system-prompts "
                "none|dflash|mtp\n"
+               "       ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer --chunked-pressure "
+               "none|dflash\n"
+               "       ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer "
+               "--chunked-reasoning-pressure "
+               "none|dflash\n"
+               "       ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer --chunked-throughput "
+               "none|dflash\n"
+               "       ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer "
+               "--chunked-throughput-completion "
+               "none|dflash\n"
                "Manual real-model check: ordinary greedy C1, 16-token requests, "
                "8 GiB RAM cache.\n"
                "Cancellation starts after the first nonempty stream delta; "
@@ -337,6 +697,18 @@ int main(int argc, char** argv) {
     }
     try {
         if (argc == 4) {
+            if (std::string_view(argv[2]) == "--chunked-reasoning-pressure") {
+                return qualify_chunked_pressure(argv[1], argv[3], true);
+            }
+            if (std::string_view(argv[2]) == "--chunked-throughput-completion") {
+                return qualify_chunked_throughput(argv[1], argv[3], true);
+            }
+            if (std::string_view(argv[2]) == "--chunked-throughput") {
+                return qualify_chunked_throughput(argv[1], argv[3]);
+            }
+            if (std::string_view(argv[2]) == "--chunked-pressure") {
+                return qualify_chunked_pressure(argv[1], argv[3]);
+            }
             if (std::string_view(argv[2]) == "--system-prompts") {
                 return qualify_system_prompts(argv[1], argv[3]);
             }

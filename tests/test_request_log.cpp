@@ -1,5 +1,6 @@
 #include "serve/console_log.h"
 #include "serve/request_log.h"
+#include "serve/translate.h"
 #include "product/context_checkpoint_format.h"
 
 #include <cmath>
@@ -90,6 +91,7 @@ int main() {
     options.enable_vision                  = false;
     options.allow_prefix_reuse             = false;
     options.preserve_thinking              = true;
+    options.default_thinking_token_budget  = 16384;
     options.sampling_overrides.temperature = 0.6F;
     options.startup_argv = {"ninfer-serve", options.artifact_path, "--api-key", "<redacted>"};
 
@@ -148,7 +150,7 @@ int main() {
                       "server record artifact type mismatch");
     failures += check(server.at("schema_version") == kRequestLogSchemaVersion,
                       "server record schema mismatch");
-    failures += check(kRequestLogSchemaVersion == 27, "request-log schema is not version 27");
+    failures += check(kRequestLogSchemaVersion == 28, "request-log schema is not version 28");
     failures += check(server.at("event") == "server_start", "server event mismatch");
     failures += check(server.at("server").at("public_model_id") == "deployment-alias",
                       "resolved public model id missing");
@@ -300,6 +302,30 @@ int main() {
         check(started.at("request").at("request_id") == 7, "request id missing from start record");
     failures += check(started.at("request").at("requested_output_tokens") == 4096,
                       "request output budget missing");
+    const ninfer::ReasoningLimitStats failed_cap{
+        .budget_tokens = 4096, .used_tokens = 4096, .limit_reached = true};
+    const Json capped_error = Json::parse(
+        format_request_error_json("serve-test", 2000, context, "no replacement room", &failed_cap));
+    failures += check(capped_error.at("reasoning_limit").at("used_tokens") == 4096,
+                      "request error log lost policy accounting");
+    failures += check(server.at("server").at("default_thinking_token_budget") == 16384,
+                      "startup log lost server default reasoning cap");
+    GenerationRequest inherited;
+    ServeOptions capped_server;
+    capped_server.default_thinking_token_budget = 16384;
+    const auto effective = resolve_request_semantics(inherited, capped_server, {});
+    PreparedRequest capped_prepared;
+    capped_prepared.enable_thinking       = effective.enable_thinking;
+    capped_prepared.thinking_token_budget = effective.thinking_token_budget;
+    const auto capped_context =
+        make_request_log_context(8, "openai_chat_completions", inherited, capped_prepared, 0.0);
+    const auto inherited_log =
+        Json::parse(format_request_start_json("serve-test", 2000, capped_context));
+    failures += check(inherited_log.at("request").at("thinking_token_budget") == 16384 &&
+                          inherited_log.at("request").at("enable_thinking") == true,
+                      "request log did not retain the effective inherited reasoning cap");
+    failures += check(started.at("request").at("thinking_token_budget").is_null(),
+                      "unlimited reasoning cap missing from resolved request diagnostics");
     failures += check(started.at("request").at("enable_thinking") == false,
                       "resolved thinking mode missing");
     failures += check(started.at("request").at("preserve_thinking") == true &&

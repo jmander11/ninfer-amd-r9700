@@ -335,6 +335,68 @@ void source_preserving_reads(ninfer::DeviceContext& device, ninfer::Fp8KInt4VPag
             "ordinary read did not consume after the fork");
 }
 
+void live_credit_image_ownership(ninfer::DeviceContext& device,
+                                 const ninfer::Fp8KInt4VPagedKVSpec& text_spec) {
+    CopyFixture fixture(text_spec);
+    auto source = fixture.pool->reserve(1);
+    source.materialize_pages(1, device.stream);
+    paint_allocation(*fixture.pool, source, 0x38, device.stream);
+    ninfer::DeviceBuffer hidden_storage(256);
+    hidden_storage.fill(0x61);
+    ninfer::Tensor hidden(hidden_storage.data(), ninfer::DType::U8, {256});
+    q3::detail::KVRamCache cache(8ULL << 20);
+    constexpr std::uint64_t owner       = 42;
+    constexpr std::size_t initial_bytes = 1ULL << 20;
+    require(cache.reserve_live_credit(owner, initial_bytes), "live credit could not be secured");
+    const auto [original_block, original_bytes] = cache.live_credit_view(owner);
+    constexpr std::size_t tail_bytes            = 32;
+    const auto tail_offset                      = original_bytes - tail_bytes;
+    std::memset(static_cast<std::uint8_t*>(original_block) + tail_offset, 0xab, tail_bytes);
+    device.order_copy_after_compute();
+    HiddenCapture capture(fixture, source, 1231, hidden, device.copy_stream);
+    capture.source.live_owner               = owner;
+    capture.source.live_reserved_tail_bytes = tail_bytes;
+    const auto image                        = cache.capture(capture.source);
+    require(image.status == q3::detail::RamCaptureStatus::Captured, "secured live capture dropped");
+    cache.wait_live_image(image.entry_id);
+    require(cache.live_image_ready(image.entry_id), "completed live fence was not ready");
+    require(cache.fifo_ids().empty() && cache.unpinned_ids().empty() &&
+                !cache.plan_match(capture.prompt, q3::detail::prefix_hash_chain(capture.prompt)),
+            "live suspension entered optional prefix lookup/eviction");
+    require(cache.reserve_live_credit(owner, 2ULL << 20), "live image credit could not grow");
+    const auto [grown_block, grown_bytes] = cache.live_credit_view(owner);
+    require(
+        grown_bytes >= (2ULL << 20) &&
+            std::all_of(static_cast<const std::uint8_t*>(grown_block) + tail_offset,
+                        static_cast<const std::uint8_t*>(grown_block) + tail_offset + tail_bytes,
+                        [](auto value) { return value == 0xab; }),
+        "credit growth changed parked sampler-tail bytes");
+    auto destination = fixture.pool->reserve(1);
+    destination.materialize_pages(1, device.copy_stream);
+    q3::detail::RamRestoreTarget target;
+    target.text           = &destination;
+    target.text_pool      = fixture.pool.get();
+    target.text_semantics = fixture.semantics;
+    target.text_dst_pages = 1;
+    target.tail_hidden    = &hidden;
+    target.stream         = device.copy_stream;
+    (void)cache.unpack_device(image.entry_id, target);
+    cache.wait_live_image(image.entry_id);
+    verify_allocation(*fixture.pool, destination, 0x38, "live image retained across credit growth",
+                      1);
+    require(all_bytes_equal(hidden_storage, 0x61), "live hidden image changed");
+    bool refused = false;
+    try {
+        cache.release_live_credit(owner);
+    } catch (const std::logic_error&) { refused = true; }
+    require(refused, "live image lost its backing credit");
+    cache.retire_live_image(image.entry_id);
+    require(cache.reserve_live_credit(owner, 512ULL << 10), "resident credit shrink failed");
+    require(cache.snapshot().used_bytes == (512ULL << 10), "resident credit retained excess RAM");
+    cache.release_live_credit(owner);
+    require(cache.snapshot().used_bytes == 0, "released live credit leaked RAM");
+}
+
 // Two restores in one round each own an in-flight H2D. Consuming the first must account its copy
 // as a load, not orphan it as save time.
 void two_pending_loads_fold_as_loads(ninfer::DeviceContext& device,
@@ -1010,6 +1072,7 @@ int main() {
         mixed_spec.plane_layouts.value = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor;
         mixed_spec.plane_layouts.value_scale = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor;
         source_preserving_reads(device, mixed_spec);
+        live_credit_image_ownership(device, text_spec);
         two_pending_loads_fold_as_loads(device, text_spec);
         stream_wait_does_not_block_host(device, text_spec);
         for (const std::uint32_t pages : {1U, 5U})

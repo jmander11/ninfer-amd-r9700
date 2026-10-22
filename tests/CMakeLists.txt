@@ -87,6 +87,9 @@ set_tests_properties(ninfer_pinned_arena_recovery_test PROPERTIES
 ninfer_add_r9700_test(ninfer_admission_policy_test
   SOURCES test_admission_policy.cpp
   LIBRARIES ninfer_engine ninfer_r9700_core)
+ninfer_add_r9700_test(ninfer_kv_pressure_policy_test
+  SOURCES test_kv_pressure_policy.cpp)
+set_tests_properties(ninfer_kv_pressure_policy_test PROPERTIES LABELS "host")
 ninfer_add_r9700_test(ninfer_sampling_defaults_test
   SOURCES test_sampling_defaults.cpp
   LIBRARIES ninfer_engine)

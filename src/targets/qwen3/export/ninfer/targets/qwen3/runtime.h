@@ -168,6 +168,27 @@ public:
     can_admit_lane_after_releasing(std::uint32_t lane, const RequestPlan<Variant>& plan,
                                    std::span<const std::uint32_t> release_lanes) const noexcept;
     [[nodiscard]] runtime::AdmissionResources admission_capacity() const noexcept;
+    [[nodiscard]] bool chunked_execution_enabled() const noexcept;
+    [[nodiscard]] runtime::AdmissionResources
+    completion_resources(const RequestBasePlan<Variant>& base,
+                         std::uint32_t prompt_token_bound) const;
+    [[nodiscard]] bool shrink_window(std::uint32_t lane, const runtime::ExecutionWindow& window);
+    [[nodiscard]] runtime::ExecutionWindow plan_window(std::uint32_t lane,
+                                                       std::uint32_t output_tokens) const;
+    [[nodiscard]] runtime::ExecutionWindow plan_suspended_window(std::uint64_t owner,
+                                                                 std::uint32_t output_tokens) const;
+    [[nodiscard]] bool grant_window(std::uint32_t lane, const runtime::ExecutionWindow& window);
+    [[nodiscard]] bool reserve_suspension_credit(std::uint64_t owner, std::size_t bytes);
+    void release_suspension_credit(std::uint64_t owner);
+    [[nodiscard]] bool start_suspend(std::uint32_t lane, std::uint64_t owner);
+    [[nodiscard]] bool suspension_ready(std::uint64_t owner) const;
+    void finish_suspend(std::uint32_t lane, std::uint64_t owner);
+    [[nodiscard]] bool start_resume(std::uint32_t lane, std::uint64_t owner,
+                                    const runtime::ExecutionWindow& window);
+    [[nodiscard]] bool resume_ready(std::uint64_t owner) const;
+    void finish_resume(std::uint32_t lane, std::uint64_t owner);
+    void discard_suspended(std::uint64_t owner);
+
     [[nodiscard]] runtime::PrefillStepResult
     start_prefill_lane(std::uint32_t lane, PreparedPrompt&& prompt, RequestPlan<Variant>&& plan,
                        runtime::TransientRegion transient, const OutputSession* output = nullptr,

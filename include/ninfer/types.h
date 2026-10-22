@@ -283,6 +283,8 @@ struct OutputOptions {
     // Set to report a TokenLogprob for every token published to a channel, each carrying this many
     // ranked alternatives, in [0, kMaximumTopLogprobs]. Unset reports none.
     std::optional<std::uint32_t> top_logprobs;
+    // Newly generated reasoning-body IDs across all attempts; absent means unlimited.
+    std::optional<std::uint32_t> thinking_token_budget;
 };
 
 struct RequestOptions {
@@ -656,6 +658,21 @@ struct RequestErrorLocation {
     std::optional<std::size_t> tool_index;
 };
 
+struct ReasoningLimitForcedToken {
+    std::uint32_t generated_token_index = 0;
+    TokenId token                       = 0;
+    std::optional<float> target_logprob{};
+};
+
+struct ReasoningLimitStats {
+    std::uint32_t budget_tokens = 0;
+    std::uint32_t used_tokens   = 0;
+    std::uint32_t forced_closes = 0;
+    std::uint32_t retries       = 0;
+    bool limit_reached          = false;
+    std::vector<ReasoningLimitForcedToken> forced_tokens{};
+};
+
 class RequestError final : public std::invalid_argument {
 public:
     RequestError(RequestErrorKind kind, const std::string& message,
@@ -673,7 +690,14 @@ public:
     // Recovery totals when this error ended an admitted generation; empty otherwise.
     [[nodiscard]] const GenerationRecoveryStats& recovery() const noexcept { return recovery_; }
 
+    [[nodiscard]] const ReasoningLimitStats& reasoning_limit() const noexcept {
+        return reasoning_limit_;
+    }
+
+    void set_reasoning_limit(ReasoningLimitStats stats) { reasoning_limit_ = std::move(stats); }
+
 private:
+    ReasoningLimitStats reasoning_limit_;
     RequestErrorKind kind_;
     GenerationRecoveryStats recovery_;
     std::optional<RequestErrorLocation> location_;
@@ -694,6 +718,7 @@ struct GenerationResult {
     std::vector<std::string> undeclared_tool_call_names;
     GenerationRecoveryStats recovery;
     ConstraintStats constraint;
+    ReasoningLimitStats reasoning_limit;
     std::uint32_t reasoning_tokens     = 0;
     FinishReason finish_reason         = FinishReason::None;
     std::uint32_t reused_prompt_tokens = 0;
@@ -828,6 +853,12 @@ struct RuntimeStats {
     std::uint32_t prefilling_requests            = 0;
     std::uint32_t decode_ready_requests          = 0;
     std::uint32_t waiting_requests               = 0;
+    std::uint32_t kv_execution_window_tokens     = 0;
+    std::uint32_t kv_growth_blocked_requests     = 0;
+    std::uint32_t kv_suspended_requests          = 0;
+    std::uint64_t kv_window_extensions           = 0;
+    std::uint64_t kv_live_suspensions            = 0;
+    std::uint64_t kv_live_resumes                = 0;
     std::uint32_t kv_ram_system_prompt_limit     = 0;
     std::size_t kv_ram_system_prompt_entries     = 0;
     std::size_t kv_ram_system_prompt_used_bytes  = 0;

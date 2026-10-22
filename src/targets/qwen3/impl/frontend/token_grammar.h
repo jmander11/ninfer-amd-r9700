@@ -27,6 +27,7 @@ struct TokenGrammarData {
     std::vector<Definition> definitions;
     xgrammar::CompiledGrammar compiled;
     ConstraintStats constraint;
+    bool starts_in_reasoning = false;
     [[nodiscard]] std::optional<ToolCall> decode_call(std::string_view text) const;
 };
 
@@ -40,7 +41,8 @@ public:
     explicit TokenGrammarState(std::shared_ptr<const TokenGrammarData> grammar,
                                std::vector<TokenId> ignored_model_stops = {});
     void preview(std::span<const TokenId> tokens,
-                 std::span<const std::uint8_t> ignored_framing = {});
+                 std::span<const std::uint8_t> ignored_framing  = {},
+                 std::span<const std::uint8_t> reasoning_closes = {});
     void commit_preview() noexcept;
     void discard_preview() noexcept;
     [[nodiscard]] ConstraintStats constraint_stats() const noexcept;
@@ -52,7 +54,8 @@ public:
     // mask, not an empty sampling domain: their parent forbids their acceptance.
     void fill_masks(std::span<const TokenId> tokens, std::span<const std::int32_t> parents,
                     std::span<std::uint32_t> words, TokenId replay_close = -1,
-                    std::span<const std::uint8_t> replay_close_allowed = {}) const;
+                    std::span<const std::uint8_t> replay_close_allowed    = {},
+                    std::span<const std::uint8_t> reasoning_close_allowed = {}) const;
 
 private:
     bool accept(xgrammar::GrammarMatcher& matcher, TokenId token) const;

@@ -125,7 +125,7 @@ std::string usage_text(const char* argv0) {
            "       [--stop-token-id N]... [--stop <text>]... [--reasoning-stop <text>]...\n"
            "       [--json-object | --json-schema FILE | --grammar FILE | --regex PATTERN | "
            "--choice TEXT ...]\n"
-           "       [--raw-output] [--print-token-ids] [--no-thinking]\n"
+           "       [--raw-output] [--print-token-ids] [--no-thinking] [--thinking-token-budget N]\n"
            "       [--reasoning-effort low|medium|xhigh] [--vision]\n"
            "       [--no-device-graph] [--capture-context-checkpoint]\n"
            "       [--context-checkpoints off|a,b,c]\n"
@@ -237,6 +237,8 @@ Options parse_options(int argc, char** argv) {
         } else if (arg == "--no-lm-head-draft") {
             options.speculative.proposal_head = ProposalHead::Full;
             proposal_head_explicit            = true;
+        } else if (arg == "--thinking-token-budget") {
+            options.thinking_token_budget = parse_u32(value(arg), "thinking-token-budget");
         } else if (arg == "--raw-output") {
             options.raw_output = true;
         } else if (arg == "--print-token-ids") {
@@ -338,6 +340,9 @@ Options parse_options(int argc, char** argv) {
                              options.kv_disk_location);
     product::resolve_speculative_cli_options(options.speculative, draft_tokens_explicit,
                                              adaptive_draft_explicit, proposal_head_explicit);
+    if (options.thinking_token_budget && (!options.enable_thinking || options.raw_output)) {
+        throw std::invalid_argument("--thinking-token-budget requires thinking and parsed output");
+    }
     if (!options.enable_thinking && options.reasoning_effort) {
         throw std::invalid_argument("--reasoning-effort cannot be combined with --no-thinking");
     }

@@ -9,9 +9,14 @@
 
 namespace ninfer::targets::qwen3 {
 
-enum class GenerationRecoveryNotice { RepeatedReasoning, ReasoningReplay, RepeatedContent };
+enum class GenerationRecoveryNotice {
+    ReasoningLimit,
+    RepeatedReasoning,
+    ReasoningReplay,
+    RepeatedContent
+};
 
-// A replacement profile for a proved framing replay; standard/greedy inputs stay unchanged.
+// A replacement profile for proved reasoning failure; standard/greedy inputs stay unchanged.
 [[nodiscard]] ResolvedSamplingParameters
 replay_recovery_sampling(ResolvedSamplingParameters original);
 
@@ -40,6 +45,11 @@ public:
     // Only the new messages. Empty calls are one system notice. Calls are one
     // assistant message plus one tool message per call. History is not copied
     // and reasoning_content is not cleared.
+    // All supported native feedback variants at this attempt, including the known
+    // repeated-call batch when proof context exists. Used to bound suffix growth.
+    [[nodiscard]] std::vector<std::vector<ChatMessage>>
+    recovery_insert_variants(std::uint32_t attempt) const;
+
     [[nodiscard]] std::vector<ChatMessage> recovery_insert(
         std::span<const ToolCall> calls, std::uint32_t attempt,
         GenerationRecoveryNotice reason = GenerationRecoveryNotice::RepeatedReasoning) const;

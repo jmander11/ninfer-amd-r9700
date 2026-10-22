@@ -92,6 +92,71 @@ The public machine-readable summary is `bench/results/readme-workloads-20261017.
 Run the command documented in `tools/bench/README.md` with the explicit local LQ4 artifact and BF16 tokenizer. The reports are under `profiles/bench/readme-workloads-20261017-run3/`; the admitted code cells use the corrected prompt from `profiles/bench/readme-workloads-code-20261017/`, produced by adding `--workload "Python package"`. The original code cells requested tools and are excluded. Inputs, output text, per-request counters, startup metadata and raw periodic timings are retained with the reports.
 
 
+### Windowed KV reservations at C8 (2026-10-22)
+
+A matched full-workload comparison on one R9700 measured automatic shared KV capacity of
+509,504 tokens with 12 GiB of RAM backing, adaptive DFlash up to seven drafts and p-less
+sampling at temperature 1.5. Both runs submitted the same eight distinct 60,000-token raw
+prompts and generated exactly 32,768 tokens per request. Model stop tokens, prefix writes and
+generation recovery were disabled. The windowed run used output reservations of at most 8,192
+tokens; the control retained full-lifetime GPU reservations. Neither run used a reasoning cap.
+
+| Measurement | Full reservation | Windowed reservation |
+|---|---:|---:|
+| Eight-request makespan, s | 1,141.620 | 891.936 |
+| Committed decode tokens / makespan, tok/s | 229.618 | 293.895 |
+| Actual mean decode batch, rows per round | 2.647 | 4.051 |
+| Mean time to first token, s | 207.360 | 108.960 |
+| Live RAM suspensions / resumes | 0 / 0 | 3 / 3 |
+
+Windowing improved whole-workload decode throughput by **28.0%** and reduced makespan by
+**21.9%** for this pair. Both runs evaluated all 480,000 prompt tokens, committed 262,136 decode
+tokens and returned 262,144 output tokens. All eight requests reached their original output
+limit without cancellation or censoring, and final active/suspended ownership was zero. The
+windowed run spent 1.064 s saving live state and 1.135 s restoring it in total. Makespan ends at
+the final client completion timestamp, excluding observer polling delay.
+
+An earlier fixed 300-second comparison showed no throughput gain while the windowed scheduler
+performed more eager prefill. That interval ended with different amounts of queued work
+completed; it remains a negative result for that bounded horizon. The complete-workload pair
+measures the cost and benefit of finishing the same eight requests. This is one raw-token stress
+workload with model stopping disabled, not a universal speedup, a useful-action benchmark or a
+model-quality result. Evidence: `profiles/chunked-kv/throughput-completion-comparison.json`.
+
+
+### Reasoning budgets and KV-window interaction (2026-10-22)
+
+A private 25-case reasoning-stall corpus replayed at C1 with two paired seeds produced
+50/50 schema-valid, nonduplicate tool-call candidates with a 4,096-token native reasoning
+close, versus 49/50 without a cap. The remaining unlimited response reached its output
+limit without an answer or tool call. Mean candidate latency by seed was 32.525/35.787 s
+with the cap and 69.979/82.437 s without; 27/50 capped requests actually intervened.
+The one discordant case completed in both arms at a third seed. A separate 16k replay
+completed naturally, so it does not demonstrate rescue by that cap.
+
+A single-seed C8 interaction check used eight original requests, 243,572 total prompt
+tokens, an explicitly constrained 327,680-token pool, RAM backing, no prefix reuse,
+recovery off and a common 300-second observation horizon. Both 4k-capped configurations
+completed 8/8 candidates: windowed allocation in 152.654 s, full reservation in 184.586 s.
+Unlimited full reservation completed 8/8 in 231.743 s; unlimited windowing completed
+5/8 with three right-censored requests at 300 s. The latter generated 92,911 decode
+tokens versus 38,803 for unlimited full reservation. Different sampled trajectories
+prevent interpreting these candidate times as a clean scheduler-throughput comparison.
+Every cell drained cleanly; none required live suspension in this corpus check.
+
+These are schema-valid proposals; task correctness, actual tool execution and historical
+failure reproduction are unverified. Controlled replays preserved thinking explicitly,
+so they do not measure the preserve-thinking-off deployment profile. Healthy HTTP checks
+passed 26/26 limiter/transport/tool/schema assertions, while six of eight strict answer
+format checks failed identically with unlimited and nonbinding limits. A lower 4k cap
+has stronger latency evidence here than 16k, without establishing universal answer quality.
+NInfer's default remains unlimited; the local deployment selects 16k. Generic evidence:
+`profiles/reasoning-limit/full-close4k-aggregate.json`,
+`profiles/reasoning-limit/c8-interaction-aggregate.json` and
+`profiles/reasoning-limit/http-close-aggregate.json`. Private corpus contents stay outside
+this repository.
+
+
 ### Decode optimization profile at 512 through 64K context (2026-10-16)
 
 Fresh characterization of `6f069b6c`, the production `r9700-lq4` artifact, fixed G16 FP8-K/INT4-V/FP16-scale cache, chunk 2048, and the Compose bulk host-argument graph environment. Each unprofiled point discards one repetition and measures three greedy corpus P+G128 requests under `auto`. These are diagnostic baselines, not an optimization A/B; some points have a slow repetition, with the full ranges retained in the report. No clock, voltage or power-policy setting was changed.

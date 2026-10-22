@@ -11,6 +11,9 @@
 
 namespace ninfer::runtime {
 
+// Immutable qualifier-only selection, never a request-visible policy.
+enum class ReasoningLimitAction : std::uint8_t { Close, Retry };
+
 // Optional cache failures distinguish source integrity, stale plans, and destination pressure.
 // HIP failures and execution errors must retain their original exception.
 enum class CacheRestoreFailureKind : std::uint8_t {
@@ -49,8 +52,9 @@ struct ResolvedExecutionOptions {
     static constexpr std::size_t kMaximumSuppressedTokens = 4;
 
     ResolvedSamplingParameters sampling;
-    std::uint32_t requested_output_tokens = 0;
-    bool allow_prefix_reuse               = true;
+    std::uint32_t requested_output_tokens   = 0;
+    std::uint32_t reservation_window_tokens = 8192;
+    bool allow_prefix_reuse                 = true;
     // Internal cache recovery bypasses existing images without disabling capture.
     bool force_cold_prefill         = false;
     bool cache_write                = true;
@@ -85,7 +89,16 @@ struct AdmissionResources {
     std::uint32_t backend_kv_pages = 0;
 };
 
+struct ExecutionWindow {
+    AdmissionResources admission;
+    std::uint32_t output_tokens  = 0;
+    std::size_t suspension_bytes = 0;
+};
+
 struct RequestPlanSummary {
+    std::uint32_t window_output_tokens = 0;
+    AdmissionResources lifetime_admission;
+    std::size_t suspension_bytes          = 0;
     std::uint32_t prompt_tokens           = 0;
     std::uint32_t reusable_prompt_tokens  = 0;
     std::uint32_t requested_output_tokens = 0;

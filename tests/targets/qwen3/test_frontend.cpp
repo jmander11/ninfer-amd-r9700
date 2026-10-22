@@ -1638,6 +1638,162 @@ int test_single_reasoning_close(const Frontend& frontend) {
     return failures;
 }
 
+int test_reasoning_token_limit(const Frontend& frontend) {
+    using ninfer::FinishReason;
+    using ninfer::OutputChannel;
+    using ninfer::TokenId;
+    using ninfer::runtime::ReasoningLimitAction;
+    int failures = 0;
+    ninfer::PromptInput input;
+    ninfer::ChatMessage user;
+    user.role = ninfer::ChatRole::User;
+    user.parts.push_back({.text = "x"});
+    input.messages.push_back(user);
+    input.options.enable_thinking = true;
+    const auto prompt             = frontend.prepare(input);
+    const ninfer::OutputOptions cap{.thinking_token_budget = 1};
+    auto session = frontend.make_output_session(prompt, {}, cap);
+    failures += check(session.has_token_masks(), "reasoning cap did not enable framing masks");
+    const std::array<TokenId, 4> nodes{0, 1, 248069, 15};
+    const std::array<std::int32_t, 4> parents{-1, 0, 1, 2};
+    std::vector<std::uint32_t> masks(nodes.size() * fi::TokenGrammarState::mask_words);
+    const auto permits = [&](std::size_t node, TokenId token) {
+        return ((masks[node * fi::TokenGrammarState::mask_words +
+                       static_cast<std::size_t>(token) / 32] >>
+                 (static_cast<unsigned>(token) % 32)) &
+                1U) != 0;
+    };
+    session.fill_token_masks(nodes, parents, masks);
+    failures += check(permits(0, 1) && permits(1, 248069) && !permits(1, 15) &&
+                          !permits(2, 248069) && permits(2, 15),
+                      "reasoning cap did not fork the exact speculative eligibility boundary");
+    auto decision =
+        session.preview(std::array<TokenId, 3>{1, 248069, 15}, 10, FinishReason::OutputLimit);
+    failures += check(decision.accepted_tokens == 1 && !decision.finished(),
+                      "reasoning boundary accepted speculative answer or close prematurely");
+    session.discard_preview();
+    failures += check(session.reasoning_limit_stats().used_tokens == 0 &&
+                          !session.reasoning_limit_forced_close_token(),
+                      "rejected reasoning proposal consumed the committed allowance");
+    (void)session.preview(std::array<TokenId, 1>{1}, 10, FinishReason::OutputLimit);
+    failures +=
+        check(channel_text(session.commit_preview(), OutputChannel::Reasoning) == "helloST" &&
+                  session.reasoning_limit_stats().used_tokens == 1 &&
+                  session.reasoning_limit_forced_close_token() == 248069,
+              "committed reasoning body failed to reach the exact cap");
+    decision = session.preview(std::array<TokenId, 2>{248069, 15}, 9, FinishReason::OutputLimit);
+    failures +=
+        check(decision.accepted_tokens == 1 && session.preview_token_channels()[0] == std::nullopt,
+              "policy close was not isolated framing without channel confidence");
+    (void)session.commit_preview();
+    failures +=
+        check(!session.in_reasoning() && session.reasoning_limit_stats().forced_closes == 1 &&
+                  session.reasoning_limit_stats().used_tokens == 1,
+              "forced close changed reasoning allowance or failed to close");
+    (void)session.preview(std::array<TokenId, 1>{15}, 1, FinishReason::OutputLimit);
+    failures += check(channel_text(session.commit_preview(), OutputChannel::Content) == "answer",
+                      "reasoning limit prevented ordinary answer continuation");
+
+    auto natural = frontend.make_output_session(prompt, {}, {.thinking_token_budget = 3});
+    (void)natural.preview(std::array<TokenId, 2>{3, 4}, 10, FinishReason::OutputLimit);
+    (void)natural.commit_preview();
+    failures += check(!natural.in_reasoning() && natural.reasoning_limit_stats().used_tokens == 1 &&
+                          natural.reasoning_limit_stats().forced_closes == 0,
+                      "textual close framing was charged as reasoning or marked forced");
+    auto partial = frontend.make_output_session(prompt, {}, cap);
+    (void)partial.preview(std::array<TokenId, 1>{3}, 10, FinishReason::OutputLimit);
+    failures +=
+        check(channel_text(partial.commit_preview(), OutputChannel::Reasoning) == "thought</thi",
+              "partial closing marker escaped the capped reasoning channel");
+    (void)partial.preview(std::array<TokenId, 1>{248069}, 9, FinishReason::OutputLimit);
+    failures += check(channel_text(partial.commit_preview(), OutputChannel::Content).empty(),
+                      "native forced close leaked a partial marker into answer text");
+    auto utf8 = frontend.make_output_session(prompt, {}, cap);
+    (void)utf8.preview(std::array<TokenId, 1>{10}, 10, FinishReason::OutputLimit);
+    failures +=
+        check(channel_text(utf8.commit_preview(), OutputChannel::Reasoning) == kUtf8Replacement &&
+                  utf8.reasoning_limit_stats().used_tokens == 1,
+              "incomplete UTF-8 hid a committed reasoning token at the cap");
+
+    auto constrained_input = input;
+    constrained_input.options.output_constraint =
+        ninfer::OutputConstraint{ninfer::OutputConstraintKind::Grammar, "root ::= \"answer\""};
+    const auto constrained_prompt = frontend.prepare(constrained_input);
+    for (const TokenId fragment : {TokenId{10}, TokenId{3}}) {
+        auto constrained = frontend.make_output_session(constrained_prompt, {}, cap);
+        (void)constrained.preview(std::array<TokenId, 1>{fragment}, 10, FinishReason::OutputLimit);
+        (void)constrained.commit_preview();
+        const std::array<TokenId, 1> root{0};
+        const std::array<std::int32_t, 1> root_parent{-1};
+        std::vector<std::uint32_t> mask(fi::TokenGrammarState::mask_words);
+        constrained.fill_token_masks(root, root_parent, mask);
+        failures += check((mask[248069 / 32] & (1U << (248069 % 32))) != 0,
+                          "pending reasoning fragment made constrained close ineligible");
+        (void)constrained.preview(std::array<TokenId, 1>{248069}, 9, FinishReason::OutputLimit);
+        constrained.discard_preview();
+        failures += check(constrained.in_reasoning() &&
+                              constrained.reasoning_limit_stats().forced_closes == 0,
+                          "discarded semantic close reset committed constrained grammar");
+        (void)constrained.preview(std::array<TokenId, 1>{248069}, 9, FinishReason::OutputLimit);
+        (void)constrained.commit_preview();
+        decision = constrained.preview(std::array<TokenId, 2>{15, 6}, 8, FinishReason::OutputLimit);
+        failures += check(decision.finish_reason == FinishReason::StopToken &&
+                              channel_text(constrained.commit_preview(), OutputChannel::Content) ==
+                                  "answer" &&
+                              constrained.reasoning_limit_stats().forced_closes == 1,
+                          "semantic first close failed to preserve constrained answer grammar");
+    }
+
+    auto retry =
+        frontend.make_output_session(prompt, {}, cap, false, nullptr, ReasoningLimitAction::Retry);
+    (void)retry.preview(std::array<TokenId, 2>{1, 15}, 10, FinishReason::OutputLimit);
+    (void)retry.commit_preview();
+    failures += check(retry.reasoning_limit_retry_required(),
+                      "budget retry incorrectly depended on generation recovery enabling");
+    input.options.enable_thinking = false;
+    const auto nonthinking_prompt = frontend.prepare(input);
+    auto replacement = frontend.make_output_session(nonthinking_prompt, {}, cap, false, &retry,
+                                                    ReasoningLimitAction::Retry);
+    failures +=
+        check(!replacement.in_reasoning() && !replacement.reasoning_limit_retry_required() &&
+                  replacement.reasoning_limit_stats().used_tokens == 1 &&
+                  replacement.reasoning_limit_stats().retries == 1,
+              "budget retry lost cumulative usage or retained a pending retry");
+    (void)replacement.preview(std::array<TokenId, 1>{15}, 1, FinishReason::OutputLimit);
+    failures +=
+        check(channel_text(replacement.commit_preview(), OutputChannel::Content) == "answer",
+              "exhausted reasoning budget blocked nonthinking replacement output");
+
+    auto terminal =
+        frontend.make_output_session(prompt, {}, cap, false, nullptr, ReasoningLimitAction::Retry);
+    decision = terminal.preview(std::array<TokenId, 1>{1}, 1, FinishReason::OutputLimit);
+    (void)terminal.commit_preview();
+    failures += check(decision.finish_reason == FinishReason::OutputLimit &&
+                          !terminal.reasoning_limit_retry_required() &&
+                          terminal.reasoning_limit_stats().forced_closes == 0,
+                      "reasoning policy overrode the total output limit");
+    ninfer::StopPolicy stop;
+    stop.token_ids = {248069};
+    auto stopped   = frontend.make_output_session(prompt, stop, cap);
+    (void)stopped.preview(std::array<TokenId, 1>{1}, 10, FinishReason::OutputLimit);
+    (void)stopped.commit_preview();
+    decision = stopped.preview(std::array<TokenId, 1>{248069}, 9, FinishReason::OutputLimit);
+    (void)stopped.commit_preview();
+    failures += check(decision.finish_reason == FinishReason::StopToken &&
+                          stopped.reasoning_limit_stats().forced_closes == 0,
+                      "policy intervention replaced an explicit caller stop");
+    for (const auto invalid : {ninfer::OutputOptions{.thinking_token_budget = 0},
+                               ninfer::OutputOptions{.raw = true, .thinking_token_budget = 1}}) {
+        failures += check(throws_invalid_argument(
+                              [&] { (void)frontend.make_output_session(prompt, {}, invalid); }),
+                          "contradictory reasoning budget was accepted");
+    }
+    failures += check(throws_invalid_argument(
+                          [&] { (void)frontend.make_output_session(nonthinking_prompt, {}, cap); }),
+                      "nonthinking request silently ignored its reasoning budget");
+    return failures;
+}
+
 int test_reasoning_replay_publication() {
     auto owned     = resources();
     auto tokenizer = nlohmann::json::parse(owned.tokenizer_json);
@@ -3653,8 +3809,84 @@ int test_official_recovery_splice() {
     ninfer::ToolCall call;
     call.name           = "read";
     call.arguments_json = R"({"path":"a.cpp"})";
-    const auto rejected = recovery->recovery_insert(std::span<const ninfer::ToolCall>(&call, 1), 1);
+    call.id             = "rejected";
+    ninfer::ChatMessage candidate;
+    candidate.role = ninfer::ChatRole::Assistant;
+    candidate.tool_calls.push_back(call);
+    ninfer::ChatMessage feedback;
+    feedback.role         = ninfer::ChatRole::Tool;
+    feedback.tool_call_id = call.id;
+    feedback.parts.push_back(ninfer::MessagePart{.text = "No tool was executed."});
+    const std::array rejected{candidate, feedback};
     failures += accept(rejected, "official rejected call did not splice onto the prepared prompt");
+
+    auto duplicate_input = input;
+    duplicate_input.options.tool_jsons.push_back(
+        R"({"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}})");
+    duplicate_input.messages.resize(1);
+    std::string repeated;
+    for (int index = 0; index < 80; ++index) { repeated += "step" + std::to_string(index) + " "; }
+    for (int index = 0; index != 2; ++index) {
+        auto prior              = candidate;
+        prior.reasoning_content = repeated;
+        prior.tool_calls[0].id  = "prior" + std::to_string(index);
+        auto result             = feedback;
+        result.tool_call_id     = prior.tool_calls[0].id;
+        result.parts[0].text    = "unchanged represented tool result";
+        duplicate_input.messages.push_back(std::move(prior));
+        duplicate_input.messages.push_back(std::move(result));
+    }
+    const auto duplicate_context =
+        ninfer::targets::qwen3::GenerationRecoveryContext::analyze(duplicate_input);
+    failures += check(duplicate_context && duplicate_context->has_repeated_tool_history(),
+                      "envelope fixture did not prove its known repeated batch");
+    for (const auto& context : {recovery, duplicate_context}) {
+        const auto original     = frontend.prepare(context->input());
+        const auto original_ids = FrontendFactory::inspect(original).token_ids;
+        failures += check(frontend.recovery_prompt_token_bound(original, *context, 0) ==
+                              original_ids.size(),
+                          "zero-retry envelope changed the original prompt");
+        std::array<std::optional<ninfer::targets::qwen3::PreparedPrompt>, 2> largest;
+        std::size_t first_maximum = 0;
+        for (const auto& variant : context->recovery_insert_variants(1)) {
+            for (std::size_t phase = 0; phase != 2; ++phase) {
+                auto spliced = frontend.splice_recovery_prompt(original_ids, context->input(),
+                                                               variant, context, phase == 0);
+                failures +=
+                    check(spliced.has_value(), "supported envelope first suffix did not splice");
+                if (!spliced) { continue; }
+                const auto size = FrontendFactory::inspect(*spliced).token_ids.size();
+                first_maximum   = std::max(first_maximum, size);
+                if (!largest[phase] ||
+                    size > FrontendFactory::inspect(*largest[phase]).token_ids.size()) {
+                    largest[phase] = std::move(spliced);
+                }
+            }
+        }
+        failures +=
+            check(frontend.recovery_prompt_token_bound(original, *context, 1) == first_maximum,
+                  "one-retry envelope differs from complete native suffix maximum");
+        std::size_t second_maximum = 0;
+        for (const auto& prefix : largest) {
+            if (!prefix) { continue; }
+            for (const auto& variant : context->recovery_insert_variants(2)) {
+                for (const bool thinking : {false, true}) {
+                    auto spliced = frontend.splice_recovery_prompt(
+                        FrontendFactory::inspect(*prefix).token_ids, context->input(), variant,
+                        context, thinking);
+                    failures += check(spliced.has_value(),
+                                      "supported envelope second suffix did not splice");
+                    if (spliced) {
+                        second_maximum = std::max(
+                            second_maximum, FrontendFactory::inspect(*spliced).token_ids.size());
+                    }
+                }
+            }
+        }
+        failures +=
+            check(frontend.recovery_prompt_token_bound(original, *context) == second_maximum,
+                  "two-retry envelope differs from native notice/batch/prologue maximum");
+    }
     return failures;
 }
 
@@ -3751,6 +3983,7 @@ int main() {
     failures += test_terminal_flush(frontend);
     failures += test_reasoning_split(frontend);
     failures += test_single_reasoning_close(frontend);
+    failures += test_reasoning_token_limit(frontend);
     failures += test_reasoning_replay_publication();
     failures += test_preview_token_channels(frontend);
     failures += test_structured_model_stop_eligibility(frontend);

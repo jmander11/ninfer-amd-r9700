@@ -248,6 +248,24 @@ add_library(ninfer_engine STATIC
   targets/registry.cpp
   targets/qwen3_8_27b/impl/package.cpp)
 ninfer_r9700_internal_includes(ninfer_engine)
+# Private comparator build. No HTTP/CLI request can select this mechanism.
+# Configure a separate build directory; production retains the canonical-close policy.
+set(NINFER_QUALIFY_REASONING_RETRY OFF CACHE BOOL
+  "Build the private reasoning-limit clean-retry comparator (unqualified)")
+mark_as_advanced(NINFER_QUALIFY_REASONING_RETRY)
+if(NINFER_QUALIFY_REASONING_RETRY)
+  target_compile_definitions(ninfer_engine PRIVATE NINFER_QUALIFY_REASONING_RETRY=1)
+endif()
+
+# Private scheduler A/B with the same RAM arena and all other candidate behavior.
+set(NINFER_QUALIFY_FULL_KV_RESERVATION OFF CACHE BOOL
+  "Use full output reservation for private chunked-KV comparison")
+mark_as_advanced(NINFER_QUALIFY_FULL_KV_RESERVATION)
+if(NINFER_QUALIFY_FULL_KV_RESERVATION)
+  target_compile_definitions(ninfer_r9700_qwen3_8_27b_runtime PRIVATE
+    NINFER_QUALIFY_FULL_KV_RESERVATION=1)
+endif()
+
 set_target_properties(ninfer_engine PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_engine PUBLIC
@@ -882,3 +900,14 @@ add_executable(ninfer_r9700_token_logprobs_qual
 ninfer_r9700_internal_includes(ninfer_r9700_token_logprobs_qual)
 set_target_properties(ninfer_r9700_token_logprobs_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_token_logprobs_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Manual target-private continuation proof; one explicitly selected resident artifact/backend.
+add_executable(ninfer_r9700_live_continuation_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/live_continuation_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_live_continuation_qual)
+set_target_properties(ninfer_r9700_live_continuation_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_live_continuation_qual PRIVATE
+  ninfer_engine ninfer_r9700_qwen3_8_27b_runtime ninfer_r9700_target_bindings
+  ninfer_artifact ninfer_r9700_core ninfer_r9700_text ninfer_media_decode
+  ninfer_runtime_capacity Threads::Threads hip::host)

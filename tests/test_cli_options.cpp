@@ -25,7 +25,26 @@ ninfer::cli::Options parse(std::vector<std::string> arguments) {
 } // namespace
 
 int main() {
-    int failures            = 0;
+    int failures = 0;
+    const auto capped =
+        parse({"ninfer", "model.ninfer", "--prompt", "hi", "--thinking-token-budget", "8192"});
+    failures += check(capped.thinking_token_budget == 8192, "CLI reasoning cap missing");
+    for (const char* value : {"0", "-1", "1.5", "4294967296"}) {
+        bool rejected = false;
+        try {
+            (void)parse(
+                {"ninfer", "model.ninfer", "--prompt", "hi", "--thinking-token-budget", value});
+        } catch (const std::invalid_argument&) { rejected = true; }
+        failures += check(rejected, "CLI accepted invalid reasoning cap");
+    }
+    for (const char* flag : {"--no-thinking", "--raw-output"}) {
+        bool rejected = false;
+        try {
+            (void)parse(
+                {"ninfer", "model.ninfer", "--prompt", "hi", "--thinking-token-budget", "1", flag});
+        } catch (const std::invalid_argument&) { rejected = true; }
+        failures += check(rejected, "CLI accepted contradictory reasoning cap");
+    }
     const auto system_cache = parse({"ninfer", "model.ninfer", "--prompt", "hi",
                                      "--kv-ram-capacity", "1024", "--kv-ram-system-prompts", "3"});
     failures += check(system_cache.kv_ram_system_prompts == 3 &&

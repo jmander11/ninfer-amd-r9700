@@ -36,6 +36,7 @@
 #include <span>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS {
 namespace schedule {
@@ -314,8 +315,10 @@ struct RequestControl {
     qwen3::AdaptiveDraftState adaptive;
     bool typical_cycle_reasoning = false;
     // The occupying request reports token logprobs: its rounds set the frame's row flag.
-    bool token_logprobs         = false;
-    std::uint32_t prompt_tokens = 0;
+    bool token_logprobs                   = false;
+    std::uint32_t prompt_tokens           = 0;
+    std::uint32_t effective_output_tokens = 0;
+    std::uint32_t window_output_tokens    = 0;
 };
 
 class ProgramImplCore {
@@ -342,6 +345,26 @@ public:
     can_admit_lane_after_releasing(std::uint32_t lane, const RequestPlan& plan,
                                    std::span<const std::uint32_t> release_lanes) const noexcept;
     [[nodiscard]] runtime::AdmissionResources admission_capacity() const noexcept;
+    [[nodiscard]] bool chunked_execution_enabled() const noexcept;
+    [[nodiscard]] runtime::AdmissionResources
+    completion_resources(const RequestBasePlan& base, std::uint32_t prompt_token_bound) const;
+    [[nodiscard]] bool shrink_window(std::uint32_t lane, const runtime::ExecutionWindow& window);
+    [[nodiscard]] runtime::ExecutionWindow plan_window(std::uint32_t lane,
+                                                       std::uint32_t output_tokens) const;
+    [[nodiscard]] runtime::ExecutionWindow plan_suspended_window(std::uint64_t owner,
+                                                                 std::uint32_t output_tokens) const;
+    [[nodiscard]] bool grant_window(std::uint32_t lane, const runtime::ExecutionWindow& window);
+    [[nodiscard]] bool reserve_suspension_credit(std::uint64_t owner, std::size_t bytes);
+    void release_suspension_credit(std::uint64_t owner);
+    [[nodiscard]] bool start_suspend(std::uint32_t lane, std::uint64_t owner);
+    [[nodiscard]] bool suspension_ready(std::uint64_t owner) const;
+    void finish_suspend(std::uint32_t lane, std::uint64_t owner);
+    [[nodiscard]] bool start_resume(std::uint32_t lane, std::uint64_t owner,
+                                    const runtime::ExecutionWindow& window);
+    [[nodiscard]] bool resume_ready(std::uint64_t owner) const;
+    void finish_resume(std::uint32_t lane, std::uint64_t owner);
+    void discard_suspended(std::uint64_t owner);
+
     [[nodiscard]] runtime::PrefillStepResult
     start_prefill_lane(std::uint32_t lane, PreparedPromptData&& prompt, RequestPlan&& plan,
                        runtime::TransientRegion transient,
@@ -584,6 +607,26 @@ public:
     std::uint64_t pending_disk_restore_ticket_ = 0;
 
 private:
+    struct SuspendedRequest {
+        SequenceState sequence;
+        RequestControl request;
+        std::uint64_t entry_id                                  = 0;
+        std::size_t sampling_counts_offset                      = 0;
+        bool sampling_counts_present                            = false;
+        std::size_t pending_features_offset                     = 0;
+        std::size_t checkpoint_count                            = 0;
+        std::uint32_t lane                                      = 0;
+        enum class Phase { Capturing, Parked, Restoring } phase = Phase::Capturing;
+    };
+
+    std::unordered_map<std::uint64_t, SuspendedRequest> suspended_requests_;
+    [[nodiscard]] runtime::ExecutionWindow
+    execution_window(std::uint32_t prompt_tokens, std::uint32_t output_tokens,
+                     std::size_t identity_extra_bytes, std::size_t checkpoint_count,
+                     runtime::AdmissionResources minimum = {}) const;
+    [[nodiscard]] bool select_imported_checkpoint(std::uint32_t frontier,
+                                                  qwen3::detail::ContextCheckpointKind kind,
+                                                  std::span<std::uint8_t> selected) const;
     void clear_lane(SequenceState& sequence, RequestControl& request) noexcept;
     // Applies the pending deferred folds of `lanes` (all lanes when empty) with the eager
     // all-layer fold, before anything else reads their GDN state or rewrites their records.
@@ -731,7 +774,8 @@ private:
     void clear_context_checkpoints(SequenceState& sequence) noexcept;
     void install_ram_context_checkpoints(SequenceState& sequence,
                                          const qwen3::detail::RamRestoredHost& host,
-                                         std::uint64_t entry_id, std::uint32_t reuse_base);
+                                         std::uint64_t entry_id, std::uint32_t reuse_base,
+                                         bool live_restore = false);
     void recycle_pending_disk_checkpoint_heads() noexcept;
     [[nodiscard]] bool staging_holds(std::uint32_t lane, qwen3::detail::PrefixHash128 hash,
                                      std::uint32_t frontier) const noexcept;

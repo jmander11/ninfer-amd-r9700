@@ -185,7 +185,12 @@ GenerationRecoveryContext::recovery_insert(std::span<const ToolCall> calls, std:
             .kind = MessagePartKind::Text,
             .text =
                 "NInfer engine recovery notice, attempt " + std::to_string(attempt) +
-                (reason == GenerationRecoveryNotice::ReasoningReplay
+                (reason == GenerationRecoveryNotice::ReasoningLimit
+                     ? ": the request reasoning-token allowance was reached. The capped "
+                       "generated attempt is omitted from this internal retry. Continue directly "
+                       "with the next relevant tool call or the completed answer using the "
+                       "remaining original output budget. "
+                 : reason == GenerationRecoveryNotice::ReasoningReplay
                      ? ": a framing replay was confirmed earlier in this request: generated "
                        "reasoning was copied into the answer channel and followed by an extra "
                        "reasoning close. An unpublished exact replay or empty continuation caused "
@@ -210,7 +215,14 @@ GenerationRecoveryContext::recovery_insert(std::span<const ToolCall> calls, std:
     }
     ChatMessage candidate;
     candidate.role = ChatRole::Assistant;
-    candidate.tool_calls.assign(calls.begin(), calls.end());
+    if (calls.size() != repeated_calls_.size() || calls.empty() ||
+        !std::equal(calls.begin(), calls.end(), repeated_calls_.begin(), same_call)) {
+        throw std::invalid_argument(
+            "rejected tool feedback requires the known repeated call batch");
+    }
+    // The proof already matched represented argument values. Reuse its fixed ordered
+    // batch rather than copying arbitrary generated JSON formatting into the suffix.
+    candidate.tool_calls = repeated_calls_;
     for (std::size_t i = 0; i < candidate.tool_calls.size(); ++i) {
         candidate.tool_calls[i].id =
             "ninfer_rejected_" + std::to_string(attempt) + "_" + std::to_string(i);
@@ -234,6 +246,20 @@ GenerationRecoveryContext::recovery_insert(std::span<const ToolCall> calls, std:
         inserted.push_back(std::move(message));
     }
     return inserted;
+}
+
+std::vector<std::vector<ChatMessage>>
+GenerationRecoveryContext::recovery_insert_variants(std::uint32_t attempt) const {
+    std::vector<std::vector<ChatMessage>> variants;
+    for (const auto notice :
+         {GenerationRecoveryNotice::ReasoningLimit, GenerationRecoveryNotice::RepeatedReasoning,
+          GenerationRecoveryNotice::ReasoningReplay, GenerationRecoveryNotice::RepeatedContent}) {
+        variants.push_back(recovery_insert({}, attempt, notice));
+    }
+    if (has_repeated_tool_history()) {
+        variants.push_back(recovery_insert(repeated_calls_, attempt));
+    }
+    return variants;
 }
 
 bool recovery_suffix_tokens_ok(std::span<const TokenId> prefix, std::span<const TokenId> prologue,

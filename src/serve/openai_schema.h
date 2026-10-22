@@ -27,6 +27,9 @@ parse_output_format(const nlohmann::json& format, bool nested_schema, std::strin
 // Parse a decoded JSON request; malformed or unsupported fields throw ApiException.
 GenerationRequest parse_chat_completion_request(const nlohmann::json& body,
                                                 const RequestLimits& limits);
+[[nodiscard]] std::optional<std::uint32_t> parse_thinking_token_budget(const nlohmann::json& value,
+                                                                       std::string_view param);
+[[nodiscard]] nlohmann::json reasoning_limit_json(const ninfer::ReasoningLimitStats& stats);
 void apply_ninfer_object(const nlohmann::json& ninfer, GenerationRequest& out);
 
 std::optional<bool> parse_openai_preserve_thinking(const nlohmann::json& body);

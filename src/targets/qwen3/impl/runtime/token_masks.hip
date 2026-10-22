@@ -130,6 +130,36 @@ bool all_permitted(const std::uint32_t* words, std::size_t nodes) {
     }
     return true;
 }
+
+// Grammar and recovery exclusions share one eligibility domain. A budget close
+// must not become an empty domain after those independent exclusions compose.
+void validate_budget_domain(const OutputSession& output, const ops::SamplingConfig& config,
+                            const std::uint32_t* words, std::size_t nodes) {
+    if (output.reasoning_limit_stats().budget_tokens == 0) { return; }
+    for (std::size_t node = 0; node < nodes; ++node) {
+        bool eligible = false;
+        for (std::size_t index = 0; index < kWords && !eligible; ++index) {
+            std::uint32_t word = words[node * kWords + index];
+            if (index + 1 == kWords && kTokenDomain % 32 != 0) {
+                word &= (std::uint32_t{1} << (kTokenDomain % 32)) - 1U;
+            }
+            for (std::int32_t i = 0; i < std::min(config.suppressed_token_count,
+                                                  ops::SamplingConfig::kMaximumSuppressedTokens);
+                 ++i) {
+                const auto token = config.suppressed_tokens[i];
+                if (token >= 0 && static_cast<std::size_t>(token) / 32 == index) {
+                    word &= ~(std::uint32_t{1} << (static_cast<unsigned>(token) % 32));
+                }
+            }
+            eligible = word != 0;
+        }
+        if (!eligible) {
+            throw RequestError(RequestErrorKind::InvalidOutputConstraint,
+                               "reasoning-limit intervention has no eligible target token");
+        }
+    }
+}
+
 } // namespace
 
 TokenMaskExchange::TokenMaskExchange(Tensor masks, Tensor sampling)
@@ -228,6 +258,7 @@ ops::SamplingConfig TokenMaskExchange::root_into(const OutputSession* output,
         const std::array<TokenId, 1> token{0};
         const std::array<std::int32_t, 1> parent{-1};
         output->fill_token_masks(token, parent, {root_mask(row), kWords});
+        validate_budget_domain(*output, config, root_mask(row), 1);
         HIP_CHECK(hipMemcpyAsync(const_cast<std::uint32_t*>(device_mask(row)), root_mask(row),
                                  kWords * sizeof(std::uint32_t), hipMemcpyHostToDevice, stream));
         output->record_token_mask_upload(kWords * sizeof(std::uint32_t));
@@ -362,6 +393,7 @@ void TokenMaskExchange::fill(bool tree) {
         std::fill_n(words, count * kWords, ~std::uint32_t{0});
         outputs_[row]->fill_token_masks({mail_ids_ + row * width_, count}, {parents, count},
                                         {words, count * kWords});
+        validate_budget_domain(*outputs_[row], config, words, count);
         if (all_permitted(words, count)) { continue; }
         // Nodes in one grammar state (free text) share a mask: publish it once, broadcast.
         bool shared = true;

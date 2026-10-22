@@ -14,16 +14,16 @@
 
 - 单 GPU、单 resident model instance；
 - 启动时固定 `max_concurrency=C`，支持 `C=1..8`，典型 `C=2..8`；
-- 运行时 `0..C` 个 admitted requests；
+- 运行时 `0..C` 个 resident requests；RAM suspension 保持 admitted identity，总 logical request 数仍受 `C + max_pending_requests` 限制；
 - Text 与 image/video prompt；
 - ordinary decoding 与 engine-wide speculative decoding；
 - streaming 与 non-streaming output；
-- prefix reuse, plus an optional completed-bundle pinned-host RAM second tier;
+- prefix reuse, plus an optional pinned-host RAM tier for completed bundles and live suspension;
 - 不同 prompt length、context length、generation limit 和 sampling configuration。
 
 ### 1.2 Non-goals
 
-- request preemption、swap、pause/resume，或把 **active** request 的 KV 迁出 GPU；
+- 通用 priority/preemptive scheduling、任意执行点暂停、active request 的 disk swap；仅支持 §5.8 的 settled-boundary RAM suspension；
 - 多请求 batched prefill（同一时刻只有一个 prefill owner；§8.9 的 mixed round 只把该 owner 的一个 bounded slice 并入 DFlash decode round 的 target forward）；
 - 多 GPU 或 distributed inference；
 - priority、tenant QoS 或 deadline-aware GPU scheduling；
@@ -49,7 +49,7 @@
 
 ### 2.1 Maximal batched decode
 
-在任一 round boundary，若有 `B>0` 个 decode-ready requests，下一次 decode round 必须包含全部 `B` 个请求。禁止把它们拆成多个 request-local forwards，也禁止为了复用单请求路径而依次执行。
+在任一 round boundary，若有 `B>0` 个 resident、funded、非 transfer-held 的 decode-ready requests，下一次 decode round 必须包含全部 `B` 个请求。Growth-blocked 请求先按 §5.8 取得 window。禁止把 runnable rows 拆成多个 request-local forwards，也禁止为了复用单请求路径而依次执行。
 
 ### 2.2 Boundary-only membership
 
@@ -61,9 +61,9 @@
 
 Engine configuration 必须能同时容纳 `C` 份 active fixed-size sequence state、`C` 行 execution metadata 和一份 shared executor workspace；否则该 `max_concurrency` 无效。Retained state 只留在 当前空闲 lane 的 fixed backing 并占用其实际 mapped growing state；new admission 可以 claim 或驱逐它， 因此不能降低 `C` 个 active sequences 的 guarantee。Growing context 仍是 shared capacity，所以不承诺 任意 `C` 个长上下文都能同时 admission。
 
-### 2.4 Admission guarantees completion capacity
+### 2.4 Admission preserves output limits and a completion path
 
-NInfer 不支持 preemption，因此 request 只有在其 prompt、声明的最大生成长度和必要的临时增长都能 获得完整资源承诺后才可 admission。已经 admitted 的 request 不会因为后来请求到达而被截断或逐出。
+RAM off 时，admission 承诺 prompt、完整 effective output bound 和 backend 临时增长的 GPU capacity。RAM on 时，完整 prompt 和当前 output window 取得 GPU entitlement；dynamic RAM credits 与 completion cohort 保留 §5.8 的 completion path。Window exhaustion 不产生 terminal output，也不缩短请求的 output/context budget。只在 settled boundary 暂停 continuation，不丢弃或重放已生成输出。
 
 ### 2.5 One prefill owner
 
@@ -87,11 +87,36 @@ Sampling、RNG、stop conditions、generation limit、usage 和 output state 属
 
 ### 2.9 Protected, resource-aware admission
 
-Prepared request order 是 admission 的公平基线，但暂时无法取得完整资源承诺的 FIFO head 不得无条件 封锁后续所有请求。Scheduler 可以用后续 request 回填当前未承诺的 lane/KV capacity，但必须先为最老的 blocked head 建立唯一 protection epoch；later admission 不能破坏该 head 在 frozen incumbent releases 后的 逐 pool 资源可行性，也不能通过持续 ingress 无限延长 temporal borrowing。
+Prepared request order 是 admission 的公平基线。RAM off 使用 §5.2–§5.7 的 full-lifetime protected-head backfill；RAM on 使用 §5.8 的 finite window-pressure epoch 和 oldest-suspended resume precedence。两者都不能让持续 fresh ingress 无限推迟已有请求的 progress。
 
-Backfill 只改变 waiting request 的 admission order。它不取得 active request 已承诺但尚未 materialize 的 资源，不产生 partial admission，不抢占已经 admitted 的 request，也不建立第二套 decode priority。所有 backfilled decode-ready requests 仍进入同一个 maximal compact batch。
+RAM-off backfill 只改变 waiting request 的 admission order，不取得 active request 已承诺但尚未 materialize 的资源。RAM-on suspension 可以释放 victim 的 GPU entitlement，但必须先 secure 完整 live continuation。所有 funded、resident、decode-ready requests 仍进入同一个 maximal compact batch；growth-blocked 和 transfer-held requests 不进入 membership。
 
 ### 2.10 Constrained generation and bounded recovery
+
+The opt-in request reasoning-token budget is owned by the output session, separately from
+framing-inclusive reasoning usage. Committed reasoning-body IDs consume the cumulative allowance;
+rejected speculative proposals, prompt history and framing do not. Hypothesis masks carry the
+same accounting and accepted prefixes end at the policy boundary. The next target position permits
+only the canonical reasoning close; that token passes through target commit and KV state normally.
+Pending UTF-8 and partial textual framing are finalized in the reasoning channel. Policy-forced
+framing has intervention counters rather than a fabricated model-confidence logprob. Ordinary
+caller stops, cancellation and completion/context ceilings retain precedence.
+
+The private clean-retry comparison uses immutable executor startup selection, one budget-triggered
+retry and the existing shared retry/output ceilings. It retains the original sampling profile and
+replaces the capped attempt with a labeled engine notice plus a native non-thinking continuation.
+It withholds replacement answer/tool deltas until terminal validation, and treats any exhausted
+replacement as failure. With ordinary generation recovery disabled, this does not activate replay,
+repetition or duplicate-tool recovery and a failed replacement exhausts instead of retrying again.
+The output-session ledger stays on the common request through KV suspension, and is copied into
+replacement sessions; neither restore nor prompt replay resets it. No mechanism has corpus or live
+qualification yet; compare them in the authorized test window before selecting deployment behavior.
+
+For a request with a reasoning cap in the ordinary Close configuration, automatic clean retries
+are disabled. Confirmed reasoning repetition keeps its analysis and continues toward natural or
+capped close; cycle escape and framing repair remain active. Invalid replay continuations,
+persistent answer repetition and proved duplicate-tool cycles fail explicitly rather than discard
+the attempt and retry. The private Retry comparator remains separate and bounded.
 
 The Qwen frontend owns compiled tool schemas, transactional grammar state, and typed completed calls. Program owns planner-accounted device eligibility masks and pinned exchange storage. Ordinary sampling uses one mask per compact row; speculative verification uses one per actual chain position or tree node. A Program-owned matcher thread forks grammar state once proposal metadata reaches the host mailbox, while the target forward runs; target sampling acquires the masks. Proposals do not advance committed grammar; only the accepted publication transaction does. Matcher errors and missing replies surface before publication.
 
@@ -99,7 +124,7 @@ P-less sampling evaluates the eligible full-vocabulary softmax. With temperature
 
 For non-raw, text-only thinking requests, bounded recovery may withhold a repeated completed call or interrupt persistent reasoning at a committed round boundary, independently of sampler and temperature. Reasoning detection requires three disjoint exact occurrences of a 256-token passage and at least 4096 distinct redundant tokens. Both reasoning and answer detectors consume channel-attributed accepted tokens before publication, and latch their proof across reasoning-close and terminal boundaries. A reasoning proof withholds the current round's unpublished answer/tool deltas before retry or error. Only duplicate-tool recovery inserts rejected-call feedback; a reasoning retry never fabricates tool feedback from an unexecuted call in that round. Without a supported retry context, proved reasoning repetition fails explicitly. Raw output is excluded; free-text answer monitoring also excludes schema/tool output. This is not a reasoning-length limit. The detector resets per attempt. The family owns the original input. A retry splices onto the resident prompt tokens, keeping historical reasoning: it closes the previous assistant prologue with its matching terminator, appends a labeled system notice or rejected-call feedback, and opens the selected native generation prologue. Only the failed generation is omitted; a second retry appends its notice after the first retry's prompt. It invents no user turn or call result. A splice whose suffix does not round-trip through the tokenizer exhausts recovery.
 
-With generation recovery enabled, a thinking response can quarantine its initial answer while its generated token IDs exactly copy the preceding generated reasoning passage (at least 256 tokens). Genuine reasoning still streams normally. A divergent answer, an extension beyond the passage, or an uncorroborated terminal copy releases held text and its original logprobs unchanged. Only a complete exact copy licenses one additional dedicated `</think>` token: that consumed token confirms a framing replay, discards the held copy, and rearms quarantine. The extra close is not published or fed to ordinary tool grammar, but remains in generated IDs, KV state and completion usage. Another complete copy, or natural termination without a separate answer or selected tool after repair, requests an unpublished retry with a labeled engine notice. Caller stops and cancellation retain precedence. Repair and proof boundaries end the accepted speculative prefix; hypothesis masks license the extra close only at the matching boundary. Raw, schema-constrained and tool-argument contents are excluded. The original output budget and shared two-retry cap still apply; exhaustion is explicit. Intentionally requesting a long exact reasoning copy with an extra close can trigger this policy. After a confirmed framing replay triggers a retry, the new assistant continuation uses the model's native non-thinking prologue. The original input and historical reasoning stay intact; only the new generation mode changes. The frontend carries the already-corroborated immutable reasoning reference into these replacements, so a complete copy of that same passage triggers recovery without licensing another close. A subsequent closed-thinking prompt is ended with a turn terminator alone, preserving all earlier notices without inserting an extra reasoning close. All replacement answer/tool deltas and their logprobs remain withheld until ordinary terminal repetition/tool validation accepts the attempt; reasoning remains visible. A failed replacement is discarded and may retry only within the remaining shared budget. Explicit caller stops release held text; cancellation releases text while omitting provisional tool events. For an initially non-greedy p-less request, these replay-recovery attempts use standard sampling at temperature 1.0, top-k 20, top-p 0.95, min-p 0 and zero presence/frequency penalties, retaining the resolved request seed. Initial generation and standard/greedy request profiles are unchanged. The actual retry profile and `enable_thinking` mode are recorded on `retry_started` recovery events. A replacement that exhausts its output/context budget without non-whitespace answer text or a complete tool call fails explicitly; caller stops and cancellation retain precedence. This is framing recovery and publication validation, not a check that an answer or external task is correct.
+With generation recovery enabled, a thinking response can quarantine its initial answer while its generated token IDs exactly copy the preceding generated reasoning passage (at least 256 tokens). Genuine reasoning still streams normally. A divergent answer, an extension beyond the passage, or an uncorroborated terminal copy releases held text and its original logprobs unchanged. Only a complete exact copy licenses one additional dedicated `</think>` token: that consumed token confirms a framing replay, discards the held copy, and rearms quarantine. The extra close is not published or fed to ordinary tool grammar, but remains in generated IDs, KV state and completion usage. Another complete copy, or natural termination without a separate answer or selected tool after repair, requests an unpublished retry with a labeled engine notice. Caller stops and cancellation retain precedence. Repair and proof boundaries end the accepted speculative prefix; hypothesis masks license the extra close only at the matching boundary. Raw, schema-constrained and tool-argument contents are excluded. The original output budget and shared two-retry cap still apply; exhaustion is explicit. Intentionally requesting a long exact reasoning copy with an extra close can trigger this policy. After a confirmed framing replay or persistent reasoning loop triggers a retry, the new assistant continuation uses the model's native non-thinking prologue. This retry strategy remains active for later retries on the same request; it does not itself establish framing-replay evidence. The original input and historical reasoning stay intact; only the new generation mode changes. The frontend carries the already-corroborated immutable reasoning reference into these replacements, so a complete copy of that same passage triggers recovery without licensing another close. A subsequent closed-thinking prompt is ended with a turn terminator alone, preserving all earlier notices without inserting an extra reasoning close. All replacement answer/tool deltas and their logprobs remain withheld until ordinary terminal repetition/tool validation accepts the attempt; reasoning remains visible. A failed replacement is discarded and may retry only within the remaining shared budget. Explicit caller stops release held text; cancellation releases text while omitting provisional tool events. For an initially non-greedy p-less request, these non-thinking recovery attempts use standard sampling at temperature 1.0, top-k 20, top-p 0.95, min-p 0 and zero presence/frequency penalties, retaining the resolved request seed. Initial generation and standard/greedy request profiles are unchanged. The actual retry profile and `enable_thinking` mode are recorded on `retry_started` recovery events. A replacement ending naturally without non-whitespace prose in answer mode or a complete selected tool call requests a bounded retry with an `empty_replacement` cause; terminal framing alone is not answer text. Exhausting the output/context budget without either fails explicitly; caller stops and cancellation retain precedence. This is repetition recovery and publication validation, not a check that an answer or external task is correct.
 
 The target-owned output session filters publication after the runtime attaches accepted-token logprobs. It retains complete deltas while quarantined, preserving their order and metadata on release. The frontend owns frozen reasoning IDs and transactional replay cursors; Program transports their per-hypothesis masks through the existing exchange, including plain chat. Grammar state skips only the corroborating repair close. Runtime owns retry admission, accounting and the shared retry budget. Preview rollback restores replay state, and commit ends at repair or repeated-copy proof before a novel continuation can share discarded deltas.
 
@@ -201,11 +226,13 @@ Cancellation 或 failure 可以从任意阶段终止请求。`WAITING` 同时包
 
 `DECODE_READY` 是稳定状态：request 已拥有完整 committed model frontier、下一次 decode round 需要的唯一 current token/anchor，且 sampling、RNG 和已发布输出与该 frontier 一致。是否属于 当前 in-flight round 由该 round 记录，不再建模成一个长期 request state。
 
+RAM on additionally permits `DECODE_READY -> GROWTH_BLOCKED -> CAPTURING -> SUSPENDED -> RESTORING -> DECODE_READY`; a funded extension returns `GROWTH_BLOCKED` directly to `DECODE_READY`. Capture/restore holds retain the original admitted request and its output owner. Suspension releases the physical lane only after capture completes; resume may bind a different lane and does not repeat prefill/finalization or select the pending token again. Admitted suspended time is not pre-admission queue time and does not restart a queue deadline.
+
 Intermediate prefill chunks 只推进 prompt state。Finalization unit 执行 target output selection并建立 decode anchor；如果立即命中 terminal condition，请求不进入 decode batch。Retained current frontier 正好覆盖完整 prompt 时可以跳过 suffix prefill，但仍通过同一 finalization unit 从 retained tail state 产生下一 anchor，并在 MTP 下完成 exact-hit bridge/proposal。命中已保存 rewrite checkpoint 时则从该 checkpoint prefill 新 suffix。 单独的 KV match 不足以进入 `DECODE_READY`。
 
 ### 4.2 Slot
 
-slot 是租给一个 admitted request 的稳定控制位置。它保存或引用：
+slot 是租给一个 resident request 的物理控制位置。Logical request identity、output、RNG 和 budget 跨 suspension 保持；resume 可以重新绑定另一个 slot。Resident slot 保存或引用：
 
 - request identity 和 lifecycle state；
 - sampling、RNG、stop 和 generation-limit state；
@@ -287,6 +314,8 @@ CPU preparation 产生 owning、immutable prompt representation。Prepared reque
 该顺序是公平基线，不是绝对的 head-of-line barrier。只有 §5.3–§5.6 定义的 protected-head backfill 可以 让 later request 先 admission；CPU preparation completion、prefix reuse 或请求内容本身不产生其他隐式 priority。
 
 ### 5.2 Authoritative admission feasibility
+
+Sections 5.2–5.7 define **RAM-off** full-lifetime admission and its protected-head proof. Bounded ingress in §5.1 applies in both modes. RAM-on admission, growth, suspension and fairness are defined in §5.8; its current window is never a completion reservation or a donor-completion claim.
 
 Scheduler 不从 token 数或显存字节重新推导请求能否进入。Target/resource layer 为每个 prepared request 给出已经按各 pool 物理粒度取整的 authoritative entitlement vector。逻辑上至少包含：
 
@@ -474,6 +503,24 @@ Admission 结果分为：
 
 ---
 
+### 5.8 RAM-on window pressure and live suspension
+
+Nonzero `--kv-ram-capacity` automatically enables output windows of at most 8192 tokens; there is no separate selector. Initial admission funds the complete prepared prompt and a bounded output window. Target-owned `ExecutionWindow` values specify exact rounded Main/backend entitlements, cumulative funded output and suspension bytes. Effective output/context limits remain lifetime bounds. Every next legal unit must fit its funded physical writes, including DFlash verification width and MTP provisional lead even when fewer output tokens may commit. A smaller useful window may be granted under pressure.
+
+At settled boundaries, resolve output/cancellation and transfer readiness, then retry growth. One growth-blocked lane waits while executable peers advance. A queued replacement may take a blocked lane only after an atomic plan proves useful post-transition execution and secured victim storage. Unblocked lanes are not suspended solely for ingress. Two blocked lanes or no executable work opens a pressure plan: reclaim optional retained state first, then choose the smallest feasible victim set, preferring blocked victims, lower transfer bytes and less repeated suspension. Completion-cohort members are excluded until an atomic funded handoff makes them ordinary backed residents. Planned released capacity is held for its selected growth/replacement transaction until completion or rollback.
+
+At the first blocked or suspended request, freeze admitted incumbent identities and their oldest identity. At most `C-1` subsequent fresh admissions may bypass that epoch; early completion does not refund credit. Two blocked lanes, no executable work or exhausted credit enters sticky drain and stops fresh replacements. The epoch resets only when its oldest incumbent completes/cancels, never on fresh arrival, physical resume or a newer completion. Resume the oldest suspended request before fresh ingress, except an already selected replacement whose victim is being captured. A resumed victim advances a useful output chunk before another capture unless no executable work remains. Existing transfers are awaited while unrelated compute continues; they are not a license for capture/restore cycling.
+
+Every resident outside the completion cohort holds allocatable RAM credit through its funded window end; suspended identities retain complete live images. Credits include physical packing/alignment, required checkpoint/recovery state, speculative tails and transfer-held allocations. Optional completed/system-prefix entries yield to live ownership. Fragmented free-byte totals alone cannot establish a credit. The sum of the cohort members' target-produced completion resource envelopes fits the shared GPU capacity in every pool and physical-lane axis. This is a future feasibility proof, not a current reservation: all requests acquire only their current windows. Backed peers can evacuate into secured RAM, allowing the cohort to grow and finish together without another RAM allocation. Oldest feasible residents join the cohort and release unnecessary credits. A member can leave for suspension only after securing its image credit and atomically exchanging its completion claim with a feasible progressing successor. A restoring request claims future cohort capacity before transfer starts and retains its image backing until restore finishes; completion, cancellation and rollback release claims exactly once.
+
+A completion envelope includes native recovery suffix growth only when the actual retry policy permits it. Raw requests, absent recovery context, disabled general recovery without private budget-Retry, and public capped Close use their ordinary lifetime vectors. Otherwise the Qwen frontend bounds native suffix growth across both permitted attempts, framing phases, notices and the proof context's canonical known duplicate-call feedback; the target adds the original output allowance once and applies its context/resource limits. Every actual retry's lifetime vector must fit its immutable admitted envelope. Exceeding the envelope is an invariant failure; it never grants extra capacity or silently changes the retry/output contract.
+
+Before parking a live request for queued admission or pressured growth, the worker can reclaim unused future window entitlement. The target plans and commits each shrink while retaining all mapped current/speculative pages and at least one useful next output token. The common scheduler uses those exact resource vectors to choose bounded donors and preserve the largest window end that satisfies the concrete transaction, then resizes backed donors' credits. Lifetime output/context limits and completion claims do not shrink. A released window is spent only by the selected admission/growth transaction; the worker does not preempt an unblocked request merely to fill ingress.
+
+Capture occurs after committed decode resolution and deferred GDN folds, never from provisional output or in-flight prefill. It preserves exact current three-plane KV/publication state, recurrent state, hidden/anchor, backend state, rope/ledger identity and required checkpoints. Original Request/OutputSession, RNG, grammar/stop/tool buffering, budget, recovery and published output remain owned by the same request. Copies fence source lifetime; a failure retains the resident source or suspended image. Live images are not prefix lookup entries, optional evictions or disk-spill candidates. No cold re-prefill fallback is permitted for active continuation. Cancellation/shutdown releases every image, credit and lane exactly once.
+
+This is the implemented contract under qualification. GPU correctness, live-transfer failure cases and aggregate throughput measurement remain deferred until the user authorizes tests; no measured throughput improvement is claimed.
+
 ## 6. Shared context and state memory
 
 本节只定义 concurrent engine 使用 Sequence-State Store 的 resource contract 和 ownership transitions；存储 substrate 本身由 §1.3 预先提供。
@@ -490,6 +537,8 @@ Admission 结果分为：
 Growing KV pages 来自 shared pools，不按 lane 静态切分，因此不同 request 可以占用差异很大的 context memory。Fixed recurrent/backend backing 与 current lane 绑定；这是物理定位，不把 external request 或 compact row identity绑定到 lane。
 
 ### 6.2 Completion reservation
+
+This full-lifetime reservation section applies with RAM off. With RAM on, the same physical pool accounting applies to the currently granted window; §5.8 defines dynamic growth and its progress guarantee. A window ending is a blocked/growth transition, while only the lifetime output/context limit is terminal.
 
 Admission 为每个 request 计算 target-specific entitlement。Main Text 的逻辑上界为：
 
@@ -574,13 +623,15 @@ Restore failure disposition distinguishes invalid source, stale plan, and destin
 
 ### 6.5 Host RAM second tier
 
-`--kv-ram-capacity` enables a startup-fixed pinned-host budget that stores **already completed** prefix bundles, plus any live ladder GDN heads moved into that same FIFO image at eviction. The default is `off`. It does not change GPU pool capacity, active-set accounting, or Device Graph addresses, and it does not move an in-flight request off the GPU.
+`--kv-ram-capacity` enables a startup-fixed pinned-host budget shared by optional completed-prefix caching and the secured live continuation images/credits of §5.8. The default is `off`. It changes active admission to bounded output windows but does not enlarge GPU pools or move Device Graph addresses. The remaining completed-prefix policy below concerns optional cache entries, not live images.
 
 MTP 或 DFlash prefill may freeze current GDN into an Engine-wide staging slot during an in-flight prefill (after the Program prefill step compute-syncs that chunk). That freeze borrows slot `C` from the turn-rollback occupant: `occupied=false` before the clobber D2D, pack the ladder head, then H2D rollback GDN and hidden back. DFlash also D2Ds that lane's cyclic local into a 1-lane Engine-wide staging window before the same `d2d_done` fence; host-pack D2H reads that frozen window, not live local. The freeze is not a RAM capture; D2H of staging GDN and cyclic onto the live-lane host log may overlap the next chunk on the same lane. KV pages of the in-flight unit stay off `copy_stream`. `--no-prefix-reuse` disables ladder capture, turn-rollback pin, and restore.
 
-The host tier is an exclusive FIFO of chats that are not on a VRAM lane. A new capture appends at the tail. Capacity pressure evicts the oldest unpinned host entry until the new image fits; if it still cannot, `drops` increments and the incoming request proceeds while the VRAM bundle is released. Host RAM is not a precondition for admission.
+The completed-prefix cache is an exclusive FIFO of chats that are not on a VRAM lane. A new optional capture appends at the tail. Capacity pressure evicts the oldest unpinned optional entry until the image fits; if it still cannot, `drops` increments and execution proceeds without that optional image. Live-image backing is a precondition for RAM-on admission/window growth outside the completion cohort and is never silently dropped.
 
 Capture and retained-lane eviction run only after `find_admission_lane` has already selected a free lane for that request. A queued prompt that still cannot fit — because in-flight lanes occupy enough shared pool pages that no free lane is feasible even after reclaiming every other free retained bundle — waits and does not dump any GPU lane. A later smaller backfill candidate that can fit may still admit and may capture other free retained lanes for itself.
+
+The paragraph above governs optional completed-bundle capture only. A funded active suspension/replacement uses the separate §5.8 transaction and may release a settled blocked resident lane.
 
 The executor captures at each admission site that is about to destroy a retained bundle, not inside `clear_lane` / `evict_retained_lane` / abort / destructor:
 
@@ -621,6 +672,8 @@ Durability publishes pack namespace, map, entry, then manifest with fsync orderi
 ---
 
 ## 7. Scheduling model
+
+These scheduling units and boundary rules apply in both RAM modes. Full-lifetime protected-head admission references select §5.2–§5.7 only with RAM off; RAM-on boundaries additionally resolve live transfers, retry window growth, and apply §5.8 before constructing the maximal funded membership. A growth-blocked or transfer-held request does not participate in a decode round.
 
 ### 7.1 GPU scheduling units
 
@@ -1141,7 +1194,7 @@ ready requests          selected definition
 
 request identity 和 occupied slot 都不影响 graph identity。
 
-### 12.4 Shared 128K context with two slots
+### 12.4 Shared 128K context with two slots (RAM off)
 
 假设相关 shared context capacity 为 128K units：
 
@@ -1158,7 +1211,7 @@ A、B 可以同时 admission。随着 context 增长，reserved capacity 转换�
 
 若还有 later request C，它只有通过 §5 的完整向量核算后才能 backfill。以 Main capacity 单维说明，A 是 B 的 frozen donor；A release 后为 B 留出的容量之外仍有 64K shadow surplus。只要 lane/optional-MTP 等其他维 也成立，这给出 C 的 frontier-safe 上界；但 C 还必须满足当前 `fits-now`，此刻真实空闲只有 48K，因此 C 当前最多取得 48K。即使 C 在 A 完成时仍 active，release boundary 仍先 admission B。若 C 需要借用 B 的 critical capacity，则还必须满足 temporal work credit，并在 frontier miss 时触发 drain。
 
-### 12.5 Persistent-safe and temporal backfill
+### 12.5 Persistent-safe and temporal backfill (RAM off)
 
 以下例子只写 Main entitlement；实际决策同时逐维检查 lane 和 optional MTP pages。假设 capacity 为 174K、`C>=4`：
 

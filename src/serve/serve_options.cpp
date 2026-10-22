@@ -115,7 +115,7 @@ std::string serve_usage_text(const char* argv0) {
            "[--vision] [--no-device-graph] [--no-prefix-reuse] "
            "[--context-checkpoints off|a,b,c] "
            "[--lm-head-draft|--no-lm-head-draft] [--no-thinking] [--preserve-thinking] "
-           "[--system-prepend TEXT] "
+           "[--system-prepend TEXT] [--default-thinking-token-budget N|off] "
            "[--cors] "
            "[--temperature F] [--top-p F] [--top-k N] [--min-p F] [--presence-penalty F] "
            "[--frequency-penalty F] [--seed N] [--greedy] [--no-p-less-sampling]\n"
@@ -150,6 +150,9 @@ std::string serve_usage_text(const char* argv0) {
            "       --context-checkpoints off disables the automatic prefill ladder; a,b,c replaces "
            "the default marks (requires --spec mtp or dflash). Marks at or above --max-context "
            "stay unused. Advertised freeze F is the committed chunk end at or past the mark.\n"
+           "       --default-thinking-token-budget defaults omitted request caps to N (default "
+           "off); "
+           "explicit null remains unlimited\n"
            "       --preserve-thinking retains closed-turn assistant reasoning in later prompts\n"
            "       --system-prepend prepends TEXT to the leading system/developer instruction on "
            "every request (inserts a system turn if missing)\n"
@@ -334,6 +337,17 @@ ServeOptions parse_serve_options(int argc, char** argv) {
             proposal_head_explicit            = true;
         } else if (arg == "--no-thinking") {
             options.enable_thinking = false;
+        } else if (arg == "--default-thinking-token-budget") {
+            const char* value = require_value("--default-thinking-token-budget");
+            if (std::string_view(value) == "off") {
+                options.default_thinking_token_budget.reset();
+            } else {
+                const auto budget = parse_u64(value, "default-thinking-token-budget");
+                if (budget == 0 || budget > std::numeric_limits<std::uint32_t>::max())
+                    throw std::invalid_argument(
+                        "--default-thinking-token-budget must be off or a positive uint32 integer");
+                options.default_thinking_token_budget = static_cast<std::uint32_t>(budget);
+            }
         } else if (arg == "--preserve-thinking") {
             options.preserve_thinking = true;
         } else if (arg == "--system-prepend") {

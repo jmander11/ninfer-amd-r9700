@@ -132,6 +132,8 @@ public:
     HostPinnedArena& operator=(HostPinnedArena&& other) noexcept;
     [[nodiscard]] void* try_alloc(std::size_t bytes, std::size_t align = 256);
     void free(void* block);
+    void shrink(void* block, std::size_t bytes);
+    [[nodiscard]] bool try_grow(void* block, std::size_t bytes);
 
     [[nodiscard]] void* base() const noexcept { return base_; }
 

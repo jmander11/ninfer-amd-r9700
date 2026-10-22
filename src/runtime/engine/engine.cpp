@@ -146,7 +146,12 @@ public:
         load                  = std::move(constructed.load);
         sampling_defaults     = constructed.sampling_defaults;
         options.mixed_forward = active->program->mixed_forward();
-        executor              = std::make_unique<Executor>(*active, device, options);
+#if defined(NINFER_QUALIFY_REASONING_RETRY)
+        constexpr auto reasoning_limit_action = runtime::ReasoningLimitAction::Retry;
+#else
+        constexpr auto reasoning_limit_action = runtime::ReasoningLimitAction::Close;
+#endif
+        executor = std::make_unique<Executor>(*active, device, options, reasoning_limit_action);
     }
 
     ~Impl() noexcept {

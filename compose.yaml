@@ -78,9 +78,10 @@ services:
       - "${NINFER_DRAFT_TOKENS:-7}"
       - --adaptive-draft
       - --lm-head-draft
-      - --preserve-thinking
       - --pending-timeout-ms
       - "900000"
+      - --default-thinking-token-budget
+      - "${NINFER_DEFAULT_THINKING_TOKEN_BUDGET:-off}"
       - --default-max-tokens
       - "32768"
     healthcheck:

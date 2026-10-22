@@ -26,6 +26,11 @@ ServeOptions parse(std::vector<std::string> arguments) {
     return parse_serve_options(static_cast<int>(argv.size()), argv.data());
 }
 
+ninfer::RequestOptions test_request_options(const GenerationRequest& request,
+                                            const ServeOptions& server) {
+    return to_request_options(request, server, resolve_request_semantics(request, server, {}));
+}
+
 } // namespace
 
 int main() {
@@ -48,6 +53,26 @@ int main() {
             (void)parse({"ninfer-serve", "model.ninfer", "--kv-ram-system-prompts", count});
         } catch (const std::invalid_argument&) { rejected = true; }
         failures += check(rejected, "system prompt limit accepted missing RAM or invalid count");
+    }
+    failures +=
+        check(!ServeOptions{}.default_thinking_token_budget &&
+                  !parse({"ninfer-serve", "model.ninfer"}).default_thinking_token_budget &&
+                  !parse({"ninfer-serve", "model.ninfer", "--default-thinking-token-budget", "off"})
+                       .default_thinking_token_budget,
+              "server default reasoning budget must remain unlimited");
+    for (const auto& [wire, expected] : std::array<std::pair<const char*, std::uint32_t>, 3>{
+             {{"1", 1}, {"16384", 16384}, {"4294967295", 4294967295U}}}) {
+        failures +=
+            check(parse({"ninfer-serve", "model.ninfer", "--default-thinking-token-budget", wire})
+                          .default_thinking_token_budget == expected,
+                  "server default reasoning cap did not preserve uint32 value");
+    }
+    for (const char* wire : {"0", "-1", "1.5", "4294967296", "18446744073709551616", "on"}) {
+        bool rejected = false;
+        try {
+            (void)parse({"ninfer-serve", "model.ninfer", "--default-thinking-token-budget", wire});
+        } catch (const std::invalid_argument&) { rejected = true; }
+        failures += check(rejected, "server accepted invalid default reasoning budget");
     }
     const auto default_spec = parse({"ninfer-serve", "model.ninfer"});
     failures += check(default_spec.speculative.backend == ninfer::SpeculativeBackend::DFlash &&
@@ -300,33 +325,34 @@ int main() {
     request.max_tokens = 1;
     ninfer::PromptCapabilities prompt_capabilities;
     prompt_capabilities.enable_thinking = true;
-    failures += check(to_request_options(request, defaults).execution.allow_prefix_reuse,
+    failures += check(test_request_options(request, defaults).execution.allow_prefix_reuse,
                       "default server policy did not reach Engine options");
-    failures += check(!to_request_options(request, configured).execution.allow_prefix_reuse,
+    failures += check(!test_request_options(request, configured).execution.allow_prefix_reuse,
                       "disabled server policy did not reach Engine options");
     request.capture_context_checkpoint = true;
-    failures += check(to_request_options(request, defaults).execution.capture_context_checkpoint,
+    failures += check(test_request_options(request, defaults).execution.capture_context_checkpoint,
                       "request capture_context_checkpoint did not reach Engine options");
     request.capture_context_checkpoint              = false;
-    const ninfer::RequestOptions inherited_sampling = to_request_options(request, sampling);
+    const ninfer::RequestOptions inherited_sampling = test_request_options(request, sampling);
     failures += check(inherited_sampling.execution.sampling.temperature == 0.0F &&
                           inherited_sampling.execution.sampling.top_p == 0.9F &&
                           inherited_sampling.execution.sampling.seed == 0,
                       "server sampling overrides did not reach Engine options");
-    failures += check(to_request_options(request, defaults).execution.sampling.p_less,
+    failures += check(test_request_options(request, defaults).execution.sampling.p_less,
                       "default p-less mode did not reach Engine overrides");
-    failures += check(!to_request_options(request, production).execution.sampling.p_less,
+    failures += check(!test_request_options(request, production).execution.sampling.p_less,
                       "--no-p-less-sampling did not reach Engine overrides");
     request.sampling.temperature = 1.1;
-    failures += check(to_request_options(request, sampling).execution.sampling.temperature == 1.1F,
-                      "request sampling override did not win over the server override");
     failures +=
-        check(resolve_prompt_semantics(request, configured, prompt_capabilities).preserve_thinking,
+        check(test_request_options(request, sampling).execution.sampling.temperature == 1.1F,
+              "request sampling override did not win over the server override");
+    failures +=
+        check(resolve_request_semantics(request, configured, prompt_capabilities).preserve_thinking,
               "server preserve-thinking default was not resolved");
     request.preserve_thinking = false;
-    failures +=
-        check(!resolve_prompt_semantics(request, configured, prompt_capabilities).preserve_thinking,
-              "request preserve-thinking override did not win");
+    failures += check(
+        !resolve_request_semantics(request, configured, prompt_capabilities).preserve_thinking,
+        "request preserve-thinking override did not win");
 
     failures +=
         check(serve_usage_text("ninfer-serve").find("--no-prefix-reuse") != std::string::npos,

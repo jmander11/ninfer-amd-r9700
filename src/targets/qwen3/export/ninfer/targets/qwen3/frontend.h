@@ -2,6 +2,7 @@
 
 #include "ninfer/types.h"
 #include "runtime/contract/types.h"
+#include <ninfer/targets/qwen3/generation_recovery.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -87,6 +88,12 @@ public:
     void discard_preview() noexcept;
     [[nodiscard]] std::uint32_t reasoning_tokens() const noexcept;
     [[nodiscard]] bool in_reasoning() const noexcept;
+    [[nodiscard]] ReasoningLimitStats reasoning_limit_stats() const noexcept;
+    [[nodiscard]] bool reasoning_limit_retry_required() const noexcept;
+    // The next committed target token is a policy control, not model confidence.
+    [[nodiscard]] std::optional<TokenId> reasoning_limit_forced_close_token() const noexcept;
+    // Committed non-whitespace prose, excluding terminal framing and selected tools.
+    [[nodiscard]] bool has_answer_content() const noexcept;
     // Valid during preview. False for raw/schema-constrained output or once
     // native tool publication has selected a tool, including literal markup in arguments.
     [[nodiscard]] bool preview_free_text_content() const noexcept;
@@ -132,14 +139,20 @@ public:
     [[nodiscard]] std::optional<PreparedPrompt> splice_recovery_prompt(
         std::vector<TokenId> prefix, const PromptInput& source, std::span<const ChatMessage> insert,
         std::shared_ptr<const GenerationRecoveryContext> recovery, bool enable_thinking) const;
+    // Absolute original prompt plus native suffix growth only. Generated IDs
+    // consume the existing output allowance and must not be charged twice.
+    [[nodiscard]] std::uint32_t recovery_prompt_token_bound(
+        const PreparedPrompt& prompt, const GenerationRecoveryContext& context,
+        std::uint32_t maximum_attempts = GenerationRecoveryContext::maximum_attempts) const;
     [[nodiscard]] std::uint32_t count_tokens(PromptInput input) const;
     [[nodiscard]] PreparedPrompt prepare_tokens(std::vector<TokenId> token_ids,
                                                 bool allow_prefix_identity = true) const;
     [[nodiscard]] PromptCapabilities prompt_capabilities() const noexcept;
-    [[nodiscard]] OutputSession
-    make_output_session(const PreparedPrompt& prompt, const StopPolicy& caller_stop,
-                        const OutputOptions& output = {}, bool generation_recovery = false,
-                        const OutputSession* recovery_source = nullptr) const;
+    [[nodiscard]] OutputSession make_output_session(
+        const PreparedPrompt& prompt, const StopPolicy& caller_stop,
+        const OutputOptions& output = {}, bool generation_recovery = false,
+        const OutputSession* recovery_source = nullptr,
+        runtime::ReasoningLimitAction action = runtime::ReasoningLimitAction::Close) const;
     [[nodiscard]] const StopPolicy& default_stop_policy() const noexcept;
     // The exact bytes of one vocabulary token, special tokens included; valid while a copy of
     // this Frontend lives. Throws std::out_of_range for an id outside the vocabulary.

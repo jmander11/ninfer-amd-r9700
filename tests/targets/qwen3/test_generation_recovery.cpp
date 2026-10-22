@@ -206,11 +206,14 @@ int main() {
                   "framing replay was confirmed earlier in this request") != std::string::npos &&
               replay_notice[0].parts[0].text.find("No tool was executed") != std::string::npos,
           "replay recovery fabricated tool observations or lost its actual cause");
-    std::vector<ToolCall> proposed = {
-        {.id = "old0", .name = "read", .arguments_json = R"({"a":1})"},
-        {.id = "old1", .name = "read", .arguments_json = R"({"b":2})"},
-    };
-    const auto rejected = context->recovery_insert(proposed, 2);
+    auto proposed              = batch.messages[1].tool_calls;
+    proposed[0].id             = "old0";
+    proposed[1].id             = "old1";
+    proposed[0].arguments_json = R"({ "limit" : 100, "filePath" : "a.cpp" })";
+    const auto rejected        = batch_context->recovery_insert(proposed, 2);
+    check(rejected[0].tool_calls[0].arguments_json ==
+              batch_context->input().messages[1].tool_calls[0].arguments_json,
+          "generated duplicate argument formatting changed the bounded feedback payload");
     check(rejected.size() == 3 && rejected[0].role == ChatRole::Assistant &&
               rejected[0].reasoning_content.empty() && rejected[0].parts.empty() &&
               rejected[0].tool_calls.size() == 2 &&
