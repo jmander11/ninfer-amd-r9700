@@ -92,6 +92,7 @@ int main() {
     options.allow_prefix_reuse             = false;
     options.preserve_thinking              = true;
     options.default_thinking_token_budget  = 16384;
+    options.default_reasoning_effort       = ninfer::ReasoningEffort::Low;
     options.sampling_overrides.temperature = 0.6F;
     options.startup_argv = {"ninfer-serve", options.artifact_path, "--api-key", "<redacted>"};
 
@@ -150,7 +151,7 @@ int main() {
                       "server record artifact type mismatch");
     failures += check(server.at("schema_version") == kRequestLogSchemaVersion,
                       "server record schema mismatch");
-    failures += check(kRequestLogSchemaVersion == 28, "request-log schema is not version 28");
+    failures += check(kRequestLogSchemaVersion == 29, "request-log schema is not version 29");
     failures += check(server.at("event") == "server_start", "server event mismatch");
     failures += check(server.at("server").at("public_model_id") == "deployment-alias",
                       "resolved public model id missing");
@@ -302,6 +303,32 @@ int main() {
         check(started.at("request").at("request_id") == 7, "request id missing from start record");
     failures += check(started.at("request").at("requested_output_tokens") == 4096,
                       "request output budget missing");
+    failures +=
+        check(started.at("request").at("reasoning_effort").is_null() &&
+                  started.at("request").at("reasoning_effort_param").get<std::string>().empty() &&
+                  format_request_start(context).find("reasoning_effort=") == std::string::npos,
+              "omitted effort was logged as a request override");
+    for (const auto* param : {"reasoning_effort", "reasoning.effort", "output_config.effort"}) {
+        for (const auto effort :
+             {RequestedReasoningEffort::Low, RequestedReasoningEffort::Medium,
+              RequestedReasoningEffort::XHigh, RequestedReasoningEffort::None}) {
+            GenerationRequest overridden      = request;
+            overridden.reasoning_effort       = effort;
+            overridden.reasoning_effort_param = param;
+            const auto overridden_context =
+                make_request_log_context(9, "test", overridden, prepared, 0.0);
+            const auto logged =
+                Json::parse(format_request_start_json("serve-test", 2000, overridden_context));
+            const std::string name(requested_reasoning_effort_name(effort));
+            const auto console = format_request_start(overridden_context);
+            failures += check(logged.at("request").at("reasoning_effort") == name &&
+                                  logged.at("request").at("reasoning_effort_param") == param &&
+                                  console.find("reasoning_effort=" + name) != std::string::npos &&
+                                  console.find(std::string("reasoning_effort_param=") + param) !=
+                                      std::string::npos,
+                              "request log lost explicit reasoning effort or its source field");
+        }
+    }
     const ninfer::ReasoningLimitStats failed_cap{
         .budget_tokens = 4096, .used_tokens = 4096, .limit_reached = true};
     const Json capped_error = Json::parse(
@@ -310,13 +337,16 @@ int main() {
                       "request error log lost policy accounting");
     failures += check(server.at("server").at("default_thinking_token_budget") == 16384,
                       "startup log lost server default reasoning cap");
+    failures += check(server.at("server").at("default_reasoning_effort") == "low",
+                      "startup log lost configured default reasoning effort");
     GenerationRequest inherited;
     ServeOptions capped_server;
     capped_server.default_thinking_token_budget = 16384;
     const auto effective = resolve_request_semantics(inherited, capped_server, {});
     PreparedRequest capped_prepared;
-    capped_prepared.enable_thinking       = effective.enable_thinking;
-    capped_prepared.thinking_token_budget = effective.thinking_token_budget;
+    capped_prepared.enable_thinking            = effective.enable_thinking;
+    capped_prepared.thinking_token_budget      = effective.thinking_token_budget;
+    capped_prepared.effective_reasoning_effort = ninfer::ReasoningEffort::Low;
     const auto capped_context =
         make_request_log_context(8, "openai_chat_completions", inherited, capped_prepared, 0.0);
     const auto inherited_log =
@@ -324,6 +354,24 @@ int main() {
     failures += check(inherited_log.at("request").at("thinking_token_budget") == 16384 &&
                           inherited_log.at("request").at("enable_thinking") == true,
                       "request log did not retain the effective inherited reasoning cap");
+    failures +=
+        check(inherited_log.at("request").at("effective_reasoning_effort") == "low" &&
+                  inherited_log.at("request").at("reasoning_effort").is_null() &&
+                  format_request_start(capped_context).find("effective_reasoning_effort=low") !=
+                      std::string::npos,
+              "request log did not distinguish effective effort from explicit override");
+    GenerationRequest explicit_low = inherited;
+    explicit_low.reasoning_effort  = RequestedReasoningEffort::Low;
+    const auto same_effort_context =
+        make_request_log_context(10, "openai_chat_completions", explicit_low, capped_prepared, 0.0);
+    const auto same_effort_log =
+        Json::parse(format_request_start_json("serve-test", 2000, same_effort_context));
+    failures +=
+        check(same_effort_log.at("request").at("reasoning_effort") == "low" &&
+                  same_effort_log.at("request").at("effective_reasoning_effort") == "low" &&
+                  format_request_start(same_effort_context).find(" reasoning_effort=low ") !=
+                      std::string::npos,
+              "explicit low matching the default was not logged as an override");
     failures += check(started.at("request").at("thinking_token_budget").is_null(),
                       "unlimited reasoning cap missing from resolved request diagnostics");
     failures += check(started.at("request").at("enable_thinking") == false,

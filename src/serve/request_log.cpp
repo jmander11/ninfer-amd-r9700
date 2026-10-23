@@ -27,6 +27,18 @@ namespace {
 
 using Json = nlohmann::json;
 
+const char* reasoning_effort_name(ninfer::ReasoningEffort effort) {
+    switch (effort) {
+    case ninfer::ReasoningEffort::Low:
+        return "low";
+    case ninfer::ReasoningEffort::Medium:
+        return "medium";
+    case ninfer::ReasoningEffort::XHigh:
+        return "xhigh";
+    }
+    return "unknown";
+}
+
 std::uint64_t unix_time_ms() {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     return static_cast<std::uint64_t>(
@@ -144,26 +156,34 @@ Json overrides_json(const ninfer::SamplingOverrides& overrides) {
 }
 
 Json request_json(const RequestLogContext& context) {
-    return Json{{"request_id", context.id},
-                {"protocol", context.protocol},
-                {"model", context.model},
-                {"stream", context.stream},
-                {"cache_write", context.cache_write},
-                {"message_count", context.message_count},
-                {"requested_output_tokens", context.requested_output_tokens},
-                {"requested_output_tokens_source",
-                 context.requested_output_tokens_client_set ? "client" : "server_default"},
-                {"tool_count", context.tool_count},
-                {"tool_choice", tool_choice_name(context.tool_choice)},
-                {"has_tool_history", context.has_tool_history},
-                {"thinking_token_budget", context.thinking_token_budget
-                                              ? Json(*context.thinking_token_budget)
-                                              : Json(nullptr)},
-                {"thinking_token_budget_param", context.thinking_token_budget_param},
-                {"enable_thinking", context.enable_thinking},
-                {"preserve_thinking", context.preserve_thinking},
-                {"preserve_thinking_semantic_change", context.preserve_thinking_semantic_change},
-                {"sampling", sampler_json(context.sampling)}};
+    return Json{
+        {"request_id", context.id},
+        {"protocol", context.protocol},
+        {"model", context.model},
+        {"stream", context.stream},
+        {"cache_write", context.cache_write},
+        {"message_count", context.message_count},
+        {"requested_output_tokens", context.requested_output_tokens},
+        {"requested_output_tokens_source",
+         context.requested_output_tokens_client_set ? "client" : "server_default"},
+        {"tool_count", context.tool_count},
+        {"tool_choice", tool_choice_name(context.tool_choice)},
+        {"has_tool_history", context.has_tool_history},
+        {"reasoning_effort", context.reasoning_effort
+                                 ? Json(requested_reasoning_effort_name(*context.reasoning_effort))
+                                 : Json(nullptr)},
+        {"reasoning_effort_param", context.reasoning_effort_param},
+        {"effective_reasoning_effort",
+         context.effective_reasoning_effort
+             ? Json(reasoning_effort_name(*context.effective_reasoning_effort))
+             : Json(nullptr)},
+        {"thinking_token_budget",
+         context.thinking_token_budget ? Json(*context.thinking_token_budget) : Json(nullptr)},
+        {"thinking_token_budget_param", context.thinking_token_budget_param},
+        {"enable_thinking", context.enable_thinking},
+        {"preserve_thinking", context.preserve_thinking},
+        {"preserve_thinking_semantic_change", context.preserve_thinking_semantic_change},
+        {"sampling", sampler_json(context.sampling)}};
 }
 
 Json rejected_request_json(const RequestRejectionLogContext& context) {
@@ -327,13 +347,18 @@ RequestLogContext make_request_log_context(std::uint64_t id, std::string protoco
     context.tool_count                         = request.tools.size();
     context.tool_choice                        = request.tool_choice;
     context.has_tool_history                   = request.has_tool_history();
-    context.thinking_token_budget              = prepared.thinking_token_budget;
-    context.thinking_token_budget_param        = request.thinking_token_budget_param;
-    context.enable_thinking                    = prepared.enable_thinking;
-    context.preserve_thinking                  = prepared.preserve_thinking;
-    context.preserve_thinking_semantic_change  = prepared.preserve_thinking_semantic_change;
-    context.sampling                           = prepared.sampling;
-    context.synchronous_prepare_seconds        = synchronous_prepare_seconds;
+    context.reasoning_effort                   = request.reasoning_effort;
+    context.effective_reasoning_effort         = prepared.effective_reasoning_effort;
+    if (request.reasoning_effort) {
+        context.reasoning_effort_param = request.reasoning_effort_param;
+    }
+    context.thinking_token_budget             = prepared.thinking_token_budget;
+    context.thinking_token_budget_param       = request.thinking_token_budget_param;
+    context.enable_thinking                   = prepared.enable_thinking;
+    context.preserve_thinking                 = prepared.preserve_thinking;
+    context.preserve_thinking_semantic_change = prepared.preserve_thinking_semantic_change;
+    context.sampling                          = prepared.sampling;
+    context.synchronous_prepare_seconds       = synchronous_prepare_seconds;
     return context;
 }
 
@@ -378,8 +403,16 @@ std::string format_request_start(const RequestLogContext& context) {
         << " tool_history=" << (context.has_tool_history ? "yes" : "no")
         << " thinking=" << (context.enable_thinking ? "on" : "off")
         << " preserve_thinking=" << (context.preserve_thinking ? "on" : "off")
-        << " preserve_change=" << (context.preserve_thinking_semantic_change ? "yes" : "no")
-        << " prepare_sync=" << std::fixed << std::setprecision(0)
+        << " preserve_change=" << (context.preserve_thinking_semantic_change ? "yes" : "no");
+    if (context.reasoning_effort) {
+        out << " reasoning_effort=" << requested_reasoning_effort_name(*context.reasoning_effort)
+            << " reasoning_effort_param=" << context.reasoning_effort_param;
+    }
+    if (context.effective_reasoning_effort) {
+        out << " effective_reasoning_effort="
+            << reasoning_effort_name(*context.effective_reasoning_effort);
+    }
+    out << " prepare_sync=" << std::fixed << std::setprecision(0)
         << context.synchronous_prepare_seconds * 1000.0 << "ms"
         << " sampler=[" << sampler_str(context.sampling) << "] \xE2\x86\x92 submitted";
     return out.str();
@@ -620,6 +653,10 @@ std::string format_server_start_json(
              {"request_log_jsonl", options.request_log_jsonl},
              {"default_output_tokens", options.default_max_tokens},
              {"default_thinking", options.enable_thinking},
+             {"default_reasoning_effort",
+              options.default_reasoning_effort
+                  ? Json(reasoning_effort_name(*options.default_reasoning_effort))
+                  : Json(nullptr)},
              {"default_thinking_token_budget", options.default_thinking_token_budget
                                                    ? Json(*options.default_thinking_token_budget)
                                                    : Json(nullptr)},

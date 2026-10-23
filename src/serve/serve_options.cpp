@@ -115,6 +115,7 @@ std::string serve_usage_text(const char* argv0) {
            "[--vision] [--no-device-graph] [--no-prefix-reuse] "
            "[--context-checkpoints off|a,b,c] "
            "[--lm-head-draft|--no-lm-head-draft] [--no-thinking] [--preserve-thinking] "
+           "[--default-reasoning-effort template|low|medium|xhigh] "
            "[--system-prepend TEXT] [--default-thinking-token-budget N|off] "
            "[--cors] "
            "[--temperature F] [--top-p F] [--top-k N] [--min-p F] [--presence-penalty F] "
@@ -150,6 +151,8 @@ std::string serve_usage_text(const char* argv0) {
            "       --context-checkpoints off disables the automatic prefill ladder; a,b,c replaces "
            "the default marks (requires --spec mtp or dflash). Marks at or above --max-context "
            "stay unused. Advertised freeze F is the committed chunk end at or past the mark.\n"
+           "       --default-reasoning-effort selects omitted request effort (default template); "
+           "explicit request effort takes precedence\n"
            "       --default-thinking-token-budget defaults omitted request caps to N (default "
            "off); "
            "explicit null remains unlimited\n"
@@ -337,6 +340,20 @@ ServeOptions parse_serve_options(int argc, char** argv) {
             proposal_head_explicit            = true;
         } else if (arg == "--no-thinking") {
             options.enable_thinking = false;
+        } else if (arg == "--default-reasoning-effort") {
+            const std::string_view value = require_value("--default-reasoning-effort");
+            if (value == "template") {
+                options.default_reasoning_effort.reset();
+            } else if (value == "low") {
+                options.default_reasoning_effort = ReasoningEffort::Low;
+            } else if (value == "medium") {
+                options.default_reasoning_effort = ReasoningEffort::Medium;
+            } else if (value == "xhigh") {
+                options.default_reasoning_effort = ReasoningEffort::XHigh;
+            } else {
+                throw std::invalid_argument(
+                    "--default-reasoning-effort must be template, low, medium, or xhigh");
+            }
         } else if (arg == "--default-thinking-token-budget") {
             const char* value = require_value("--default-thinking-token-budget");
             if (std::string_view(value) == "off") {

@@ -17,7 +17,7 @@
 
 namespace ninfer::serve {
 
-inline constexpr int kRequestLogSchemaVersion        = 28;
+inline constexpr int kRequestLogSchemaVersion        = 29;
 inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log";
 
 // Closed wire names shared by the request log and the GET /metrics exposition.
@@ -121,6 +121,9 @@ struct RequestLogContext {
     std::size_t tool_count                  = 0;
     ToolChoice tool_choice;
     bool has_tool_history = false;
+    std::optional<RequestedReasoningEffort> reasoning_effort;
+    std::string reasoning_effort_param;
+    std::optional<ninfer::ReasoningEffort> effective_reasoning_effort;
     std::optional<std::uint32_t> thinking_token_budget;
     std::string thinking_token_budget_param;
     bool enable_thinking                   = true;

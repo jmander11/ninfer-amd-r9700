@@ -74,6 +74,63 @@ int main() {
         } catch (const std::invalid_argument&) { rejected = true; }
         failures += check(rejected, "server accepted invalid default reasoning budget");
     }
+    failures += check(!parse({"ninfer-serve", "model.ninfer"}).default_reasoning_effort &&
+                          !parse({"ninfer-serve", "model.ninfer", "--default-reasoning-effort",
+                                  "low", "--default-reasoning-effort", "template"})
+                               .default_reasoning_effort,
+                      "omitted or template default effort must use the artifact default");
+    for (const auto& [wire, expected] :
+         std::array<std::pair<const char*, ninfer::ReasoningEffort>, 3>{
+             {{"low", ninfer::ReasoningEffort::Low},
+              {"medium", ninfer::ReasoningEffort::Medium},
+              {"xhigh", ninfer::ReasoningEffort::XHigh}}}) {
+        const auto server =
+            parse({"ninfer-serve", "model.ninfer", "--default-reasoning-effort", wire});
+        failures += check(server.default_reasoning_effort == expected,
+                          "default effort flag did not preserve the selected effort");
+    }
+    for (const char* wire : {"none", "minimal", "high", "max", "off", ""}) {
+        bool rejected = false;
+        try {
+            (void)parse({"ninfer-serve", "model.ninfer", "--default-reasoning-effort", wire});
+        } catch (const std::invalid_argument&) { rejected = true; }
+        failures += check(rejected, "server accepted invalid default reasoning effort");
+    }
+    auto low_server = parse({"ninfer-serve", "model.ninfer", "--default-reasoning-effort", "low"});
+    ninfer::PromptCapabilities effort_capabilities;
+    effort_capabilities.enable_thinking  = true;
+    effort_capabilities.reasoning_effort = {.low            = true,
+                                            .medium         = true,
+                                            .xhigh          = true,
+                                            .default_effort = ninfer::ReasoningEffort::XHigh};
+    GenerationRequest effort_request;
+    effort_request.messages.resize(1);
+    const auto inherit = resolve_request_semantics(effort_request, low_server, effort_capabilities);
+    failures +=
+        check(inherit.enable_thinking && inherit.reasoning_effort == ninfer::ReasoningEffort::Low &&
+                  to_prompt_input(effort_request, inherit, {}).options.reasoning_effort ==
+                      ninfer::ReasoningEffort::Low,
+              "omitted request effort did not reach PromptInput as server default low");
+    effort_request.reasoning_effort = RequestedReasoningEffort::Medium;
+    failures += check(resolve_request_semantics(effort_request, low_server, effort_capabilities)
+                              .reasoning_effort == ninfer::ReasoningEffort::Medium,
+                      "explicit request effort did not override server default");
+    effort_request.reasoning_effort = RequestedReasoningEffort::None;
+    const auto no_reasoning =
+        resolve_request_semantics(effort_request, low_server, effort_capabilities);
+    failures += check(!no_reasoning.enable_thinking && !no_reasoning.reasoning_effort,
+                      "none did not disable thinking under a low server default");
+    effort_request.reasoning_effort.reset();
+    effort_request.enable_thinking = false;
+    const auto disabled =
+        resolve_request_semantics(effort_request, low_server, effort_capabilities);
+    failures += check(!disabled.enable_thinking && !disabled.reasoning_effort,
+                      "disabled thinking inherited server effort");
+    low_server.enable_thinking     = false;
+    effort_request.enable_thinking = true;
+    failures += check(resolve_request_semantics(effort_request, low_server, effort_capabilities)
+                              .reasoning_effort == ninfer::ReasoningEffort::Low,
+                      "request enabling thinking did not inherit low effort");
     const auto default_spec = parse({"ninfer-serve", "model.ninfer"});
     failures += check(default_spec.speculative.backend == ninfer::SpeculativeBackend::DFlash &&
                           default_spec.speculative.draft_tokens == 7 &&

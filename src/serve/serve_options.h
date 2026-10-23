@@ -54,6 +54,7 @@ struct ServeOptions {
     std::optional<std::vector<std::uint32_t>> context_checkpoint_marks;
     bool enable_thinking =
         true; // default thinking mode for the generation prompt (--no-thinking opts out)
+    std::optional<ReasoningEffort> default_reasoning_effort; // unset => artifact template default
     bool preserve_thinking = false;
     std::optional<std::uint32_t> default_thinking_token_budget; // unset => unlimited
     std::string system_prepend;

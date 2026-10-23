@@ -145,7 +145,10 @@ ResolvedRequestSemantics resolve_request_semantics(const GenerationRequest& requ
         }
         return result;
     };
-    if (!request.reasoning_effort) { return resolve_budget(); }
+    if (!request.reasoning_effort) {
+        if (result.enable_thinking) { result.reasoning_effort = server.default_reasoning_effort; }
+        return resolve_budget();
+    }
 
     const RequestedReasoningEffort requested = *request.reasoning_effort;
     const bool enables_thinking              = requested != RequestedReasoningEffort::None;

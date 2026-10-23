@@ -384,7 +384,12 @@ GenerationService::GenerationService(ServeOptions options, LoadProgress load_pro
     engine_                = std::make_unique<ninfer::Engine>(std::move(engine_options));
     options_.mixed_forward = engine_->options().mixed_forward;
     prompt_capabilities_   = engine_->prompt_capabilities();
-    request_capacity_      = std::make_shared<RequestCapacity>(
+    if (options_.default_reasoning_effort &&
+        !prompt_capabilities_.reasoning_effort.supports(*options_.default_reasoning_effort)) {
+        throw std::invalid_argument(
+            "--default-reasoning-effort is not supported by the loaded chat template");
+    }
+    request_capacity_ = std::make_shared<RequestCapacity>(
         static_cast<std::size_t>(options_.max_concurrency) + options_.max_pending_requests);
     media_input_capacity_ = std::make_shared<MediaInputCapacity>();
 }
@@ -466,12 +471,17 @@ PreparedRequest GenerationService::prepare(const GenerationRequest& request,
     const ResolvedRequestSemantics semantics =
         resolve_request_semantics(request, options_, prompt_capabilities_);
     PreparedRequest prepared;
-    ninfer::RequestOptions request_options     = to_request_options(request, options_, semantics);
-    prepared.include_usage                     = request.include_usage;
-    prepared.tool_capable                      = request.uses_tools();
-    prepared.tool_name_max_length              = request.tool_name_max_length;
-    prepared.thinking_token_budget             = semantics.thinking_token_budget;
-    prepared.enable_thinking                   = semantics.enable_thinking;
+    ninfer::RequestOptions request_options = to_request_options(request, options_, semantics);
+    prepared.include_usage                 = request.include_usage;
+    prepared.tool_capable                  = request.uses_tools();
+    prepared.tool_name_max_length          = request.tool_name_max_length;
+    prepared.thinking_token_budget         = semantics.thinking_token_budget;
+    prepared.enable_thinking               = semantics.enable_thinking;
+    if (semantics.enable_thinking) {
+        prepared.effective_reasoning_effort =
+            semantics.reasoning_effort ? semantics.reasoning_effort
+                                       : prompt_capabilities_.reasoning_effort.default_effort;
+    }
     prepared.preserve_thinking                 = semantics.preserve_thinking;
     prepared.preserve_thinking_semantic_change = request.preserve_thinking_semantic_change;
     const std::size_t media_items              = request.media_item_count();

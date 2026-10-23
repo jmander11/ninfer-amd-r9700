@@ -80,6 +80,8 @@ services:
       - --lm-head-draft
       - --pending-timeout-ms
       - "900000"
+      - --default-reasoning-effort
+      - "${NINFER_DEFAULT_REASONING_EFFORT:-low}"
       - --default-thinking-token-budget
       - "${NINFER_DEFAULT_THINKING_TOKEN_BUDGET:-off}"
       - --default-max-tokens

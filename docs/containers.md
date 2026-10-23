@@ -7,6 +7,8 @@ Set `NINFER_SYSTEM_PROMPTS=N` to opt into retaining up to N system prefixes insi
 
 A bind mount stores disk prefixes under `./.cache/ninfer/prefix` by default. Set `NINFER_DISK_CACHE_DIR` to choose another host cache directory; use a separate directory for each model/server deployment. This host directory survives container replacement and `docker compose down --volumes`. Disk cache is prefix reuse, not active-context offload. Disk format v8 requires a fresh directory when upgrading from earlier formats. RAM contents do not survive restart; durable disk entries can be restored for the same model fingerprint. When disabling disk cache with `NINFER_DISK_CACHE_MIB=off`, remove `--kv-disk-location /cache/prefix` from the local Compose command override: the server accepts a disk location only when disk capacity is enabled.
 
+Docker defaults reasoning effort to `low` through `NINFER_DEFAULT_REASONING_EFFORT`. Set it to `medium` or `xhigh` to change the omitted-request effort, or `template` to use the artifact default. Explicit request effort still overrides it.
+
 Requests may override temperature; p-less sampling remains enabled by default. Adaptive draft length and the optimized proposal head are enabled. Closed-turn assistant reasoning preservation is off by default; requests may enable `preserve_thinking` individually.
 
 Pending requests have a 900000 ms (15-minute) preparation/admission timeout; the default output limit is 32768 tokens. The 262144-token context limit includes prompt and output and is a literal `--max-context` argument in `compose.yaml`.
