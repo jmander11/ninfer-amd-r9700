@@ -140,6 +140,11 @@ ninfer_add_r9700_test(ninfer_grammar_tokenizer_test
 ninfer_add_r9700_test(ninfer_token_grammar_test
   SOURCES targets/qwen3/test_token_grammar.cpp
   LIBRARIES ninfer_engine)
+ninfer_add_r9700_test(ninfer_token_mask_exchange_test
+  SOURCES targets/qwen3/test_token_mask_exchange.cpp
+  LIBRARIES ninfer_engine ninfer_r9700_core)
+set_tests_properties(ninfer_token_mask_exchange_test PROPERTIES
+  LABELS "r9700" TIMEOUT 30 RESOURCE_LOCK r9700_device)
 ninfer_add_r9700_test(ninfer_frontend_test
   SOURCES targets/qwen3/test_frontend.cpp
   LIBRARIES ninfer_engine)

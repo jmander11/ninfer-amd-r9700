@@ -13,12 +13,11 @@
 
 namespace ninfer::targets::qwen3 {
 
-// Header of the fine-grained host mailbox. The device writes request/tree/batch/timed_out, the
+// Header of the fine-grained host mailbox. The device writes request/tree/batch, the
 // matcher thread writes reply; both sides use system-scope atomics for the two sequence words.
 struct TokenMaskExchange::Mailbox {
     std::uint32_t request;
     std::uint32_t reply;
-    std::uint32_t timed_out;
     std::uint32_t tree;
     std::uint32_t batch;
 };
@@ -28,7 +27,6 @@ constexpr std::size_t kWords            = (kTokenDomain + 31) / 32;
 constexpr std::uint32_t kPublishThreads = 256;
 constexpr std::uint32_t kAcquireBlocks  = 16;
 constexpr std::uint32_t kAcquireThreads = 256;
-constexpr auto kReplyTimeout            = std::chrono::seconds(2);
 constexpr auto kMatcherPoll             = std::chrono::microseconds(20);
 
 std::size_t align_up(std::size_t value) { return (value + 255U) & ~std::size_t{255U}; }
@@ -62,28 +60,19 @@ __global__ __launch_bounds__(kPublishThreads) void token_mask_publish_kernel(
 
 // Waits for the matcher's reply to the published request, then copies the reply configs and the
 // restricted mask rows into device storage; a restricted row's columns past its node count are
-// all-permitted, as the unrestricted sampler would see them. Without a reply in time the bound
-// unmasked configs are copied, and every CTA that timed out records it for finish_round().
+// all-permitted, as the unrestricted sampler would see them. The owned matcher always posts
+// a reply, including when matching throws; host scheduling and grammar cost have no deadline.
 __global__ __launch_bounds__(kAcquireThreads) void token_mask_acquire_kernel(
     TokenMaskExchange::Mailbox* mailbox, const ops::SamplingConfig* reply_configs,
-    const ops::SamplingConfig* fallback_configs, const std::uint32_t* mask_words,
-    const std::uint32_t* host_masks, ops::SamplingConfig* device_configs,
-    std::uint32_t* device_masks, std::size_t row_words, std::uint64_t timeout_ticks) {
-    __shared__ std::uint32_t replied;
+    const std::uint32_t* mask_words, const std::uint32_t* host_masks,
+    ops::SamplingConfig* device_configs, std::uint32_t* device_masks, std::size_t row_words) {
     if (threadIdx.x == 0U) {
         const std::uint32_t request =
             __hip_atomic_load(&mailbox->request, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-        const std::uint64_t start = wall_clock64();
-        std::uint32_t ok          = 1U;
         while (__hip_atomic_load(&mailbox->reply, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) !=
                request) {
-            if (wall_clock64() - start > timeout_ticks) {
-                ok = 0U;
-                break;
-            }
             __builtin_amdgcn_s_sleep(32);
         }
-        replied = ok;
     }
     __syncthreads();
     const std::uint32_t batch =
@@ -91,17 +80,10 @@ __global__ __launch_bounds__(kAcquireThreads) void token_mask_acquire_kernel(
     constexpr std::size_t config_words = sizeof(ops::SamplingConfig) / sizeof(std::uint32_t);
     static_assert(sizeof(ops::SamplingConfig) % sizeof(std::uint32_t) == 0);
     if (blockIdx.x == 0U) {
-        const auto* source = reinterpret_cast<const std::uint32_t*>(
-            replied != 0U ? reply_configs : fallback_configs);
-        auto* destination = reinterpret_cast<std::uint32_t*>(device_configs);
+        const auto* source = reinterpret_cast<const std::uint32_t*>(reply_configs);
+        auto* destination  = reinterpret_cast<std::uint32_t*>(device_configs);
         for (std::size_t i = threadIdx.x; i < batch * config_words; i += blockDim.x)
             destination[i] = source[i];
-    }
-    if (replied == 0U) {
-        if (threadIdx.x == 0U)
-            __hip_atomic_store(&mailbox->timed_out, 1U, __ATOMIC_RELAXED,
-                               __HIP_MEMORY_SCOPE_SYSTEM);
-        return;
     }
     const std::size_t thread  = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     const std::size_t threads = static_cast<std::size_t>(gridDim.x) * blockDim.x;
@@ -196,13 +178,6 @@ TokenMaskExchange::TokenMaskExchange(Tensor masks, Tensor sampling)
     mail_fallback_   = reinterpret_cast<ops::SamplingConfig*>(base + fallback_offset);
     mail_masks_      = reinterpret_cast<std::uint32_t*>(base + masks_offset);
 
-    int device         = 0;
-    int wall_clock_khz = 0;
-    HIP_CHECK(hipGetDevice(&device));
-    HIP_CHECK(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, device));
-    reply_timeout_ticks_ =
-        static_cast<std::uint64_t>(wall_clock_khz) *
-        std::chrono::duration_cast<std::chrono::milliseconds>(kReplyTimeout).count();
     matcher_ = std::thread([this] { serve(); });
 }
 
@@ -292,10 +267,9 @@ const ops::SamplingConfig* TokenMaskExchange::publish(const Tensor& ids, const T
 
 void TokenMaskExchange::acquire(hipStream_t stream) {
     hipLaunchKernelGGL(token_mask_acquire_kernel, dim3(kAcquireBlocks), dim3(kAcquireThreads), 0,
-                       stream, mailbox_, mail_configs_, mail_fallback_, mail_mask_words_,
-                       mail_masks_, static_cast<ops::SamplingConfig*>(sampling_.data),
-                       static_cast<std::uint32_t*>(masks_.data), width_ * kWords,
-                       reply_timeout_ticks_);
+                       stream, mailbox_, mail_configs_, mail_mask_words_, mail_masks_,
+                       static_cast<ops::SamplingConfig*>(sampling_.data),
+                       static_cast<std::uint32_t*>(masks_.data), width_ * kWords);
     HIP_CHECK(hipGetLastError());
 }
 
@@ -307,7 +281,6 @@ void TokenMaskExchange::arm() {
             mail_fallback_[row].allowed_token_words         = nullptr;
             mail_fallback_[row].allowed_token_column_stride = 0;
         }
-        std::atomic_ref(mailbox_->timed_out).store(0U, std::memory_order_relaxed);
         armed_ = true;
     }
     armed_changed_.notify_all();
@@ -321,12 +294,6 @@ void TokenMaskExchange::disarm() noexcept {
 void TokenMaskExchange::finish_round() {
     std::lock_guard lock(mutex_);
     armed_ = false;
-    // The round synchronized, so its last request is final: one it timed out on is never
-    // answered later against another round's bindings.
-    answered_ = std::atomic_ref(mailbox_->request).load(std::memory_order_acquire);
-    if (std::atomic_ref(mailbox_->timed_out).exchange(0U, std::memory_order_relaxed) != 0U) {
-        throw std::runtime_error("token grammar mask exchange received no host reply");
-    }
     if (error_) { std::rethrow_exception(std::exchange(error_, nullptr)); }
 }
 

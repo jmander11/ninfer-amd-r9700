@@ -285,20 +285,34 @@ void validate_graph_profiles(const std::vector<GraphExecutionProfile>& profiles,
 
 // Keeps the tool-mask matcher armed exactly while one speculative round can execute.
 struct TokenMaskRoundGuard {
-    explicit TokenMaskRoundGuard(qwen3::TokenMaskExchange& exchange) : exchange(exchange) {
+    TokenMaskRoundGuard(qwen3::TokenMaskExchange& exchange, DeviceContext& device)
+        : exchange(exchange), stream(device.stream) {
         exchange.arm();
     }
 
-    ~TokenMaskRoundGuard() { exchange.disarm(); }
+    ~TokenMaskRoundGuard() {
+        // Enqueue failures can unwind with a publish/acquire still in flight. Keep the
+        // matcher alive until that work drains, including during Program construction.
+        if (!finished) { (void)hipStreamSynchronize(stream); }
+        exchange.disarm();
+    }
+
+    // Called only after round synchronization. Avoid another HIP wait on the normal path.
+    void finish() {
+        finished = true;
+        exchange.finish_round();
+    }
 
     TokenMaskRoundGuard(const TokenMaskRoundGuard&)            = delete;
     TokenMaskRoundGuard& operator=(const TokenMaskRoundGuard&) = delete;
     qwen3::TokenMaskExchange& exchange;
+    hipStream_t stream;
+    bool finished = false;
 };
 
 template <class Prepare>
 void instantiate_graph_family(DecodeGraphFamily& family, const char* label, DeviceContext& device,
-                              Prepare&& prepare) {
+                              Prepare&& prepare, qwen3::TokenMaskExchange& token_masks) {
     if (family.profiles.empty()) {
         throw std::logic_error(std::string(label) + " Device Graph family has no profiles");
     }
@@ -321,8 +335,10 @@ void instantiate_graph_family(DecodeGraphFamily& family, const char* label, Devi
         if (has_larger_representative) { continue; }
         prepare(profile.min_execution_frontier, profile.batch_size, profile.draft_tokens);
         device.synchronize();
+        TokenMaskRoundGuard token_mask_round(token_masks, device);
         profile.executable.launch(device.stream);
         device.synchronize();
+        token_mask_round.finish();
     }
 }
 
@@ -4434,13 +4450,13 @@ void ProgramImplCore::prepare_graphs() {
                     mtp_transactions.close_captured();
                     return;
                 }
-                const TokenMaskRoundGuard token_mask_round(*token_masks);
+                TokenMaskRoundGuard token_mask_round(*token_masks, device);
                 schedule::mtp_decode_batch(mtp_state, static_cast<std::int32_t>(batch_size), k,
                                            nullptr);
                 text_transactions.enqueue_resolution();
                 mtp_transactions.enqueue_resolution();
                 device.synchronize();
-                token_masks->finish_round();
+                token_mask_round.finish();
                 text_transactions.finish_resolution({text_transactions.cursor, batch_size});
                 mtp_transactions.finish_resolution({mtp_transactions.cursor, batch_size});
             };
@@ -4516,12 +4532,12 @@ void ProgramImplCore::prepare_graphs() {
                     transactions.close_captured();
                     return;
                 }
-                const TokenMaskRoundGuard token_mask_round(*token_masks);
+                TokenMaskRoundGuard token_mask_round(*token_masks, device);
                 schedule::dflash_decode_batch(dflash_state, static_cast<std::int32_t>(batch_size),
                                               fixed_k, fixed_w, envelopes, nullptr);
                 transactions.enqueue_resolution();
                 device.synchronize();
-                token_masks->finish_round();
+                token_mask_round.finish();
                 transactions.finish_resolution({transactions.cursor, batch_size});
             };
 
@@ -4554,13 +4570,15 @@ void ProgramImplCore::prepare_graphs() {
     }
 
     if (!ordinary_graphs.profiles.empty()) {
-        instantiate_graph_family(ordinary_graphs, "ordinary", device, prepare_representative);
+        instantiate_graph_family(ordinary_graphs, "ordinary", device, prepare_representative,
+                                 *token_masks);
     }
     if (speculative_backend == SpeculativeBackend::DFlash) {
-        instantiate_graph_family(dflash_graphs, "DFlash", device, prepare_representative);
+        instantiate_graph_family(dflash_graphs, "DFlash", device, prepare_representative,
+                                 *token_masks);
     }
     if (speculative_backend == SpeculativeBackend::Mtp) {
-        instantiate_graph_family(mtp_graphs, "MTP", device, prepare_representative);
+        instantiate_graph_family(mtp_graphs, "MTP", device, prepare_representative, *token_masks);
     }
 
     const std::size_t captured_definitions     = ordinary_graphs.profiles.size() +
@@ -5552,7 +5570,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
                                                  token_masks.get()};
 
         bind_token_mask_batch(lanes, mtp_host_ingress->sampling);
-        const TokenMaskRoundGuard token_mask_round(*token_masks);
+        TokenMaskRoundGuard token_mask_round(*token_masks, device);
         mark_workspace_usage(workspace_plan.mtp_round);
         const auto started = Clock::now();
         if (executable != nullptr) {
@@ -5584,7 +5602,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         }
         text_transactions.finish_resolution({text_retained_frontiers.data(), lanes.size()});
         mtp_transactions.finish_resolution({mtp_retained_frontiers.data(), lanes.size()});
-        token_masks->finish_round();
+        token_mask_round.finish();
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it.
         if (adaptive_draft && realized_extent > 0) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,
@@ -5945,7 +5963,7 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             calibrates_p_less_drafts()};
 
         bind_token_mask_batch(lanes, dflash_host_ingress->sampling);
-        const TokenMaskRoundGuard token_mask_round(*token_masks);
+        TokenMaskRoundGuard token_mask_round(*token_masks, device);
         mark_workspace_usage(prefill_lane ? workspace_plan.dflash_mixed
                                           : workspace_plan.dflash_round);
         const auto started = Clock::now();
@@ -6007,7 +6025,7 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             static_cast<std::int32_t>(live_w), TextConfig::token_domain,
             dflash_uses_tree_verify(batch_k, live_w), token_masks->published_sampling(),
             io.dflash_decode->selector_ids, io.dflash_decode->selector_q);
-        token_masks->finish_round();
+        token_mask_round.finish();
         if (calibrate_p_less) {
             const std::size_t row_values =
                 static_cast<std::size_t>(ops::kPLessProposalCalibrationTemperatureCount) * batch_k;

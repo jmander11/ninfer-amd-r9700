@@ -26,8 +26,8 @@ namespace ninfer::targets::qwen3 {
 //   acquire()  before the first read of the configs (target argmax): a kernel waits for the reply
 //              and copies the configs and only the restricted mask rows into device storage.
 // Every executed speculative round is bracketed by arm() and, after the round synchronized,
-// finish_round(). If no reply arrives within two seconds the round proceeds unmasked and
-// finish_round() throws.
+// finish_round(). Acquisition waits for the owned matcher regardless of host latency; matcher
+// errors are reported by finish_round() before publication.
 class TokenMaskExchange {
 public:
     TokenMaskExchange(Tensor masks, Tensor sampling);
@@ -59,7 +59,7 @@ public:
 
     void arm();
     void disarm() noexcept;
-    // Disarms, then reports a grammar failure or a missing reply of the synchronized round.
+    // Disarms, then reports a grammar failure of the synchronized round.
     void finish_round();
 
     struct Mailbox;
@@ -91,7 +91,6 @@ private:
     ops::SamplingConfig* mail_configs_  = nullptr;
     ops::SamplingConfig* mail_fallback_ = nullptr;
     std::uint32_t* mail_masks_          = nullptr;
-    std::uint64_t reply_timeout_ticks_  = 0;
     std::vector<const OutputSession*> outputs_;
     std::vector<ops::SamplingConfig> configs_;
     std::mutex mutex_;
