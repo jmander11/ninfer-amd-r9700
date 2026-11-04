@@ -949,8 +949,6 @@ private:
 
     void retire_request(const std::shared_ptr<Request>& request) {
         if (chunked_execution_) {
-            instance_.program->discard_suspended(request->id);
-            instance_.program->release_suspension_credit(request->id);
             std::erase(suspended_, request);
             std::erase(pressure_victims_, request);
             std::erase(recovery_queue_, request);
@@ -991,6 +989,14 @@ private:
         release_planning_state(request);
         request->prompt = {};
         request->host_input.reset();
+        if (chunked_execution_) {
+            // Preserve the primary error while attempting both device releases and completing
+            // host retirement, even if a release fails.
+            detail::run_secondary_cleanup(
+                [&] { instance_.program->discard_suspended(request->id); });
+            detail::run_secondary_cleanup(
+                [&] { instance_.program->release_suspension_credit(request->id); });
+        }
         retire_request(request);
         {
             std::lock_guard lock(request->mutex);
@@ -1146,6 +1152,10 @@ private:
         end_copy_hold(request);
         result.timings.queued_seconds    = request->queued_seconds;
         result.timings.copy_hold_seconds = request->copy_hold_seconds;
+        if (chunked_execution_) {
+            instance_.program->discard_suspended(request->id);
+            instance_.program->release_suspension_credit(request->id);
+        }
         retire_request(request);
         {
             std::lock_guard lock(request->mutex);

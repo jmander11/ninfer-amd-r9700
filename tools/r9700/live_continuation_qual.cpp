@@ -102,7 +102,7 @@ struct Result {
     std::uint32_t released_backend_pages = 0;
 };
 
-void publish(Result& result, targets::qwen3::PublishedOutput output) {
+void publish(Result& result, const targets::qwen3::PublishedOutput& output) {
     for (const auto& delta : output) {
         require(!delta.tool_call, "generic continuation unexpectedly generated a tool event");
         (delta.channel == OutputChannel::Reasoning ? result.reasoning : result.content) +=

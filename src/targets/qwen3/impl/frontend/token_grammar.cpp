@@ -187,8 +187,9 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                 }
             }
         }
-        auto output = words.subspan(node * mask_words, mask_words);
-        if (!nodes[node]) {
+        auto output   = words.subspan(node * mask_words, mask_words);
+        auto& matcher = nodes[node];
+        if (!matcher) {
             std::fill(output.begin(), output.end(), ~std::uint32_t{0});
             continue;
         }
@@ -200,7 +201,7 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                       .shape       = &shape,
                       .strides     = nullptr,
                       .byte_offset = 0};
-        (void)nodes[node]->FillNextTokenBitmask(&mask);
+        (void)matcher->FillNextTokenBitmask(&mask);
         if (!reasoning_close_allowed.empty() && reasoning_close_allowed[node]) {
             auto closed = xgrammar::GrammarMatcher(grammar_->compiled);
             if (!closed.AcceptToken(replay_close)) {

@@ -1178,19 +1178,17 @@ RamRestoredHost KVRamCache::load_host(std::uint64_t entry_id) const {
 
 KvRamSnapshot KVRamCache::snapshot() const noexcept {
     std::lock_guard lock(io_mutex_);
-    std::size_t used = 0;
-    for (const auto& entry : records_) {
-        if (entry.second.live_owner == 0) { used += entry.second.bytes; }
-    }
-    for (const auto& [owner, credit] : live_credits_) { used += credit.bytes; }
-    std::size_t system_entries = 0, system_bytes = 0;
-    for (const auto id : fifo_) {
-        const auto& record = require(id);
-        if (record.system_prompt) {
-            ++system_entries;
-            system_bytes += record.bytes;
+    std::size_t used = 0, system_entries = 0, system_bytes = 0;
+    for (const auto& [id, record] : records_) {
+        if (record.live_owner == 0) {
+            used += record.bytes;
+            if (!record.retired && record.system_prompt) {
+                ++system_entries;
+                system_bytes += record.bytes;
+            }
         }
     }
+    for (const auto& [owner, credit] : live_credits_) { used += credit.bytes; }
     return KvRamSnapshot{
         .capacity_bytes           = arena_.capacity(),
         .used_bytes               = used,

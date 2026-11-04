@@ -3276,6 +3276,8 @@ public:
     std::array<std::uint32_t, 8> credit_releases{};
     std::uint32_t discarded_images           = 0;
     std::uint32_t credit_releases_at_capture = 0;
+    bool fail_shutdown_credit_release        = false;
+    std::uint32_t shutdown_credit_failures   = 0;
 
     [[nodiscard]] bool wait_for_held_phase() {
         std::unique_lock lock(phase_mutex_);
@@ -3475,6 +3477,10 @@ public:
         if (live_credits.at(owner) != 0) {
             live_credits[owner] = 0;
             ++credit_releases.at(owner);
+            if (fail_shutdown_credit_release && shutdown_transfer_fences != 0) {
+                ++shutdown_credit_failures;
+                throw std::runtime_error("injected shutdown credit cleanup failure");
+            }
         }
     }
 
@@ -4132,13 +4138,16 @@ int run_chunked_pending_recovery(Frontend& frontend) {
 
 int run_chunked_shutdown_and_partial_tool(Frontend& frontend) {
     int failures = 0;
-    for (const bool shutdown : {true, false}) {
+    enum class Case { Shutdown, FailedCleanup, PartialTool };
+    for (const auto mode : {Case::Shutdown, Case::FailedCleanup, Case::PartialTool}) {
+        const bool shutdown = mode != Case::PartialTool;
         ChunkedProgram program;
-        program.pending_recovery_probe = shutdown;
-        program.shutdown_capture_probe = shutdown;
-        program.partial_tool_probe     = !shutdown;
-        program.require_peer           = !shutdown;
-        program.hold_phase             = ChunkedProgram::HoldPhase::Capture;
+        program.fail_shutdown_credit_release = mode == Case::FailedCleanup;
+        program.pending_recovery_probe       = shutdown;
+        program.shutdown_capture_probe       = shutdown;
+        program.partial_tool_probe           = !shutdown;
+        program.require_peer                 = !shutdown;
+        program.hold_phase                   = ChunkedProgram::HoldPhase::Capture;
         if (!shutdown) {
             program.initial_window = 30;
             program.physical_pages = 62;
@@ -4161,6 +4170,9 @@ int run_chunked_shutdown_and_partial_tool(Frontend& frontend) {
                     std::all_of(program.live_credits.begin(), program.live_credits.end(),
                                 [](auto bytes) { return bytes == 0; }),
                 "shutdown: held live image/credit was not fenced and released once");
+            failures += check((program.shutdown_credit_failures != 0) ==
+                                  program.fail_shutdown_credit_release,
+                              "shutdown: secondary credit cleanup failure was not exercised");
         }
     }
     return failures;

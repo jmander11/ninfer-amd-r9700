@@ -343,7 +343,7 @@ int qualify_chunked_pressure(const std::filesystem::path& artifact, std::string_
     options.generation_recovery = false;
     ninfer::Engine engine(options);
     std::atomic<bool> stalled{false};
-    std::jthread observer([&](std::stop_token stop) {
+    std::jthread observer([&](const std::stop_token& stop) {
         auto previous = engine.runtime_stats();
         auto changed  = std::chrono::steady_clock::now();
         while (!stop.stop_requested()) {
@@ -360,7 +360,7 @@ int qualify_chunked_pressure(const std::filesystem::path& artifact, std::string_
                       << " suspended=" << now.kv_suspended_requests
                       << " extensions=" << now.kv_window_extensions
                       << " captures=" << now.kv_live_suspensions
-                      << " restores=" << now.kv_live_resumes << std::endl;
+                      << " restores=" << now.kv_live_resumes << '\n';
             if (std::chrono::steady_clock::now() - changed > std::chrono::seconds(45)) {
                 stalled.store(true);
             }
@@ -466,7 +466,7 @@ int qualify_chunked_throughput(const std::filesystem::path& artifact, std::strin
     options.speculative.proposal_head  = ninfer::ProposalHead::Optimized;
     ninfer::Engine engine(options);
     std::cerr << "throughput loaded backend=" << backend
-              << " pool_tokens=" << engine.memory_summary().kv_capacity << std::endl;
+              << " pool_tokens=" << engine.memory_summary().kv_capacity << '\n';
     std::array<ninfer::GenerationHandle, 8> handles;
     std::array<ninfer::GenerationResult, 8> results;
     std::array<std::exception_ptr, 8> errors{};
@@ -494,6 +494,7 @@ int qualify_chunked_throughput(const std::filesystem::path& artifact, std::strin
         handles[i]                      = engine.submit(std::move(prompts[i]), request);
     }
     std::vector<std::jthread> clients;
+    clients.reserve(handles.size());
     for (std::size_t i = 0; i < handles.size(); ++i) {
         clients.emplace_back([&, i] {
             try {
@@ -539,7 +540,7 @@ int qualify_chunked_throughput(const std::filesystem::path& artifact, std::strin
                   << " ready=" << now.decode_ready_requests << " waiting=" << now.waiting_requests
                   << " blocked=" << now.kv_growth_blocked_requests
                   << " suspended=" << now.kv_suspended_requests << " ram=" << now.kv_ram_used_bytes
-                  << std::endl;
+                  << '\n';
     }
     const auto sampled           = engine.runtime_stats();
     const double sampled_seconds = std::chrono::duration<double>(Clock::now() - started).count();

@@ -3855,11 +3855,12 @@ int test_official_recovery_splice() {
                 failures +=
                     check(spliced.has_value(), "supported envelope first suffix did not splice");
                 if (!spliced) { continue; }
-                const auto size = FrontendFactory::inspect(*spliced).token_ids.size();
-                first_maximum   = std::max(first_maximum, size);
-                if (!largest[phase] ||
-                    size > FrontendFactory::inspect(*largest[phase]).token_ids.size()) {
-                    largest[phase] = std::move(spliced);
+                const auto size      = FrontendFactory::inspect(*spliced).token_ids.size();
+                first_maximum        = std::max(first_maximum, size);
+                auto& largest_prompt = largest[phase];
+                if (!largest_prompt ||
+                    size > FrontendFactory::inspect(*largest_prompt).token_ids.size()) {
+                    largest_prompt = std::move(spliced);
                 }
             }
         }
@@ -3869,11 +3870,11 @@ int test_official_recovery_splice() {
         std::size_t second_maximum = 0;
         for (const auto& prefix : largest) {
             if (!prefix) { continue; }
+            const auto& prefix_ids = FrontendFactory::inspect(*prefix).token_ids;
             for (const auto& variant : context->recovery_insert_variants(2)) {
                 for (const bool thinking : {false, true}) {
-                    auto spliced = frontend.splice_recovery_prompt(
-                        FrontendFactory::inspect(*prefix).token_ids, context->input(), variant,
-                        context, thinking);
+                    auto spliced = frontend.splice_recovery_prompt(prefix_ids, context->input(),
+                                                                   variant, context, thinking);
                     failures += check(spliced.has_value(),
                                       "supported envelope second suffix did not splice");
                     if (spliced) {
