@@ -35,8 +35,9 @@ StoredResponse record(std::string id, ResponseContext context) {
     StoredResponse value;
     value.id = std::move(id);
     value.response =
-        nlohmann::json{{"id", value.id}, {"object", "response"}, {"status", "completed"}};
-    value.input_items.push_back(nlohmann::json{{"id", "msg_" + value.id}, {"type", "message"}});
+        nlohmann::ordered_json{{"id", value.id}, {"object", "response"}, {"status", "completed"}};
+    value.input_items.push_back(
+        nlohmann::ordered_json{{"id", "msg_" + value.id}, {"type", "message"}});
     value.context = std::move(context);
     return value;
 }
@@ -138,14 +139,16 @@ int test_persistent_dag() {
     const auto right =
         append_response_context(root, {text_turn(ninfer::ChatRole::User, "sibling")});
     std::size_t expected_bytes = 0;
-    nlohmann::json expected_body;
-    std::vector<nlohmann::json> expected_items;
+    nlohmann::ordered_json expected_body;
+    std::vector<nlohmann::ordered_json> expected_items;
     {
         ResponseStore store(4, 1ULL << 20, directory.path.string());
         store.put(record("parent", root));
-        auto value                 = record("left", left);
-        value.preserve_thinking    = true;
-        value.response["metadata"] = {{"nested", {1, true, "value"}}};
+        auto value                       = record("left", left);
+        value.preserve_thinking          = true;
+        value.response["metadata"]       = {{"nested", {1, true, "value"}}};
+        value.response["text"]["format"] = nlohmann::ordered_json::parse(
+            R"({"type":"json_schema","name":"result","schema":{"type":"object","properties":{"title":{"type":"string"},"people":{"type":"array"}}}})");
         value.input_items.push_back(
             {{"type", "function_call_output"}, {"call_id", "call_1"}, {"output", "tool result"}});
         expected_body  = value.response;
@@ -178,6 +181,8 @@ int test_persistent_dag() {
         failures += check(a->response == expected_body && a->input_items == expected_items &&
                               a->preserve_thinking,
                           "restart lost typed Items, envelope or thinking policy");
+        failures += check(a->response.dump() == expected_body.dump(),
+                          "restart reordered the response envelope or nested schema properties");
         const auto turns = flatten_response_context(a->context);
         failures += check(turns.size() == 3 && turns[0].content[0].text == "root" &&
                               turns[1].reasoning_content == output.reasoning_content &&

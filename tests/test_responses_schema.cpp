@@ -21,7 +21,7 @@
 
 namespace {
 
-using Json = nlohmann::json;
+using Json = nlohmann::ordered_json;
 using namespace ninfer::serve;
 
 int check(bool condition, const std::string& message) {

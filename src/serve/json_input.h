@@ -6,7 +6,7 @@
 
 namespace ninfer::serve {
 
-// Parse once, validating schema numbers before ordinary DOM forwarding loses their spelling.
-nlohmann::json parse_request_body(std::string_view source);
+// Preserve member order and validate schema numbers before forwarding loses their spelling.
+nlohmann::ordered_json parse_request_body(std::string_view source);
 
 } // namespace ninfer::serve

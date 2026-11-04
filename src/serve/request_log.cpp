@@ -25,7 +25,7 @@
 namespace ninfer::serve {
 namespace {
 
-using Json = nlohmann::json;
+using Json = nlohmann::ordered_json;
 
 const char* reasoning_effort_name(ninfer::ReasoningEffort effort) {
     switch (effort) {

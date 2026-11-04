@@ -4,7 +4,13 @@ Upstream is the RTX 5090/CUDA `dylanbrodiefafard/ninfer` repository’s `experim
 
 ## Baseline
 
-Reconciled through upstream `5c2bd4b39a3cc645e400e842ca2b92968f920aec` (2026-10-27), with the 2026-10-28 AMD reconciliation below. Upstream rewrote the history that contained the former `7142d4280123d9df507f863c1ae3d16f50e6476e` baseline. This reconciliation maps the former dispositions onto the fetched history and advances the source baseline by behavior, without an ancestry merge. The next sync reviews upstream changes after `5c2bd4b3` against current AMD behavior.
+Reconciled through upstream `c88d194f51c52e6e1e1fff00da0f47c9f3f0c03b` (2026-11-03), with the 2026-11-04 AMD port below. The next sync reviews upstream changes after `c88d194f` against current AMD behavior. Upstream previously rewrote the history containing the former `7142d4280123d9df507f863c1ae3d16f50e6476e` baseline; the 2026-10-28 reconciliation below maps its dispositions onto the current history without an ancestry merge.
+
+## Request JSON member order (2026-11-04)
+
+The fetched `experimental` tip is `c88d194f51c52e6e1e1fff00da0f47c9f3f0c03b`; its only commit after the previous `5c2bd4b3` baseline is ported. Preserve `nlohmann::ordered_json` through HTTP request parsing, Chat/Responses/Anthropic translation, tool definitions, response envelopes and the shared messages-file prompt adapter. This removes the conversion to key-sorted JSON that alphabetized response-schema properties before grammar compilation and tool schemas before prompt rendering. Adapt the native Responses disk store as well so serialization and restart preserve nested schema order. Retain the native numeric-source admission checks and serving capabilities.
+
+Verification: the new HTTP and messages-file order regressions both fail on the pre-port implementation and pass after the port. Exact serialized-schema checks cover nested properties, Chat and Responses constraints, Chat/Responses/Anthropic tools, the echoed Responses format and messages-file tools. The existing persistence regression now checks exact response-envelope order after restart. The gfx1201 Release build with warnings as errors and all 65 host tests pass (`cmake --build build-r9700 -j 8`; `ctest --test-dir build-r9700 -LE r9700 --output-on-failure -j 8`). Changed-line clang-tidy covers 20 translation units with zero diagnostics; the subsequently updated Responses test is checked separately. Formatting, lint and source whitespace checks pass. Evidence is under `profiles/upstream-sync/20261104/`. No GPU numerical behavior changes; GPU inference qualification was not run. No throughput claim, ancestry merge or deployment is part of this sync.
 
 ## Rewritten-history reconciliation and cache failure fixes (2026-10-28)
 

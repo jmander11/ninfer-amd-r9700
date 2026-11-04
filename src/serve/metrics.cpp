@@ -25,7 +25,7 @@
 namespace ninfer::serve {
 namespace {
 
-using Json = nlohmann::json;
+using Json = nlohmann::ordered_json;
 
 // Tokens per physical KV page group, the same value as ninfer::kPagedKVPageSize for every
 // device KV pool. Serve does not include the core KV header.

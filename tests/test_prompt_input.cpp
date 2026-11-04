@@ -70,7 +70,17 @@ int main() {
         } catch (const std::invalid_argument&) { rejected = true; }
         if (!rejected)
             throw std::runtime_error("CLI tool schema silently rounded its source number");
-        std::cout << "PASS: messages-relative acquisition and schema numeric source\n";
+        const std::string tool =
+            R"({"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{"title":{"type":"string"},"people":{"type":"array"}},"required":["title","people"]}}})";
+        {
+            std::ofstream(messages)
+                << R"({"messages":[{"role":"user","content":"hello"}],"tools":[)" << tool << "]}";
+        }
+        const auto prompt = ninfer::product::prompt_from_messages(messages, false, false);
+        if (prompt.options.tool_jsons != std::vector<std::string>{tool}) {
+            throw std::runtime_error("messages-file tool schema lost property order");
+        }
+        std::cout << "PASS: messages-relative acquisition, schema numeric source and order\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

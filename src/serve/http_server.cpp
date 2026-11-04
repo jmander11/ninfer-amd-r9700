@@ -24,8 +24,9 @@
 namespace ninfer::serve {
 void handle_health(bool available, httplib::Response& response) {
     response.status = available ? 200 : 503;
-    response.set_content(nlohmann::json{{"status", available ? "ok" : "unavailable"}}.dump(),
-                         "application/json");
+    response.set_content(
+        nlohmann::ordered_json{{"status", available ? "ok" : "unavailable"}}.dump(),
+        "application/json");
 }
 
 namespace {
@@ -540,7 +541,7 @@ void HttpServer::handle_model(const httplib::Request& req, httplib::Response& re
 
 void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::Response& res) {
     const auto generation_started = std::chrono::steady_clock::now();
-    nlohmann::json body;
+    nlohmann::ordered_json body;
     try {
         body = parse_request_body(req.body);
     } catch (const ApiException& error) {
@@ -780,7 +781,7 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
 
 void HttpServer::handle_count_tokens(const httplib::Request& req, httplib::Response& res) {
     metrics_.observe_token_count(MetricsProtocol::AnthropicMessages);
-    nlohmann::json body;
+    nlohmann::ordered_json body;
     try {
         body = parse_request_body(req.body);
     } catch (const ApiException& error) {
@@ -813,7 +814,7 @@ void HttpServer::handle_count_tokens(const httplib::Request& req, httplib::Respo
 
 void HttpServer::handle_messages(const httplib::Request& req, httplib::Response& res) {
     const auto generation_started = std::chrono::steady_clock::now();
-    nlohmann::json body;
+    nlohmann::ordered_json body;
     try {
         body = parse_request_body(req.body);
     } catch (const ApiException& error) {
