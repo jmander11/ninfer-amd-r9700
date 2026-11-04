@@ -493,6 +493,11 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
                 program.sequences[0].retained && program.sequences[0].kv.has_value() &&
                 program.sequences[0].ledger == captured_ledger,
             "capture allocation failure changed resident continuation or retained RAM sources");
+    // The pressure fixture leaves identical prefixes indexed. Remove those copies so the
+    // restore below must select the fresh entry whose identity and full state we verify.
+    for (const auto id : program.kv_ram_cache_->fifo_ids()) { program.kv_ram_cache_->discard(id); }
+    require(program.kv_ram_snapshot().entry_count == 0,
+            "capture-allocation fixture left an indexed RAM prefix");
     std::uint64_t entry_id = 0;
     require(program.capture_retained_lane(0, &entry_id) && entry_id != 0,
             "retained lane did not capture a RAM checkpoint");
