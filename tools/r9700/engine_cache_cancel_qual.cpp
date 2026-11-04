@@ -597,28 +597,28 @@ int qualify_chunked_throughput(const std::filesystem::path& artifact, std::strin
         std::cout << std::setprecision(10) << "chunked_throughput_completion backend=" << backend
                   << " C=8 prompt=60000x8 max_output=32768 safety_deadline_seconds=1800"
                   << " pool_tokens=" << engine.memory_summary().kv_capacity
-                  << " window=" << sampled.kv_execution_window_tokens
-                  << " makespan_seconds=" << makespan_seconds
+                  << " window=" << sampled.kv_execution_window_tokens;
+        std::cout << " makespan_seconds=" << makespan_seconds
                   << " observer_elapsed_seconds=" << sampled_seconds << " total_elapsed_seconds="
                   << std::chrono::duration<double>(Clock::now() - started).count() << " prefill="
                   << drained.computed_prefill_tokens - initial.computed_prefill_tokens
-                  << " decode=" << decode
-                  << " decode_tok_s=" << static_cast<double>(decode) / makespan_seconds
+                  << " decode=" << decode;
+        std::cout << " decode_tok_s=" << static_cast<double>(decode) / makespan_seconds
                   << " returned_tokens=" << emitted
                   << " output_tok_s=" << static_cast<double>(emitted) / makespan_seconds
-                  << " avg_decode_batch=" << (rounds ? static_cast<double>(rows) / rounds : 0)
-                  << " sampled_peak_active_requests=" << sampled_peak_active
+                  << " avg_decode_batch=" << (rounds ? static_cast<double>(rows) / rounds : 0);
+        std::cout << " sampled_peak_active_requests=" << sampled_peak_active
                   << " sampled_peak_decode_ready=" << sampled_peak_decode_ready
-                  << " peak_actual_decode_batch=unavailable"
-                  << " started=" << started_requests
+                  << " peak_actual_decode_batch=unavailable";
+        std::cout << " started=" << started_requests
                   << " avg_ttft=" << (started_requests ? ttft / started_requests : 0)
                   << " cancelled=" << cancelled << " output_limit=" << completed
-                  << " drain_seconds=" << drain_seconds
-                  << " drained_active=" << drained.running_requests
+                  << " drain_seconds=" << drain_seconds;
+        std::cout << " drained_active=" << drained.running_requests
                   << " extensions=" << drained.kv_window_extensions
                   << " suspensions=" << drained.kv_live_suspensions
-                  << " resumes=" << drained.kv_live_resumes
-                  << " ram_save_seconds=" << drained.kv_ram_save_seconds
+                  << " resumes=" << drained.kv_live_resumes;
+        std::cout << " ram_save_seconds=" << drained.kv_ram_save_seconds
                   << " ram_load_seconds=" << drained.kv_ram_load_seconds
                   << " censored=" << (completed != handles.size() || makespan_seconds >= 1800)
                   << '\n';
