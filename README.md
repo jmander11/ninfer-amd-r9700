@@ -59,19 +59,21 @@ Measured 2026-10-17 on one R9700, Release build, Device Graphs, power `auto`, ch
 
 **Answer generation with the default sampling settings:**
 
-| Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s |
-|---|---:|---:|---:|
-| English story | 146 | 88 | 356 |
-| Python package | 171 | 135 | 535 |
-| Math reasoning | 346 | 126 | 491 |
-| Document summary 8K | 8,192 | 93 | 340 |
-| Document summary 32K | 32,779 | 97 | 300 |
+| Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s |
+|---|---:|---:|---:|---:|
+| English story | 146 | 88 | 356 | 440 |
+| Python package | 171 | 135 | 535 | 630 |
+| Math reasoning | 346 | 126 | 491 | 608 |
+| Document summary 8K | 8,192 | 93 | 340 | 420 |
+| Document summary 32K | 32,779 | 97 | 300 | 330 |
+
+C1/C6 measured 2026-10-17; C8 measured 2026-11-04. The C8 8K summary has 8,194 prompt tokens. Document content follows the repository at each measurement.
 
 P-less temperature 1.5, adaptive DFlash up to seven drafts, 512 output tokens per request (including reasoning). Means of three runs after one warmup.
 
-Generation rates exclude prompt processing. Each prompt is cached before timing; C6 counts only intervals with all six requests decoding. Divide C6 by six for the average per active request.
+Generation rates exclude prompt processing. Each prompt is cached before timing; C6/C8 count only intervals with all six/eight requests decoding. Divide the aggregate rate by concurrency for the average per active request.
 
-Prompt content and sampling affect draft acceptance and speed. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results: `bench/results/readme-workloads-20261017.json`.
+Prompt content and sampling affect draft acceptance and speed. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results: `bench/results/readme-workloads-20261017.json` and `bench/results/readme-workloads-c8-20261104.json`.
 
 In every tested 8K/32K cell, the increase in prediction loss over the BF16 source was smaller than for the fixed 5090 NVFP4 reference. This compares next-token prediction loss, not answer quality or speed against another GPU. Standard and multikey needle retrieval passed through 240K; multikey also passed at 260K. Test conditions and limitations are in `docs/performance.md`.
 

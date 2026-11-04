@@ -125,6 +125,36 @@ The public machine-readable summary is `bench/results/readme-workloads-20261017.
 Run the command documented in `tools/bench/README.md` with the explicit local LQ4 artifact and BF16 tokenizer. The reports are under `profiles/bench/readme-workloads-20261017-run3/`; the admitted code cells use the corrected prompt from `profiles/bench/readme-workloads-code-20261017/`, produced by adding `--workload "Python package"`. The original code cells requested tools and are excluded. Inputs, output text, per-request counters, startup metadata and raw periodic timings are retained with the reports.
 
 
+### README C8 answer generation (2026-11-04)
+
+The five README workloads were measured at C8 on candidate `7bc9a4ce` with the same runner,
+manifest, production LQ4 artifact and generation settings as the October 17 C1/C6 matrix:
+Device Graphs, adaptive DFlash up to K7, optimized proposal head, chunk 2048, p-less temperature
+1.5, 65,536-token context, automatic KV sizing, Vision and RAM/SSD prefix tiers off. The host
+used one gfx1201 R9700, driver 7.1.3.31500000, Linux 7.0.0-38-generic and HIP 7.15.26333 /
+AMD Clang 23 under ROCm 10, with power `auto` and the same bulk host-argument graph environment.
+
+Each cell discards one warmup wave and averages three measured waves. Every measured lane
+reached 512 output tokens. Rates count committed decode tokens only in full-batch decode-only
+100-ms wall intervals, including host scheduling. Divide by eight for the average per active
+request. These C8 results were measured separately from the retained C1/C6 matrix; document
+prompts use the repository text at each measurement, so their content differs. They are
+workload throughput samples, not a controlled concurrency-scaling comparison or task-quality score.
+
+| Workload | Prompt tokens | C8 aggregate mean ± sample stddev tok/s | Draft acceptance |
+|---|---:|---:|---:|
+| English story | 146 | 440.0 ± 5.9 | 31.0% |
+| Python package | 171 | 630.0 ± 36.6 | 41.0% |
+| Math reasoning | 346 | 607.9 ± 14.4 | 38.4% |
+| Document summary 8K | 8,194 | 420.0 ± 13.8 | 36.7% |
+| Document summary 32K | 32,779 | 330.0 ± 5.4 | 26.6% |
+
+Published summary: `bench/results/readme-workloads-c8-20261104.json`. Raw requests, responses,
+commands, startup metadata and timing intervals remain under
+`profiles/bench/readme-workloads-c8-20261104/`. Reproduce with the README workload command in
+`tools/bench/README.md`, selecting `--concurrency 8`.
+
+
 ### Windowed KV reservations at C8 (2026-10-22)
 
 A matched full-workload comparison on one R9700 measured automatic shared KV capacity of
