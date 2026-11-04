@@ -83,6 +83,9 @@ struct RamLadderImage {
 };
 
 struct RamCaptureSource {
+    bool system_prompt                    = false;
+    std::uint64_t live_owner              = 0;
+    std::size_t live_reserved_tail_bytes  = 0;
     std::uint32_t execution_frontier      = 0;
     std::uint32_t ledger_frontier         = 0;
     std::int32_t rope_delta               = 0;
@@ -194,8 +197,8 @@ struct RamCaptureResult {
 
 class KVRamCache {
 public:
-    explicit KVRamCache(std::size_t capacity_bytes);
-    explicit KVRamCache(HostPinnedArena&& arena);
+    explicit KVRamCache(std::size_t capacity_bytes, std::uint32_t system_prompt_limit = 0);
+    explicit KVRamCache(HostPinnedArena&& arena, std::uint32_t system_prompt_limit = 0);
     ~KVRamCache();
 
     KVRamCache(const KVRamCache&)            = delete;
@@ -213,7 +216,7 @@ public:
     // the retired entries that became free.
     void claim(std::uint64_t entry_id);
     void release(std::uint64_t entry_id);
-    // Retires a claimed entry after its restore.
+    // Retires a conversation after restore; a system source stays indexed and touches LRU.
     void consume(std::uint64_t entry_id);
     // Completes a successful restore without retiring its source.
     void release_restored(std::uint64_t entry_id);
@@ -221,9 +224,29 @@ public:
     void discard(std::uint64_t entry_id);
     [[nodiscard]] bool is_claimed(std::uint64_t entry_id) const;
 
+    // Credits own real contiguous arena blocks; live images borrow them and are never indexed.
+    // Returns false when contiguous capacity or host metadata cannot be secured. Existing
+    // credits/images remain valid; unclaimed optional prefixes may be evicted while trying.
+    [[nodiscard]] bool reserve_live_credit(std::uint64_t owner, std::size_t bytes);
+    void release_live_credit(std::uint64_t owner);
+    [[nodiscard]] std::pair<void*, std::size_t> live_credit_view(std::uint64_t owner) const;
+    void retire_live_image(std::uint64_t id);
+    void wait_live_image(std::uint64_t id);
+    [[nodiscard]] bool live_image_ready(std::uint64_t id) const;
+    [[nodiscard]] static std::size_t
+    live_image_budget(const PagedKVPool& text, const PagedKVPool* backend, std::uint32_t text_pages,
+                      std::uint32_t backend_pages, std::size_t ledger_tokens,
+                      std::size_t identity_bytes, std::size_t conv_bytes,
+                      std::size_t recurrent_bytes, std::size_t hidden_bytes,
+                      std::size_t cyclic_bytes, std::size_t checkpoint_count);
     [[nodiscard]] RamCaptureResult capture(const RamCaptureSource& source);
+    [[nodiscard]] bool is_system_prompt(std::uint64_t entry_id) const;
+    [[nodiscard]] bool has_system_prompt(const PreparedPromptData& prompt,
+                                         PrefixHash128 hash) const;
+    bool evict_system_prompt();
+    // Ordinary conversations only; system snapshots never enter disk spill enumeration.
     [[nodiscard]] std::vector<std::uint64_t> fifo_ids() const;
-    // Oldest-first ids that are neither claimed nor pinned for I/O.
+    // Ordinary FIFO ids that are neither claimed nor pinned for I/O.
     [[nodiscard]] std::vector<std::uint64_t> unpinned_ids() const;
     // Pins a live entry's block for a reader outside the cache; a retired entry cannot be pinned.
     void pin_for_io(std::uint64_t entry_id);
@@ -291,6 +314,7 @@ public:
     void wait_pending_copies();
     // Waits for one entry's device copies without waiting on unrelated entries.
     void wait_entry_copies(std::uint64_t entry_id);
+    void wait_entry_copies_on_stream(std::uint64_t entry_id, hipStream_t stream);
 
     [[nodiscard]] std::uint64_t index_version() const noexcept { return index_version_; }
 
@@ -305,8 +329,20 @@ public:
 
     void test_fail_next_capture() noexcept { fail_next_capture_ = true; }
 
-    void test_fail_next_capture_metadata_allocation() noexcept {
-        fail_next_capture_metadata_allocation_ = true;
+    static void test_fail_next_capture_metadata_allocation() noexcept {
+        fail_next_capture_metadata_allocation_.store(true, std::memory_order_release);
+    }
+
+    [[nodiscard]] static bool test_capture_metadata_failure_pending() noexcept {
+        return fail_next_capture_metadata_allocation_.load(std::memory_order_acquire);
+    }
+
+    static void test_fail_next_eviction_snapshot_allocation() noexcept {
+        fail_next_eviction_snapshot_allocation_.store(true, std::memory_order_release);
+    }
+
+    [[nodiscard]] static bool test_eviction_snapshot_allocation_pending() noexcept {
+        return fail_next_eviction_snapshot_allocation_.load(std::memory_order_acquire);
     }
 
     static void test_fail_next_plan_metadata_allocation() noexcept {
@@ -365,7 +401,10 @@ private:
     };
 
     struct Record {
-        std::uint64_t id = 0;
+        std::uint64_t id         = 0;
+        bool system_prompt       = false;
+        std::uint64_t live_owner = 0;
+        std::uint64_t last_used  = 0;
         PrefixHash128 hash_f{};
         PrefixHash128 hash_c{};
         bool hash_c_valid                 = false;
@@ -404,6 +443,7 @@ private:
     // Live or retired entries; readers that hold an I/O pin may outlive retirement.
     [[nodiscard]] const Record& require_block(std::uint64_t entry_id) const;
     void retire_locked(std::uint64_t entry_id);
+    bool evict_system_prompt_locked();
     [[nodiscard]] bool retired_free_locked(const Record& record) const;
     void free_block_locked(Record& record);
     void reap_retired_locked();
@@ -425,11 +465,21 @@ private:
 
     void bump_version() noexcept { ++index_version_; }
 
+    struct LiveCredit {
+        void* block       = nullptr;
+        std::size_t bytes = 0;
+    };
+
+    std::unordered_map<std::uint64_t, LiveCredit> live_credits_;
     HostPinnedArena arena_;
     // Rewrite and ladder image copies into and out of entry blocks. Destroyed (drained) before
     // the arena its callbacks write.
     HostCopyStream host_copies_;
     std::deque<std::uint64_t> fifo_;
+    std::uint32_t system_prompt_limit_ = 0;
+    std::uint64_t system_clock_        = 0;
+    std::uint64_t system_restores_     = 0;
+    std::uint64_t system_evictions_    = 0;
     std::unordered_map<std::uint64_t, Record> records_;
     std::vector<std::uint64_t> pending_save_ids_;
     std::vector<std::uint64_t> pending_load_ids_;
@@ -443,12 +493,13 @@ private:
     double save_seconds_             = 0;
     double load_seconds_             = 0;
     mutable std::mutex io_mutex_;
-    bool fail_next_ticket_write_                = false;
-    bool fail_next_capture_                     = false;
-    bool fail_next_capture_metadata_allocation_ = false;
-    int fail_copy_event_allocation_after_       = -1;
+    bool fail_next_ticket_write_ = false;
+    bool fail_next_capture_      = false;
+    inline static std::atomic<bool> fail_next_capture_metadata_allocation_{false};
+    int fail_copy_event_allocation_after_ = -1;
     inline static std::atomic<bool> fail_next_restore_metadata_allocation_{false};
     inline static std::atomic<bool> fail_next_plan_metadata_allocation_{false};
+    inline static std::atomic<bool> fail_next_eviction_snapshot_allocation_{false};
     void (*before_copy_completion_)(void*, hipStream_t) = nullptr;
     void* before_copy_completion_state_                 = nullptr;
     int fail_copy_snapshot_allocation_stage_            = -1;

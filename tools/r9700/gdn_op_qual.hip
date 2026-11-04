@@ -217,7 +217,8 @@ void require_close(const std::vector<float>& actual, const std::vector<Expected>
         const double reference = static_cast<double>(expected[index]);
         const double absolute  = std::abs(observed - reference);
         const double relative  = absolute / std::max(1.0e-6, std::abs(reference));
-        if (absolute > absolute_limit && relative > relative_limit) {
+        if (!std::isfinite(observed) || !std::isfinite(reference) ||
+            (absolute > absolute_limit && relative > relative_limit)) {
             std::ostringstream message;
             message << label << " mismatch at " << index << " observed=" << observed
                     << " expected=" << reference;

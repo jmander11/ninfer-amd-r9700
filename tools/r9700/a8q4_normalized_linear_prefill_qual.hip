@@ -392,8 +392,8 @@ int main(int argc, char** argv) {
         };
         const auto [route_ms, composition_ms] = time_ab(stream, route, composition);
 
-        // ---- Verification width T6 through the public op (the first six fixture rows): one
-        // prepare block that clears a stale status word itself, then the small-batch GEMM. ----
+        // Verification width T6 through the public op (the first six fixture rows): one
+        // prepare block that clears a stale status word itself, then the small-batch GEMM.
         constexpr std::uint32_t kVerifyTokens = 6;
         require(lin::a8q4g64_normalized_linear_batched_supported(kVerifyTokens),
                 "T6 is outside the batched normalized route");
@@ -511,8 +511,8 @@ int main(int argc, char** argv) {
                     "T6 normalized status CTA missed a scale overflow");
         }
 
-        // ---- GDN input front: RMSNorm into the shared codec, BF16 rows published, K5120 ->
-        // query-key N4096, value N6144 and output gate N6144 from the same planes. ----
+        // GDN input front: RMSNorm into the shared codec, BF16 rows published, K5120 ->
+        // query-key N4096, value N6144 and output gate N6144 from the same planes.
         constexpr std::uint32_t kPairRows0 = 4096, kPairRows1 = 6144;
         // pair_codes1/pair_scales1 hold the value-z matrix [2 x 6144 rows]; the value and gate
         // projections read its two row-block halves.
@@ -659,7 +659,7 @@ int main(int argc, char** argv) {
         const auto [pair_route_ms, pair_composition_ms] =
             time_ab(stream, pair_route, pair_composition);
 
-        // ---- GDN output: per-head gated RMSNorm into the A8G64 codec, K6144 -> N5120. ----
+        // GDN output: per-head gated RMSNorm into the A8G64 codec, K6144 -> N5120.
         constexpr std::uint32_t kGatedColumns = 6144, kGatedRows = 5120, kHeadDim = 128;
         std::vector<std::uint8_t> gated_codes(static_cast<std::size_t>(kGatedRows) * kGatedColumns /
                                               2U);
@@ -825,9 +825,9 @@ int main(int argc, char** argv) {
                 gated_worst = std::max(gated_worst, error);
             }
         }
-        // ---- Verification width T6 of the gated route (one thread per 16-byte slot): its planes
+        // Verification width T6 of the gated route (one thread per 16-byte slot): its planes
         // equal the T2048 planes of the same rows byte for byte, and the output is exactly
-        // BF16(residual + the non-accumulating small-batch GEMM on those planes). ----
+        // BF16(residual + the non-accumulating small-batch GEMM on those planes).
         {
             constexpr std::uint32_t kT = 6;
             require(lin::a8q4g64_gated_normalized_linear_supported(kT),
@@ -967,8 +967,8 @@ int main(int argc, char** argv) {
         const auto [gated_route_ms, gated_composition_ms] =
             time_ab(stream, gated_route, gated_composition);
 
-        // ---- Projected-residual prefill (attention output, K6144 -> N5120) and the fused
-        // SiLU down projection (K17408 -> N5120): exact BF16(residual + production GEMM). ----
+        // Projected-residual prefill (attention output, K6144 -> N5120) and the fused
+        // SiLU down projection (K17408 -> N5120): exact BF16(residual + production GEMM).
         require(lin::a8q4g64_projected_residual_supported(tokens, kGatedRows, kGatedColumns),
                 "T2048 attention output is outside the projected-residual prefill route");
         d_gated_output.put(gated_residual);
@@ -1068,9 +1068,9 @@ int main(int argc, char** argv) {
         require(accumulated_exactly(down_output, gated_residual, d_gated_control.get()),
                 "fused down output differs from BF16(residual + production GEMM)");
 
-        // ---- Verification width T6 of the in-place residual epilogue (small-batch routes): the
+        // Verification width T6 of the in-place residual epilogue (small-batch routes): the
         // attention/GDN output projection K6144 and the fused SiLU down K17408, each exactly
-        // BF16(residual + the non-accumulating small-batch GEMM on the same planes). ----
+        // BF16(residual + the non-accumulating small-batch GEMM on the same planes).
         {
             constexpr std::uint32_t kT = 6;
             const std::vector<hip_bfloat16> residual6(gated_residual.begin(),

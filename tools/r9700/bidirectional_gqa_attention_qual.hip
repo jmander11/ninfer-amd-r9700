@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -114,6 +115,36 @@ Result run_case(ninfer::DeviceContext& device, int tokens, const std::vector<std
         }
     }
 
+    // Materialized pages can contain unwritten tails. Keep only the union of the live
+    // contexts finite; poison everything else, including inactive query columns.
+    const hip_bfloat16 poison(std::numeric_limits<float>::quiet_NaN());
+    for (int table_row = 0; table_row < kTableRows; ++table_row) {
+        int live_length = 0;
+        for (int b = 0; b < batch; ++b)
+            if (table_rows[b] == table_row && valid[b] > 0)
+                live_length = std::max(live_length, lengths[b]);
+        for (int position = live_length; position < kLogicalPages * kPage; ++position) {
+            const int physical_page =
+                block_tables[static_cast<std::size_t>(position / kPage) +
+                             static_cast<std::size_t>(kLogicalPages) * table_row];
+            for (int head = 0; head < kKh; ++head)
+                for (int d = 0; d < kD; ++d) {
+                    const auto index = page_index(d, position % kPage, physical_page, head);
+                    context_k[index] = context_v[index] = poison;
+                }
+        }
+    }
+    for (int b = 0; b < batch; ++b)
+        for (int token = valid[b]; token < tokens; ++token) {
+            for (int head = 0; head < kQh; ++head)
+                for (int d = 0; d < kD; ++d) q[q_index(d, head, token, b, tokens)] = poison;
+            for (int head = 0; head < kKh; ++head)
+                for (int d = 0; d < kD; ++d) {
+                    const auto index = kv_index(d, head, token, b, tokens);
+                    query_k[index] = query_v[index] = poison;
+                }
+        }
+
     auto d_q          = upload(q);
     auto d_query_k    = upload(query_k);
     auto d_query_v    = upload(query_v);
@@ -149,8 +180,8 @@ Result run_case(ninfer::DeviceContext& device, int tokens, const std::vector<std
         kScale, context, envelope, workspace, output_tensor, device.stream);
     device.synchronize();
 
-    // Unprofiled event timing at this case's extent (attribution-only baseline for the
-    // Layer-0 decision point; the oracle gate above remains the correctness authority).
+    // Unprofiled event timing at this case's extent. Correctness is checked against the oracle
+    // above.
     Result result;
     const int iters = 200;
     device.synchronize();
@@ -248,7 +279,8 @@ Result run_case(ninfer::DeviceContext& device, int tokens, const std::vector<std
                     const double error = std::abs(got - expected);
                     result.max_abs     = std::max(result.max_abs, error);
                     ++result.compared;
-                    if (error > 0.0045 + 0.004 * std::abs(expected)) {
+                    if (!std::isfinite(got) || !std::isfinite(expected) ||
+                        error > 0.0045 + 0.004 * std::abs(expected)) {
                         throw std::runtime_error("FP64 attention oracle mismatch");
                     }
                 }
@@ -270,7 +302,7 @@ int main() {
         const Result chain = run_case(device, 5, {0, 1}, {5, 3}, {0, 1}, {0, 1});
         const Result tree  = run_case(device, 12, {65, 64}, {12, 7}, {1, 0}, {0, 65});
         std::cout << "bidirectional_gqa_attention: PASS gfx1201 D128/Hq32/Hkv8 "
-                     "T=5/12 B=2 fragmented/mixed max_abs="
+                     "T=5/12 B=2 fragmented/mixed poisoned-unused max_abs="
                   << std::max(chain.max_abs, tree.max_abs)
                   << " compared=" << chain.compared + tree.compared
                   << " median_ms(chain T5)=" << chain.median_ms

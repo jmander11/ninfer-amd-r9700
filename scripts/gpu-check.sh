@@ -10,6 +10,8 @@
 # memory fault, initcheck by the test's own oracle, racecheck by exit status 86 with a report.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/maintainer-env.sh
+source "$repo_root/scripts/maintainer-env.sh"
 mode="${1:-}"
 case "$mode" in
   memcheck|initcheck|racecheck) shift ;;
@@ -23,7 +25,7 @@ if (($#)); then
 fi
 jobs="${NINFER_DEV_JOBS:-8}"
 [[ "$jobs" =~ ^[1-8]$ ]] || { echo 'NINFER_DEV_JOBS must be 1..8.' >&2; exit 2; }
-gpu_lock="${NINFER_GPU_LOCK:-/path/to/local/.ninfer-coordination/gpu.lock}"
+gpu_lock="${NINFER_GPU_LOCK:?Set NINFER_GPU_LOCK in .ninfer-local.env or the environment}"
 tools="$repo_root/tools/r9700/gpu_check"
 
 make -C "$tools" --no-print-directory

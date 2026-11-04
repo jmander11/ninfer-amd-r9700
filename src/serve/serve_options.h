@@ -32,12 +32,13 @@ struct ServeOptions {
     KvCapacityPolicy kv_capacity       = KvCapacityPolicy::automatic();
     std::uint32_t max_concurrency      = 1;
     std::uint32_t max_pending_requests = 16;
-    std::uint32_t pending_timeout_ms   = 30000;
+    std::uint32_t pending_timeout_ms   = 300000;
     std::uint32_t prefill_chunk        = kDefaultPrefillChunk;
     std::optional<std::uint32_t> mixed_forward; // unset => automatic (Engine resolves)
-    std::uint32_t mixed_forward_rounds = 1;
-    std::size_t kv_ram_capacity_bytes  = 0;
-    std::size_t kv_disk_capacity_bytes = 0;
+    std::uint32_t mixed_forward_rounds  = 1;
+    std::size_t kv_ram_capacity_bytes   = 0;
+    std::uint32_t kv_ram_system_prompts = 0;
+    std::size_t kv_disk_capacity_bytes  = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress     = KvDiskCompress::Off;
     std::uint32_t log_stats_interval_ms = 5000; // 0 disables periodic Engine throughput logs
@@ -53,7 +54,9 @@ struct ServeOptions {
     std::optional<std::vector<std::uint32_t>> context_checkpoint_marks;
     bool enable_thinking =
         true; // default thinking mode for the generation prompt (--no-thinking opts out)
+    std::optional<ReasoningEffort> default_reasoning_effort; // unset => artifact template default
     bool preserve_thinking = false;
+    std::optional<std::uint32_t> default_thinking_token_budget; // unset => unlimited
     std::string system_prepend;
     int default_max_tokens = kDefaultMaxTokens;
     bool enable_cors       = false; // send permissive CORS headers for browser UIs

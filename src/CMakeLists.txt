@@ -115,7 +115,7 @@ add_library(ninfer_artifact STATIC
   artifact/materializer.cpp
   artifact/typed_binding.cpp)
 ninfer_r9700_internal_includes(ninfer_artifact)
-target_link_libraries(ninfer_artifact PUBLIC ninfer_r9700_core hip::host)
+target_link_libraries(ninfer_artifact PUBLIC ninfer_r9700_core hip::host PRIVATE OpenSSL::Crypto)
 
 # The R9700 target binder is a closed compilable boundary over the registered evaluation
 # inventories. It performs no runtime repacking: every matrix view points directly into artifact
@@ -136,9 +136,16 @@ target_link_libraries(ninfer_r9700_target_bindings PUBLIC ninfer_artifact hip::h
 # CPU text/frontend support used by the one exact Qwen runtime. Keeping utf8proc in this closed
 # target avoids depending on the removed legacy Engine graph for tokenizer linkage.
 add_library(ninfer_r9700_text STATIC
+  text/json_input.cpp
+  text/json_schema.cpp
+  text/schema_composition.cpp
   text/unicode.cpp
   ${PROJECT_SOURCE_DIR}/third_party/utf8proc/utf8proc.c)
 ninfer_r9700_internal_includes(ninfer_r9700_text)
+target_include_directories(ninfer_r9700_text SYSTEM PRIVATE
+  ${PROJECT_SOURCE_DIR}/third_party/xgrammar/cpp
+  ${PROJECT_SOURCE_DIR}/third_party/xgrammar/3rdparty/picojson)
+target_link_libraries(ninfer_r9700_text PRIVATE ninfer_token_grammar)
 
 find_package(PkgConfig REQUIRED)
 if(NINFER_BUILD_APPS)
@@ -154,7 +161,7 @@ if(NINFER_BUILD_APPS)
   add_library(ninfer_product_prompt_input STATIC
     product/prompt_input/prompt_input.cpp)
   ninfer_r9700_internal_includes(ninfer_product_prompt_input)
-  target_link_libraries(ninfer_product_prompt_input PRIVATE ninfer_media_acquire)
+  target_link_libraries(ninfer_product_prompt_input PRIVATE ninfer_media_acquire ninfer_r9700_text)
 
   add_library(ninfer_product_load_progress STATIC
     product/load_progress/load_progress.cpp)
@@ -241,6 +248,24 @@ add_library(ninfer_engine STATIC
   targets/registry.cpp
   targets/qwen3_8_27b/impl/package.cpp)
 ninfer_r9700_internal_includes(ninfer_engine)
+# Private comparator build. No HTTP/CLI request can select this mechanism.
+# Configure a separate build directory; production retains the canonical-close policy.
+set(NINFER_QUALIFY_REASONING_RETRY OFF CACHE BOOL
+  "Build the private reasoning-limit clean-retry comparator (unqualified)")
+mark_as_advanced(NINFER_QUALIFY_REASONING_RETRY)
+if(NINFER_QUALIFY_REASONING_RETRY)
+  target_compile_definitions(ninfer_engine PRIVATE NINFER_QUALIFY_REASONING_RETRY=1)
+endif()
+
+# Private scheduler A/B with the same RAM arena and all other candidate behavior.
+set(NINFER_QUALIFY_FULL_KV_RESERVATION OFF CACHE BOOL
+  "Use full output reservation for private chunked-KV comparison")
+mark_as_advanced(NINFER_QUALIFY_FULL_KV_RESERVATION)
+if(NINFER_QUALIFY_FULL_KV_RESERVATION)
+  target_compile_definitions(ninfer_r9700_qwen3_8_27b_runtime PRIVATE
+    NINFER_QUALIFY_FULL_KV_RESERVATION=1)
+endif()
+
 set_target_properties(ninfer_engine PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_engine PUBLIC
@@ -260,12 +285,14 @@ if(NINFER_BUILD_APPS)
   # HTTP protocol/product adapter. It depends on the one public Engine and owns no model
   # mathematics, target state, or device backend selection.
   add_library(ninfer_serve STATIC
+    serve/json_input.cpp
     serve/openai_schema.cpp
     serve/responses_schema.cpp
     serve/anthropic_schema.cpp
     serve/response_store.cpp
     serve/translate.cpp
     serve/console_log.cpp
+    serve/startup_watchdog.cpp
     serve/generation_service.cpp
     serve/request_log.cpp
     serve/metrics.cpp
@@ -312,6 +339,14 @@ set_target_properties(ninfer_r9700_engine_cache_cancel_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
 target_link_libraries(ninfer_r9700_engine_cache_cancel_qual PRIVATE ninfer_engine)
 
+# Manual regression for concurrent long tool prompts, checkpoint copies, reuse and decode batches.
+add_executable(ninfer_r9700_concurrent_long_prompt_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/concurrent_long_prompt_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_concurrent_long_prompt_qual)
+set_target_properties(ninfer_r9700_concurrent_long_prompt_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_concurrent_long_prompt_qual PRIVATE ninfer_engine)
+
 # Manual Program-level generation-recovery qualification on resident, retained, and RAM-restored
 # KV; requires an explicit artifact and a speculative backend argument.
 add_executable(ninfer_r9700_recovery_kv_qual
@@ -320,6 +355,20 @@ ninfer_r9700_internal_includes(ninfer_r9700_recovery_kv_qual)
 set_target_properties(ninfer_r9700_recovery_kv_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
 target_link_libraries(ninfer_r9700_recovery_kv_qual PRIVATE
+  ninfer_engine
+  ninfer_r9700_qwen3_8_27b_runtime
+  ninfer_r9700_target_bindings
+  ninfer_artifact
+  ninfer_r9700_core
+  hip::host)
+
+# Real six-lane default DFlash graph geometry and nonfinite publication/recovery qualification.
+add_executable(ninfer_r9700_nonfinite_batch_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/nonfinite_batch_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_nonfinite_batch_qual)
+set_target_properties(ninfer_r9700_nonfinite_batch_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_nonfinite_batch_qual PRIVATE
   ninfer_engine
   ninfer_r9700_qwen3_8_27b_runtime
   ninfer_r9700_target_bindings
@@ -421,6 +470,12 @@ ninfer_r9700_internal_includes(ninfer_r9700_dflash2_select_qual)
 set_target_properties(ninfer_r9700_dflash2_select_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_dflash2_select_qual PRIVATE ninfer_r9700_core hip::host)
+
+add_executable(ninfer_r9700_vision_bf16_linear_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/vision_bf16_linear_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_vision_bf16_linear_qual)
+set_target_properties(ninfer_r9700_vision_bf16_linear_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_vision_bf16_linear_qual PRIVATE ninfer_r9700_core hip::host)
 
 add_executable(ninfer_r9700_linear_op_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/linear_op_qual.hip)
@@ -846,3 +901,14 @@ add_executable(ninfer_r9700_token_logprobs_qual
 ninfer_r9700_internal_includes(ninfer_r9700_token_logprobs_qual)
 set_target_properties(ninfer_r9700_token_logprobs_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_token_logprobs_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Manual target-private continuation proof; one explicitly selected resident artifact/backend.
+add_executable(ninfer_r9700_live_continuation_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/live_continuation_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_live_continuation_qual)
+set_target_properties(ninfer_r9700_live_continuation_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_live_continuation_qual PRIVATE
+  ninfer_engine ninfer_r9700_qwen3_8_27b_runtime ninfer_r9700_target_bindings
+  ninfer_artifact ninfer_r9700_core ninfer_r9700_text ninfer_media_decode
+  ninfer_runtime_capacity Threads::Threads hip::host)

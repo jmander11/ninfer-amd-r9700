@@ -103,6 +103,38 @@ Result run_case(ninfer::DeviceContext& device, int window, int tokens,
         }
     }
 
+    // Only the committed window and live query prefix are represented inputs. Poison every
+    // unused cache slot and inactive Q/K/V row so a load followed by zero multiplication cannot
+    // silently pass the finite-input oracle cases. A slot used by any live row remains finite.
+    const hip_bfloat16 poison(std::numeric_limits<float>::quiet_NaN());
+    for (int b = 0; b < batch; ++b) {
+        std::vector<bool> live_slots(static_cast<std::size_t>(window), false);
+        if (valid[b] > 0) {
+            for (int position = std::max(0, lengths[b] - (window - 1)); position < lengths[b];
+                 ++position) {
+                live_slots[static_cast<std::size_t>(position & (window - 1))] = true;
+            }
+        }
+        for (int slot = 0; slot < window; ++slot) {
+            if (live_slots[static_cast<std::size_t>(slot)]) continue;
+            for (int head = 0; head < kKvHeads; ++head) {
+                for (int d = 0; d < kD; ++d) {
+                    const auto index = context_index(d, slot, head, lanes[b], padded);
+                    context_k[index] = context_v[index] = poison;
+                }
+            }
+        }
+        for (int token = valid[b]; token < tokens; ++token) {
+            for (int head = 0; head < kQHeads; ++head)
+                for (int d = 0; d < kD; ++d) q[q_index(d, head, token, b, tokens)] = poison;
+            for (int head = 0; head < kKvHeads; ++head)
+                for (int d = 0; d < kD; ++d) {
+                    const auto index = query_kv_index(d, head, token, b, tokens);
+                    query_k[index] = query_v[index] = poison;
+                }
+        }
+    }
+
     std::vector<double> expected(q_elements, 0.0);
     std::vector<double> scores(static_cast<std::size_t>(window - 1 + tokens));
     for (int b = 0; b < batch; ++b) {
@@ -204,6 +236,12 @@ Result run_case(ninfer::DeviceContext& device, int window, int tokens,
     }
     std::vector<hip_bfloat16> actual(q_elements);
     d_output.copy_to_host(actual.data(), d_output.size());
+    for (int b = 0; b < batch; ++b)
+        for (int token = valid[b]; token < tokens; ++token)
+            for (int head = 0; head < kQHeads; ++head)
+                for (int d = 0; d < kD; ++d)
+                    if (static_cast<float>(actual[q_index(d, head, token, b, tokens)]) != 0.0F)
+                        fail("SWA inactive output tail was not exactly zero");
     double squared_error     = 0.0;
     double squared_reference = 0.0;
     Result result;
@@ -213,7 +251,8 @@ Result run_case(ninfer::DeviceContext& device, int window, int tokens,
         result.max_abs     = std::max(result.max_abs, std::abs(error));
         squared_error += error * error;
         squared_reference += expected[index] * expected[index];
-        if (std::abs(error) > 0.0045 + 0.004 * std::abs(expected[index])) {
+        if (!std::isfinite(got) || !std::isfinite(expected[index]) ||
+            std::abs(error) > 0.0045 + 0.004 * std::abs(expected[index])) {
             fail("SWA represented-BF16/FP64 oracle mismatch");
         }
     }
@@ -266,7 +305,7 @@ int main() {
             run_case(device, 4096, 7, {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000},
                      {7, 7, 7, 7, 7, 7, 7, 7}, {7, 0, 6, 1, 5, 2, 4, 3}, {0, 9000});
         std::cout << "swa: PASS gfx1201 wave32 D128/Hq32/Hkv8 W4096 T3/B2 mixed-tail "
-                     "W2048 T1 max_abs="
+                     "W2048 T1 poisoned-unused max_abs="
                   << std::max({w4096.max_abs, w2048.max_abs, w2048_b2.max_abs, direct.max_abs,
                                saturated.max_abs, production.max_abs, c8_k7.max_abs, c8_k6.max_abs})
                   << " rel_l2="

@@ -847,6 +847,7 @@ void validate_target_options(DeviceContext& device, const EngineOptions& options
     }
     qwen3::detail::validate_configured_context_checkpoint_marks(options.context_checkpoint_marks,
                                                                 options.speculative.backend);
+    validate_kv_system_prompt_options(options.kv_ram_capacity_bytes, options.kv_ram_system_prompts);
     validate_kv_disk_options(options.kv_ram_capacity_bytes, options.kv_disk_capacity_bytes,
                              options.kv_disk_location);
 }
@@ -907,12 +908,13 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
     impl->use_device_graph         = inputs.use_device_graph;
     impl->device                   = inputs.device;
     impl->kv_ram_capacity_bytes    = inputs.kv_ram_capacity_bytes;
+    impl->kv_ram_system_prompts    = inputs.kv_ram_system_prompts;
     impl->kv_disk_capacity_bytes   = inputs.kv_disk_capacity_bytes;
     impl->kv_disk_location         = inputs.kv_disk_location;
     impl->kv_disk_compress         = inputs.kv_disk_compress;
     impl->model_id                 = inputs.model_id;
     impl->weights_id               = inputs.weights_id;
-    impl->artifact_file_identity   = inputs.artifact_file_identity;
+    impl->artifact_tensor_identity = inputs.artifact_tensor_identity;
     impl->context_checkpoint_marks = inputs.context_checkpoint_marks;
     impl->persistent               = persistent_layout(*impl);
     impl->workspace                = build_workspace_plan(*impl);
@@ -946,8 +948,11 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         }
         impl->graph_definition_count = definitions;
         impl->graph_executable_count = definitions;
+        // Ordinary C1/capacity256 preparation measured 44 MiB on gfx1201 with eligible-logit
+        // reporting (2026-10-18). Its two profiles reserve 20 MiB below; the remaining 24 MiB
+        // is family residency. Reporting adds no captured graph nodes.
         const std::size_t family_bytes =
-            (impl->speculative_backend == SpeculativeBackend::None  ? 23U
+            (impl->speculative_backend == SpeculativeBackend::None  ? 24U
              : impl->speculative_backend == SpeculativeBackend::Mtp ? 46U
                                                                     : 48U) *
             kMiB;
@@ -963,6 +968,13 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
                 impl->weights_profile, impl->features, impl->capacity, impl->max_concurrency,
                 impl->prefill_chunk, impl->draft_window, impl->adaptive_draft)) {
             impl->graph_allowance_bytes = std::min(impl->graph_allowance_bytes, *calibrated);
+        }
+        if (lowered_definitions != 0U) {
+            // Cooperative graph dispatch adds shared runtime residency, not a new argument pool
+            // per definition. C6 bulk preparation measured 80 MiB against the previous
+            // 62-MiB inventory (2026-10-19); reserve 20 MiB for the additional graph residency.
+            impl->graph_allowance_bytes = checked_add(impl->graph_allowance_bytes, 20U * kMiB,
+                                                      "cooperative decode dispatch residency");
         }
     }
     impl->device_reservation_bytes = checked_add(
@@ -1024,12 +1036,13 @@ make_sequence_planner_impl(DeviceContext& device, const EngineOptions& options,
         .use_device_graph         = options.use_device_graph,
         .device                   = options.device,
         .kv_ram_capacity_bytes    = options.kv_ram_capacity_bytes,
+        .kv_ram_system_prompts    = options.kv_ram_system_prompts,
         .kv_disk_capacity_bytes   = options.kv_disk_capacity_bytes,
         .kv_disk_location         = options.kv_disk_location,
         .kv_disk_compress         = options.kv_disk_compress,
         .model_id                 = options.model_id,
         .weights_id               = options.weights_id,
-        .artifact_file_identity   = options.artifact_file_identity,
+        .artifact_tensor_identity = options.artifact_tensor_identity,
         .context_checkpoint_marks =
             qwen3::detail::resolved_prefill_context_marks(options.context_checkpoint_marks),
     };

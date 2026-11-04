@@ -1,0 +1,778 @@
+{
+  "description": "Historical R9700 qualification evidence removed from the public tracked tree and rewritten history; originals are retained only in the private recovery bundle and maintainer archive.",
+  "source_commit": "5ef7805006476223ef00e66d1ee24157e8a7bbd9",
+  "tracked_files": 3409,
+  "uncompressed_file_bytes": 166273035,
+  "archive_filename": "ninfer-evidence-5ef78050.tar.gz",
+  "archive_sha256": "d78e438beda3e3ae69d4e37a7ab37f02b1112a3563bce73458d75e32a6ed9405",
+  "archive_bytes": 69883212,
+  "restore_command": "tar -xzf /path/to/private/ninfer-evidence-5ef78050.tar.gz",
+  "published_summaries": [
+    "docs/performance.md",
+    "bench/results/readme-workloads-20261017.json",
+    "tools/ppl/fixtures/nvfp4-5090-20260922/reference.json"
+  ],
+  "groups": [
+    {
+      "path": "profiles/bench/a8q4-group-major-activation-prepare-20260905",
+      "files": 4,
+      "bytes": 4995
+    },
+    {
+      "path": "profiles/bench/a8q4-n16k16-scalar-base-prepare-20260905",
+      "files": 4,
+      "bytes": 6846
+    },
+    {
+      "path": "profiles/bench/a8q4-n16k16-scalar-base-repeat1-prepare-20260905",
+      "files": 3,
+      "bytes": 2745
+    },
+    {
+      "path": "profiles/bench/a8q4-n16k16-weight-ht-prepare-20260905",
+      "files": 4,
+      "bytes": 8204
+    },
+    {
+      "path": "profiles/bench/final-artifact-cutover-admission-prepare-20260905",
+      "files": 3,
+      "bytes": 7872
+    },
+    {
+      "path": "profiles/bench/low-context-selected-ladder-20260905",
+      "files": 3,
+      "bytes": 7948
+    },
+    {
+      "path": "profiles/bench/post-chunk-twelve-candidate-20260905",
+      "files": 4,
+      "bytes": 25139
+    },
+    {
+      "path": "profiles/bench/post-terminal-focused-verification-20260905",
+      "files": 4,
+      "bytes": 24356
+    },
+    {
+      "path": "profiles/bench/post-terminal-niah-prepare-20260905",
+      "files": 3,
+      "bytes": 3900
+    },
+    {
+      "path": "profiles/bench/post-terminal-selected-hardware-use-20260905",
+      "files": 3,
+      "bytes": 8357
+    },
+    {
+      "path": "profiles/bench/post-terminal-selected-vision-prepare-20260905",
+      "files": 3,
+      "bytes": 4514
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-all-q4-g16-dense-panel-attention-20260921",
+      "files": 3,
+      "bytes": 20835
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-all-q4-g16-xattention-s16-tau900-panel-attention-20260921",
+      "files": 3,
+      "bytes": 21249
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-all-q4-g32-dense-panel-attention-20260921",
+      "files": 3,
+      "bytes": 20825
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-all-q4-g32-xattention-s16-tau900-panel-attention-20260921",
+      "files": 3,
+      "bytes": 21250
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-four-role-g16-dense-panel-attention-20260921",
+      "files": 3,
+      "bytes": 22878
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-four-role-g16-xattention-s16-tau900-panel-attention-20260921",
+      "files": 3,
+      "bytes": 23318
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-four-role-g32-dense-panel-attention-20260921",
+      "files": 3,
+      "bytes": 22889
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-four-role-g32-xattention-s16-tau900-panel-attention-20260921",
+      "files": 3,
+      "bytes": 23317
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-mixed-g16-dense-panel-attention-20260921",
+      "files": 3,
+      "bytes": 20892
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-mixed-g16-xattention-s16-tau900-panel-attention-20260921",
+      "files": 3,
+      "bytes": 21308
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-mixed-g32-dense-panel-attention-20260921",
+      "files": 3,
+      "bytes": 20888
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-finalist-mixed-g32-xattention-s16-tau900-panel-attention-20260921",
+      "files": 3,
+      "bytes": 21315
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-all-q4-g16-dense-panel-attention-20260921",
+      "files": 5,
+      "bytes": 37960
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-all-q4-g16-dense-receipt-bound-n16k16-20260921",
+      "files": 4,
+      "bytes": 26549
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-all-q4-g16-xattention-s16-tau900-panel-attention-20260921",
+      "files": 5,
+      "bytes": 38779
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-all-q4-g32-dense-panel-attention-20260921",
+      "files": 5,
+      "bytes": 37961
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-all-q4-g32-xattention-s16-tau900-panel-attention-20260921",
+      "files": 5,
+      "bytes": 38778
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-four-role-g16-dense-panel-attention-20260921",
+      "files": 5,
+      "bytes": 40727
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-four-role-g16-xattention-s16-tau900-panel-attention-20260921",
+      "files": 5,
+      "bytes": 41554
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-four-role-g32-dense-panel-attention-20260921",
+      "files": 5,
+      "bytes": 40703
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-four-role-g32-xattention-s16-tau900-panel-attention-20260921",
+      "files": 5,
+      "bytes": 41546
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-mixed-g16-dense-panel-attention-20260921",
+      "files": 5,
+      "bytes": 38054
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-mixed-g16-xattention-s16-tau900-panel-attention-20260921",
+      "files": 5,
+      "bytes": 38871
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-mixed-g32-dense-panel-attention-20260921",
+      "files": 5,
+      "bytes": 38052
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screen-mixed-g32-xattention-s16-tau900-panel-attention-20260921",
+      "files": 5,
+      "bytes": 38866
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-screening-panel-attention-20260921.json",
+      "files": 1,
+      "bytes": 27257
+    },
+    {
+      "path": "profiles/bench/prefill-chunk-selection-panel-attention-20260921.json",
+      "files": 1,
+      "bytes": 62410
+    },
+    {
+      "path": "profiles/bench/r9700-a8-bound-dflash-20260923",
+      "files": 83,
+      "bytes": 476769
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-gdn-pair-t1-qualification-20260919.json",
+      "files": 1,
+      "bytes": 3657
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-group-major-activation-p2048-ab-20260905.json",
+      "files": 1,
+      "bytes": 9067
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-n16k16-m64n192-scalar-base-p2048-ab-20260905.json",
+      "files": 1,
+      "bytes": 12858
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-n16k16-m96n256-p2048-ab-20260905.json",
+      "files": 1,
+      "bytes": 11673
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-n16k16-scalar-base-p2048-ab-20260905.json",
+      "files": 1,
+      "bytes": 9651
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-n16k16-scalar-base-p2048-ab-repeat1-20260905.json",
+      "files": 1,
+      "bytes": 10388
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-n16k16-weight-device-ht-p2048-ab-20260905.json",
+      "files": 1,
+      "bytes": 6973
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919",
+      "files": 10,
+      "bytes": 801744
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919",
+      "files": 14,
+      "bytes": 904386
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920",
+      "files": 24,
+      "bytes": 947114
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920",
+      "files": 29,
+      "bytes": 961831
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920",
+      "files": 33,
+      "bytes": 5513219
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry1-20260920",
+      "files": 33,
+      "bytes": 5518351
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920",
+      "files": 37,
+      "bytes": 5546974
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-20260920",
+      "files": 37,
+      "bytes": 5540755
+    },
+    {
+      "path": "profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-retry1-20260920",
+      "files": 37,
+      "bytes": 5545220
+    },
+    {
+      "path": "profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906",
+      "files": 52,
+      "bytes": 3566411
+    },
+    {
+      "path": "profiles/bench/r9700-attention-parity-candidate-focused-20260906",
+      "files": 1,
+      "bytes": 3100
+    },
+    {
+      "path": "profiles/bench/r9700-attention-projection-t1-production-qualification-20260919",
+      "files": 5,
+      "bytes": 16801
+    },
+    {
+      "path": "profiles/bench/r9700-attention-q4-pair-t1-direct-20260919",
+      "files": 8,
+      "bytes": 565428
+    },
+    {
+      "path": "profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919",
+      "files": 33,
+      "bytes": 108404
+    },
+    {
+      "path": "profiles/bench/r9700-base-decode-bandwidth-baseline-20260919",
+      "files": 25,
+      "bytes": 75132
+    },
+    {
+      "path": "profiles/bench/r9700-base-decode-dot8-cold-block-sweep-20260919.json",
+      "files": 1,
+      "bytes": 8562
+    },
+    {
+      "path": "profiles/bench/r9700-bf16-gdn-control-t1-20260919",
+      "files": 7,
+      "bytes": 721836
+    },
+    {
+      "path": "profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919",
+      "files": 14,
+      "bytes": 661283
+    },
+    {
+      "path": "profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919",
+      "files": 17,
+      "bytes": 60249
+    },
+    {
+      "path": "profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919",
+      "files": 10,
+      "bytes": 54129
+    },
+    {
+      "path": "profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920",
+      "files": 31,
+      "bytes": 147287
+    },
+    {
+      "path": "profiles/bench/r9700-chunk-selection-panel-attention-20260921",
+      "files": 5,
+      "bytes": 23962
+    },
+    {
+      "path": "profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921",
+      "files": 6,
+      "bytes": 23492
+    },
+    {
+      "path": "profiles/bench/r9700-chunked-attention-candidate-20260921",
+      "files": 12,
+      "bytes": 32724
+    },
+    {
+      "path": "profiles/bench/r9700-chunked-attention-candidate-leaf-retry1-20260921",
+      "files": 20,
+      "bytes": 102964
+    },
+    {
+      "path": "profiles/bench/r9700-compact-followup-20260923",
+      "files": 193,
+      "bytes": 578387
+    },
+    {
+      "path": "profiles/bench/r9700-concurrent-overhead-20260923",
+      "files": 141,
+      "bytes": 1128338
+    },
+    {
+      "path": "profiles/bench/r9700-dense-bk-crossover-p2048-c1-20260904.json",
+      "files": 1,
+      "bytes": 6415
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-companion-ops-20260921",
+      "files": 40,
+      "bytes": 42340
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-down-scale-gather-qualification-20260921",
+      "files": 24,
+      "bytes": 694695
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921",
+      "files": 50,
+      "bytes": 175546
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-four-role-n16k16-canonical-q4-preflight-20260906",
+      "files": 4,
+      "bytes": 12325
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906",
+      "files": 17,
+      "bytes": 61254
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-mlp-down-t5-matched-builds-20260906",
+      "files": 4,
+      "bytes": 15265
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906",
+      "files": 13,
+      "bytes": 30929
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-mlp-down-t5-qualification-20260906",
+      "files": 11,
+      "bytes": 28337
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906",
+      "files": 58,
+      "bytes": 168009
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-projections-tail-20260923",
+      "files": 93,
+      "bytes": 599714
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906",
+      "files": 8,
+      "bytes": 23000
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906",
+      "files": 20,
+      "bytes": 61296
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906",
+      "files": 36,
+      "bytes": 198723
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-small-t-c1-20260906",
+      "files": 80,
+      "bytes": 177894
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-small-t-flattened-20260906",
+      "files": 18,
+      "bytes": 42462
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906",
+      "files": 5,
+      "bytes": 17499
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906",
+      "files": 5,
+      "bytes": 47343
+    },
+    {
+      "path": "profiles/bench/r9700-dflash-verify-down-production-confirm-20260921",
+      "files": 29,
+      "bytes": 112193
+    },
+    {
+      "path": "profiles/bench/r9700-dot8-weight-nt-direct-v2-20260906",
+      "files": 1,
+      "bytes": 12126
+    },
+    {
+      "path": "profiles/bench/r9700-dot8-weight-nt-whole-p8192-g32-screen-20260906.json",
+      "files": 1,
+      "bytes": 52823
+    },
+    {
+      "path": "profiles/bench/r9700-dot8-weight-nt-whole-p8192-g32-screen-20260906.json.raw",
+      "files": 12,
+      "bytes": 69359
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-context-model-startup-20260921",
+      "files": 7,
+      "bytes": 12419
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906",
+      "files": 55,
+      "bytes": 18317846
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-four-role-pre-shared-workspace-p2048-c1-20260904.json",
+      "files": 1,
+      "bytes": 6474
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906",
+      "files": 36,
+      "bytes": 156921
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-prefix-common-e2-diagnostic-20260906",
+      "files": 9,
+      "bytes": 392157
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906",
+      "files": 22,
+      "bytes": 571665
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906",
+      "files": 24,
+      "bytes": 62398
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-vs-a8q4-attention-qk-gate-value-linear-execution-20260904.json",
+      "files": 1,
+      "bytes": 2862
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-vs-a8q4-gate-up-linear-execution-20260904.json",
+      "files": 1,
+      "bytes": 2794
+    },
+    {
+      "path": "profiles/bench/r9700-fp8-vs-a8q4-gdn-query-key-linear-execution-20260904.json",
+      "files": 1,
+      "bytes": 2841
+    },
+    {
+      "path": "profiles/bench/r9700-gate-up-prefetch-qualification-20260920",
+      "files": 29,
+      "bytes": 2378906
+    },
+    {
+      "path": "profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920",
+      "files": 25,
+      "bytes": 772784
+    },
+    {
+      "path": "profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919",
+      "files": 43,
+      "bytes": 134011
+    },
+    {
+      "path": "profiles/bench/r9700-gdn-q4-pair-t1-whole-ab-20260919",
+      "files": 31,
+      "bytes": 86851
+    },
+    {
+      "path": "profiles/bench/r9700-n16k16-q4-cu-mask-causal-prepare-20260905",
+      "files": 18,
+      "bytes": 62089
+    },
+    {
+      "path": "profiles/bench/r9700-n16k16-q4-cu-mask-causal-repeat1-prepare-20260905",
+      "files": 19,
+      "bytes": 52137
+    },
+    {
+      "path": "profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920",
+      "files": 32,
+      "bytes": 77296
+    },
+    {
+      "path": "profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920",
+      "files": 25,
+      "bytes": 2356184
+    },
+    {
+      "path": "profiles/bench/r9700-normalized-linear-t1-qualification-20260920",
+      "files": 24,
+      "bytes": 2357459
+    },
+    {
+      "path": "profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920",
+      "files": 56,
+      "bytes": 123067
+    },
+    {
+      "path": "profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919",
+      "files": 5,
+      "bytes": 25571
+    },
+    {
+      "path": "profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919",
+      "files": 81,
+      "bytes": 304241
+    },
+    {
+      "path": "profiles/bench/r9700-projected-residual-t1-production-confirmation-20260920",
+      "files": 11,
+      "bytes": 38009
+    },
+    {
+      "path": "profiles/bench/r9700-projected-residual-t1-production-confirmation-retry1-20260920",
+      "files": 31,
+      "bytes": 77641
+    },
+    {
+      "path": "profiles/bench/r9700-projected-residual-t1-whole-ab-20260920",
+      "files": 55,
+      "bytes": 115752
+    },
+    {
+      "path": "profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906",
+      "files": 43,
+      "bytes": 5415240
+    },
+    {
+      "path": "profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906",
+      "files": 24,
+      "bytes": 14243251
+    },
+    {
+      "path": "profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906",
+      "files": 49,
+      "bytes": 5747289
+    },
+    {
+      "path": "profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906",
+      "files": 39,
+      "bytes": 9201800
+    },
+    {
+      "path": "profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906",
+      "files": 31,
+      "bytes": 3429368
+    },
+    {
+      "path": "profiles/bench/r9700-qwen3-layer3-attention-trace-72cebe82-20260906",
+      "files": 31,
+      "bytes": 5072673
+    },
+    {
+      "path": "profiles/bench/r9700-remaining-candidates-20260924",
+      "files": 209,
+      "bytes": 1585663
+    },
+    {
+      "path": "profiles/bench/r9700-rmsnorm-dflash-rows56-qualification-20260906",
+      "files": 15,
+      "bytes": 24743
+    },
+    {
+      "path": "profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921",
+      "files": 113,
+      "bytes": 470832
+    },
+    {
+      "path": "profiles/bench/r9700-terminal-base-panel-attention-20260921",
+      "files": 212,
+      "bytes": 682010
+    },
+    {
+      "path": "profiles/bench/r9700-terminal-base-phase-sum-20260921",
+      "files": 68,
+      "bytes": 579564
+    },
+    {
+      "path": "profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906",
+      "files": 25,
+      "bytes": 2720384
+    },
+    {
+      "path": "profiles/bench/r9700-three-route-production-confirmation-20260920",
+      "files": 23,
+      "bytes": 90734
+    },
+    {
+      "path": "profiles/bench/r9700-xattention-real-keep-distribution-20260921",
+      "files": 58,
+      "bytes": 2038186
+    },
+    {
+      "path": "profiles/bench/selected-dflash-prepare-20260905",
+      "files": 3,
+      "bytes": 7400
+    },
+    {
+      "path": "profiles/bench/terminal-static-selection-20260905",
+      "files": 3,
+      "bytes": 13127
+    },
+    {
+      "path": "profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904",
+      "files": 4,
+      "bytes": 70634
+    },
+    {
+      "path": "profiles/ppl/four-role-n16k16-a4-8k-20260905",
+      "files": 5,
+      "bytes": 65086
+    },
+    {
+      "path": "profiles/ppl/four-role-n16k16-a4-8k-prepare-20260905",
+      "files": 4,
+      "bytes": 15432
+    },
+    {
+      "path": "profiles/ppl/post-terminal-exact-token-prepare-20260905",
+      "files": 3,
+      "bytes": 4754
+    },
+    {
+      "path": "profiles/ppl/r9700-bf16-source-checkpoint-preflight-20260905.json",
+      "files": 1,
+      "bytes": 3257
+    },
+    {
+      "path": "profiles/ppl/r9700-selective-protected-comparison-20260921",
+      "files": 15,
+      "bytes": 244930
+    },
+    {
+      "path": "profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921",
+      "files": 108,
+      "bytes": 2888976
+    },
+    {
+      "path": "profiles/ppl/terminal-quality-recovery-20260905",
+      "files": 4,
+      "bytes": 18639
+    },
+    {
+      "path": "profiles/rocprof/diagnostic-p2048-current-production-selected-region-20260904",
+      "files": 1,
+      "bytes": 20218
+    },
+    {
+      "path": "profiles/rocprof/r9700-chunked-prefill-attribution-20260921",
+      "files": 8,
+      "bytes": 51877
+    },
+    {
+      "path": "profiles/rocprof/r9700-compact-mixed-speed-20260923",
+      "files": 36,
+      "bytes": 461013
+    },
+    {
+      "path": "profiles/rocprof/r9700-dflash-q4-c1-k4k5-owner-trace-plan-20260906",
+      "files": 16,
+      "bytes": 37309610
+    },
+    {
+      "path": "profiles/rocprof/r9700-post-rmsnorm-ordinary-c1-p8192-g256-proxy-plan-20260906",
+      "files": 4,
+      "bytes": 128215
+    },
+    {
+      "path": "profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906",
+      "files": 11,
+      "bytes": 1867696
+    },
+    {
+      "path": "profiles/rocprof/selected-ordinary-decode-memory-prepare-20260905",
+      "files": 3,
+      "bytes": 4283
+    },
+    {
+      "path": "profiles/rocprof/selected-ordinary-decode-profile-build-20260905",
+      "files": 3,
+      "bytes": 3203
+    }
+  ],
+  "history_note": "Source commit refers to the private pre-redaction recovery bundle. Raw profiles are excluded from the rewritten public history."
+}

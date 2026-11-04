@@ -1,5 +1,6 @@
 #include "serve/console_log.h"
 #include "serve/request_log.h"
+#include "serve/translate.h"
 #include "product/context_checkpoint_format.h"
 
 #include <cmath>
@@ -39,18 +40,21 @@ int main() {
                                          .cycle_exclusions           = 17,
                                          .discarded_tool_calls       = 0,
                                          .discarded_reasoning_tokens = 6568,
+                                         .framing_repairs            = 1,
+                                         .discarded_content_tokens   = 570,
                                          .generated_tokens           = 7000,
                                          .remaining_tokens           = 25000};
     failures +=
         check(format_recovery_event(103, recovery_event) ==
                   "[req 103] recovery event=retry_triggered cause=repeated_reasoning attempts=1"
                   " cycle_exclusions=17 discarded_tool_calls=0 discarded_reasoning_tokens=6568"
-                  " gen=7000 remaining=25000",
+                  " framing_repairs=1 discarded_content_tokens=570 gen=7000 remaining=25000",
               "reasoning recovery log lost request identity or accounting");
     for (const auto& [kind, name] : std::vector<std::pair<ninfer::RecoveryEventKind, std::string>>{
              {ninfer::RecoveryEventKind::CycleExclusion, "cycle_exclusion"},
              {ninfer::RecoveryEventKind::RetryStarted, "retry_started"},
              {ninfer::RecoveryEventKind::RetryPrefillComplete, "retry_prefill_complete"},
+             {ninfer::RecoveryEventKind::ReplayDiscarded, "replay_discarded"},
              {ninfer::RecoveryEventKind::Finished, "finished"},
              {ninfer::RecoveryEventKind::Exhausted, "exhausted"}}) {
         recovery_event.kind                 = kind;
@@ -87,6 +91,8 @@ int main() {
     options.enable_vision                  = false;
     options.allow_prefix_reuse             = false;
     options.preserve_thinking              = true;
+    options.default_thinking_token_budget  = 16384;
+    options.default_reasoning_effort       = ninfer::ReasoningEffort::Low;
     options.sampling_overrides.temperature = 0.6F;
     options.startup_argv = {"ninfer-serve", options.artifact_path, "--api-key", "<redacted>"};
 
@@ -145,7 +151,7 @@ int main() {
                       "server record artifact type mismatch");
     failures += check(server.at("schema_version") == kRequestLogSchemaVersion,
                       "server record schema mismatch");
-    failures += check(kRequestLogSchemaVersion == 24, "request-log schema is not version 24");
+    failures += check(kRequestLogSchemaVersion == 29, "request-log schema is not version 29");
     failures += check(server.at("event") == "server_start", "server event mismatch");
     failures += check(server.at("server").at("public_model_id") == "deployment-alias",
                       "resolved public model id missing");
@@ -297,6 +303,77 @@ int main() {
         check(started.at("request").at("request_id") == 7, "request id missing from start record");
     failures += check(started.at("request").at("requested_output_tokens") == 4096,
                       "request output budget missing");
+    failures +=
+        check(started.at("request").at("reasoning_effort").is_null() &&
+                  started.at("request").at("reasoning_effort_param").get<std::string>().empty() &&
+                  format_request_start(context).find("reasoning_effort=") == std::string::npos,
+              "omitted effort was logged as a request override");
+    for (const auto* param : {"reasoning_effort", "reasoning.effort", "output_config.effort"}) {
+        for (const auto effort :
+             {RequestedReasoningEffort::Low, RequestedReasoningEffort::Medium,
+              RequestedReasoningEffort::XHigh, RequestedReasoningEffort::None}) {
+            GenerationRequest overridden      = request;
+            overridden.reasoning_effort       = effort;
+            overridden.reasoning_effort_param = param;
+            const auto overridden_context =
+                make_request_log_context(9, "test", overridden, prepared, 0.0);
+            const auto logged =
+                Json::parse(format_request_start_json("serve-test", 2000, overridden_context));
+            const std::string name(requested_reasoning_effort_name(effort));
+            const auto console = format_request_start(overridden_context);
+            failures += check(logged.at("request").at("reasoning_effort") == name &&
+                                  logged.at("request").at("reasoning_effort_param") == param &&
+                                  console.find("reasoning_effort=" + name) != std::string::npos &&
+                                  console.find(std::string("reasoning_effort_param=") + param) !=
+                                      std::string::npos,
+                              "request log lost explicit reasoning effort or its source field");
+        }
+    }
+    const ninfer::ReasoningLimitStats failed_cap{
+        .budget_tokens = 4096, .used_tokens = 4096, .limit_reached = true};
+    const Json capped_error = Json::parse(
+        format_request_error_json("serve-test", 2000, context, "no replacement room", &failed_cap));
+    failures += check(capped_error.at("reasoning_limit").at("used_tokens") == 4096,
+                      "request error log lost policy accounting");
+    failures += check(server.at("server").at("default_thinking_token_budget") == 16384,
+                      "startup log lost server default reasoning cap");
+    failures += check(server.at("server").at("default_reasoning_effort") == "low",
+                      "startup log lost configured default reasoning effort");
+    GenerationRequest inherited;
+    ServeOptions capped_server;
+    capped_server.default_thinking_token_budget = 16384;
+    const auto effective = resolve_request_semantics(inherited, capped_server, {});
+    PreparedRequest capped_prepared;
+    capped_prepared.enable_thinking            = effective.enable_thinking;
+    capped_prepared.thinking_token_budget      = effective.thinking_token_budget;
+    capped_prepared.effective_reasoning_effort = ninfer::ReasoningEffort::Low;
+    const auto capped_context =
+        make_request_log_context(8, "openai_chat_completions", inherited, capped_prepared, 0.0);
+    const auto inherited_log =
+        Json::parse(format_request_start_json("serve-test", 2000, capped_context));
+    failures += check(inherited_log.at("request").at("thinking_token_budget") == 16384 &&
+                          inherited_log.at("request").at("enable_thinking") == true,
+                      "request log did not retain the effective inherited reasoning cap");
+    failures +=
+        check(inherited_log.at("request").at("effective_reasoning_effort") == "low" &&
+                  inherited_log.at("request").at("reasoning_effort").is_null() &&
+                  format_request_start(capped_context).find("effective_reasoning_effort=low") !=
+                      std::string::npos,
+              "request log did not distinguish effective effort from explicit override");
+    GenerationRequest explicit_low = inherited;
+    explicit_low.reasoning_effort  = RequestedReasoningEffort::Low;
+    const auto same_effort_context =
+        make_request_log_context(10, "openai_chat_completions", explicit_low, capped_prepared, 0.0);
+    const auto same_effort_log =
+        Json::parse(format_request_start_json("serve-test", 2000, same_effort_context));
+    failures +=
+        check(same_effort_log.at("request").at("reasoning_effort") == "low" &&
+                  same_effort_log.at("request").at("effective_reasoning_effort") == "low" &&
+                  format_request_start(same_effort_context).find(" reasoning_effort=low ") !=
+                      std::string::npos,
+              "explicit low matching the default was not logged as an override");
+    failures += check(started.at("request").at("thinking_token_budget").is_null(),
+                      "unlimited reasoning cap missing from resolved request diagnostics");
     failures += check(started.at("request").at("enable_thinking") == false,
                       "resolved thinking mode missing");
     failures += check(started.at("request").at("preserve_thinking") == true &&
@@ -340,20 +417,21 @@ int main() {
               "human preparation rejection log is incomplete");
 
     GenerationOutcome outcome;
-    outcome.prompt_tokens                    = 401;
-    outcome.completion_tokens                = 1024;
-    outcome.finish_reason                    = ninfer::FinishReason::OutputLimit;
-    outcome.metrics.prepare_seconds          = 0.1234567890123;
-    outcome.metrics.ttft_seconds             = 0.3580246791357;
-    outcome.metrics.vision_seconds           = 0.0;
-    outcome.metrics.prefill_seconds          = 0.2345678901234;
-    outcome.metrics.decode_seconds           = 5.3456789012345;
-    outcome.metrics.total_seconds            = 5.7037035803702;
-    outcome.metrics.prefix_cache_hit_tokens  = 101;
-    outcome.metrics.prefix_reuse_path        = ninfer::PrefixReusePath::RestoreTurnCheckpoint;
-    outcome.metrics.speculative_backend      = ninfer::SpeculativeBackend::Mtp;
-    outcome.metrics.speculative_draft_window = 3;
-    outcome.metrics.speculative_rounds       = 300;
+    outcome.prompt_tokens                          = 401;
+    outcome.completion_tokens                      = 1024;
+    outcome.finish_reason                          = ninfer::FinishReason::OutputLimit;
+    outcome.metrics.prepare_seconds                = 0.1234567890123;
+    outcome.metrics.ttft_seconds                   = 0.3580246791357;
+    outcome.metrics.vision_seconds                 = 0.0;
+    outcome.metrics.prefill_seconds                = 0.2345678901234;
+    outcome.metrics.decode_seconds                 = 5.3456789012345;
+    outcome.metrics.total_seconds                  = 5.7037035803702;
+    outcome.metrics.prefix_cache_hit_tokens        = 101;
+    outcome.metrics.system_prompt_cache_hit_tokens = 101;
+    outcome.metrics.prefix_reuse_path              = ninfer::PrefixReusePath::RestoreTurnCheckpoint;
+    outcome.metrics.speculative_backend            = ninfer::SpeculativeBackend::Mtp;
+    outcome.metrics.speculative_draft_window       = 3;
+    outcome.metrics.speculative_rounds             = 300;
     outcome.metrics.speculative_p_less_draft_temperature = 0.8F;
     outcome.metrics.speculative_draft_tokens             = 900;
     outcome.metrics.speculative_accepted_tokens          = 720;
@@ -361,6 +439,10 @@ int main() {
     outcome.metrics.speculative_accepted_per_position    = {290, 240, 190};
 
     const Json done = Json::parse(format_request_done_json("serve-test", 3000, context, outcome));
+    failures += check(done.at("result").at("system_prompt_cache_hit_tokens") == 101 &&
+                          format_request_done(context, outcome).find("system_cached=101tok") !=
+                              std::string::npos,
+                      "system-prefix cache token count missing from request logs");
     failures += check(std::abs(done.at("speculative").at("p_less_draft_temperature").get<float>() -
                                0.8F) < 1.0e-6F,
                       "speculative draft temperature missing");
@@ -634,6 +716,35 @@ int main() {
                           recovery_line.at("cycle_exclusions") == 4,
                       "recovery event JSON mismatch");
 
+    cycle_recovery.kind            = ninfer::RecoveryEventKind::RetryStarted;
+    cycle_recovery.enable_thinking = false;
+    cycle_recovery.sampling        = ninfer::ResolvedSamplingParameters{.temperature       = 1.5F,
+                                                                        .top_k             = 0,
+                                                                        .top_p             = 1.0F,
+                                                                        .min_p             = 0.0F,
+                                                                        .presence_penalty  = 0.0F,
+                                                                        .frequency_penalty = 0.0F,
+                                                                        .seed              = 20261020,
+                                                                        .p_less            = false};
+    const Json retry_line =
+        Json::parse(format_recovery_event_json("serve-test", 4101, 7, cycle_recovery));
+    failures += check(retry_line.at("sampling") == Json{{"temperature", 1.5},
+                                                        {"top_k", 0},
+                                                        {"top_p", 1.0},
+                                                        {"min_p", 0.0},
+                                                        {"presence_penalty", 0.0},
+                                                        {"frequency_penalty", 0.0},
+                                                        {"seed", 20261020},
+                                                        {"p_less", false}},
+                      "retry sampling log loses the actual profile");
+    failures += check(retry_line.at("enable_thinking") == false,
+                      "retry log loses native non-thinking mode");
+    failures +=
+        check(format_recovery_event(7, cycle_recovery)
+                      .find("p_less=0 temperature=1.5 top_k=0 top_p=1 min_p=0 presence_penalty=0 "
+                            "frequency_penalty=0 seed=20261020") != std::string::npos,
+              "console retry log loses the actual profile");
+
     failures += check(format_request_start(context).find("thinking=off") != std::string::npos,
                       "human request log omits resolved thinking mode");
     failures +=
@@ -695,19 +806,22 @@ int main() {
     ram_throughput.scheduler.gpu_kv_main_entitled_pages    = 40;
     ram_throughput.scheduler.kv_cache_fallbacks            = 2;
     ram_throughput.scheduler.kv_disk_spill_active          = true;
-    ram_throughput.scheduler.kv_disk_compaction_active     = true;
+    ram_throughput.scheduler.kv_disk_defrag_active         = true;
+    ram_throughput.scheduler.kv_disk_storage_bytes         = 8388608;
     ram_throughput.scheduler.kv_disk_restore_active        = true;
     ram_throughput.scheduler.kv_disk_pending_jobs          = 3;
     ram_throughput.scheduler.kv_disk_spill_elapsed_seconds = 12.165;
     ram_throughput.kv_disk_save_seconds                    = 12.165;
     const std::string human_disk_throughput                = format_throughput(ram_throughput);
-    failures += check(human_disk_throughput.find(
-                          "spill_completed=12165ms load=9ms h2d=12ms work=spill,compact,restore "
-                          "pending=3 spill_age=12.2s") != std::string::npos,
-                      "human disk log hides background work or mislabels completed spill time");
+    failures += check(
+        human_disk_throughput.find(
+            "spill_completed=12165ms load=9ms h2d=12ms storage=8.0MiB work=spill,defrag,restore "
+            "pending=3 spill_age=12.2s") != std::string::npos,
+        "human disk log hides background work or mislabels completed spill time");
     const auto disk_json = Json::parse(format_throughput_json("serve-test", 5001, ram_throughput));
     failures += check(disk_json.at("scheduler").at("kv_disk_spill_active") == true &&
-                          disk_json.at("scheduler").at("kv_disk_compaction_active") == true &&
+                          disk_json.at("scheduler").at("kv_disk_defrag_active") == true &&
+                          disk_json.at("scheduler").at("kv_disk_storage_bytes") == 8388608 &&
                           disk_json.at("scheduler").at("kv_disk_restore_active") == true &&
                           disk_json.at("scheduler").at("kv_disk_pending_jobs") == 3 &&
                           disk_json.at("scheduler").at("kv_disk_spill_elapsed_seconds") == 12.165,

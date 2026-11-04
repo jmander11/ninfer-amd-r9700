@@ -4,6 +4,8 @@
 .codex
 .cortexkit
 .env
+.ninfer-local.env
+AGENTS.local.md
 .idea
 .pytest_cache
 .rocprofv3

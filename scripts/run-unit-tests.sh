@@ -2,6 +2,8 @@
 # Host tests by default. --gpu explicitly enables physical qualifiers; --real names one artifact.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/maintainer-env.sh
+source "$repo_root/scripts/maintainer-env.sh"
 builder="${NINFER_DEV_CONTAINER:-ninfer-r9700-builder}"
 build_dir="${NINFER_BUILD_DIR:-$repo_root/build-r9700}"
 python="${NINFER_PYTHON:-python3.11}"

@@ -136,7 +136,7 @@ struct EngineOptions {
     KvCapacityPolicy kv_capacity       = KvCapacityPolicy::explicit_capacity(2048);
     std::uint32_t max_concurrency      = 1;
     std::uint32_t max_pending_requests = 16;
-    std::uint32_t pending_timeout_ms   = 30000;
+    std::uint32_t pending_timeout_ms   = 300000;
     std::uint32_t prefill_chunk        = kDefaultPrefillChunk;
     // Forward width (columns) of each prefill step while other requests are decode-ready; 0 runs
     // the owner's whole prefill before the next decode round. A DFlash text owner's slice shares
@@ -149,13 +149,15 @@ struct EngineOptions {
     std::optional<std::uint32_t> mixed_forward;
     std::uint32_t mixed_forward_rounds = 1;
     std::size_t kv_ram_capacity_bytes  = 0;
-    std::size_t kv_disk_capacity_bytes = 0;
+    // Retained system-prefix LRU entries, sharing kv_ram_capacity_bytes; zero disables.
+    std::uint32_t kv_ram_system_prompts = 0;
+    std::size_t kv_disk_capacity_bytes  = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
     // Filled from the loaded artifact at Engine construction for the KV-disk fingerprint.
     std::string model_id;
     std::string weights_id;
-    std::string artifact_file_identity;
+    std::string artifact_tensor_identity;
     // nullopt = default prefill ladder; empty = disable automatic ladder (`off`).
     std::optional<std::vector<std::uint32_t>> context_checkpoint_marks;
     SpeculativeOptions speculative;
@@ -165,6 +167,13 @@ struct EngineOptions {
     bool generation_recovery = true;
     LoadProgress load_progress;
 };
+
+inline void validate_kv_system_prompt_options(std::size_t ram_capacity_bytes,
+                                              std::uint32_t system_prompts) {
+    if (system_prompts != 0 && ram_capacity_bytes == 0) {
+        throw std::invalid_argument("--kv-ram-system-prompts requires --kv-ram-capacity");
+    }
+}
 
 inline void validate_kv_disk_options(std::size_t ram_capacity_bytes,
                                      std::size_t disk_capacity_bytes,
@@ -274,6 +283,8 @@ struct OutputOptions {
     // Set to report a TokenLogprob for every token published to a channel, each carrying this many
     // ranked alternatives, in [0, kMaximumTopLogprobs]. Unset reports none.
     std::optional<std::uint32_t> top_logprobs;
+    // Newly generated reasoning-body IDs across all attempts; absent means unlimited.
+    std::optional<std::uint32_t> thinking_token_budget;
 };
 
 struct RequestOptions {
@@ -386,15 +397,38 @@ enum class OutputConstraintKind : std::uint8_t {
     JsonObject,
     JsonSchema,
     Grammar,
+    Choice,
+    Regex,
 };
 
-// Owns the schema JSON or XGrammar EBNF source (root rule: root). Constraints apply to answer
+// Owns schema JSON, XGrammar EBNF (root rule: root), full-match regex, or literal choices.
+// Choice alternatives may include the empty string; the alternatives list must be nonempty.
+// Constraints apply to answer
 // content after reasoning. A generation prompt is required, and tool declarations are forbidden.
 // Unsupported schemas/grammars fail preparation with InvalidOutputConstraint. Caller stops and
 // output/context limits can truncate a valid prefix before the grammar completes.
 struct OutputConstraint {
     OutputConstraintKind kind = OutputConstraintKind::JsonObject;
     std::string source;
+    std::vector<std::string> choices = {};
+};
+
+enum class ConstraintCompileCache : std::uint8_t { None, Hit, Built, Waited };
+enum class ConstraintBranch : std::uint8_t { None, Reasoning, Answer, ToolCall };
+
+struct ConstraintStats {
+    bool active                          = false;
+    bool complete                        = false;
+    bool terminated                      = false;
+    ConstraintBranch branch              = ConstraintBranch::None;
+    ConstraintCompileCache compile_cache = ConstraintCompileCache::None;
+    // Host compile elapsed time, including the compiler-lock wait subset.
+    double compile_seconds          = 0.0;
+    double compile_wait_seconds     = 0.0;
+    std::uint64_t mask_calls        = 0;
+    std::uint64_t mask_nodes        = 0;
+    std::uint64_t mask_upload_bytes = 0;
+    double mask_seconds             = 0.0;
 };
 
 struct PromptOptions {
@@ -466,15 +500,31 @@ struct TokenLogprob {
     }
 };
 
+// A committed tool stream is provisional until terminal generation success. Incomplete never
+// creates an executable ToolCall or conversation-history entry. Argument fragments concatenate to
+// JSON only for completed calls; consumers must not execute a partial stream.
+enum class ToolCallDeltaKind : std::uint8_t { Start, Arguments, Completed, Incomplete };
+
+struct ToolCallDelta {
+    ToolCallDeltaKind kind = ToolCallDeltaKind::Start;
+    std::uint32_t index    = 0;
+    std::string id;
+    std::string name;
+    std::string arguments;
+};
+
 struct OutputDelta {
     OutputChannel channel = OutputChannel::Content;
     std::string text;
     // With OutputOptions::top_logprobs: the tokens committed to this channel by the round that
-    // produced the delta. Records are token-aligned rather than text-aligned: text held back for a
-    // stop-string or UTF-8 boundary arrives in a later delta, so text may be empty here, and a
-    // token trimmed by a stop string still has its record. Tokens that publish to no channel
-    // (reasoning markers, tool-call markup, stop tokens) have no record.
+    // produced the delta. A publication gate may withhold records with their text and release
+    // them unchanged in a later delta. Records are token-aligned rather than text-aligned: text
+    // held back for a stop-string or UTF-8 boundary arrives in a later delta, so text may be empty
+    // here, and a token trimmed by a stop string still has its record. Tokens that publish to no
+    // channel (reasoning markers, tool-call markup, stop tokens whose text is not published) have
+    // no record; raw output publishes stop-token text, so those tokens have content records.
     std::vector<TokenLogprob> logprobs;
+    std::optional<ToolCallDelta> tool_call;
 };
 
 enum class OutputDelivery : std::uint8_t {
@@ -487,6 +537,7 @@ enum class RecoveryEventKind : std::uint8_t {
     RetryTriggered,
     RetryStarted,
     RetryPrefillComplete,
+    ReplayDiscarded,
     Finished,
     Exhausted,
 };
@@ -500,8 +551,13 @@ struct RecoveryEvent {
     std::uint32_t cycle_exclusions           = 0;
     std::uint32_t discarded_tool_calls       = 0;
     std::uint32_t discarded_reasoning_tokens = 0;
+    std::uint32_t framing_repairs            = 0;
+    std::uint32_t discarded_content_tokens   = 0;
     std::size_t generated_tokens             = 0;
     std::uint32_t remaining_tokens           = 0;
+    // Present on RetryStarted: the actual complete profile for that attempt.
+    std::optional<ResolvedSamplingParameters> sampling;
+    std::optional<bool> enable_thinking;
 };
 
 class OutputSink {
@@ -590,22 +646,61 @@ struct GenerationRecoveryStats {
     // True exclusion count for the request. CycleExclusion RecoveryEvents are published at
     // powers of two and are not this total.
     std::uint32_t cycle_exclusions = 0;
+    // Corroborated reasoning replay omitted from answer publication; tokens remain in usage/KV.
+    std::uint32_t framing_repairs          = 0;
+    std::uint32_t discarded_content_tokens = 0;
+};
+
+// A schema-relative JSON Pointer and, for a tool failure, its index in the submitted
+// PromptInput tool list. Product adapters retain the original wire-field location.
+struct RequestErrorLocation {
+    std::string pointer;
+    std::optional<std::size_t> tool_index;
+};
+
+struct ReasoningLimitForcedToken {
+    std::uint32_t generated_token_index = 0;
+    TokenId token                       = 0;
+    std::optional<float> target_logprob{};
+};
+
+struct ReasoningLimitStats {
+    std::uint32_t budget_tokens = 0;
+    std::uint32_t used_tokens   = 0;
+    std::uint32_t forced_closes = 0;
+    std::uint32_t retries       = 0;
+    bool limit_reached          = false;
+    std::vector<ReasoningLimitForcedToken> forced_tokens{};
 };
 
 class RequestError final : public std::invalid_argument {
 public:
     RequestError(RequestErrorKind kind, const std::string& message,
-                 GenerationRecoveryStats recovery = {})
-        : std::invalid_argument(message), kind_(kind), recovery_(recovery) {}
+                 GenerationRecoveryStats recovery             = {},
+                 std::optional<RequestErrorLocation> location = std::nullopt)
+        : std::invalid_argument(message), kind_(kind), recovery_(recovery),
+          location_(std::move(location)) {}
 
     [[nodiscard]] RequestErrorKind kind() const noexcept { return kind_; }
+
+    [[nodiscard]] const std::optional<RequestErrorLocation>& location() const noexcept {
+        return location_;
+    }
 
     // Recovery totals when this error ended an admitted generation; empty otherwise.
     [[nodiscard]] const GenerationRecoveryStats& recovery() const noexcept { return recovery_; }
 
+    [[nodiscard]] const ReasoningLimitStats& reasoning_limit() const noexcept {
+        return reasoning_limit_;
+    }
+
+    void set_reasoning_limit(ReasoningLimitStats stats) { reasoning_limit_ = std::move(stats); }
+
 private:
+    ReasoningLimitStats reasoning_limit_;
     RequestErrorKind kind_;
     GenerationRecoveryStats recovery_;
+    std::optional<RequestErrorLocation> location_;
 };
 
 struct GenerationResult {
@@ -622,11 +717,15 @@ struct GenerationResult {
     // Diagnostic names only when tools were not declared; never executable.
     std::vector<std::string> undeclared_tool_call_names;
     GenerationRecoveryStats recovery;
-    std::uint32_t reasoning_tokens        = 0;
-    FinishReason finish_reason            = FinishReason::None;
-    std::uint32_t reused_prompt_tokens    = 0;
-    PrefixReusePath prefix_reuse_path     = PrefixReusePath::FullReset;
-    PrefixReuseSource prefix_reuse_source = PrefixReuseSource::None;
+    ConstraintStats constraint;
+    ReasoningLimitStats reasoning_limit;
+    std::uint32_t reasoning_tokens     = 0;
+    FinishReason finish_reason         = FinishReason::None;
+    std::uint32_t reused_prompt_tokens = 0;
+    // Tokens restored specifically from a retained system-prefix RAM entry.
+    std::uint32_t system_prompt_cache_hit_tokens = 0;
+    PrefixReusePath prefix_reuse_path            = PrefixReusePath::FullReset;
+    PrefixReuseSource prefix_reuse_source        = PrefixReuseSource::None;
     // Absolute staged-checkpoint head frontiers this request restored or wrote;
     // 0 if none. restored is the matching ladder or turn-rollback F (the same
     // length as reused_prompt_tokens on those paths). captured is the advertised
@@ -700,8 +799,8 @@ enum class KvDiskDropReason : std::uint8_t {
     IndexLoad,       // a stored entry was rejected while loading the index
     Persist,         // a manifest write or directory fsync failed
     NoteAlloc,       // bookkeeping for a new RAM entry could not allocate
-    SpillNoRoom,     // the filesystem lacks room for the append plus the compaction reserve
-    SpillNoCapacity, // capacity eviction could not free enough logical bytes
+    SpillNoRoom,     // the filesystem lacks room for a cache write and its metadata
+    SpillNoCapacity, // capacity eviction could not free enough pack-file bytes
     SpillFailed,     // a spill failed while preparing, starting, or writing
     ReclaimUnsaved,  // a non-durable RAM entry was evicted without a disk copy
     OptionalAlloc,   // an optional prefetch or idle spill could not allocate
@@ -748,25 +847,36 @@ struct RuntimeStats {
     // Tokens committed by decode rounds; the first token emitted by prefill is excluded.
     std::uint64_t committed_decode_tokens = 0;
     // Decode batch executions and the sum of their batch sizes.
-    std::uint64_t decode_rounds         = 0;
-    std::uint64_t decode_row_rounds     = 0;
-    std::uint32_t running_requests      = 0;
-    std::uint32_t prefilling_requests   = 0;
-    std::uint32_t decode_ready_requests = 0;
-    std::uint32_t waiting_requests      = 0;
-    std::uint64_t kv_ram_captures       = 0;
-    std::uint64_t kv_ram_restores       = 0;
-    std::uint64_t kv_ram_evictions      = 0;
-    std::uint64_t kv_ram_drops          = 0;
-    double kv_ram_save_seconds          = 0;
-    double kv_ram_load_seconds          = 0;
-    std::size_t kv_ram_capacity_bytes   = 0;
-    std::size_t kv_ram_used_bytes       = 0;
-    std::size_t kv_ram_entry_count      = 0;
-    std::uint64_t kv_disk_captures      = 0;
-    std::uint64_t kv_disk_restores      = 0;
-    std::uint64_t kv_disk_evictions     = 0;
-    std::uint64_t kv_disk_drops         = 0;
+    std::uint64_t decode_rounds                  = 0;
+    std::uint64_t decode_row_rounds              = 0;
+    std::uint32_t running_requests               = 0;
+    std::uint32_t prefilling_requests            = 0;
+    std::uint32_t decode_ready_requests          = 0;
+    std::uint32_t waiting_requests               = 0;
+    std::uint32_t kv_execution_window_tokens     = 0;
+    std::uint32_t kv_growth_blocked_requests     = 0;
+    std::uint32_t kv_suspended_requests          = 0;
+    std::uint64_t kv_window_extensions           = 0;
+    std::uint64_t kv_live_suspensions            = 0;
+    std::uint64_t kv_live_resumes                = 0;
+    std::uint32_t kv_ram_system_prompt_limit     = 0;
+    std::size_t kv_ram_system_prompt_entries     = 0;
+    std::size_t kv_ram_system_prompt_used_bytes  = 0;
+    std::uint64_t kv_ram_system_prompt_restores  = 0;
+    std::uint64_t kv_ram_system_prompt_evictions = 0;
+    std::uint64_t kv_ram_captures                = 0;
+    std::uint64_t kv_ram_restores                = 0;
+    std::uint64_t kv_ram_evictions               = 0;
+    std::uint64_t kv_ram_drops                   = 0;
+    double kv_ram_save_seconds                   = 0;
+    double kv_ram_load_seconds                   = 0;
+    std::size_t kv_ram_capacity_bytes            = 0;
+    std::size_t kv_ram_used_bytes                = 0;
+    std::size_t kv_ram_entry_count               = 0;
+    std::uint64_t kv_disk_captures               = 0;
+    std::uint64_t kv_disk_restores               = 0;
+    std::uint64_t kv_disk_evictions              = 0;
+    std::uint64_t kv_disk_drops                  = 0;
     std::array<std::uint64_t, kKvDiskDropReasonCount> kv_disk_drop_reasons{};
     double kv_disk_save_seconds        = 0;
     double kv_disk_load_seconds        = 0;
@@ -776,7 +886,8 @@ struct RuntimeStats {
     // Live disk work is independent of scheduler occupancy. Save time is the full elapsed
     // lifetime of completed spills, not time spent blocking requests in an observer interval.
     bool kv_disk_spill_active            = false;
-    bool kv_disk_compaction_active       = false;
+    bool kv_disk_defrag_active           = false;
+    std::size_t kv_disk_storage_bytes    = 0;
     bool kv_disk_restore_active          = false;
     std::size_t kv_disk_pending_jobs     = 0;
     double kv_disk_spill_elapsed_seconds = 0;

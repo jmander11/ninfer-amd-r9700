@@ -8,10 +8,20 @@ import hashlib
 import json
 import math
 import sqlite3
+import sys
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.r9700.host import power_profile_path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 
 MEASURED = "ninfer_bench_measured"
 FULL_LAYERS = frozenset(range(3, 64, 4))
@@ -48,7 +58,7 @@ EXPECTED_COMMON_WORKLOAD = {
     "warmup": 1,
 }
 EXPECTED_POWER_PROFILE = {
-    "path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
+    "path": str(power_profile_path()),
     "required_before_after": "auto",
 }
 EXPECTED_CLAIMS = {

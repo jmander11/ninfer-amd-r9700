@@ -1,4 +1,5 @@
 #include "serve/anthropic_schema.h"
+#include "serve/openai_schema.h"
 
 #include <array>
 #include <cctype>
@@ -13,7 +14,7 @@
 namespace ninfer::serve {
 namespace {
 
-using Json = nlohmann::json;
+using Json = nlohmann::ordered_json;
 
 constexpr std::size_t kMaxToolNameLength = 128;
 
@@ -133,7 +134,7 @@ ninfer::product::media_acquire::Source parse_image_source(const Json& block) {
     return out;
 }
 
-// --- request parsing --------------------------------------------------------
+// Request parsing.
 
 void parse_tools(const Json& body, GenerationRequest& out) {
     if (!body.contains("tools") || body.at("tools").is_null()) { return; }
@@ -153,8 +154,9 @@ void parse_tools(const Json& body, GenerationRequest& out) {
             bad_request("tool input_schema must be a JSON object", "tools");
         }
         ToolDefinition tool;
-        tool.name     = require_function_name(item, "tools");
-        Json function = Json{{"name", tool.name}};
+        tool.schema_pointer = "/tools/" + std::to_string(out.tools.size()) + "/input_schema";
+        tool.name           = require_function_name(item, "tools");
+        Json function       = Json{{"name", tool.name}};
         if (item.contains("description") && !item.at("description").is_null()) {
             if (!item.at("description").is_string()) {
                 bad_request("tool description must be a string", "tools");
@@ -461,6 +463,12 @@ void parse_thinking(const Json& body, GenerationRequest& out) {
     // adapter tolerates Claude Code's evolving thinking vocabulary.
     const std::string type = thinking.at("type").get<std::string>();
     out.enable_thinking    = (type != "disabled");
+    if (thinking.contains("budget_tokens")) {
+        out.thinking_token_budget_specified = true;
+        out.thinking_token_budget_param     = "thinking.budget_tokens";
+        out.thinking_token_budget = parse_thinking_token_budget(thinking.at("budget_tokens"),
+                                                                out.thinking_token_budget_param);
+    }
 }
 
 void parse_output_config(const Json& body, GenerationRequest& out) {
@@ -552,7 +560,9 @@ GenerationRequest parse_messages_request(const Json& body, const RequestLimits& 
 }
 
 const char* messages_stop_reason(ninfer::FinishReason reason, bool has_tool_calls) {
-    if (has_tool_calls) { return "tool_use"; }
+    if (has_tool_calls &&
+        (reason == ninfer::FinishReason::StopToken || reason == ninfer::FinishReason::StopString))
+        return "tool_use";
     switch (reason) {
     case ninfer::FinishReason::OutputLimit:
     case ninfer::FinishReason::ContextCapacity:
@@ -587,15 +597,18 @@ std::string make_messages_response(const std::string& id, const std::string& mod
                               {"input", std::move(input)}});
     }
     if (blocks.empty()) { blocks.push_back(Json{{"type", "text"}, {"text", ""}}); }
-    const Json payload = {{"id", id},
-                          {"type", "message"},
-                          {"role", "assistant"},
-                          {"model", model},
-                          {"content", std::move(blocks)},
-                          {"stop_reason", stop_reason},
-                          {"stop_sequence", nullptr},
-                          {"usage", Json{{"input_tokens", usage.prompt_tokens},
-                                         {"output_tokens", usage.completion_tokens}}}};
+    Json payload = {{"id", id},
+                    {"type", "message"},
+                    {"role", "assistant"},
+                    {"model", model},
+                    {"content", std::move(blocks)},
+                    {"stop_reason", stop_reason},
+                    {"stop_sequence", nullptr},
+                    {"usage", Json{{"input_tokens", usage.prompt_tokens},
+                                   {"output_tokens", usage.completion_tokens}}}};
+    if (usage.reasoning_limit.budget_tokens != 0) {
+        payload["usage"]["ninfer"]["reasoning_limit"] = reasoning_limit_json(usage.reasoning_limit);
+    }
     return payload.dump();
 }
 
@@ -666,11 +679,16 @@ std::string make_content_block_stop(int index) {
     return sse("content_block_stop", Json{{"type", "content_block_stop"}, {"index", index}});
 }
 
-std::string make_message_delta(const char* stop_reason, int output_tokens) {
+std::string make_message_delta(const char* stop_reason, int output_tokens,
+                               const ninfer::ReasoningLimitStats& reasoning_limit) {
+    Json usage = {{"output_tokens", output_tokens}};
+    if (reasoning_limit.budget_tokens != 0) {
+        usage["ninfer"]["reasoning_limit"] = reasoning_limit_json(reasoning_limit);
+    }
     return sse("message_delta",
                Json{{"type", "message_delta"},
                     {"delta", Json{{"stop_reason", stop_reason}, {"stop_sequence", nullptr}}},
-                    {"usage", Json{{"output_tokens", output_tokens}}}});
+                    {"usage", std::move(usage)}});
 }
 
 std::string make_message_stop() { return sse("message_stop", Json{{"type", "message_stop"}}); }
@@ -678,9 +696,12 @@ std::string make_message_stop() { return sse("message_stop", Json{{"type", "mess
 std::string make_messages_ping() { return sse("ping", Json{{"type", "ping"}}); }
 
 std::string make_messages_error_body(const ApiError& error) {
-    const Json payload = {
+    Json payload = {
         {"type", "error"},
         {"error", Json{{"type", anthropic_error_type(error.status)}, {"message", error.message}}}};
+    if (error.reasoning_limit.budget_tokens != 0) {
+        payload["error"]["ninfer"]["reasoning_limit"] = reasoning_limit_json(error.reasoning_limit);
+    }
     return payload.dump();
 }
 

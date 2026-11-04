@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
-"""NIAH (needle-in-a-haystack) recall check against the live NInfer serve.
+"""Check needle-in-a-haystack recall against a running NInfer server.
 
-This is a behavioral long-context attention gate: a broken attention path loses
-the needle. The script hits the
-*already-running* server (no engine restart / reconfig) and checks whether the
-exact needle string is retrieved in the model's answer to a long-context
-question. It reports per-run recall (e.g. 3/3) rather than a speed metric.
-
-Stdlib only; never restarts or reconfigures the engine. Fixtures resolve
-relative to the repo root (auto-detected) unless given as an absolute path.
+Checks whether each answer contains the exact needle and reports per-run
+recall. Uses only the standard library and does not restart or reconfigure
+the server. Relative fixture paths resolve from the repository root.
 
     python3 -m tools.bench.run_niah_check --label SAGE --runs 3
     python3 -m tools.bench.run_niah_check --fixture examples/cli/messages/long_niah_64k.json \
         --needle "ORCHID=493817; COLOR=COBALT" --max-tokens 64 --label SAGE
 
-Outputs a per-run JSON record under profiles/bench/niah-check/ (gitignored). Durable gate evidence
-uses an explicit --out together with --server-log, --artifact, and --serve-bin; that mode binds the
-loaded files and requires one fresh full-prefill request_done event for every HTTP response.
+Records go to ignored profiles/bench/niah-check/ by default. For durable gate
+evidence, supply --out, --server-log, --artifact and --serve-bin. That mode
+binds the loaded files and requires a fresh full-prefill request_done event
+for every HTTP response.
 """
 
 from __future__ import annotations
@@ -34,7 +30,7 @@ from tools.ppl.pareto import validate_terminal_production_authority
 
 
 def repo_root() -> Path:
-    """Repo root = the directory containing CMakeLists.txt (walk up from here)."""
+    """Find the repository root by walking up to CMakeLists.txt."""
     here = Path(__file__).resolve().parent
     for candidate in (here, *here.parents[:6]):
         if (candidate / "CMakeLists.txt").is_file():
@@ -62,7 +58,7 @@ NIAH_LENGTHS = ("8k", "32k", "64k", "100k", "128k", "150k", "200k", "240k", "260
 NIAH_MULTIKEY_LENGTHS = ("8k", "32k", "64k", "128k", "240k", "260k")
 NIAH_POSITIONS = ("start", "q25", "mid", "q75", "end")
 SERVER_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
-SERVER_LOG_SCHEMA_VERSION = 24
+SERVER_LOG_SCHEMA_VERSION = 27
 XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
 NIAH_ENGINE_PROFILE = {
     "max_context": 262144,
@@ -496,16 +492,6 @@ def load_key(api_key: str | None) -> str:
     for name in ("NINFER_API_KEY", "LLAMA_CPP_LOCAL_API_KEY"):
         if os.environ.get(name):
             return os.environ[name]
-    for env in (
-        Path("/home/maintainer/docker/.env"),
-        ROOT.parent.parent / ".env",
-        Path.cwd() / ".env",
-    ):
-        if env.exists():
-            for line in env.read_text().splitlines():
-                for prefix in ("LLAMA_CPP_REMOTE_API_KEY=", "LLAMA_CPP_LOCAL_API_KEY="):
-                    if line.startswith(prefix):
-                        return line.split("=", 1)[1].strip().strip('"')
     return ""
 
 

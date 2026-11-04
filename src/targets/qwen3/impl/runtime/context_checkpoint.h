@@ -281,15 +281,14 @@ select_resident_prefill_reuse(bool current_matches, std::uint32_t execution_fron
                                          rewrite_frontier, rewrite_path, heads);
 }
 
-// Resident checkpoint head reduced to the identity fields the reuse decision consumes.
+// Checkpoint identity used to decide prefix reuse.
 struct ContextCheckpointRef {
     std::uint32_t frontier = 0;
     PrefixHash128 hash{};
     ContextCheckpointKind kind = ContextCheckpointKind::Ladder;
 };
 
-// Resident sequence state consumed by the reuse decision. This is the detail-level view of
-// the runtime's richer ResidentStateView: the owner maps into it on every planning pass.
+// Fields needed to decide reuse, copied from ResidentStateView on each planning pass.
 struct ResidentReuseState {
     const std::vector<TokenId>* ledger     = nullptr;
     const ResidentPrefixIdentity* identity = nullptr;

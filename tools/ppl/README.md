@@ -1,83 +1,30 @@
 # R9700 perplexity and Pareto-quality gate
 
+Source private host settings from `.ninfer-local.env` before GPU work, and hold `flock --exclusive "$NINFER_GPU_LOCK"` through all children. Checkpoint and Python paths are explicit CLI inputs. The historical selective-source runners require `--weights /path/to/bf16` and use the Python interpreter running the command. `compare_nvfp4 prepare` additionally requires `--nvidia-repo` and `--nvidia-model`; later stages use the model recorded in its manifest. See `../../docs/maintainer/local-development.md`.
+
 ## Exploratory dense/XAttention context comparison
 
-`tools/bench/context_ladder.py run --kind ppl` runs serial, matched-token prefill PPL
-at explicit context lengths, retaining aligned NLL/argmax sidecars. Its `compare` command
-rejects mismatched inputs, score windows, artifacts and activation/cache profiles and
-reports PPL/NLL changes and new severe positions. Reusable speed, PPL and trace commands
-are in `tools/bench/context_ladder.md`. This exploratory measurement setup does not replace
-the fixed BF16-source admission campaign below; never use cycled timing IDs as natural
-long-context quality evidence or extrapolate the retained4K5090 scores to longer inputs.
+`tools/bench/context_ladder.py run --kind ppl` runs serial, matched-token prefill PPL at explicit context lengths, retaining aligned NLL/argmax sidecars. Its `compare` command rejects mismatched inputs, score windows, artifacts and activation/cache profiles and reports PPL/NLL changes and new severe positions. Reusable speed, PPL and trace commands are in `tools/bench/context_ladder.md`. This exploratory measurement setup does not replace the fixed BF16-source admission campaign below; never use cycled timing IDs as natural long-context quality evidence or extrapolate the retained 4K 5090 scores to longer inputs.
 
 ## Bounded NVFP4 comparison
 
-`compare_nvfp4.py` compares three identical 4096-token samples with the local
-`ninfer-reference` NVFP4 scorer, then measures AMD C1 P4096/G128 ordinary inference.
-It evaluates all-Q4 and mixed Q4/W8 with Q4 A4/A8, plus selective and four-role
-A8 implementations. This diagnostic comparison does not replace BF16-source
-production admission. See `docs/performance.md` for results and limitations.
+`compare_nvfp4.py` scores the same three 4096-token samples with the frozen NVIDIA checkout's NVFP4 scorer, then measures AMD C1 P4096/G128 ordinary inference. It evaluates all-Q4 and mixed Q4/W8 with Q4 A4/A8, plus selective and four-role A8 implementations. This diagnostic comparison does not replace BF16-source production admission. See `docs/performance.md` for results and limitations.
 
-The immutable 5090 reference is also Git-tracked in
-`fixtures/nvfp4-5090-20260922/`: exact token IDs, all six FP32 NLL sidecars,
-reports, commands, binary identity, source commit, and artifact path. Use this
-retained reference for subsequent recipe comparisons; do not replace it with
-results from a changed NVIDIA build or scoring span. The larger local campaign
-directory additionally retains the frozen scorer and original logs.
+The immutable 5090 reference is also Git-tracked in `fixtures/nvfp4-5090-20260922/`: exact token IDs, all six FP32 NLL sidecars, reports, commands, binary identity, source commit, and artifact path. Use this retained reference for subsequent recipe comparisons; do not replace it with results from a changed NVIDIA build or scoring span. The larger local campaign directory additionally retains the frozen scorer and original logs.
 
-`python3.11 -m tools.ppl.select_fp8_capped` runs the subsequent fixed Q4/FP8-only
-recipe comparison against that reference. Its `prepare`, `quality`, `decode-quality`,
-`screen`, `speed`, and `analyze` actions take an explicit `--out`; `--only` selects
-one of four fixed recipe names. Conversion/binding are documented in
-`docs/maintainer/qwen3.8-27b-artifact.md`. Mixed activation actions snapshot and
-evaluate the separately compiled prefill gate/up A4 binary on selective-cap;
-they require explicit mixed-profile report metadata. Original measurements remain
-unchanged. Detailed commands live in the dated experiment package.
+`python3.11 -m tools.ppl.select_fp8_capped` runs the subsequent fixed Q4/FP8-only recipe comparison against that reference. Its `prepare`, `quality`, `decode-quality`, `screen`, `speed`, and `analyze` actions take an explicit `--out`; `--only` selects one of four fixed recipe names. Conversion/binding are documented in `docs/maintainer/qwen3.8-27b-artifact.md`. Mixed activation actions snapshot and evaluate the separately compiled prefill gate/up A4 binary on selective-cap; they require explicit mixed-profile report metadata. Original measurements remain unchanged. Detailed commands live in the dated experiment package.
 
-`python3.11 -m tools.ppl.select_nv_aligned` performs the bounded follow-up:
-`prepare`, `snapshot`, `quality` (both schedules), and `speed` with explicit
-`--out`, `--recipe`, and `--profile`. The build-time
-`NINFER_R9700_Q4_PREFILL_A4_FAMILIES` selector is documented in the integer-artifact
-reference. `--binary-tag` names a new frozen snapshot after adding recipe identities;
-never overwrite the earlier snapshot. Speed requires the completed same-profile
-six-cell2% screen and checks benchmark profile and repeated tokens. New severe
-positions remain separately reported, not hidden by aggregate PPL.
-Commands/results: `profiles/ppl/r9700-nv-aligned-precision-20260923/`.
+`python3.11 -m tools.ppl.select_nv_aligned` performs the bounded follow-up: `prepare`, `snapshot`, `quality` (both schedules), and `speed` with explicit `--out`, `--recipe`, and `--profile`. The build-time `NINFER_R9700_Q4_PREFILL_A4_FAMILIES` selector is documented in the integer-artifact reference. `--binary-tag` names a new frozen snapshot after adding recipe identities; never overwrite the earlier snapshot. Speed requires the completed same-profile six-cell 2% screen and checks benchmark profile and repeated tokens. New severe positions remain separately reported, not hidden by aggregate PPL. Commands/results: `profiles/ppl/r9700-nv-aligned-precision-20260923/`.
 
-`python3.11 -m tools.ppl.endpoint_precision` evaluates fixed W8 endpoint ablations with
-`prepare`, `snapshot`, `quality`, and `report`, using explicit `--out`. `quality` takes
-`--recipe cap26-embed|cap26-head|cap26-both|cap22-embed|cap22-head|cap22-both` and
-`--profile a8|gate-up|mlp|projections|attn-input|gate-up-attn-input` (compile selector0..5).
-`--recipe cap22-base` scores the retained Q4-endpoint smaller-base control without copying it.
-Snapshot each matching build first; optional `--w8-bits 16` requires an actual W8A16 build
-and uses a distinct snapshot/result name. Each configuration measures all six preserved
-NVFP4 scoring spans. `report` compares measured quality and theoretical weight bytes/Q4
-integer-product work only: there is no speed action or implied tok/s estimate.
-Commands/results: `profiles/ppl/r9700-endpoint-precision-20260923/`.
+`python3.11 -m tools.ppl.endpoint_precision` evaluates fixed W8 endpoint ablations with `prepare`, `snapshot`, `quality`, and `report`, using explicit `--out`. `quality` takes `--recipe cap26-embed|cap26-head|cap26-both|cap22-embed|cap22-head|cap22-both` and `--profile a8|gate-up|mlp|projections|attn-input|gate-up-attn-input` (compile selector 0..5). `--recipe cap22-base` scores the retained Q4-endpoint smaller-base control without copying it. Snapshot each matching build first; optional `--w8-bits 16` requires an actual W8A16 build and uses a distinct snapshot/result name. Each configuration measures all six preserved NVFP4 scoring spans. `report` compares measured quality and theoretical weight bytes/Q4 integer-product work only: there is no speed action or implied tok/s estimate. Commands/results: `profiles/ppl/r9700-endpoint-precision-20260923/`.
 
-On this shared machine, serialize conversion/readback, builds, and GPU jobs; never overlap
-them across agents. Explicitly cap CMake builds with `--parallel 8` or fewer jobs and
-reduce/stop on memory or I/O pressure. A build-job cap is not a memory limit.
+Serialize GPU jobs with the shared lock. Builds may overlap inference; use at most eight build jobs and reduce concurrency under memory or I/O pressure. Conversion/readback also needs enough host memory. The build-job cap does not impose a memory limit.
 
-Use Python3.11 and an explicit `--out` directory. Actions, in order, are
-`prepare`, `snapshot-amd`, `quality-nvidia`, `decode-quality-nvidia`,
-`quality-amd`, `decode-quality-amd`, `speed`, `analyze`. Preparation binds the
-explicit local artifacts and snapshots the NVIDIA scorer; snapshot AMD only
-after both evaluator builds are complete. Serialize GPU jobs. Outputs are
-create-only; successful cells can be resumed. `--only CONFIG` restricts a row.
-For a necessary host-only repair, `--ppl-bin`/`--bench-bin` names a new frozen
-binary and `--tag TAG` preserves failed cells in separate directories. After
-all three samples succeed, an explicit selection receipt chooses the retry
-for analysis. The retained campaign package includes exact commands and inputs.
+Use Python 3.11 and an explicit `--out` directory. Actions, in order, are `prepare`, `snapshot-amd`, `quality-nvidia`, `decode-quality-nvidia`, `quality-amd`, `decode-quality-amd`, `speed`, `analyze`. Preparation binds the explicit local artifacts and snapshots the NVIDIA scorer; snapshot AMD only after both evaluator builds are complete. Serialize GPU jobs. Outputs are create-only; successful cells can be resumed. `--only CONFIG` restricts a row. For a necessary host-only repair, `--ppl-bin`/`--bench-bin` names a new frozen binary and `--tag TAG` preserves failed cells in separate directories. After all three samples succeed, an explicit selection receipt chooses the retry for analysis. The retained campaign package includes exact commands and inputs.
 
 ## BF16-source production gate
 
-This campaign measures the fixed Qwen3.8-27B FP8-K/INT4-V product against an
-independent BF16 reference. It does not expose a cache-format or attention-mode
-runtime switch. Before the persistent ABI is frozen, G16 and G32 are evaluated
-as separately configured executables over the same explicit R9700 candidate
-weight artifact; the losing executable profile and codec branch are deleted
-after selection.
+This campaign measures the fixed Qwen3.8-27B FP8-K/INT4-V product against an independent BF16 reference. It does not expose a cache-format or attention-mode runtime switch. Before the persistent ABI is frozen, G16 and G32 are evaluated as separately configured executables over the same explicit R9700 candidate weight artifact; the losing executable profile and codec branch are deleted after selection.
 
 `ninfer-ppl` computes teacher-forced next-token NLL:
 
@@ -93,141 +40,67 @@ The two schedules exercise different production shapes:
 | `prefill` | chunked full-sequence prompt path |
 | `decode` | prefill the skipped prefix, then teacher-force the suffix at T=1 |
 
-The default `--skip half` excludes the first half from the mean while retaining
-those tokens in KV. `--skip 0` scores every next-token position. Device Graphs
-are enabled by default. At both 8K and 32K the extras pair Device Graph with
-eager execution and MTP with ordinary decode. The 8K controls also compare the
-default MTP draft window with `k=4`, start decode mid-page, and cover a short
-context.
+The default `--skip half` excludes the first half from the mean while retaining those tokens in KV. `--skip 0` scores every next-token position. Device Graphs are enabled by default. At both 8K and 32K the extras pair Device Graph with eager execution and MTP with ordinary decode. The 8K controls also compare the default MTP draft window with `k=4`, start decode mid-page, and cover a short context.
 
 Each cell emits JSON plus two index-aligned binary sidecars:
 
 - `.nllf32`: little-endian float32 NLL for every scored position.
 - `.argmaxi32`: little-endian signed int32 greedy prediction at each position.
 
-Quality eligibility requires finite, complete, exactly aligned sidecars and an explicitly named
-tier; there is no silent default. The `accuracy` tier caps paired mean-NLL delta at 0.02 and new
-severe membership at `max(4, ceil(0.001 * scored_positions))`. The `capacity-speed` tier caps
-mean-NLL delta at `ln(1.05) = 0.048790164` and new severe membership at
-`ceil(0.0025 * scored_positions)`. Severe means NLL at least 10. This position-aware guardrail
-cannot be replaced by aggregate count: repairing one BF16-severe position does not hide a new
-severe position elsewhere. Sidecar lengths must match exactly. Prefill/decode compares two
-qualified schedules that can legitimately select different private attention precision. It requires
-finite, position-aligned sidecars and a measured maximum per-token NLL bound supplied explicitly as
-`--schedule-parity-max-abs-nll`; greedy flips are reported but do not gate this comparison. There is
-no universal default inferred from a short probe. Graph/eager, MTP/ordinary, and draft-window pairs default to
-exact NLL equality; an intentional relaxation must be passed explicitly with
-`--execution-parity-max-abs-nll`. Exact greedy-token equality remains mandatory for
-those same-route execution pairs. The report also records paired delta standard
-error, absolute-error percentiles, and the ten worst signed token deltas.
-Each `worst_delta_tokens.position` is the zero-based index in the cell's aligned scored-position
-sidecars; add the enclosing cell's `skip_tokens` to recover the corresponding scored prompt
-position. `delta_nll` retains the candidate-minus-BF16 sign, while `abs_delta_nll` determines the
-largest-magnitude ordering.
+Quality eligibility requires finite, complete, exactly aligned sidecars and an explicitly named tier; there is no silent default. The `accuracy` tier caps paired mean-NLL delta at 0.02 and new severe membership at `max(4, ceil(0.001 * scored_positions))`. The `capacity-speed` tier caps mean-NLL delta at `ln(1.05) = 0.048790164` and new severe membership at `ceil(0.0025 * scored_positions)`. Severe means NLL at least 10. This position-aware guardrail cannot be replaced by aggregate count: repairing one BF16-severe position does not hide a new severe position elsewhere. Sidecar lengths must match exactly. Prefill/decode compares two qualified schedules that can legitimately select different private attention precision. It requires finite, position-aligned sidecars and a measured maximum per-token NLL bound supplied explicitly as `--schedule-parity-max-abs-nll`; greedy flips are reported but do not gate this comparison. There is no universal default inferred from a short probe. Graph/eager, MTP/ordinary, and draft-window pairs default to exact NLL equality; an intentional relaxation must be passed explicitly with `--execution-parity-max-abs-nll`. Exact greedy-token equality remains mandatory for those same-route execution pairs. The report also records paired delta standard error, absolute-error percentiles, and the ten worst signed token deltas. Each `worst_delta_tokens.position` is the zero-based index in the cell's aligned scored-position sidecars; add the enclosing cell's `skip_tokens` to recover the corresponding scored prompt position. `delta_nll` retains the candidate-minus-BF16 sign, while `abs_delta_nll` determines the largest-magnitude ordering.
 
-Exact-token comparison has two distinct roles. Each complete weight-and-cache
-candidate is compared directly with the independent BF16-source authority; its
-greedy mismatch count and rate are quality diagnostics, not admission gates. The fixed lossy FP8
-E4M3FN-key/INT4-value cache alone changes 93/94 of 4,095 BF16 greedy positions for G16/G32, so zero
-BF16 flips cannot be a coherent product requirement. Execution variants of one candidate (graph/eager,
-MTP/ordinary, and draft-window controls) are compared directly with that
-candidate's primary sidecars and must also be token-exact. G16 and G32 have no
-separate candidate-to-candidate quality gate: they consume byte-identical weights and each is
-numerically gated against BF16. A direct G16/G32 comparison remains useful diagnostic evidence.
+Exact-token comparison has two distinct roles. Each complete weight-and-cache candidate is compared directly with the independent BF16-source authority; its greedy mismatch count and rate are quality diagnostics, not admission gates. The fixed lossy FP8 E4M3FN-key/INT4-value cache alone changes 93/94 of 4,095 BF16 greedy positions for G16/G32, so zero BF16 flips cannot be a coherent product requirement. Execution variants of one candidate (graph/eager, MTP/ordinary, and draft-window controls) are compared directly with that candidate's primary sidecars and must also be token-exact. G16 and G32 have no separate candidate-to-candidate quality gate: they consume byte-identical weights and each is numerically gated against BF16. A direct G16/G32 comparison remains useful diagnostic evidence.
 
-Here “greedy flip” means disagreement with the BF16 scorer's argmax, not disagreement with the
-corpus's teacher-forced next token. Corpus-token quality is represented by NLL/PPL. Flip rate is
-retained for diagnosis and regression attribution, but it neither admits nor rejects a lossy
-candidate.
+Here “greedy flip” means disagreement with the BF16 scorer's argmax, not disagreement with the corpus's teacher-forced next token. Corpus-token quality is represented by NLL/PPL. Flip rate is retained for diagnosis and regression attribution, but it neither admits nor rejects a lossy candidate.
 
 After schema-v7 selects one evaluation winner, prepare its separate exact same-route token gate:
 
 ```bash
-/home/maintainer/.local/bin/python3.11 -m tools.ppl.prepare_selected_exact_token \
+python3.11 -m tools.ppl.prepare_selected_exact_token \
+  --bf16-source /path/to/models/qwen3.8-27b-bf16 \
+  --bf16-receipt /path/to/checkpoint-preflight.json \
+  --python /path/to/rocm-python3.11 \
   --selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --out profiles/ppl/r9700-selected-exact-token-20260921
 ```
 
-That CPU-only step resolves and binds the winner's artifact, G16/G32 scorer, dense or
-B128/S16/tau900 profile, selected chunk, candidate-local quality authority, and validated 18-shard
-BF16 source. It emits one future C1 command under
-`profiles/ppl/r9700-selected-exact-token-20260921`; run its `commands.sh` only under the exclusive
-GPU lease. Preparation requires the published selection and `apps/ninfer-ppl` in its exact selected
-build root. The fresh phase-sum roots initially contain bench/planner but not that scorer.
-The FP8 context/reporting recovery bridges those roots relied on were retired with hipBLASLt
-(438f6a89), and a selection whose source provenance binds either bridge is rejected. Do not
-silently substitute the original panel scorer or rebuild a
-frozen root from this launcher. The launcher runs under the installed
-`/path/to/local/.venv-ninfer-r9700-py311/bin/python` with the ROCm library paths exported.
-It reuses the selected quality campaign's bound BF16 prefill reference and exact repeat proof,
-without rerunning the source model. The layer-major oracle uses identical chunk spans and
-`skip=half` scored positions under either schedule label; original prefill reports and sidecars
-remain unchanged. Only the candidate executes the real T=1 decode schedule, freshly in both
-graph and eager modes (4,095 and 16,383 rounds respectively at 8K and 32K per mode).
-The required physical campaign covers
-8K and 32K same-route graph/eager exact-I32-token and zero-NLL-delta checks. MTP3/ordinary and
-MTP3/MTP4 comparisons are optional diagnostic exact-token/state/graph regressions, not base or
-DFlash admission prerequisites. Its final admission JSON is atomically published only after
-recomputing required comparisons from the raw sidecars and matching every raw cell's complete
-weights/corpus/schedule/spec/chunk/graph command and semantic identity. Candidate-to-BF16 greedy flips remain
-diagnostic; no zero-flip BF16 threshold is added.
+That CPU-only step records and validates the winner's artifact, G16/G32 scorer, dense or B128/S16/tau900 profile, selected chunk, candidate-local quality authority, and validated 18-shard BF16 source. It emits one future C1 command under `profiles/ppl/r9700-selected-exact-token-20260921`; run its `commands.sh` only under the exclusive GPU lease. Preparation requires the published selection and `apps/ninfer-ppl` in its exact selected build root. The fresh phase-sum roots initially contain bench/planner but not that scorer. The FP8 context/reporting recovery bridges those roots relied on were retired with hipBLASLt (438f6a89), and a selection whose source provenance binds either bridge is rejected. Do not silently substitute the original panel scorer or rebuild a frozen root from this launcher.
 
-The completed 24 candidate/group/length quality cells are teacher-forced **prefill** evidence
-(including measured quality exclusions), not selected decode evidence. The historical
-`post-terminal-focused-verification-20260905/run.sh` runs host/Op tests and rebuilds its selected
-root; it neither produces BF16 model parity nor replaces this decode campaign. Existing selected
-whole graph/eager controls cover C1..4 public generated tokens separately; do not repeat them as
-an additional blanket qualifier sweep. MTP and DFlash retain their separate stated contracts.
+The launcher runs under the installed `python3.11` with the ROCm library paths exported. It reuses the selected quality campaign's bound BF16 prefill reference and exact repeat proof, without rerunning the source model. The layer-major oracle uses identical chunk spans and `skip=half` scored positions under either schedule label; original prefill reports and sidecars remain unchanged.
 
-For the separate artifact-backed Python Vision versus source-BF16 finite/shape diagnostic,
-prepare a fresh package after selection with:
+Only the candidate executes the real T=1 decode schedule, freshly in both graph and eager modes (4,095 and 16,383 rounds respectively at 8K and 32K per mode). The required physical campaign covers 8K and 32K same-route graph/eager exact-I32-token and zero-NLL-delta checks. MTP3/ordinary and MTP3/MTP4 comparisons are optional diagnostic exact-token/state/graph regressions, not base or DFlash admission prerequisites.
+
+Its final admission JSON is atomically published only after recomputing required comparisons from the raw sidecars and matching every raw cell's complete weights/corpus/schedule/spec/chunk/graph command and semantic identity. Candidate-to-BF16 greedy flips remain diagnostic; no zero-flip BF16 threshold is added.
+
+The completed 24 candidate/group/length quality cells are teacher-forced **prefill** evidence (including measured quality exclusions), not selected decode evidence. The historical `post-terminal-focused-verification-20260905/run.sh` runs host/Op tests and rebuilds its selected root; it neither produces BF16 model parity nor replaces this decode campaign. Existing selected whole graph/eager controls cover C1..4 public generated tokens separately; do not repeat them as an additional blanket qualifier sweep. MTP and DFlash retain their separate stated contracts.
+
+For the separate artifact-backed Python Vision versus source-BF16 finite/shape diagnostic, prepare a fresh package after selection with:
 
 ```bash
-/home/maintainer/.local/bin/python3.11 -m tools.bench.prepare_selected_vision_diagnostic \
+python3.11 -m tools.bench.prepare_selected_vision_diagnostic \
+  --source /path/to/models/qwen3.8-27b-bf16 \
+  --source-receipt /path/to/checkpoint-preflight.json \
+  --frontend-python /path/to/frontend-python3.11 \
+  --gpu-python /path/to/rocm-python3.11 \
   --selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --out profiles/bench/r9700-selected-vision-20260921
 ```
 
-That tool checks its explicit frontend and GPU Python dependencies and prepares one CPU image
-fixture; it does not run the GPU until the emitted `commands.sh` is invoked. Its existing
-frontend/ROCm environments are distinct from the text scorer's Python 3.11 environment. Missing
-dependencies are a prerequisite to report, not permission to install them. The artifact-backed
-Python VisionEncoder comparison is not C++ Engine Vision execution proof and has no numerical
-admission threshold.
+That tool checks its explicit frontend and GPU Python dependencies and prepares one CPU image fixture; it does not run the GPU until the emitted `commands.sh` is invoked. Its existing frontend/ROCm environments are distinct from the text scorer's Python 3.11 environment. Missing dependencies are a prerequisite to report, not permission to install them. The artifact-backed Python VisionEncoder comparison is not C++ Engine Vision execution proof and has no numerical admission threshold.
 
 ## Required artifacts and executables
 
-The reference scorer is the checkpoint-direct BF16 mathematical/model authority
-at `tools/reference/qwen3_8_27b_bf16/ppl.py`. It opens the complete original
-18-shard safetensors directory and never uses `.ninfer`, packed W8 arithmetic,
-or the product Engine. The G16 and G32 inputs use the same explicit candidate
-artifact because the cache is runtime state, not artifact payload. `run.py`
-requires the two paths to be the same file or byte-identical files with the same
-NInfer identity, hashes that candidate once, and rejects per-cell artifact path
-or identity drift. Each product scorer reports its compiled `kv_value_group`, exact K/V/V-scale
-plane layouts, Q4 and W8 activation profiles, and the enabled FP8-Q/K classifier with its T1/T2
-minimum contexts. `run.py` rejects a scorer whose report disagrees with its requested
-cache/plane-layout/activation/attention profile. The W8 value
-describes the compile-time evaluator profile; an A8 profile retains its measured represented-BF16
-crossover for smaller shapes rather than quantizing every invocation. The bound evaluator identities
-are `r9700-int-candidate`, `r9700-w8g32-mse-eval`,
-`r9700-q4g64-n16k16-eval`, `r9700-q4-w8-n16k16-eval`, `r9700-q4-w8-mse-n16k16-eval`,
-`r9700-w8-bf16-embed-eval`,
-`r9700-w8-bf16-attn-qk-eval`, `r9700-w8-bf16-attn-vo-eval`, and
-`r9700-w8-bf16-gdn-qk-eval`. Each campaign still accepts exactly one explicit candidate artifact
-for its selected cache-profile binary, preventing converter plans or identity drift from being
-mistaken for a runnable comparison.
-The same-format mixed calibration control keeps its result under
-`profiles/ppl/q4-w8-mse-real/<profile>.json` with the adjacent complete NLL and argmax sidecars.
-Its `r9700-q4-w8-mse-n16k16-eval` identity must be preserved in every cell and its completed 8K row is
-added to `profiles/ppl/8k-candidate-comparison.json` and the paired Markdown report rather than
-left as terminal-only output. Those reports retain PPL, NLL deltas/distribution, exact flips,
-terrible-token membership, score time, gates, and disposition.
-The selected adaptive-A8 W8 execution A/B for those identical artifact bytes is retained under
-`profiles/ppl/w8a8-shape-dispatch-ab-20260903/`; the aggregate comparison preserves the earlier
-represented-BF16 W8 row as its explicit control.
-Activate the ROCm Python environment described in the scorer's adjacent README
-before invoking `run.py`; it executes `ppl.py` directly through that environment.
+The BF16 reference scorer is `tools/reference/qwen3_8_27b_bf16/ppl.py`. It reads the complete original 18-shard safetensors directory and never uses `.ninfer`, packed W8 arithmetic, or the product Engine.
+
+The G16 and G32 inputs use the same explicit candidate artifact because the cache is runtime state, not artifact payload. `run.py` requires the two paths to be the same file or byte-identical files with the same NInfer identity, hashes that candidate once, and rejects per-cell artifact path or identity drift.
+
+Each product scorer reports its compiled `kv_value_group`, exact K/V/V-scale plane layouts, Q4 and W8 activation profiles, and the enabled FP8-Q/K classifier with its T1/T2 minimum contexts. `run.py` rejects a scorer whose report disagrees with its requested cache/plane-layout/activation/attention profile. The W8 value describes the compile-time evaluator profile; an A8 profile retains its measured represented-BF16 crossover for smaller shapes rather than quantizing every invocation.
+
+The bound evaluator identities are `r9700-int-candidate`, `r9700-w8g32-mse-eval`, `r9700-q4g64-n16k16-eval`, `r9700-q4-w8-n16k16-eval`, `r9700-q4-w8-mse-n16k16-eval`, `r9700-w8-bf16-embed-eval`, `r9700-w8-bf16-attn-qk-eval`, `r9700-w8-bf16-attn-vo-eval`, and `r9700-w8-bf16-gdn-qk-eval`. Each campaign still accepts exactly one explicit candidate artifact for its selected cache-profile binary, preventing converter plans or identity drift from being mistaken for a runnable comparison.
+
+The same-format mixed calibration control keeps its result under `profiles/ppl/q4-w8-mse-real/<profile>.json` with the adjacent complete NLL and argmax sidecars. Its `r9700-q4-w8-mse-n16k16-eval` identity must be preserved in every cell and its completed 8K row is added to `profiles/ppl/8k-candidate-comparison.json` and the paired Markdown report rather than left as terminal-only output. Those reports retain PPL, NLL deltas/distribution, exact flips, terrible-token membership, score time, gates, and disposition. The selected adaptive-A8 W8 execution A/B for those identical artifact bytes is retained under `profiles/ppl/w8a8-shape-dispatch-ab-20260903/`; the aggregate comparison preserves the earlier represented-BF16 W8 row as its explicit control.
+
+Activate the ROCm Python environment described in the scorer's adjacent README before invoking `run.py`; it executes `ppl.py` directly through that environment.
 
 Configure the temporary candidate identities explicitly:
 
@@ -259,30 +132,11 @@ python3 tools/ppl/run.py \
   --schedule-parity-max-abs-nll MEASURED_8K_BOUND
 ```
 
-The default matrix is 8K and 32K, prefill and decode, followed by the paired
-execution and 8K position/window extras above. Execution-only candidate cells
-reuse the same-length BF16 decode sidecars because the independent reference
-formula has no graph or speculative path. Every selected candidate needs an
-explicit `--gate`; use
-`--allow-ungated` only for bring-up that cannot be used as selection evidence.
-Replace `MEASURED_8K_BOUND` with the retained maximum from the complete 8K
-schedule comparison; the 63-position probe is not sufficient to define it.
-To inspect one candidate while bringing it up, use `--profiles r9700-g16`; the
-BF16 reference is inserted automatically. Useful reductions are `--tokens N`,
-`--long`, `--schedule prefill`, and `--no-extras`.
+The default matrix is 8K and 32K, prefill and decode, followed by the paired execution and 8K position/window extras above. Execution-only candidate cells reuse the same-length BF16 decode sidecars because the independent reference formula has no graph or speculative path. Every selected candidate needs an explicit `--gate`; use `--allow-ungated` only for bring-up that cannot be used as selection evidence. Replace `MEASURED_8K_BOUND` with the retained maximum from the complete 8K schedule comparison; the 63-position probe is not sufficient to define it. To inspect one candidate while bringing it up, use `--profiles r9700-g16`; the BF16 reference is inserted automatically. Useful reductions are `--tokens N`, `--long`, `--schedule prefill`, and `--no-extras`.
 
-Decode cells use the production MTP configuration by default. Pass `--spec none`
-for a spec-free decode campaign. Prefill is spec-free. A DFlash target may be
-invoked directly through `ninfer-ppl --schedule prefill`; teacher-forced DFlash
-decode is intentionally rejected. The BF16 scorer accepts the MTP setting only
-as the paired-cell label: it always evaluates the ordinary target distribution,
-which is also the target-logit column compared for a product MTP cell.
+Decode cells use the production MTP configuration by default. Pass `--spec none` for a spec-free decode campaign. Prefill is spec-free. A DFlash target may be invoked directly through `ninfer-ppl --schedule prefill`; teacher-forced DFlash decode is intentionally rejected. The BF16 scorer accepts the MTP setting only as the paired-cell label: it always evaluates the ordinary target distribution, which is also the target-logit column compared for a product MTP cell.
 
-The corpus is encoded by the tokenizer embedded in the first candidate artifact.
-The BF16 source authority implements scoring only, so a reference-only run needs
-an already populated `--ids` file. If the checked corpus is too short, the paired
-runner invokes `bake_corpus.py` with the first candidate. A direct bake requires
-an explicit product artifact:
+The corpus is encoded by the tokenizer embedded in the first candidate artifact. The BF16 source authority implements scoring only, so a reference-only run needs an already populated `--ids` file. If the checked corpus is too short, the paired runner invokes `bake_corpus.py` with the first candidate. A direct bake requires an explicit product artifact:
 
 ```bash
 python3 tools/ppl/bake_corpus.py \
@@ -291,26 +145,11 @@ python3 tools/ppl/bake_corpus.py \
   --long
 ```
 
-The output directory contains `results.json`, `results.md`, and every cell's
-sidecars. `results.json` is `ninfer_r9700_ppl_campaign` schema v6 and records the
-candidate and scorer hashes, validated BF16 source identity/counts, validated
-source config/index and all 18 shard SHA-256 values, corpus manifest/hash/token count, exact
-commands, compiled group, both activation profiles, the
-`packed-t1to6-split512-t4tree-v1` attention classifier, compile-bound dense or XAttention
-prefill profile, explicit quality tier, execution labels, sidecar hashes, thresholds, and the
-overall gate result. The runner
-rejects corpus, model, weights, group,
-schedule, spec, graph, chunk, prompt-length, or terrible-token-threshold drift.
-Preserve all outputs when moving evidence: aggregate PPL without the paired
-token records is not an admission result. Historical `argmax_exact` fields remain in reports but
-are explicitly diagnostic for BF16 comparisons.
+The output directory contains `results.json`, `results.md`, and every cell's sidecars. `results.json` is `ninfer_r9700_ppl_campaign` schema v6 and records the candidate and scorer hashes, validated BF16 source identity/counts, validated source config/index and all 18 shard SHA-256 values, corpus manifest/hash/token count, exact commands, compiled group, both activation profiles, the `packed-t1to6-split512-t4tree-v1` attention classifier, compile-bound dense or XAttention prefill profile, explicit quality tier, execution labels, sidecar hashes, thresholds, and the overall gate result. The runner rejects corpus, model, weights, group, schedule, spec, graph, chunk, prompt-length, or terrible-token-threshold drift. Preserve all outputs when moving evidence: aggregate PPL without the paired token records is not an admission result. Historical `argmax_exact` fields remain in reports but are explicitly diagnostic for BF16 comparisons.
 
 ### Q4 activation-width evaluator
 
-Q4 activation precision is an execution intermediate rather than artifact metadata. A8G64 is the
-production-style default for every Q4-bearing artifact; it preserves native IU4 execution while
-materially reducing activation error. The ordinary product build selects A8, so build the G16
-scorer while leaving the Q4 artifact unchanged:
+Q4 activation precision is an execution intermediate rather than artifact metadata. A8G64 is the production-style default for every Q4-bearing artifact; it preserves native IU4 execution while materially reducing activation error. The ordinary product build selects A8, so build the G16 scorer while leaving the Q4 artifact unchanged:
 
 ```bash
 cmake -S . -B build-r9700 -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -319,8 +158,7 @@ cmake -S . -B build-r9700 -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-r9700 --target ninfer-ppl --parallel 8
 ```
 
-Run the same command once for each existing Q4-bearing evaluator, changing only the explicit
-artifact and output directory:
+Run the same command once for each existing Q4-bearing evaluator, changing only the explicit artifact and output directory:
 
 ```bash
 mkdir -p profiles/ppl/q4g64-a8-real
@@ -348,25 +186,11 @@ build-r9700/apps/ninfer-ppl \
   --out-json profiles/ppl/q4-w8-mse-a8-real/prefill-8192-g16.json
 ```
 
-Every JSON row reports `q4_activation_bits`, `w8_activation_bits`, FP8-Q/K enablement and exact
-crossover classifier, the bound artifact identity, KV group, exact workload, and
-timing; adjacent NLL and argmax sidecars retain the complete position-aligned result.
-Reject a row before comparison if either the reported activation width or artifact identity is not
-the requested profile. The campaign runner enforces A8 by default; pass
-`--expected-q4-activation-bits 4` only with a scorer explicitly configured with
-`-DNINFER_R9700_Q4_ACTIVATION_BITS=4 -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=0`
-to reproduce the retained uniform-A4 evaluator. Q4 A8 changes no
-persistent Q4 bytes. A mixed artifact's W8 matrices use the selected adaptive A8 profile by
-default; request `--expected-w8-activation-bits 16` only for the represented-BF16 control.
+Every JSON row reports `q4_activation_bits`, `w8_activation_bits`, FP8-Q/K enablement and exact crossover classifier, the bound artifact identity, KV group, exact workload, and timing; adjacent NLL and argmax sidecars retain the complete position-aligned result. Reject a row before comparison if either the reported activation width or artifact identity is not the requested profile. The campaign runner enforces A8 by default; pass `--expected-q4-activation-bits 4` only with a scorer explicitly configured with `-DNINFER_R9700_Q4_ACTIVATION_BITS=4 -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=0` to reproduce the retained uniform-A4 evaluator. Q4 A8 changes no persistent Q4 bytes. A mixed artifact's W8 matrices use the selected adaptive A8 profile by default; request `--expected-w8-activation-bits 16` only for the represented-BF16 control.
 
-Configure `build-r9700-a4q4` with activation bits4 and family0 only when reproducing
-the retained uniform-A4 evidence. A fresh default build selects A8 with gate/up-only
-A4 prefill (family1). Uniform-A8 control campaigns must explicitly configure family0;
-`q4_activation_bits: 8` alone does not identify uniform A8. Check `q4_activation_profile`.
+Configure `build-r9700-a4q4` with activation bits4 and family0 only when reproducing the retained uniform-A4 evidence. A fresh default build selects A8 with gate/up-only A4 prefill (family1). Uniform-A8 control campaigns must explicitly configure family0; `q4_activation_bits: 8` alone does not identify uniform A8. Check `q4_activation_profile`.
 
-PPL verifies the target distribution under the MTP transaction, but it does not
-measure proposal acceptance or product throughput. Record acceptance and whole-path latency with the
-same candidate artifact in separately compiled schema-v21 benchmark runs:
+PPL verifies the target distribution under the MTP transaction, but it does not measure proposal acceptance or product throughput. Record acceptance and whole-path latency with the same candidate artifact in separately compiled schema-v21 benchmark runs:
 
 ```bash
 python3 tools/bench/run_ninfer_bench_matrix.py \
@@ -384,28 +208,13 @@ python3 tools/bench/run_ninfer_bench_matrix.py \
   --output-dir profiles/bench/r9700-g32-qualification
 ```
 
-For uniform all-Q4+A8 or mixed Q4/W8+A8 controls, use a separately configured family0 benchmark and substitute
-the exact `r9700-q4g64-n16k16-eval`, `r9700-q4-w8-n16k16-eval`, or `r9700-q4-w8-mse-n16k16-eval` artifact above. Keep
-`--expected-q4-activation-bits 8`; the default expected W8 profile is the selected adaptive A8
-route. Pass `--expected-w8-activation-bits 16` only for the represented-BF16 control. The runner
-rejects an accidentally reused activation or attention-profile executable.
+For uniform all-Q4+A8 or mixed Q4/W8+A8 controls, use a separately configured family0 benchmark and substitute the exact `r9700-q4g64-n16k16-eval`, `r9700-q4-w8-n16k16-eval`, or `r9700-q4-w8-mse-n16k16-eval` artifact above. Keep `--expected-q4-activation-bits 8`; the default expected W8 profile is the selected adaptive A8 route. Pass `--expected-w8-activation-bits 16` only for the represented-BF16 control. The runner rejects an accidentally reused activation or attention-profile executable.
 
-The raw benchmark report includes the compiled KV group plus speculative rounds,
-drafts, accepted tokens, accepted-per-position, acceptance rate, acceptance
-length, and fallbacks. The matrix runner rejects a resumed or newly produced
-report from the wrong compiled group. DFlash2 requires its own companion
-acceptance/performance campaign because teacher-forced DFlash decode is not a
-defined PPL schedule.
+The raw benchmark report includes the compiled KV group plus speculative rounds, drafts, accepted tokens, accepted-per-position, acceptance rate, acceptance length, and fallbacks. The matrix runner rejects a resumed or newly produced report from the wrong compiled group. DFlash2 requires its own companion acceptance/performance campaign because teacher-forced DFlash decode is not a defined PPL schedule.
 
 ### XAttention real-model gate
 
-XAttention is a compile-isolated prefill route, not a runtime profile. Its quality gate therefore
-uses fresh dense and S16/tau=.9 executables for both unresolved cache-group candidates, the exact
-same all-Q4 artifact, corpus, prefill chunk, schedules, and independent BF16 source. Configure and
-build the same four selection trees used by the matched benchmark campaigns. Rebuild immediately
-before acquisition and let `run.py` retain the resulting executable hashes; an earlier named hash
-is never an authority after any linked core or challenger source changes, even when that route is
-still unpromoted:
+XAttention is a compile-isolated prefill route, not a runtime profile. Its quality gate therefore uses fresh dense and S16/tau=.9 executables for both unresolved cache-group candidates, the exact same all-Q4 artifact, corpus, prefill chunk, schedules, and independent BF16 source. Configure and build the same four selection trees used by the matched benchmark campaigns. Rebuild immediately before acquisition and let `run.py` retain the resulting executable hashes; an earlier named hash is never an authority after any linked core or challenger source changes, even when that route is still unpromoted:
 
 ```bash
 cmake -S . -B build-r9700-dense-selection-g16 -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -445,26 +254,14 @@ cmake --build build-r9700-xattention-model-s16-tau900-g32 \
   --target ninfer-ppl --parallel 8
 ```
 
-Run the matched 8K/32K prefill campaigns. The all-Q4 artifact is a `capacity-speed` candidate, whose
-mean-NLL ceiling is `ln(1.05) = 0.048790164169432`; every candidate is compared directly with the
-independent BF16 authority and greedy differences are retained diagnostically. The dense campaign
-is the route-attribution control, while the S16 campaign is the admission gate:
+Run the matched 8K/32K prefill campaigns. The all-Q4 artifact is a `capacity-speed` candidate, whose mean-NLL ceiling is `ln(1.05) = 0.048790164169432`; every candidate is compared directly with the independent BF16 authority and greedy differences are retained diagnostically. The dense campaign is the route-attribution control, while the S16 campaign is the admission gate:
 
-The abstract causal model is chunk-partition invariant: every row has the same visible prefix and
-the GDN state advances in the same token order. The realized BF16 scorer is not proven bitwise
-chunk-invariant. Changing the span changes batched matrix shapes and fused-recurrent GDN call
-boundaries, which can change deterministic algorithm selection and floating-point association.
-The fixed 8,192-source-row FP32 attention-PV accumulation is independent of the outer prefill
-chunk, but it does not make projections, QK/softmax, or GDN execution partition invariant. Schema
-v6 therefore binds `prefill_chunk` in the campaign and every raw command. Pairing a candidate at
-the selected chunk with BF16 rows from another chunk could move NLL, severe-position, or argmax
-diagnostics. The contingency below creates exactly two fresh realizations at each of 8K and 32K;
-do not use a cross-chunk comparison as a reuse waiver.
+The abstract causal model is chunk-partition invariant: every row has the same visible prefix and the GDN state advances in the same token order. The realized BF16 scorer is not proven bitwise chunk-invariant. Changing the span changes batched matrix shapes and fused-recurrent GDN call boundaries, which can change deterministic algorithm selection and floating-point association. The fixed 8,192-source-row FP32 attention-PV accumulation is independent of the outer prefill chunk, but it does not make projections, QK/softmax, or GDN execution partition invariant. Schema v6 therefore binds `prefill_chunk` in the campaign and every raw command. Pairing a candidate at the selected chunk with BF16 rows from another chunk could move NLL, severe-position, or argmax diagnostics. The contingency below creates exactly two fresh realizations at each of 8K and 32K; do not use a cross-chunk comparison as a reuse waiver.
 
 ```bash
 set -euo pipefail
 export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
-export PATH=/path/to/local/.venv-ninfer-r9700/bin:${PATH}
+export PATH=/path/to/python-environment/bin:${PATH}
 if ! NINFER_SELECTED_PREFILL_CHUNK="$(python3 -c \
   'from pathlib import Path; from tools.bench.select_prefill_chunk import validate_selection_record; print(validate_selection_record(Path("profiles/bench/prefill-chunk-selection-20260904.json"))["selected_prefill_chunk"])')"; then
   echo "prefill-chunk selection validation failed" >&2
@@ -476,7 +273,7 @@ case "$NINFER_SELECTED_PREFILL_CHUNK" in
 esac
 
 for PPL_EXECUTABLE in \
-  /path/to/local/.venv-ninfer-r9700/bin/python \
+  python3.11 \
   build-r9700-dense-selection-g16/apps/ninfer-ppl \
   build-r9700-dense-selection-g32/apps/ninfer-ppl \
   build-r9700-xattention-model-s16-tau900/apps/ninfer-ppl \
@@ -490,7 +287,7 @@ for PPL_INPUT in \
   out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer; do
   [[ -f "$PPL_INPUT" ]]
 done
-[[ -d /path/to/local/models/qwen3.8-27b-bf16 ]]
+[[ -d /path/to/models/qwen3.8-27b-bf16 ]]
 
 # All-Q4 sparse and both mixed routes are always fresh. Dense all-Q4 is fresh only when the
 # selected chunk differs from the retained 4096-token authority. Check every candidate destination
@@ -525,9 +322,9 @@ else
   [[ ! -e "$NINFER_BF16_B" ]]
   [[ ! -e "$NINFER_BF16_REPEAT" ]]
   for NINFER_BF16_OUT in "$NINFER_BF16_A" "$NINFER_BF16_B"; do
-    /path/to/local/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
+    python3.11 tools/ppl/run.py \
       --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
-      --bf16-reference-weights /path/to/local/models/qwen3.8-27b-bf16 \
+      --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
       --ids tools/ppl/corpus.ids --profiles bf16-reference \
       --schedule prefill --spec none --no-extras \
       --prefill-chunk "$NINFER_SELECTED_PREFILL_CHUNK" \
@@ -542,9 +339,9 @@ fi
 export ALL_Q4_DENSE_QUALITY
 
 if [[ "$NINFER_SELECTED_PREFILL_CHUNK" != 4096 ]]; then
-/path/to/local/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
+python3.11 tools/ppl/run.py \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
-  --bf16-reference-weights /path/to/local/models/qwen3.8-27b-bf16 \
+  --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --g16-ppl-bin build-r9700-dense-selection-g16/apps/ninfer-ppl \
   --g32-ppl-bin build-r9700-dense-selection-g32/apps/ninfer-ppl \
   --g16-weights out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer \
@@ -563,9 +360,9 @@ if [[ "$NINFER_SELECTED_PREFILL_CHUNK" != 4096 ]]; then
   --out profiles/ppl/xattention-dense-q4g64-post-challenger-20260904
 fi
 
-/path/to/local/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
+python3.11 tools/ppl/run.py \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
-  --bf16-reference-weights /path/to/local/models/qwen3.8-27b-bf16 \
+  --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --g16-ppl-bin build-r9700-xattention-model-s16-tau900/apps/ninfer-ppl \
   --g32-ppl-bin build-r9700-xattention-model-s16-tau900-g32/apps/ninfer-ppl \
   --g16-weights out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer \
@@ -587,9 +384,9 @@ fi
 # all-Q4 authority, so both route campaigns import those rows and score only the mixed candidates.
 run_mixed_xattention_ppl() {
   local route="$1" g16_bin="$2" g32_bin="$3" output="$4"
-  /path/to/local/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
+  python3.11 tools/ppl/run.py \
     --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
-    --bf16-reference-weights /path/to/local/models/qwen3.8-27b-bf16 \
+    --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
     --g16-ppl-bin "$g16_bin" --g32-ppl-bin "$g32_bin" \
     --g16-weights out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer \
     --g32-weights out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer \
@@ -615,54 +412,18 @@ run_mixed_xattention_ppl b128-s16-tau900 \
   profiles/ppl/xattention-s16-tau900-q4-w8-mse-post-challenger-20260904
 ```
 
-These post-challenger output paths are intentionally unused before acquisition. At selected chunk
-4,096, `ALL_Q4_DENSE_QUALITY` names the already admitted exact-v3 dense all-Q4 rebase and that one
-candidate campaign is not rerun. At any other selected chunk it names the fresh dense all-Q4
-output alongside the other three fresh candidates. The earlier dated all-Q4 and mixed-dense
-campaign directories remain immutable historical evidence bound to their original scorer bytes;
-never rerun a rebuilt scorer into those directories.
+These post-challenger output paths are intentionally unused before acquisition. At selected chunk 4,096, `ALL_Q4_DENSE_QUALITY` names the already admitted exact-v3 dense all-Q4 rebase and that one candidate campaign is not rerun. At any other selected chunk it names the fresh dense all-Q4 output alongside the other three fresh candidates. The earlier dated all-Q4 and mixed-dense campaign directories remain immutable historical evidence bound to their original scorer bytes; never rerun a rebuilt scorer into those directories.
 
-At preparation time the all-Q4 artifact SHA-256 is
-`19d029a89c1ef1cf87420067555021a7c7b435c31a92bea7c64ccf42c03d80e9`, the mixed
-Q4/W8-MSE artifact SHA-256 is
-`8fbadf14e355b1943ef9386a91ebafff0d852295a9adc0054bdd430291505ebd`, and the
-32,768-token corpus SHA-256 is
-`aa1ba6d9932a4bcefdfd1c395bde73911daeba083c6b45d353a421dcd1eae077`. The runner
-recomputes each applicable identity and retains it with the BF16 source and newly built scorer
-identities.
+At preparation time the all-Q4 artifact SHA-256 is `19d029a89c1ef1cf87420067555021a7c7b435c31a92bea7c64ccf42c03d80e9`, the mixed Q4/W8-MSE artifact SHA-256 is `8fbadf14e355b1943ef9386a91ebafff0d852295a9adc0054bdd430291505ebd`, and the 32,768-token corpus SHA-256 is `aa1ba6d9932a4bcefdfd1c395bde73911daeba083c6b45d353a421dcd1eae077`. The runner recomputes each applicable identity and retains it with the BF16 source and newly built scorer identities.
 
-Do not reuse the earlier `profiles/ppl/q4g64-a8-real/` dense cells for this gate. They predate the
-compile-bound `xattention_qualification: false` report field and do not bind their scorer executable
-hash in one campaign envelope. The newer direct
-`profiles/ppl/xattention-s16-tau900-g16/dense-prefill-8192-g16` sidecars do report the dense
-compile profile, but cover only G16/8K and likewise have no campaign-level scorer, artifact, corpus,
-or BF16-source binding. Schema-v6 `results.json` binds the exact scorer binaries, artifact, corpus,
-BF16 source, expected attention profile, cell commands, and sidecar hashes; preserve both campaign
-directories together for matched attribution.
-Each candidate command imports rather than recomputes the expensive BF16 rows. The option is available
-to any prefill-only, non-speculative campaign whose requested lengths, skip, chunk, device, corpus,
-BF16 source, and BF16 scorer match the retained schema-v6 authority. It reopens the imported BF16
-raw reports and sidecars and checks their source hashes, complete deterministic execution
-provenance, and completeness. Candidate route, recipe, quality tier, gates, candidate cells, and
-campaign-wide pass do not affect BF16 reference math and are not reuse constraints.
+Do not reuse the earlier `profiles/ppl/q4g64-a8-real/` dense cells for this gate. They predate the compile-bound `xattention_qualification: false` report field and do not bind their scorer executable hash in one campaign envelope. The newer direct `profiles/ppl/xattention-s16-tau900-g16/dense-prefill-8192-g16` sidecars do report the dense compile profile, but cover only G16/8K and likewise have no campaign-level scorer, artifact, corpus, or BF16-source binding. Schema-v6 `results.json` binds the exact scorer binaries, artifact, corpus, BF16 source, expected attention profile, cell commands, and sidecar hashes; preserve both campaign directories together for matched attribution. Each candidate command imports rather than recomputes the expensive BF16 rows. The option is available to any prefill-only, non-speculative campaign whose requested lengths, skip, chunk, device, corpus, BF16 source, and BF16 scorer match the retained schema-v6 authority. It reopens the imported BF16 raw reports and sidecars and checks their source hashes, complete deterministic execution provenance, and completeness. Candidate route, recipe, quality tier, gates, candidate cells, and campaign-wide pass do not affect BF16 reference math and are not reuse constraints.
 
-When the BF16 execution authority changes without changing an already measured dense candidate,
-`--reuse-candidate-campaign` performs the complementary offline operation. It imports only the
-primary G16/G32 prefill cells from schema-v6 campaigns, verifies the exact artifact and scorer
-bytes, corpus, workload, cache/activation/attention profile, raw scorer JSON, commands, and sidecar
-hashes, removes every old BF16-derived field, and recomputes those fields against the selected BF16
-campaign. It cannot import decode/execution extras, cannot cross a dense/XAttention profile boundary,
-and must not be used for candidate code that changed. Repeat the option only to combine disjoint
-profile/length subsets: overlapping cells fail, while requested cells absent from the retained
-sources execute normally. An incomplete source is never itself promoted as complete. The following
-retained invocation rebound the
-unchanged historical all-Q4 dense cells to the v3 authority without either scorer running. Its
-distinct output already exists and is immutable; a new rebase must name another unused output path:
+When the BF16 execution authority changes without changing an already measured dense candidate, `--reuse-candidate-campaign` performs the complementary offline operation. It imports only the primary G16/G32 prefill cells from schema-v6 campaigns, verifies the exact artifact and scorer bytes, corpus, workload, cache/activation/attention profile, raw scorer JSON, commands, and sidecar hashes, removes every old BF16-derived field, and recomputes those fields against the selected BF16 campaign. It cannot import decode/execution extras, cannot cross a dense/XAttention profile boundary, and must not be used for candidate code that changed. Repeat the option only to combine disjoint profile/length subsets: overlapping cells fail, while requested cells absent from the retained sources execute normally. An incomplete source is never itself promoted as complete. The following retained invocation rebound the unchanged historical all-Q4 dense cells to the v3 authority without either scorer running. Its distinct output already exists and is immutable; a new rebase must name another unused output path:
 
 ```bash
-/path/to/local/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
+python3.11 tools/ppl/run.py \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
-  --bf16-reference-weights /path/to/local/models/qwen3.8-27b-bf16 \
+  --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --g16-ppl-bin build-r9700-xattention-ppl-dense-g16/apps/ninfer-ppl \
   --g32-ppl-bin build-r9700-xattention-ppl-dense-g32/apps/ninfer-ppl \
   --g16-weights out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer \
@@ -680,15 +441,9 @@ distinct output already exists and is immutable; a new rebase must name another 
   --out profiles/ppl/xattention-dense-q4g64-v3-rebase-20260904
 ```
 
-Use the analogous original mixed-dense campaign and its exact retained dense scorers/artifact for
-that recipe. Sparse sidecars measured before an XAttention consumer change are not unchanged and
-therefore require fresh scoring.
+Use the analogous original mixed-dense campaign and its exact retained dense scorers/artifact for that recipe. Sparse sidecars measured before an XAttention consumer change are not unchanged and therefore require fresh scoring.
 
-Every BF16 reuse requires the exact schema-v1 A/B comparison. The runner reopens both comparison
-inputs, verifies their hashes and exact 8K/32K rows, requires the selected reusable campaign to be
-one of that pair, and binds the comparison and authority hashes into the new schema-v6 campaign.
-The terminal Pareto assembler revalidates that binding and requires the same exact comparison for
-all dense/sparse and G16/G32 candidates; a deterministic-profile label alone is insufficient.
+Every BF16 reuse requires the exact schema-v1 A/B comparison. The runner reopens both comparison inputs, verifies their hashes and exact 8K/32K rows, requires the selected reusable campaign to be one of that pair, and binds the comparison and authority hashes into the new schema-v6 campaign. The terminal Pareto assembler revalidates that binding and requires the same exact comparison for all dense/sparse and G16/G32 candidates; a deterministic-profile label alone is insufficient.
 
 After both campaigns complete, assemble their direct route comparison:
 
@@ -699,50 +454,36 @@ python3 tools/ppl/compare_xattention.py \
   --out profiles/ppl/xattention-q4g64-route-comparison-post-challenger-20260904.json
 ```
 
-The schema-v1 comparison requires the all-Q4 `capacity-speed` tier and exact `ln(1.05)` gate,
-rejects scorer, artifact, corpus, BF16 source, cache layout, activation, threshold, or workload
-drift; verifies the retained report and sidecar hashes; and requires the
-two independently executed BF16 sidecar pairs to be byte-identical. For each G16/G32 8K/32K cell
-it reports XAttention-minus-dense paired NLL statistics, severe-position membership changes,
-diagnostic greedy flips, scorer seconds, and dense-over-XAttention speedup. This comparison is
-route attribution, not a replacement for either campaign's independent BF16 admission gates or a
-production-throughput measurement.
+The schema-v1 comparison requires the all-Q4 `capacity-speed` tier and exact `ln(1.05)` gate, rejects scorer, artifact, corpus, BF16 source, cache layout, activation, threshold, or workload drift; verifies the retained report and sidecar hashes; and requires the two independently executed BF16 sidecar pairs to be byte-identical. For each G16/G32 8K/32K cell it reports XAttention-minus-dense paired NLL statistics, severe-position membership changes, diagnostic greedy flips, scorer seconds, and dense-over-XAttention speedup. This comparison is route attribution, not a replacement for either campaign's independent BF16 admission gates or a production-throughput measurement.
 
 ### Source-only Q4 group-size gate
 
-Before adding a Q4G128 artifact format or runtime route, isolate its weight-codec effect with the
-separate diagnostic owner. It decodes canonical signed Q4 with represented FP16 scales back to
-BF16 one matrix at a time and then uses the unchanged deterministic source formula. Activations
-remain BF16, so this is a go/no-go gate for implementing the format, never product A8Q4 PPL.
-The CPU-only preflight validates all 18 shards, all 851 Text tensors, and the 498 raw matrix views
-corresponding to the 322 logical matrices consumed by non-speculative Text scoring (the separate
-draft head is not executed):
+Before adding a Q4G128 artifact format or runtime route, isolate its weight-codec effect with the separate diagnostic owner. It decodes canonical signed Q4 with represented FP16 scales back to BF16 one matrix at a time and then uses the unchanged deterministic source formula. Activations remain BF16, so this is a go/no-go gate for implementing the format, never product A8Q4 PPL. The CPU-only preflight validates all 18 shards, all 851 Text tensors, and the 498 raw matrix views corresponding to the 322 logical matrices consumed by non-speculative Text scoring (the separate draft head is not executed):
 
 ```bash
 LD_LIBRARY_PATH=/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/q4_group_source_diagnostic.py \
-  --weights /path/to/local/models/qwen3.8-27b-bf16 \
+  --weights /path/to/models/qwen3.8-27b-bf16 \
   --ids tools/ppl/corpus.ids --group 128 --tokens 8192 --device 0 \
   --preflight-only \
   --out profiles/bench/r9700-q4g128-source-ppl-preflight-20260904.json
 ```
 
-After the GPU queue is explicitly released, run the paired 8K diagnostics into fresh paths and
-compare them with the retained exact v3 BF16 cell:
+After the GPU queue is explicitly released, run the paired 8K diagnostics into fresh paths and compare them with the retained exact v3 BF16 cell:
 
 ```bash
 LD_LIBRARY_PATH=/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/q4_group_source_diagnostic.py \
-  --weights /path/to/local/models/qwen3.8-27b-bf16 \
+  --weights /path/to/models/qwen3.8-27b-bf16 \
   --ids tools/ppl/corpus.ids --group 64 --tokens 8192 --device 0 \
   --out profiles/ppl/q4-group-source-8k-20260904/q4g64.json
 
 LD_LIBRARY_PATH=/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/q4_group_source_diagnostic.py \
-  --weights /path/to/local/models/qwen3.8-27b-bf16 \
+  --weights /path/to/models/qwen3.8-27b-bf16 \
   --ids tools/ppl/corpus.ids --group 128 --tokens 8192 --device 0 \
   --out profiles/ppl/q4-group-source-8k-20260904/q4g128.json
 
@@ -753,59 +494,39 @@ python3 tools/ppl/compare_q4_group_source.py \
   --out profiles/ppl/q4-group-source-8k-20260904/comparison.json
 ```
 
-The two score processes each use the existing single-layer-resident scorer plus bounded 4,096-row
-quantization scratch. The largest BF16 matrix is the 2,542,796,800-byte output head; source and
-decoded copies coexist, and the largest FP32 scratch plane is 285,212,672 bytes. Use the 32 GiB
-R9700 and budget roughly 3--4 minutes of established scorer time per 8K run plus codec overhead
-(about 10 minutes for the pair conservatively). Escalate a passing pair to 32K with new paths;
-retained v3 scorer times bound that pair at roughly 25--30 minutes plus codec overhead.
+The two score processes each use the existing single-layer-resident scorer plus bounded 4,096-row quantization scratch. The largest BF16 matrix is the 2,542,796,800-byte output head; source and decoded copies coexist, and the largest FP32 scratch plane is 285,212,672 bytes. Use the 32 GiB R9700 and budget roughly 3--4 minutes of established scorer time per 8K run plus codec overhead (about 10 minutes for the pair conservatively). Escalate a passing pair to 32K with new paths; retained v3 scorer times bound that pair at roughly 25--30 minutes plus codec overhead.
 
 ### Source-only FP8/Q4 hybrid gate
 
-The canonical four-role hybrid has a separate weight-codec diagnostic before its product PPL
-campaign. It reads the target-owned `fp8_hybrid_selection.inc` identity and 144 logical names,
-then mechanically follows the existing source recipes to identify raw rows. This is important for
-the head-interleaved attention Q projection and for the first 4,096 rows of each GDN QKV source.
-The selected rows use canonical row-scaled E4M3FN with FP32 row scales; 178 logical Text matrices
-use canonical Q4G64, and the 144 direct-BF16 rank-two Text matrices remain unchanged. The full
-artifact inventory remains 144 E4M3 and 295 Q4 because MTP, Vision, and the draft head are outside
-ordinary Text scoring.
+The canonical four-role hybrid has a separate weight-codec diagnostic before its product PPL campaign. It reads the target-owned `fp8_hybrid_selection.inc` identity and 144 logical names, then mechanically follows the existing source recipes to identify raw rows. This is important for the head-interleaved attention Q projection and for the first 4,096 rows of each GDN QKV source. The selected rows use canonical row-scaled E4M3FN with FP32 row scales; 178 logical Text matrices use canonical Q4G64, and the 144 direct-BF16 rank-two Text matrices remain unchanged. The full artifact inventory remains 144 E4M3 and 295 Q4 because MTP, Vision, and the draft head are outside ordinary Text scoring.
 
-After the GPU queue is explicitly released, produce the 8K codec-only cell and compare it with the
-retained deterministic BF16 authority:
+After the GPU queue is explicitly released, produce the 8K codec-only cell and compare it with the retained deterministic BF16 authority:
 
 ```bash
 mkdir -p profiles/ppl/fp8-hybrid-source-8k-20260904
 LD_LIBRARY_PATH=/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/fp8_hybrid_source_diagnostic.py \
-  --weights /path/to/local/models/qwen3.8-27b-bf16 \
+  --weights /path/to/models/qwen3.8-27b-bf16 \
   --ids tools/ppl/corpus.ids --device 0 \
   --out profiles/ppl/fp8-hybrid-source-8k-20260904/hybrid.json
 
 LD_LIBRARY_PATH=/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/compare_fp8_hybrid_source.py \
   --hybrid profiles/ppl/fp8-hybrid-source-8k-20260904/hybrid.json \
   --bf16 profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/8192.prefill.bf16-reference.json \
   --out profiles/ppl/fp8-hybrid-source-8k-20260904/comparison.json
 ```
 
-The comparison rehashes both sidecars, requires exact source/corpus and 8K prefill-half alignment,
-and applies the existing capacity-speed bounds: mean-NLL delta at most `ln(1.05)` and no more than
-0.25% newly severe positions. Activations and matrix arithmetic remain BF16, so this result isolates
-the persistent codec and cannot substitute for hybrid product PPL or whole-inference admission.
+The comparison rehashes both sidecars, requires exact source/corpus and 8K prefill-half alignment, and applies the existing capacity-speed bounds: mean-NLL delta at most `ln(1.05)` and no more than 0.25% newly severe positions. Activations and matrix arithmetic remain BF16, so this result isolates the persistent codec and cannot substitute for hybrid product PPL or whole-inference admission.
 
-If that source-codec comparison passes, run the artifact-backed 8K product cell. The campaign
-runner requires the decision-owned hybrid identity and its adjacent conversion receipt, including
-recipe, selection, object-plan, source-index/ranking, byte-size, and artifact hashes. It reuses only
-the 8K cell from the retained exact joint 8K/32K BF16 authority and recomputes candidate-versus-BF16
-NLL, newly severe positions, and diagnostic greedy-token flips from the aligned sidecars:
+If that source-codec comparison passes, run the artifact-backed 8K product cell. The campaign runner requires the decision-owned hybrid identity and its adjacent conversion receipt, including recipe, selection, object-plan, source-index/ranking, byte-size, and artifact hashes. It reuses only the 8K cell from the retained exact joint 8K/32K BF16 authority and recomputes candidate-versus-BF16 NLL, newly severe positions, and diagnostic greedy-token flips from the aligned sidecars:
 
 ```bash
 LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
-  --bf16-reference-weights /path/to/local/models/qwen3.8-27b-bf16 \
+python3.11 tools/ppl/run.py \
+  --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
   --g16-weights out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer \
   --g16-ppl-bin build-r9700-dense-selection-g16/apps/ninfer-ppl \
@@ -820,14 +541,11 @@ LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
   --out profiles/ppl/fp8-hybrid-product-8k-20260904
 ```
 
-After the 8K product campaign passes, seal its greedy-token diagnostic without rerunning either
-scorer. This validator reopens the live hybrid artifact and adjacent conversion receipt, the exact
-BF16 repeat authority and retained scorer sidecars, and the candidate sidecars; it then recomputes
-the position-aligned I32 argmax comparison rather than trusting the campaign's derived fields:
+After the 8K product campaign passes, seal its greedy-token diagnostic without rerunning either scorer. This validator reopens the live hybrid artifact and adjacent conversion receipt, the exact BF16 repeat authority and retained scorer sidecars, and the candidate sidecars; it then recomputes the position-aligned I32 argmax comparison rather than trusting the campaign's derived fields:
 
 ```bash
 LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/validate_fp8_hybrid_greedy.py \
   --campaign profiles/ppl/fp8-hybrid-product-8k-20260904/results.json \
   --artifact out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer \
@@ -837,15 +555,11 @@ LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
   --out profiles/ppl/fp8-hybrid-product-8k-20260904/greedy-token-diagnostic.json
 ```
 
-The following CPU-only comparison localizes the residual between the source-codec formula and the
-artifact-backed product. It first revalidates the same artifact receipt, BF16 repeat authority,
-source/corpus identity, workload, and all six sidecars. Its product-minus-source row collectively
-contains activation quantization, product matrix arithmetic/reduction, cache codecs, and fused
-implementation differences; these effects cannot be separated further from final-token sidecars:
+The following CPU-only comparison localizes the residual between the source-codec formula and the artifact-backed product. It first revalidates the same artifact receipt, BF16 repeat authority, source/corpus identity, workload, and all six sidecars. Its product-minus-source row collectively contains activation quantization, product matrix arithmetic/reduction, cache codecs, and fused implementation differences; these effects cannot be separated further from final-token sidecars:
 
 ```bash
 LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/compare_fp8_hybrid_execution.py \
   --source-codec profiles/ppl/fp8-hybrid-source-8k-20260904/hybrid.json \
   --product-campaign profiles/ppl/fp8-hybrid-product-8k-20260904/results.json \
@@ -856,14 +570,12 @@ LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
   --out profiles/ppl/fp8-hybrid-execution-localization-8k-20260904.json
 ```
 
-Only if the 8K product campaign exits successfully and its `results.json` reports `pass: true`,
-run the separate 32K cell. It consumes the same artifact, receipt, scorer, corpus, BF16 authority,
-and gate:
+Only if the 8K product campaign exits successfully and its `results.json` reports `pass: true`, run the separate 32K cell. It consumes the same artifact, receipt, scorer, corpus, BF16 authority, and gate:
 
 ```bash
 LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
-  --bf16-reference-weights /path/to/local/models/qwen3.8-27b-bf16 \
+python3.11 tools/ppl/run.py \
+  --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
   --g16-weights out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer \
   --g16-ppl-bin build-r9700-dense-selection-g16/apps/ninfer-ppl \
@@ -878,12 +590,11 @@ LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
   --out profiles/ppl/fp8-hybrid-product-32k-20260904
 ```
 
-If the conditional 32K product campaign passes, seal its independent greedy diagnostic with the
-same authorities:
+If the conditional 32K product campaign passes, seal its independent greedy diagnostic with the same authorities:
 
 ```bash
 LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/validate_fp8_hybrid_greedy.py \
   --campaign profiles/ppl/fp8-hybrid-product-32k-20260904/results.json \
   --artifact out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer \
@@ -893,15 +604,11 @@ LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
   --out profiles/ppl/fp8-hybrid-product-32k-20260904/greedy-token-diagnostic.json
 ```
 
-Also validate the complete 16,383-position product/BF16 localization boundary. There is currently
-no same-length 32K source-codec sidecar, so omitting `--source-codec` is intentional: the report
-must say `source_localization_available: false` and makes no cross-length attribution. If a 32K
-source-codec diagnostic is later acquired independently, pass its JSON with `--source-codec` to
-enable the same three-way decomposition used at 8K.
+Also validate the complete 16,383-position product/BF16 localization boundary. There is currently no same-length 32K source-codec sidecar, so omitting `--source-codec` is intentional: the report must say `source_localization_available: false` and makes no cross-length attribution. If a 32K source-codec diagnostic is later acquired independently, pass its JSON with `--source-codec` to enable the same three-way decomposition used at 8K.
 
 ```bash
 LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/compare_fp8_hybrid_execution.py \
   --product-campaign profiles/ppl/fp8-hybrid-product-32k-20260904/results.json \
   --artifact out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer \
@@ -911,31 +618,24 @@ LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
   --out profiles/ppl/fp8-hybrid-execution-localization-32k-20260904.json
 ```
 
-These bounded prefill cells establish artifact-backed quality only. Exact greedy disagreements
-against BF16 are reported for diagnosis but are not a coherent gate for a lossy recipe. Decode,
-execution-parity extras, full product PPL, capacity, and whole-inference selection remain separate.
+These bounded prefill cells establish artifact-backed quality only. Exact greedy disagreements against BF16 are reported for diagnosis but are not a coherent gate for a lossy recipe. Decode, execution-parity extras, full product PPL, capacity, and whole-inference selection remain separate.
 
-After both product PPL cells pass, run the bounded C1 selected-artifact execution gate. Do not use
-`--no-extras`: the runner's existing extras compare the MTP3 Device Graph cell with eager execution,
-ordinary decoding, and an MTP4 draft-window control using complete aligned NLL sidecars and exact
-argmax identity.
+After both product PPL cells pass, run the bounded C1 selected-artifact execution gate. Do not use `--no-extras`: the runner's existing extras compare the MTP3 Device Graph cell with eager execution, ordinary decoding, and an MTP4 draft-window control using complete aligned NLL sidecars and exact argmax identity.
 
-The runner probes its own interpreter for a ROCm PyTorch build before creating the campaign
-directory. Keep the explicit environment below: Python scorer scripts are launched with this same
-interpreter, and the complete argv is retained in each cell's provenance.
+The runner probes its own interpreter for a ROCm PyTorch build before creating the campaign directory. Keep the explicit environment below: Python scorer scripts are launched with this same interpreter, and the complete argv is retained in each cell's provenance.
 
 ```bash
 export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
-export PATH=/path/to/local/.venv-ninfer-r9700/bin:${PATH}
-/path/to/local/.venv-ninfer-r9700/bin/python -c \
+export PATH=/path/to/python-environment/bin:${PATH}
+python3.11 -c \
   "import torch; assert torch.version.hip, 'the execution gate requires ROCm PyTorch'"
 NINFER_EXECUTION_GATE_DIR=profiles/ppl/fp8-hybrid-product-execution-c1-20260904
 test ! -e "$NINFER_EXECUTION_GATE_DIR" || \
   { test -d "$NINFER_EXECUTION_GATE_DIR" && \
     test -z "$(find "$NINFER_EXECUTION_GATE_DIR" -mindepth 1 -print -quit)"; }
 
-/path/to/local/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
-  --bf16-reference-weights /path/to/local/models/qwen3.8-27b-bf16 \
+python3.11 tools/ppl/run.py \
+  --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
   --g16-weights out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer \
   --g16-ppl-bin build-r9700-dense-selection-g16/apps/ninfer-ppl \
@@ -948,39 +648,22 @@ test ! -e "$NINFER_EXECUTION_GATE_DIR" || \
   --require-fp8-hybrid \
   --out "$NINFER_EXECUTION_GATE_DIR"
 
-/path/to/local/.venv-ninfer-r9700/bin/python \
+python3.11 \
   tools/ppl/validate_fp8_hybrid_execution_gate.py \
   --results "$NINFER_EXECUTION_GATE_DIR/results.json" \
   --width-tool build-r9700/src/ninfer_r9700_runtime_planner_qual \
   --out "$NINFER_EXECUTION_GATE_DIR/execution-gate.json"
 ```
 
-The validator reopens the exact hybrid artifact and adjacent conversion receipt, rehashes both
-scorers, requires the ordinary same-route graph/eager comparison, and asks the compiled host
-authority for its ordinary C=1..4 prepared descriptor inventory. Optional MTP comparisons may
-retain their wider inventories as diagnostics, but they do not gate base selection or required
-DFlash admission. This host inventory check does not allocate a device and does not substitute
-for the physical C1 execution cells.
+The validator reopens the exact hybrid artifact and adjacent conversion receipt, rehashes both scorers, requires the ordinary same-route graph/eager comparison, and asks the compiled host authority for its ordinary C=1..4 prepared descriptor inventory. Optional MTP comparisons may retain their wider inventories as diagnostics, but they do not gate base selection or required DFlash admission. This host inventory check does not allocate a device and does not substitute for the physical C1 execution cells.
 
 ## Candidate lifecycle
 
-The registry in `schemes.py` deliberately contains only the independent BF16
-authority and the G16/G32 FP8-K/INT4-V candidates. A kernel implementation does
-not become another PPL profile: it first passes its complete Op oracle and then
-replaces the route inside the appropriate fixed candidate build. Do not add
-format flags, sparse-attention selectors, or placeholder profiles.
+The registry in `schemes.py` deliberately contains only the independent BF16 authority and the G16/G32 FP8-K/INT4-V candidates. A kernel implementation does not become another PPL profile: it first passes its complete Op oracle and then replaces the route inside the appropriate fixed candidate build. Do not add format flags, sparse-attention selectors, or placeholder profiles.
 
-Quality eligibility is not model selection. Pareto comparison requires complete matched 8K and
-32K quality, resolved capacity, and whole-inference tokens/second for every required prefill/decode
-and C=1..4 workload. A quality-eligible candidate A dominates candidate B only when A is no worse
-in mean-NLL delta, new-severe-position rate, resolved capacity, and every required whole-inference
-speed cell, and is strictly better in at least one. Otherwise both remain retained frontier
-choices. Raw PPL `score_seconds` is never a speed objective. `pareto.py` applies this rule and
-rejects records missing any required whole-inference or capacity cell.
+Quality eligibility is not model selection. Pareto comparison requires complete matched 8K and 32K quality, resolved capacity, and whole-inference tokens/second for every required prefill/decode and C=1..4 workload. A quality-eligible candidate A dominates candidate B only when A is no worse in mean-NLL delta, new-severe-position rate, resolved capacity, and every required whole-inference speed cell, and is strictly better in at least one. Otherwise both remain retained frontier choices. Raw PPL `score_seconds` is never a speed objective. `pareto.py` applies this rule and rejects records missing any required whole-inference or capacity cell.
 
-Frontier retention is the evidence boundary, not permission to ship two cache ABIs. If G16 and
-G32 builds of the same eligible weight recipe are both non-dominated, select the one static
-production cache/execution profile by this ordered rule:
+Frontier retention is the evidence boundary, not permission to ship two cache ABIs. If G16 and G32 builds of the same eligible weight recipe are both non-dominated, select the one static production cache/execution profile by this ordered rule:
 
 1. For every required whole-inference cell, divide the candidate's tokens/second by the best
    frontier value in that cell; maximize the minimum ratio.
@@ -992,30 +675,11 @@ production cache/execution profile by this ordered rule:
    canonical static-profile tuple `(value_group, K layout, V layout, V-scale layout,
    Q4 activation bits, W8 activation bits, FP8-Q/K profile, XAttention profile)`.
 
-This post-frontier rule uses no workload weights and cannot trade a severe slow cell for an
-average win. It first collapses static cache/execution profiles for byte-identical weights, then
-applies the same ordered rule globally to the retained per-recipe winners. Retain the complete
-frontier, every per-recipe decision, normalized ratios, and the terminal decisive stage.
+This post-frontier rule uses no workload weights and cannot trade a severe slow cell for an average win. It first collapses static cache/execution profiles for byte-identical weights, then applies the same ordered rule globally to the retained per-recipe winners. Retain the complete frontier, every per-recipe decision, normalized ratios, and the terminal decisive stage.
 
-Schema v7 emits this under `same_recipe_static_profile_selection`: `selections` contains one
-machine-readable winner, ordered rationale, and normalized objective map for each weight recipe
-with multiple frontier static profiles. `not_collapsed` names frontier candidates that have no
-same-recipe peer. Assembled inputs derive recipe identity from the provenance-bound artifact
-identity and hash; candidate names are never parsed as recipe identities.
+Schema v7 emits this under `same_recipe_static_profile_selection`: `selections` contains one machine-readable winner, ordered rationale, and normalized objective map for each weight recipe with multiple frontier static profiles. `not_collapsed` names frontier candidates that have no same-recipe peer. Assembled inputs derive recipe identity from the provenance-bound artifact identity and hash; candidate names are never parsed as recipe identities.
 
-The `--require-xattention-dense-controls` admission mode is stricter: for every candidate artifact
-it requires native schema-v6 dense and B128/S16/tau900 PPL campaigns for G16 and G32, all sharing
-one BF16/corpus authority, plus each candidate's matched C=1..4 capacity and whole-inference
-matrices. The all-Q4, mixed Q4/W8, and authority-bound four-role FP8/Q4 recipes require all twelve
-Cartesian artifact/cache/attention candidates; dense-only recipe selection cannot establish how sparse
-prefill changes cross-recipe speed, capacity, or combined quality. Schema v7 retains
-each same-recipe winner and emits one `terminal_production_selection` across those winners by the
-same ordered global maximin rule. The retained 1+3 means are compared exactly without a noise
-tolerance, and the raw repetitions and spread remain evidence.
-Each schema-v7 candidate carries an explicit storage-profile identity derived from its exact
-artifact ID. The hybrid campaign must additionally retain the authority-bound conversion receipt;
-it never inherits the all-Q4 storage profile merely because its unselected matrices are Q4G64.
-The terminal record binds and reopens the complete schema-v4 Pareto input before downstream use.
+The `--require-xattention-dense-controls` admission mode is stricter: for every candidate artifact it requires native schema-v6 dense and B128/S16/tau900 PPL campaigns for G16 and G32, all sharing one BF16/corpus authority, plus each candidate's matched C=1..4 capacity and whole-inference matrices. The all-Q4, mixed Q4/W8, and authority-bound four-role FP8/Q4 recipes require all twelve Cartesian artifact/cache/attention candidates; dense-only recipe selection cannot establish how sparse prefill changes cross-recipe speed, capacity, or combined quality. Schema v7 retains each same-recipe winner and emits one `terminal_production_selection` across those winners by the same ordered global maximin rule. The retained 1+3 means are compared exactly without a noise tolerance, and the raw repetitions and spread remain evidence. Each schema-v7 candidate carries an explicit storage-profile identity derived from its exact artifact ID. The hybrid campaign must additionally retain the authority-bound conversion receipt; it never inherits the all-Q4 storage profile merely because its unselected matrices are Q4G64. The terminal record binds and reopens the complete schema-v4 Pareto input before downstream use.
 
 Its input is an explicit retained comparison manifest:
 
@@ -1069,17 +733,9 @@ Its input is an explicit retained comparison manifest:
 }
 ```
 
-Run `python3 tools/ppl/pareto.py --input comparison.json --out pareto.json`. The schema-v7
-classifier rejects 32K workload-feasibility rows as capacity objectives; each capacity cell must
-explicitly identify a `resolved_effective_maximum` and whether device memory or the model's native
-context ceiling binds. The classifier
-recomputes tier eligibility and severe rate from the counts, rejects a false declared eligibility,
-keeps the full objective values and names every dominator. The retained result is then collapsed
-to one required static cache and execution profile only by the post-frontier rule above.
+Run `python3 tools/ppl/pareto.py --input comparison.json --out pareto.json`. The schema-v7 classifier rejects 32K workload-feasibility rows as capacity objectives; each capacity cell must explicitly identify a `resolved_effective_maximum` and whether device memory or the model's native context ceiling binds. The classifier recomputes tier eligibility and severe rate from the counts, rejects a false declared eligibility, keeps the full objective values and names every dominator. The retained result is then collapsed to one required static cache and execution profile only by the post-frontier rule above.
 
-Do not construct `comparison.json` by copying summary values. Assemble it from the retained raw
-authorities so artifact, executable, compiled profile, command, case, and concurrency provenance
-are revalidated:
+Do not construct `comparison.json` by copying summary values. Assemble it from the retained raw authorities so artifact, executable, compiled profile, command, case, and concurrency provenance are revalidated:
 
 ```bash
 python3 tools/ppl/assemble_pareto.py \
@@ -1093,25 +749,9 @@ python3 tools/ppl/pareto.py \
   --out profiles/bench/pareto-result.json
 ```
 
-Each candidate's `QUALITY_JSON` accepts either the retained
-`ninfer-r9700-q4-a8-final-quality-v2` comparison or a passing native
-`ninfer_r9700_ppl_campaign` schema-v6 `results.json`. Candidate-local quality inputs allow dense
-and B128/S16/tau900 static profiles to enter the same decision without merging or relabeling their
-campaigns. The assembler reopens every selected native raw cell and sidecar, verifies its compiled
-profile identity, and binds their hashes into the schema-v4 input.
-`--prefill-chunk-selection` is mandatory. The assembler recomputes the schema-v2 global selection,
-binds its hash, and requires every PPL cell plus every capacity and whole command to carry its
-selected value. Each whole directory must contain exactly one ordinary spec-none report at every
-C=1..4 point, and assembly ranks only those 8K/32K fresh-request timings. MTP3 may be retained as
-optional exact-token/state/graph regression evidence but is neither an assembly prerequisite nor
-a ranking input. Each base capacity directory likewise uses `effective_capacity_ordinary` with
-draft window zero and no speculative head. Schema v7 identifies both base ranking and capacity
-profiles as `spec-none-ordinary`.
-Selected-profile NIAH and required DFlash admission remain separate gates. There is no manual or implicit
-historical-4096 path.
+Each candidate's `QUALITY_JSON` accepts either the retained `ninfer-r9700-q4-a8-final-quality-v2` comparison or a passing native `ninfer_r9700_ppl_campaign` schema-v6 `results.json`. Candidate-local quality inputs allow dense and B128/S16/tau900 static profiles to enter the same decision without merging or relabeling their campaigns. The assembler reopens every selected native raw cell and sidecar, verifies its compiled profile identity, and binds their hashes into the schema-v4 input. `--prefill-chunk-selection` is mandatory. The assembler recomputes the schema-v2 global selection, binds its hash, and requires every PPL cell plus every capacity and whole command to carry its selected value. Each whole directory must contain exactly one ordinary spec-none report at every C=1..4 point, and assembly ranks only those 8K/32K fresh-request timings. MTP3 may be retained as optional exact-token/state/graph regression evidence but is neither an assembly prerequisite nor a ranking input. Each base capacity directory likewise uses `effective_capacity_ordinary` with draft window zero and no speculative head. Schema v7 identifies both base ranking and capacity profiles as `spec-none-ordinary`. Selected-profile NIAH and required DFlash admission remain separate gates. There is no manual or implicit historical-4096 path.
 
-After the dense and sparse G16/G32 capacity/whole matrix pairs finish, XAttention admission
-assembles the complete four-profile Cartesian set for every capacity-eligible artifact:
+After the dense and sparse G16/G32 capacity/whole matrix pairs finish, XAttention admission assembles the complete four-profile Cartesian set for every capacity-eligible artifact:
 
 ```bash
 python3 tools/ppl/assemble_pareto.py \
@@ -1172,51 +812,16 @@ python3 tools/ppl/pareto.py \
   --out profiles/bench/pareto-result-post-promotion-20260904.json
 ```
 
-`FOUR_ROLE_DENSE_QUALITY` and `FOUR_ROLE_XATTENTION_QUALITY` name the native schema-v6
-four-role-hybrid campaigns carrying the exact authority-bound conversion receipt for their dense
-and B128/S16/tau900 profiles, respectively.
+`FOUR_ROLE_DENSE_QUALITY` and `FOUR_ROLE_XATTENTION_QUALITY` name the native schema-v6 four-role-hybrid campaigns carrying the exact authority-bound conversion receipt for their dense and B128/S16/tau900 profiles, respectively.
 
-The dense candidates are mandatory for XAttention admission: without them the result compares only
-the sparse cache groups and cannot prove an end-to-end sparse speed improvement. A sparse campaign
-or matrix must never be relabeled as dense evidence. `--reuse-bf16-campaign` may import BF16-only
-cells across candidate recipes, dense/sparse routes, and quality tiers because none of those
-choices changes the independent BF16 reference. It revalidates schema/model identity, BF16
+The dense candidates are mandatory for XAttention admission: without them the result compares only the sparse cache groups and cannot prove an end-to-end sparse speed improvement. A sparse campaign or matrix must never be relabeled as dense evidence. `--reuse-bf16-campaign` may import BF16-only cells across candidate recipes, dense/sparse routes, and quality tiers because none of those choices changes the independent BF16 reference. It revalidates schema/model identity, BF16
   source/scorer, corpus, lengths, prefill schedule, skip/chunk/device settings, raw reports, and
   sidecars. A non-speculative decode-only campaign with `--no-position-extras` may reuse those
   reference cells when prefill/decode scored starts match exactly; candidate cross-schedule reuse
   remains forbidden. The raw BF16 cells must also carry the mandatory hipBLAS/no-atomics/strict-deterministic
-execution profile, and every cell must match the campaign's exact `reference_execution` object;
-that object binds the complete scorer/FLA implementation and interpreter/package/runtime/device
-environment. The required v3 profile additionally binds the structured full-attention PV identity:
-explicit FP32 `torch.mm`, fixed 8,192-row absolute source chunks in ascending order, final partial
-chunk inclusion, and ordered FP32 accumulation. It also binds the GDN recurrence dispatch as the
+execution profile, and every cell must match the campaign's exact `reference_execution` object; that object binds the complete scorer/FLA implementation and interpreter/package/runtime/device environment. The required v3 profile additionally binds the structured full-attention PV identity: explicit FP32 `torch.mm`, fixed 8,192-row absolute source chunks in ascending order, final partial chunk inclusion, and ordered FP32 accumulation. It also binds the GDN recurrence dispatch as the
   project’s explicit FP32 route at T=1 and FLA fused-recurrent at every T>1 span, including the
   fixed `FLA_USE_FAST_OPS=0` exponent route, operand,
-output, final-state, scale, and state-format identity. The same object now requires disabled
-PyTorch TunableOp, highest matmul precision, canonical TF32/Triton/rocBLAS/launch/allocator
-environment controls, absence of architecture, Tensile-library, and custom-allocator overrides,
-actual gfx1201 identity, and the resolved Triton/AMD buffer, atomic, prefetch, async-copy,
-ping-pong, transpose, and packed-float lowering controls. Older v2 chunk-GDN results and earlier
-v3 results lacking this complete structured boundary are rejected.
-Candidate artifact identity, candidate cells,
-route, tier, gates, and campaign-wide pass are deliberately not BF16 reuse constraints.
+output, final-state, scale, and state-format identity. The same object now requires disabled PyTorch TunableOp, highest matmul precision, canonical TF32/Triton/rocBLAS/launch/allocator environment controls, absence of architecture, Tensile-library, and custom-allocator overrides, actual gfx1201 identity, and the resolved Triton/AMD buffer, atomic, prefetch, async-copy, ping-pong, transpose, and packed-float lowering controls. Older v2 chunk-GDN results and earlier v3 results lacking this complete structured boundary are rejected. Candidate artifact identity, candidate cells, route, tier, gates, and campaign-wide pass are deliberately not BF16 reuse constraints.
 
-Each `--candidate` takes exactly six values. The assembler requires schema-v14 complete matrices,
-all C=1..4 points, the same exact benchmark bytes across that candidate's two matrices, and
-artifact bytes matching its 8K/32K quality rows. It reopens and validates every raw benchmark
-report before emitting 24 matched speed cells and exactly four resolved effective-capacity cells.
-Each spec-none ordinary fresh-request whole row owns prefill throughput, decode throughput, and
-end-to-end throughput from the same repetitions; its speculative counters must be disabled and
-zero. Separate pure-prefill and prefix-reuse-seeded
-decode matrices are diagnostic duplicates and are not selection inputs.
-The assembler emits `ninfer_r9700_pareto_input` schema v4; the classifier emits
-`ninfer_r9700_pareto_comparison` schema v7, retaining the full frontier, deterministic per-recipe
-static-profile selections, and the terminal artifact/cache/execution winner with normalized values
-and decisive stages.
-If native-context startup cannot satisfy its minimum reservation plus headroom, the missing
-capacity cell makes that candidate non-comparable. A missing report is accepted only when it has a
-unique matching entry in the matrix `failures.json`; the assembler binds that entry, exact command,
-stdout/stderr hashes, and stderr text as an unresolved capacity-measurement failure instead of
-inferring an OOM or inventing a capacity value. Any unrelated failure rejects the campaign.
-For a candidate already excluded by such a capacity failure, pass `-` for `WHOLE_DIR`;
-the assembler retains it as explicitly non-comparable without requiring wasteful speed campaigns.
+Each `--candidate` takes exactly six values. The assembler requires schema-v14 complete matrices, all C=1..4 points, the same exact benchmark bytes across that candidate's two matrices, and artifact bytes matching its 8K/32K quality rows. It reopens and validates every raw benchmark report before emitting 24 matched speed cells and exactly four resolved effective-capacity cells. Each spec-none ordinary fresh-request whole row owns prefill throughput, decode throughput, and end-to-end throughput from the same repetitions; its speculative counters must be disabled and zero. Separate pure-prefill and prefix-reuse-seeded decode matrices are diagnostic duplicates and are not selection inputs. The assembler emits `ninfer_r9700_pareto_input` schema v4; the classifier emits `ninfer_r9700_pareto_comparison` schema v7, retaining the full frontier, deterministic per-recipe static-profile selections, and the terminal artifact/cache/execution winner with normalized values and decisive stages. If native-context startup cannot satisfy its minimum reservation plus headroom, the missing capacity cell makes that candidate non-comparable. A missing report is accepted only when it has a unique matching entry in the matrix `failures.json`; the assembler binds that entry, exact command, stdout/stderr hashes, and stderr text as an unresolved capacity-measurement failure instead of inferring an OOM or inventing a capacity value. Any unrelated failure rejects the campaign. For a candidate already excluded by such a capacity failure, pass `-` for `WHOLE_DIR`; the assembler retains it as explicitly non-comparable without requiring wasteful speed campaigns.

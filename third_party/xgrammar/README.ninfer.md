@@ -1,0 +1,67 @@
+# NInfer XGrammar source base
+
+This implementation originates from [XGrammar](https://github.com/mlc-ai/xgrammar),
+commit [`3641b5c21e70a6c5515ad9eca24fcbee21ee6ad0`](https://github.com/mlc-ai/xgrammar/commit/3641b5c21e70a6c5515ad9eca24fcbee21ee6ad0),
+under the Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+NInfer owns the CMake target and maintains its adaptations here, adopting upstream changes
+selectively. The AMD port starts from Neroued/ninfer `2734a56e087e36bd4754505264f4df51b426b917`
+and applies the count-independent mask/compiler/matcher changes from
+`0a8530d44141379b210b9733a3c51857daeceff9`. The intervening optional binary64 bounded-number
+and tuple-intersection expansion is excluded; bounded-number emission keeps six fractional digits.
+Native adaptations retain exact required/unique named properties in unordered objects,
+additional-parameter name exclusion, true byte-prefix tokenizer intervals, and canonical Qwen
+framing. Product regression oracles protect these behaviors alongside the selected new features.
+This source tree replaces the fetched-source/build-copy patch mechanism with one CPU library,
+`ninfer_token_grammar`. Cold compilation permits at most two concurrent callers per compiler.
+The resident adapter serializes request compilation and overlaps its byte-level argument
+validator with vocabulary-mask compilation. The byte validator uses one host thread; vocabulary
+preprocessing uses sixteen host workers. Python/TVM bindings, GPU kernels, Web code, upstream
+tests and build machinery are excluded.
+
+Grammar string escaping preserves embedded NUL bytes, including in compilation cache keys.
+The prepared-grammar cache shares one budget and single-flight mechanism across EBNF, regex, structural formats, and JSON;
+its miss factory covers grammar conversion and output framing within the cold-compile limit.
+NInfer validates and normalizes its admitted schema subset before this cache lookup.
+Cache access reports hit, build or an in-flight wait to the caller without adding another cache.
+JSON adaptations preserve literal data in cache keys, reject unsupported unions, resolve local
+JSON Pointers and carry typed errors with schema locations. String grammars constrain decoded
+Unicode values before JSON encoding; property-name exclusion also covers escaped spellings.
+String intersections combine patterns and decoded Unicode length in one automaton.
+Counted-string compiler and matcher paths preserve continuation state across UTF-8, JSON escapes,
+and parent-rule boundaries without unrolling every permitted string length.
+General schema conjunction reduction and source diagnostics belong to NInfer's text adapter.
+Regex and schema patterns share character/escape normalization with explicit full/search matching;
+regex hexadecimal escapes consume exactly two digits. Product constraints reject unsupported
+escapes and anchor positions before grammar conversion.
+The Qwen converter uses canonical tool framing and retains schema-valid raw string data,
+including literal XML-looking delimiters resolved by the native completed-call decoder. It
+bounds tool integer emission to signed 64-bit values. Native fixes preserve required and unique
+named parameters and exclude their names from the additional-parameter branch.
+
+Native schema admission preserves source decimal values and rejects number bounds that would
+lose an exact integer during private binary64 conversion. Integer-only bounds stay signed
+64-bit, and composition compares mixed integer/floating bounds without binary64 rounding.
+Basic positional arrays accept boolean prefix schemas, stop at a forbidden position, and
+permit shorter instances and `maxItems` prefixes subject to `minItems`. These are repairs to
+the admitted subset, not the deferred tuple-intersection extension. Broader binary64 bounded
+numbers, fractional integer bounds, and tuple intersections remain excluded; bounded-number
+emission has at most six fractional digits and rejects empty represented intervals.
+Typed schema errors carry the source schema identity and schema-relative pointer through
+conversion. NInfer's owning normalization map translates generated definitions back to source
+locations before protocol error rendering.
+
+The CPU dependency closure includes Lark and all format converters referenced by the shared
+factories. `cpp/testing.cc` also supplies token-formatting diagnostics used by the matcher and
+compiled grammar; it is part of this library, not a test executable.
+
+Bundled header dependencies:
+
+- `3rdparty/picojson/picojson.h`: XGrammar's modified version, including ordered-object support;
+  its license is in the header.
+- `3rdparty/dlpack/include/dlpack/dlpack.h`: from the upstream submodule at
+  [`bbd2f4d32427e548797929af08cfe2a9cbb3cf12`](https://github.com/dmlc/dlpack/commit/bbd2f4d32427e548797929af08cfe2a9cbb3cf12);
+  see its [LICENSE](3rdparty/dlpack/LICENSE).
+
+`ninfer_token_grammar` is a C++20 static library linked explicitly by consumers. It uses standard
+threads and has no Python, TVM or CUDA runtime dependency. Cpptrace is disabled.

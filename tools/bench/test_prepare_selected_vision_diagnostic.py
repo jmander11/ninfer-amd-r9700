@@ -66,9 +66,6 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
 
             with (
                 mock.patch(
-                    "tools.bench.prepare_selected_vision_diagnostic.SOURCE_RECEIPT", selection
-                ),
-                mock.patch(
                     "tools.bench.prepare_selected_vision_diagnostic.resolve_route",
                     return_value=route,
                 ),
@@ -87,7 +84,14 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
                     "tools.bench.prepare_selected_vision_diagnostic.subprocess.run", side_effect=run
                 ),
             ):
-                plan = prepare(selection, output)
+                plan = prepare(
+                    selection,
+                    output,
+                    source_dir=Path("/fixture/bf16"),
+                    source_receipt=selection,
+                    frontend_interpreter=Path("/fixture/frontend-python"),
+                    gpu_interpreter=Path("/fixture/gpu-python"),
+                )
             self.assertEqual(plan["terminal_route"], route)
             self.assertEqual(plan["prepared_input"]["contract"], contract)
             self.assertTrue((output / "commands.sh").is_file())
@@ -104,7 +108,14 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
             output = root / "campaign"
             output.symlink_to(root / "missing")
             with self.assertRaisesRegex(ValueError, "already exists"):
-                prepare(selection, output)
+                prepare(
+                    selection,
+                    output,
+                    source_dir=Path("/fixture/bf16"),
+                    source_receipt=selection,
+                    frontend_interpreter=Path("/fixture/frontend-python"),
+                    gpu_interpreter=Path("/fixture/gpu-python"),
+                )
             self.assertTrue(output.is_symlink())
 
 

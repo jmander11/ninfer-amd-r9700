@@ -7,6 +7,7 @@
 #include <ninfer/targets/qwen3/vision.h>
 
 #include "artifact/binder.h"
+#include "artifact/reader.h"
 #include "artifact/materializer.h"
 #include "core/tensor.h"
 #include "ops/r9700/linear/linear_execution.h"
@@ -24,6 +25,9 @@ inline constexpr std::size_t kTextLayers          = 64;
 inline constexpr std::size_t kFullAttentionLayers = 16;
 inline constexpr std::size_t kGdnLayers           = 48;
 inline constexpr std::size_t kDFlash2Layers       = 5;
+
+std::vector<artifact::TensorContentSelection>
+cache_tensor_selections(const artifact::Reader& reader, qwen3::StartupFeatures features);
 
 struct WeightPlan {
     artifact::ObjectHandle object;

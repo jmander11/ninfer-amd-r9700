@@ -12,8 +12,7 @@ from pathlib import Path
 from tools.ppl.compare_selective_a8q4_source import _load_score, validate_comparison
 
 REPO = Path(__file__).resolve().parents[2]
-PYTHON = Path("/path/to/local/.venv-ninfer-r9700/bin/python")
-WEIGHTS = Path("/path/to/local/models/qwen3.8-27b-bf16")
+PYTHON = Path(sys.executable)
 IDS = REPO / "tools/ppl/corpus.ids"
 SCREEN = REPO / "profiles/bench/r9700-selective-q4g128-mse-source-screen-20260905.json"
 BF16 = REPO / (
@@ -58,13 +57,13 @@ def _arm_state(profile: str, path: Path) -> str:
     return "complete"
 
 
-def _score_command(profile: str, path: Path) -> list[str]:
+def _score_command(profile: str, path: Path, weights: Path) -> list[str]:
     return [
         str(PYTHON),
         "-m",
         "tools.ppl.selective_a8q4_source_diagnostic",
         "--weights",
-        str(WEIGHTS),
+        str(weights),
         "--ids",
         str(IDS),
         "--profile",
@@ -80,12 +79,12 @@ def _score_command(profile: str, path: Path) -> list[str]:
     ]
 
 
-def run() -> int:
+def run(*, weights: Path) -> int:
     os.chdir(REPO)
     _ensure_namespace()
     for profile, path in ARMS.items():
         if _arm_state(profile, path) == "missing":
-            subprocess.run(_score_command(profile, path), check=True)
+            subprocess.run(_score_command(profile, path, weights), check=True)
             if _arm_state(profile, path) != "complete":
                 raise RuntimeError(f"{profile}: scorer returned without complete evidence")
     if COMPARISON.exists() or COMPARISON.is_symlink():
@@ -118,9 +117,11 @@ def run() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    argparse.ArgumentParser(description=__doc__).parse_args(argv)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--weights", required=True, type=Path)
+    args = parser.parse_args(argv)
     try:
-        return run()
+        return run(weights=args.weights)
     except (
         FileExistsError,
         OSError,

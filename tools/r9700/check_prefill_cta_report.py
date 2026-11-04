@@ -7,11 +7,17 @@ import argparse
 import hashlib
 import json
 import math
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-POWER_PATH = "/sys/class/drm/card2/device/power_dpm_force_performance_level"
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.r9700.host import power_profile_path
+
+POWER_PATH = str(power_profile_path())
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOKENS = {1024, 2048, 4096, 8192}
 DEVICE_NAME = "AMD Radeon AI PRO R9700"

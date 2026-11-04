@@ -37,7 +37,6 @@ using Json   = nlohmann::json;
 using Clock  = std::chrono::steady_clock;
 namespace fi = frontend_internal;
 
-constexpr std::size_t kPatchFeatures        = 1536;
 constexpr std::string_view kThinkClose      = "</think>";
 constexpr std::string_view kToolOpen        = "<tool_call>";
 constexpr std::string_view kToolClose       = "</tool_call>";
@@ -333,6 +332,7 @@ std::unique_ptr<PreparedPromptData> make_text_prompt_data(fi::EncodedChat encode
     PreparedPromptData& result = *prepared;
     result.token_ids.assign(encoded.input_ids.begin(), encoded.input_ids.end());
     result.turn_closure_frontiers      = std::move(encoded.turn_closure_frontiers);
+    result.system_prompt_frontier      = encoded.system_prompt_frontier;
     result.identity.rewrite_checkpoint = encoded.rewrite_checkpoint;
     result.final_assistant_token_begin = encoded.final_assistant_token_begin;
     assign_text_positions(result);
@@ -366,6 +366,7 @@ std::unique_ptr<PreparedPromptData> make_media_prompt_data(fi::ProcessedInput pr
     result.prepare.vision_tokens       = processed.stats.vision_tokens;
     result.prepare.attention_pairs     = processed.stats.attention_pairs;
     result.turn_closure_frontiers      = std::move(processed.turn_closure_frontiers);
+    result.system_prompt_frontier      = processed.system_prompt_frontier;
     result.prepare.patch_bytes         = processed.stats.patch_bytes;
     result.identity.rewrite_checkpoint = processed.rewrite_checkpoint;
     result.final_assistant_token_begin = processed.final_assistant_token_begin;
@@ -431,7 +432,7 @@ std::size_t channel_index(OutputChannel channel) noexcept {
 
 void append_delta(PublishedOutput& output, OutputChannel channel, std::string text) {
     if (text.empty()) { return; }
-    if (!output.empty() && output.back().channel == channel) {
+    if (!output.empty() && !output.back().tool_call && output.back().channel == channel) {
         output.back().text += text;
     } else {
         output.push_back(OutputDelta{.channel = channel, .text = std::move(text)});
@@ -527,6 +528,56 @@ struct DecoderState {
     std::string tool_marker_pending;
     std::uint64_t decoded_bytes    = 0;
     std::uint32_t reasoning_tokens = 0;
+    ReasoningLimitStats reasoning_limit;
+    // IDs consisting only of a pending textual close prefix. Charged conservatively
+    // until the complete marker proves they were framing rather than body.
+    std::uint32_t reasoning_marker_tokens = 0;
+    bool reasoning_limit_retry_pending    = false;
+};
+
+// Only generated IDs in this response can establish the replay. Once the first
+// reasoning close freezes the reference, speculative forks share immutable IDs
+// and copy only cursors/flags. No historical prompt tokens enter this proof.
+struct ReasoningReplayState {
+    static constexpr std::size_t minimum_reference = 256;
+    bool enabled                                   = false;
+    bool active                                    = false;
+    bool repaired                                  = false;
+    bool retry_required                            = false;
+    bool accepted_answer                           = false;
+    std::size_t matched                            = 0;
+    std::shared_ptr<const std::vector<TokenId>> reference;
+
+    [[nodiscard]] bool close_allowed() const noexcept {
+        return enabled && active && !repaired && reference && matched == reference->size();
+    }
+
+    void freeze(std::span<const TokenId> history, bool dedicated_close) {
+        if (!enabled || reference) { return; }
+        if (!dedicated_close || history.size() < minimum_reference) {
+            enabled = false;
+            return;
+        }
+        reference = std::make_shared<const std::vector<TokenId>>(history.begin(), history.end());
+        active    = true;
+    }
+
+    void observe(TokenId token, std::optional<OutputChannel> channel, bool leading_gap,
+                 bool model_stop, bool substantive) {
+        if (!enabled || !reference || model_stop) { return; }
+        if (active && channel == OutputChannel::Content && matched < reference->size() &&
+            token == (*reference)[matched]) {
+            ++matched;
+            if (repaired && matched == reference->size()) { retry_required = true; }
+            return;
+        }
+        if (active && leading_gap && matched == 0) { return; }
+        // Divergence releases a previously held nonempty copy as ordinary answer
+        // content. Its semantic relevance is not inferred by this framing guard.
+        if (active && matched != 0) { accepted_answer = true; }
+        active = false;
+        if (channel == OutputChannel::Content && substantive) { accepted_answer = true; }
+    }
 };
 
 bool suppress_reasoning_end(const DecoderState& state, bool raw, bool grammar_managed) {
@@ -575,6 +626,23 @@ bool has_ambiguous_tool_marker(const DecoderState& state, bool tool_output_enabl
 
 bool in_tool_region(const DecoderState& state, bool tool_output_enabled) {
     return state.in_tool_call || has_ambiguous_tool_marker(state, tool_output_enabled);
+}
+
+std::optional<OutputChannel> attributed_channel(bool was_reasoning, bool was_tool,
+                                                bool was_stripping, const DecoderState& after,
+                                                std::string_view bytes, bool withheld_stop,
+                                                bool raw, bool tool_output_enabled) {
+    if (bytes.empty() || withheld_stop) { return std::nullopt; }
+    if (was_reasoning) {
+        return after.in_reasoning ? std::optional{OutputChannel::Reasoning} : std::nullopt;
+    }
+    // Raw publication does not interpret tool envelopes.
+    if (raw || (!was_tool && !in_tool_region(after, tool_output_enabled) &&
+                !(tool_output_enabled && bytes.find(kToolOpen) != std::string_view::npos) &&
+                !(was_stripping && after.strip_content_leading))) {
+        return OutputChannel::Content;
+    }
+    return std::nullopt;
 }
 
 bool model_stop_allowed(const DecoderState& state, bool raw, bool tool_output_enabled) {
@@ -721,6 +789,48 @@ void feed_token_bytes(DecoderState& state, std::string_view bytes, const StopPol
                       tool_output_enabled);
 }
 
+// A native close must not complete an unfinished UTF-8 sequence or absorb a
+// textual marker prefix. Both pending fragments remain in the reasoning channel.
+void flush_reasoning_fragments(DecoderState& state, const StopPolicy& policy,
+                               PublishedOutput& emitted, std::uint32_t committed_tokens,
+                               StopMatch* match, bool tool_output_enabled) {
+    if (!state.utf8_pending.empty()) {
+        state.utf8_pending.clear();
+        feed_decoded_text(state, kUtf8Replacement, policy, emitted, committed_tokens, match,
+                          tool_output_enabled);
+    }
+    if (!state.think_marker_pending.empty()) {
+        feed_channel(state, OutputChannel::Reasoning, state.think_marker_pending, policy, emitted,
+                     committed_tokens, match);
+        state.think_marker_pending.clear();
+    }
+    state.reasoning_marker_tokens = 0;
+}
+
+void charge_reasoning_token(DecoderState& state, std::string_view bytes, bool canonical_close,
+                            bool stop_token) {
+    auto& limit = state.reasoning_limit;
+    if (!state.in_reasoning || limit.budget_tokens == 0 || canonical_close || stop_token) {
+        return;
+    }
+    ++limit.used_tokens;
+    const std::string candidate = state.think_marker_pending + std::string(bytes);
+    if (state.utf8_pending.empty() && !candidate.empty() && kThinkClose.starts_with(candidate)) {
+        ++state.reasoning_marker_tokens;
+        if (candidate == kThinkClose) {
+            limit.used_tokens -= state.reasoning_marker_tokens;
+            state.reasoning_marker_tokens = 0;
+        }
+    } else if (state.utf8_pending.empty() && candidate.starts_with(kThinkClose)) {
+        // The current ID contains closing framing followed by answer text, but
+        // contributes no reasoning body. Earlier mixed body/marker IDs stay charged.
+        limit.used_tokens -= state.reasoning_marker_tokens + 1;
+        state.reasoning_marker_tokens = 0;
+    } else {
+        state.reasoning_marker_tokens = 0;
+    }
+}
+
 void terminalize(DecoderState& state, const StopPolicy& policy, PublishedOutput& emitted,
                  std::uint32_t committed_tokens, bool tool_output_enabled) {
     if (!state.utf8_pending.empty()) {
@@ -792,6 +902,96 @@ public:
     struct ToolPublication {
         std::string pending;
         std::vector<ToolCall> calls;
+        std::string active_name;
+        std::string streamed_arguments;
+        std::size_t streamed_raw_bytes = 0;
+        bool selected_tool             = false;
+        bool raw_started               = false;
+        bool raw_frozen                = false;
+
+        void emit(PublishedOutput& output, ToolCallDeltaKind kind, std::string arguments = {}) {
+            if (kind == ToolCallDeltaKind::Start) selected_tool = true;
+            OutputDelta delta;
+            delta.tool_call = ToolCallDelta{.kind      = kind,
+                                            .index     = static_cast<std::uint32_t>(calls.size()),
+                                            .id        = {},
+                                            .name      = active_name,
+                                            .arguments = std::move(arguments)};
+            output.push_back(std::move(delta));
+        }
+
+        void stream_prefix(PublishedOutput& output, const TokenGrammarData& grammar) {
+            if (raw_frozen) return;
+            auto body = std::string_view(pending);
+            if (!body.starts_with(kToolOpen)) return;
+            body.remove_prefix(kToolOpen.size());
+            while (!body.empty() && std::isspace(static_cast<unsigned char>(body.front())))
+                body.remove_prefix(1);
+            if (!body.starts_with("<function=")) return;
+            body.remove_prefix(std::string_view("<function=").size());
+            const auto name_end = body.find('>');
+            if (name_end == std::string_view::npos) return;
+            const auto name = body.substr(0, name_end);
+            const auto definition =
+                std::find_if(grammar.definitions.begin(), grammar.definitions.end(),
+                             [&](const auto& item) { return item.name == name; });
+            if (definition == grammar.definitions.end()) return;
+            if (active_name.empty()) {
+                active_name = name;
+                emit(output, ToolCallDeltaKind::Start);
+            }
+            body.remove_prefix(name_end + 1);
+            while (!body.empty() && std::isspace(static_cast<unsigned char>(body.front())))
+                body.remove_prefix(1);
+            if (!body.starts_with("<parameter=")) return;
+            body.remove_prefix(std::string_view("<parameter=").size());
+            const auto key_end = body.find('>');
+            if (key_end == std::string_view::npos) return;
+            const std::string key(body.substr(0, key_end));
+            // Only a completely unconstrained string guarantees the decoder's first (raw)
+            // interpretation for every completion. Unions, literals and constrained values
+            // retain the native schema-guided whole-call backtracking semantics.
+            const auto& schema = definition->parameters;
+            if (!schema.contains("properties") || !schema["properties"].contains(key)) return;
+            const auto& value_schema = schema["properties"][key];
+            if (!value_schema.is_object() || !value_schema.contains("type") ||
+                value_schema["type"] != "string")
+                return;
+            // Metadata never narrows the instance language. Every other keyword keeps the
+            // complete-call validator in charge, including const/enum/pattern/length and refs.
+            for (const auto& item : value_schema.items()) {
+                const auto& field = item.key();
+                if (field != "type" && field != "$schema" && field != "$id" && field != "title" &&
+                    field != "description" && field != "default" && field != "examples" &&
+                    field != "deprecated" && field != "readOnly" && field != "writeOnly" &&
+                    field != "$comment")
+                    return;
+            }
+            body.remove_prefix(key_end + 1);
+            if (body.empty() || body.front() != '\n') return;
+            body.remove_prefix(1);
+            // A candidate close may be literal string data. Once one appears, hold the
+            // ambiguous suffix until decode_call resolves the complete envelope.
+            constexpr std::string_view close = "\n</parameter>";
+            const auto found                 = body.find(close, streamed_raw_bytes);
+            const auto hold                  = longest_suffix_prefix(body, close);
+            const auto stable = found != std::string_view::npos ? found : body.size() - hold;
+            std::string fragment;
+            if (!raw_started) {
+                fragment    = "{" + Json(key).dump() + ":\"";
+                raw_started = true;
+            }
+            auto encoded =
+                Json(std::string(body.substr(streamed_raw_bytes, stable - streamed_raw_bytes)))
+                    .dump();
+            fragment += encoded.substr(1, encoded.size() - 2);
+            if (!fragment.empty()) {
+                streamed_arguments += fragment;
+                emit(output, ToolCallDeltaKind::Arguments, std::move(fragment));
+            }
+            streamed_raw_bytes = stable;
+            raw_frozen         = found != std::string_view::npos;
+        }
 
         void filter(PublishedOutput& output, const TokenGrammarData& grammar, bool terminal) {
             PublishedOutput visible;
@@ -828,13 +1028,32 @@ public:
                         append_delta(visible, OutputChannel::Content, pending.substr(0, open));
                     }
                     pending.erase(0, open);
+                    selected_tool = true;
+                    stream_prefix(visible, grammar);
                     auto close     = pending.find(kToolClose);
                     bool completed = false;
                     while (close != std::string::npos) {
                         const auto end = close + kToolClose.size();
                         if (auto call =
                                 grammar.decode_call(std::string_view(pending).substr(0, end))) {
+                            // stream_prefix publishes only a guaranteed prefix of this native
+                            // decoder result, including literal closing markup and whitespace.
+                            if (!call->arguments_json.starts_with(streamed_arguments))
+                                throw std::logic_error(
+                                    "tool argument stream lost its prefix invariant");
+                            if (active_name.empty()) {
+                                active_name = call->name;
+                                emit(visible, ToolCallDeltaKind::Start);
+                            }
+                            if (call->arguments_json.size() > streamed_arguments.size())
+                                emit(visible, ToolCallDeltaKind::Arguments,
+                                     call->arguments_json.substr(streamed_arguments.size()));
+                            emit(visible, ToolCallDeltaKind::Completed);
                             calls.push_back(std::move(*call));
+                            active_name.clear();
+                            streamed_arguments.clear();
+                            streamed_raw_bytes = 0;
+                            raw_started = raw_frozen = false;
                             pending.erase(0, end);
                             completed = true;
                             break;
@@ -848,6 +1067,12 @@ public:
             // envelope. Never convert that partial call into an executable call
             // or leak its markup into a streamed prose answer.
             if (terminal) {
+                selected_tool = selected_tool || pending.starts_with("<tool_call");
+                if (!active_name.empty()) {
+                    emit(visible, ToolCallDeltaKind::Incomplete);
+                    active_name.clear();
+                    streamed_arguments.clear();
+                }
                 const bool separator =
                     !calls.empty() &&
                     std::all_of(pending.begin(), pending.end(),
@@ -865,16 +1090,18 @@ public:
          bool starts_in_reasoning, bool tool_output_enabled_, TokenId reasoning_end_token_,
          std::span<const TokenId> model_stop_tokens_,
          std::shared_ptr<const TokenGrammarData> grammar,
-         std::shared_ptr<const GenerationRecoveryContext> recovery)
+         std::shared_ptr<const GenerationRecoveryContext> recovery, bool generation_recovery)
         : tokenizer(std::move(tokenizer_)), policy(std::move(policy_)),
           model_stop_tokens(model_stop_tokens_.begin(), model_stop_tokens_.end()),
           preserve_special(output.raw || output.preserve_special_tokens),
           preserve_model_stops(output.raw || output.preserve_special_tokens), raw(output.raw),
           tool_output_enabled(tool_output_enabled_), reasoning_end_token(reasoning_end_token_) {
-        state.in_reasoning            = starts_in_reasoning && !output.raw;
+        state.reasoning_limit.budget_tokens = output.thinking_token_budget.value_or(0);
+        state.in_reasoning                  = starts_in_reasoning && !output.raw;
         state.require_initial_content = !output.raw && (state.in_reasoning || tool_output_enabled);
         grammar_data                  = std::move(grammar);
         state.constrained_content     = grammar_data && grammar_data->definitions.empty();
+        replay.enabled = generation_recovery && state.in_reasoning && !state.constrained_content;
         if (state.constrained_content) { state.require_initial_content = false; }
         preserve_special = preserve_special || state.constrained_content;
         recovery_context = std::move(recovery);
@@ -894,13 +1121,27 @@ public:
     std::shared_ptr<const fi::Tokenizer> tokenizer;
     StopPolicy policy;
     std::vector<TokenId> model_stop_tokens;
-    bool preserve_special       = false;
-    bool preserve_model_stops   = false;
-    bool raw                    = false;
-    bool tool_output_enabled    = false;
-    TokenId reasoning_end_token = -1;
+    bool preserve_special                      = false;
+    bool preserve_model_stops                  = false;
+    bool raw                                   = false;
+    bool tool_output_enabled                   = false;
+    TokenId reasoning_end_token                = -1;
+    runtime::ReasoningLimitAction limit_action = runtime::ReasoningLimitAction::Close;
     DecoderState state;
     DecoderState preview_state;
+    ReasoningReplayState replay;
+    ReasoningReplayState preview_replay;
+    // Preview may append; discard truncates to the committed size. Immutable
+    // reference snapshots are created only at the first dedicated close.
+    std::vector<TokenId> reasoning_history;
+    std::size_t committed_reasoning_size = 0;
+    std::vector<std::uint8_t> preview_ignored_framing;
+    std::vector<std::uint8_t> preview_reasoning_closes;
+    std::uint32_t preview_replay_discarded = 0;
+    std::uint32_t preview_replay_repairs   = 0;
+    std::uint32_t replay_discarded         = 0;
+    std::uint32_t replay_repairs           = 0;
+    PublishedOutput replay_held;
     PublishedOutput preview_output;
     // One entry per token of the pending preview; see preview_token_channels().
     std::vector<std::optional<OutputChannel>> preview_channels;
@@ -942,29 +1183,6 @@ double PreparedPrompt::prepare_seconds() const noexcept {
 
 PreparedPrompt::operator bool() const noexcept { return data_ != nullptr; }
 
-PublishedOutput::PublishedOutput(PublishedOutput&& other) noexcept
-    : values_(std::move(other.values_)), size_(std::exchange(other.size_, 0)) {}
-
-PublishedOutput& PublishedOutput::operator=(PublishedOutput&& other) noexcept {
-    if (this != &other) {
-        values_ = std::move(other.values_);
-        size_   = std::exchange(other.size_, 0);
-    }
-    return *this;
-}
-
-void PublishedOutput::clear() noexcept {
-    for (std::size_t index = 0; index < size_; ++index) { values_[index] = {}; }
-    size_ = 0;
-}
-
-void PublishedOutput::push_back(OutputDelta value) {
-    if (size_ == values_.size()) {
-        throw std::logic_error("output decoder produced more than two channel transitions");
-    }
-    values_[size_++] = std::move(value);
-}
-
 OutputSession::OutputSession() noexcept                           = default;
 OutputSession::~OutputSession()                                   = default;
 OutputSession::OutputSession(OutputSession&&) noexcept            = default;
@@ -989,7 +1207,13 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
         throw std::invalid_argument("generated-token budget has an invalid limit reason");
     }
 
-    impl_->preview_state = impl_->state;
+    impl_->preview_state  = impl_->state;
+    impl_->preview_replay = impl_->replay;
+    impl_->reasoning_history.resize(impl_->committed_reasoning_size);
+    impl_->preview_ignored_framing.clear();
+    impl_->preview_reasoning_closes.clear();
+    impl_->preview_replay_discarded = 0;
+    impl_->preview_replay_repairs   = 0;
     impl_->preview_output.clear();
 
     const bool stops_blocked_at_start =
@@ -1000,7 +1224,12 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
     const auto complete = [&](std::uint32_t count, FinishReason reason,
                               bool reject_generated_round = false) {
         impl_->preview_channels.resize(count);
-        if (impl_->token_grammar) { impl_->token_grammar->preview(tokens.first(count)); }
+        impl_->preview_ignored_framing.resize(count);
+        impl_->preview_reasoning_closes.resize(count);
+        if (impl_->token_grammar) {
+            impl_->token_grammar->preview(tokens.first(count), impl_->preview_ignored_framing,
+                                          impl_->preview_reasoning_closes);
+        }
         if (impl_->grammar_data && !impl_->grammar_data->definitions.empty() && !impl_->raw) {
             impl_->preview_tools = impl_->tools;
             impl_->preview_tools.filter(impl_->preview_output, *impl_->grammar_data,
@@ -1022,8 +1251,17 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
 
         if (suppress_reasoning_end(impl_->preview_state, impl_->raw,
                                    impl_->grammar_data != nullptr) &&
-            token == impl_->reasoning_end_token) {
+            !impl_->preview_replay.close_allowed() && token == impl_->reasoning_end_token) {
             throw std::logic_error("sampler selected a reasoning close outside reasoning");
+        }
+        if (impl_->preview_state.in_reasoning &&
+            impl_->preview_state.reasoning_limit.budget_tokens != 0 &&
+            impl_->preview_state.reasoning_limit.used_tokens >=
+                impl_->preview_state.reasoning_limit.budget_tokens &&
+            token != impl_->reasoning_end_token &&
+            std::find(impl_->policy.token_ids.begin(), impl_->policy.token_ids.end(), token) ==
+                impl_->policy.token_ids.end()) {
+            throw std::logic_error("sampler crossed the reasoning-token boundary without a close");
         }
         if (impl_->preview_state.in_reasoning) { ++impl_->preview_state.reasoning_tokens; }
 
@@ -1035,7 +1273,9 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
             impl_->model_stop_tokens.end();
         if (model_stop &&
             !model_stop_allowed(impl_->preview_state, impl_->raw, impl_->tool_output_enabled)) {
-            impl_->preview_state = impl_->state;
+            impl_->preview_state  = impl_->state;
+            impl_->preview_replay = impl_->replay;
+            impl_->reasoning_history.resize(impl_->committed_reasoning_size);
             impl_->preview_output.clear();
             return complete(0, FinishReason::None, true);
         }
@@ -1047,26 +1287,82 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
         }
 
         StopMatch match;
+        const bool repair_close =
+            impl_->preview_replay.close_allowed() && token == impl_->reasoning_end_token;
+        impl_->preview_ignored_framing.push_back(repair_close ? 1 : 0);
+        impl_->preview_reasoning_closes.push_back(0);
+        if (repair_close && !stop_token) {
+            impl_->preview_replay_discarded =
+                static_cast<std::uint32_t>(impl_->preview_replay.matched);
+            impl_->preview_replay_repairs              = 1;
+            impl_->preview_replay.repaired             = true;
+            impl_->preview_replay.matched              = 0;
+            impl_->preview_state.strip_content_leading = true;
+            impl_->preview_channels.push_back(std::nullopt);
+            if (count == budget_remaining) {
+                terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count,
+                            impl_->tool_output_enabled);
+                return complete(count, limit_reason);
+            }
+            // Never merge post-repair prose/tools with the replay being discarded.
+            return complete(count, FinishReason::None);
+        }
         const std::string_view bytes = impl_->tokenizer->decode_token_bytes(
             token, !impl_->preserve_special || (model_stop && !impl_->preserve_model_stops));
         const bool was_reasoning      = impl_->preview_state.in_reasoning;
         const bool was_end_suppressed = suppress_reasoning_end(impl_->preview_state, impl_->raw,
                                                                impl_->grammar_data != nullptr);
         const bool was_stripping      = impl_->preview_state.strip_content_leading;
-        const bool was_tool = in_tool_region(impl_->preview_state, impl_->tool_output_enabled);
+        const bool was_tool    = in_tool_region(impl_->preview_state, impl_->tool_output_enabled);
+        const bool had_content = impl_->preview_state.has_non_whitespace_content;
+        const bool semantic_close = was_reasoning &&
+                                    impl_->preview_state.reasoning_limit.budget_tokens != 0 &&
+                                    impl_->preview_state.reasoning_limit.used_tokens >=
+                                        impl_->preview_state.reasoning_limit.budget_tokens &&
+                                    token == impl_->reasoning_end_token;
+        const bool forced_close   = semantic_close && !stop_token;
+        if (semantic_close) { impl_->preview_reasoning_closes.back() = 1; }
+        if (was_reasoning && token == impl_->reasoning_end_token &&
+            impl_->preview_state.reasoning_limit.budget_tokens != 0) {
+            flush_reasoning_fragments(impl_->preview_state, impl_->policy, impl_->preview_output,
+                                      count, &match, impl_->tool_output_enabled);
+        }
+        charge_reasoning_token(impl_->preview_state, bytes, token == impl_->reasoning_end_token,
+                               stop_token);
         feed_token_bytes(impl_->preview_state, bytes, impl_->policy, impl_->preview_output, count,
                          &match, impl_->tool_output_enabled);
-        std::optional<OutputChannel> channel;
-        if (stop_token || model_stop || bytes.empty()) {
-            // Publishes no text.
-        } else if (was_reasoning) {
-            // The token that closes reasoning is the marker, not reasoning text.
-            if (impl_->preview_state.in_reasoning) { channel = OutputChannel::Reasoning; }
-        } else if (!was_tool && !in_tool_region(impl_->preview_state, impl_->tool_output_enabled) &&
-                   !(was_stripping && impl_->preview_state.strip_content_leading)) {
-            channel = OutputChannel::Content;
+        // A budget replacement needs semantic answer evidence, not diagnostic EOS bytes.
+        if (model_stop && stop_token && impl_->preview_state.reasoning_limit.budget_tokens != 0) {
+            impl_->preview_state.has_non_whitespace_content = had_content;
         }
+        if (forced_close && !match.found) { ++impl_->preview_state.reasoning_limit.forced_closes; }
+        const bool at_reasoning_limit = impl_->preview_state.in_reasoning &&
+                                        impl_->preview_state.reasoning_limit.budget_tokens != 0 &&
+                                        impl_->preview_state.reasoning_limit.used_tokens >=
+                                            impl_->preview_state.reasoning_limit.budget_tokens;
+        if (at_reasoning_limit) {
+            flush_reasoning_fragments(impl_->preview_state, impl_->policy, impl_->preview_output,
+                                      count, &match, impl_->tool_output_enabled);
+            impl_->preview_state.reasoning_limit.limit_reached = true;
+        }
+        const auto channel =
+            attributed_channel(was_reasoning, was_tool, was_stripping, impl_->preview_state, bytes,
+                               stop_token && !impl_->policy.publish_stop_token, impl_->raw,
+                               impl_->tool_output_enabled);
         impl_->preview_channels.push_back(channel);
+        if (impl_->preview_replay.enabled && !impl_->preview_replay.reference) {
+            if (channel == OutputChannel::Reasoning) { impl_->reasoning_history.push_back(token); }
+            if (was_reasoning && !impl_->preview_state.in_reasoning) {
+                impl_->preview_replay.freeze(impl_->reasoning_history,
+                                             token == impl_->reasoning_end_token);
+            }
+        } else if (!was_reasoning) {
+            impl_->preview_replay.observe(
+                token, channel, was_stripping && impl_->preview_state.strip_content_leading,
+                model_stop && stop_token,
+                std::any_of(bytes.begin(), bytes.end(),
+                            [](unsigned char byte) { return std::isspace(byte) == 0; }));
+        }
 
         if (match.found) {
             impl_->preview_state  = terminal_state(std::move(impl_->preview_state));
@@ -1084,10 +1380,35 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
             return complete(count, FinishReason::StopToken);
         }
 
+        if (at_reasoning_limit || forced_close) {
+            if (count == budget_remaining) {
+                terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count,
+                            impl_->tool_output_enabled);
+                return complete(count, limit_reason);
+            }
+            if (at_reasoning_limit && impl_->limit_action == runtime::ReasoningLimitAction::Retry &&
+                impl_->preview_state.reasoning_limit.retries == 0) {
+                impl_->preview_state.reasoning_limit_retry_pending = true;
+            }
+            // The following target position must be sampled with the new mask.
+            return complete(count, FinishReason::None);
+        }
+
+        if (impl_->preview_replay.retry_required) {
+            if (count == budget_remaining) {
+                terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count,
+                            impl_->tool_output_enabled);
+                return complete(count, limit_reason);
+            }
+            return complete(count, FinishReason::None);
+        }
+
         // Following columns use the round's original exclusions. Commit through a framing
         // transition, then sample the continuation in its updated eligibility domain.
-        if (was_end_suppressed != suppress_reasoning_end(impl_->preview_state, impl_->raw,
-                                                         impl_->grammar_data != nullptr) &&
+        if ((was_end_suppressed != suppress_reasoning_end(impl_->preview_state, impl_->raw,
+                                                          impl_->grammar_data != nullptr) ||
+             (!impl_->grammar_data &&
+              impl_->preview_replay.close_allowed() != impl_->replay.close_allowed())) &&
             index + 1 < tokens.size()) {
             return complete(count, FinishReason::None);
         }
@@ -1121,7 +1442,11 @@ runtime::OutputDecision OutputSession::preview_terminal(FinishReason reason) {
         reason == FinishReason::StopToken) {
         throw std::invalid_argument("invalid between-round terminal decoder reason");
     }
-    impl_->preview_state = impl_->state;
+    impl_->preview_state  = impl_->state;
+    impl_->preview_replay = impl_->replay;
+    impl_->reasoning_history.resize(impl_->committed_reasoning_size);
+    impl_->preview_replay_discarded = 0;
+    impl_->preview_replay_repairs   = 0;
     impl_->preview_output.clear();
     impl_->preview_channels.clear();
     terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, 0,
@@ -1149,16 +1474,84 @@ PublishedOutput OutputSession::commit_preview() noexcept {
         swap(impl_->tools, impl_->preview_tools);
     }
     swap(impl_->state, impl_->preview_state);
-    PublishedOutput output = std::move(impl_->preview_output);
+    swap(impl_->replay, impl_->preview_replay);
+    impl_->committed_reasoning_size = impl_->reasoning_history.size();
+    impl_->replay_discarded         = impl_->preview_replay_discarded;
+    impl_->replay_repairs           = impl_->preview_replay_repairs;
+    PublishedOutput output          = std::move(impl_->preview_output);
     impl_->preview_output.clear();
     impl_->preview_ready = false;
     return output;
 }
 
+ReasoningReplayPublication OutputSession::filter_reasoning_replay(PublishedOutput output,
+                                                                  FinishReason reason,
+                                                                  bool caller_terminated) {
+    if (!impl_ || impl_->preview_ready) {
+        throw std::logic_error("replay publication requires a committed output session");
+    }
+    ReasoningReplayPublication result;
+    auto& replay     = impl_->replay;
+    const auto flush = [&] {
+        result.output = std::move(impl_->replay_held);
+        for (auto& delta : output) { result.output.push_back(std::move(delta)); }
+        impl_->replay_held.clear();
+    };
+    if (caller_terminated) {
+        flush();
+        replay.enabled          = false;
+        replay.active           = false;
+        replay.retry_required   = false;
+        impl_->replay_discarded = impl_->replay_repairs = 0;
+        return result;
+    }
+    if (!replay.enabled) {
+        flush();
+        return result;
+    }
+    if (impl_->tools.selected_tool) { replay.accepted_answer = true; }
+    const bool terminal_without_answer =
+        reason != FinishReason::None && replay.repaired && !replay.accepted_answer;
+    result.retry_required           = replay.retry_required || terminal_without_answer;
+    result.framing_repairs          = std::exchange(impl_->replay_repairs, 0);
+    result.discarded_content_tokens = std::exchange(impl_->replay_discarded, 0);
+    if (result.retry_required) {
+        result.discarded_content_tokens += static_cast<std::uint32_t>(replay.matched);
+        replay.matched = 0;
+    }
+    if (result.framing_repairs != 0 || result.retry_required) {
+        impl_->replay_held.clear();
+        // The accepted preview ends exactly at the repair/proof token, so no
+        // post-repair answer can share these content deltas.
+        for (auto& delta : output) {
+            if (!delta.tool_call && delta.channel == OutputChannel::Reasoning) {
+                result.output.push_back(std::move(delta));
+            }
+        }
+        return result;
+    }
+    if (replay.active && reason == FinishReason::None) {
+        for (auto& delta : output) {
+            if (!delta.tool_call && delta.channel == OutputChannel::Content) {
+                impl_->replay_held.push_back(std::move(delta));
+            } else {
+                result.output.push_back(std::move(delta));
+            }
+        }
+        return result;
+    }
+    // An uncorroborated copy may be a legitimate answer. Divergence or its
+    // terminal boundary publishes all held bytes/logprobs unchanged and in order.
+    flush();
+    return result;
+}
+
 void OutputSession::discard_preview() noexcept {
     if (impl_ == nullptr || !impl_->preview_ready) { std::terminate(); }
     if (impl_->token_grammar) { impl_->token_grammar->discard_preview(); }
-    impl_->preview_state = impl_->state;
+    impl_->preview_state  = impl_->state;
+    impl_->preview_replay = impl_->replay;
+    impl_->reasoning_history.resize(impl_->committed_reasoning_size);
     impl_->preview_output.clear();
     impl_->preview_ready = false;
 }
@@ -1171,13 +1564,42 @@ bool OutputSession::in_reasoning() const noexcept {
     return impl_ != nullptr && impl_->state.in_reasoning;
 }
 
+ReasoningLimitStats OutputSession::reasoning_limit_stats() const noexcept {
+    return impl_ ? impl_->state.reasoning_limit : ReasoningLimitStats{};
+}
+
+bool OutputSession::reasoning_limit_retry_required() const noexcept {
+    return impl_ && !impl_->state.terminal && impl_->state.reasoning_limit_retry_pending;
+}
+
+std::optional<TokenId> OutputSession::reasoning_limit_forced_close_token() const noexcept {
+    if (impl_ && impl_->limit_action == runtime::ReasoningLimitAction::Close &&
+        impl_->state.in_reasoning && impl_->state.reasoning_limit.budget_tokens != 0 &&
+        impl_->state.reasoning_limit.used_tokens >= impl_->state.reasoning_limit.budget_tokens &&
+        !impl_->state.terminal) {
+        return impl_->reasoning_end_token;
+    }
+    return std::nullopt;
+}
+
+bool OutputSession::has_answer_content() const noexcept {
+    return impl_ && impl_->state.reasoning_limit.budget_tokens != 0 &&
+           impl_->state.has_non_whitespace_content && !impl_->tools.selected_tool;
+}
+
+bool OutputSession::preview_free_text_content() const noexcept {
+    return impl_ && impl_->preview_ready && !impl_->raw &&
+           !impl_->preview_state.constrained_content && !impl_->preview_tools.selected_tool;
+}
+
 bool OutputSession::model_stop_tokens_allowed() const noexcept {
     return impl_ == nullptr ||
            model_stop_allowed(impl_->state, impl_->raw, impl_->tool_output_enabled);
 }
 
 std::optional<TokenId> OutputSession::suppressed_reasoning_end_token() const noexcept {
-    if (impl_ && suppress_reasoning_end(impl_->state, impl_->raw, impl_->grammar_data != nullptr)) {
+    if (impl_ && !has_token_masks() &&
+        suppress_reasoning_end(impl_->state, impl_->raw, impl_->grammar_data != nullptr)) {
         return impl_->reasoning_end_token;
     }
     return std::nullopt;
@@ -1195,8 +1617,26 @@ bool OutputSession::reasoning_cycle_exclusion_allowed(TokenId token) const {
            longest_suffix_prefix(candidate, kThinkClose, true) == 0;
 }
 
+ConstraintStats OutputSession::constraint_stats() const noexcept {
+    if (!has_token_grammar()) return {};
+    auto result   = impl_->token_grammar->constraint_stats();
+    result.branch = in_reasoning()               ? ConstraintBranch::Reasoning
+                    : impl_->tools.selected_tool ? ConstraintBranch::ToolCall
+                                                 : ConstraintBranch::Answer;
+    return result;
+}
+
+void OutputSession::record_token_mask_upload(std::size_t bytes) const noexcept {
+    if (has_token_grammar()) impl_->token_grammar->record_upload(bytes);
+}
+
 bool OutputSession::has_token_grammar() const noexcept {
     return impl_ && impl_->token_grammar != nullptr;
+}
+
+bool OutputSession::has_token_masks() const noexcept {
+    return has_token_grammar() || (impl_ && ((impl_->replay.enabled && impl_->replay.active) ||
+                                             impl_->state.reasoning_limit.budget_tokens != 0));
 }
 
 std::vector<std::string> unconstrained_tool_call_names(std::string_view text,
@@ -1258,8 +1698,133 @@ bool OutputSession::terminal() const noexcept { return impl_ && impl_->state.ter
 void OutputSession::fill_token_masks(std::span<const TokenId> tokens,
                                      std::span<const std::int32_t> parents,
                                      std::span<std::uint32_t> words) const {
-    if (!has_token_grammar()) { throw std::logic_error("output session has no tool grammar"); }
-    impl_->token_grammar->fill_masks(tokens, parents, words);
+    if (!has_token_masks()) { throw std::logic_error("output session has no token mask policy"); }
+    if (!impl_->replay.enabled && impl_->state.reasoning_limit.budget_tokens == 0) {
+        impl_->token_grammar->fill_masks(tokens, parents, words);
+        return;
+    }
+    if (tokens.empty() || tokens.size() != parents.size()) {
+        throw std::invalid_argument("invalid replay mask hypothesis shape");
+    }
+
+    struct Hypothesis {
+        DecoderState decoder;
+        ReasoningReplayState replay;
+        std::vector<TokenId> reasoning_suffix;
+    };
+
+    std::vector<Hypothesis> nodes(tokens.size());
+    std::vector<std::uint8_t> allowed(tokens.size());
+    std::vector<std::uint8_t> reasoning_closes(tokens.size());
+    nodes[0].decoder = impl_->state;
+    nodes[0].replay  = impl_->replay;
+    const StopPolicy no_stops;
+    for (std::size_t node = 0; node < nodes.size(); ++node) {
+        if (node != 0) {
+            const auto parent = parents[node];
+            if (parent < 0 || static_cast<std::size_t>(parent) >= node) {
+                throw std::invalid_argument("replay mask parent must precede child");
+            }
+            nodes[node]      = nodes[parent];
+            auto& hypothesis = nodes[node];
+            auto& decoder    = hypothesis.decoder;
+            auto& replay     = hypothesis.replay;
+            const auto token = tokens[node];
+            if (replay.close_allowed() && token == impl_->reasoning_end_token) {
+                replay.repaired               = true;
+                replay.matched                = 0;
+                decoder.strip_content_leading = true;
+            } else {
+                const bool model_stop =
+                    std::find(impl_->model_stop_tokens.begin(), impl_->model_stop_tokens.end(),
+                              token) != impl_->model_stop_tokens.end();
+                const auto bytes = impl_->tokenizer->decode_token_bytes(
+                    token,
+                    !impl_->preserve_special || (model_stop && !impl_->preserve_model_stops));
+                const bool was_reasoning = decoder.in_reasoning;
+                const bool was_tool      = in_tool_region(decoder, impl_->tool_output_enabled);
+                const bool was_stripping = decoder.strip_content_leading;
+                PublishedOutput ignored;
+                if (was_reasoning && token == impl_->reasoning_end_token &&
+                    decoder.reasoning_limit.budget_tokens != 0) {
+                    flush_reasoning_fragments(decoder, no_stops, ignored, 1, nullptr,
+                                              impl_->tool_output_enabled);
+                }
+                charge_reasoning_token(decoder, bytes, token == impl_->reasoning_end_token,
+                                       model_stop);
+                feed_token_bytes(decoder, bytes, no_stops, ignored, 1, nullptr,
+                                 impl_->tool_output_enabled);
+                const auto channel =
+                    attributed_channel(was_reasoning, was_tool, was_stripping, decoder, bytes,
+                                       false, false, impl_->tool_output_enabled);
+                if (replay.enabled && !replay.reference) {
+                    if (channel == OutputChannel::Reasoning) {
+                        hypothesis.reasoning_suffix.push_back(token);
+                    }
+                    if (was_reasoning && !decoder.in_reasoning) {
+                        // Only a hypothetical first close materializes a reference;
+                        // ordinary replay forks share the committed immutable vector.
+                        std::vector<TokenId> history(impl_->reasoning_history.begin(),
+                                                     impl_->reasoning_history.begin() +
+                                                         impl_->committed_reasoning_size);
+                        history.insert(history.end(), hypothesis.reasoning_suffix.begin(),
+                                       hypothesis.reasoning_suffix.end());
+                        replay.freeze(history, token == impl_->reasoning_end_token);
+                    }
+                } else if (!was_reasoning) {
+                    const bool terminal_model_stop =
+                        model_stop &&
+                        std::find(impl_->policy.token_ids.begin(), impl_->policy.token_ids.end(),
+                                  token) != impl_->policy.token_ids.end();
+                    replay.observe(token, channel, was_stripping && decoder.strip_content_leading,
+                                   terminal_model_stop,
+                                   std::any_of(bytes.begin(), bytes.end(), [](unsigned char byte) {
+                                       return std::isspace(byte) == 0;
+                                   }));
+                }
+            }
+        }
+        allowed[node]           = nodes[node].replay.close_allowed() ? 1 : 0;
+        const auto& limit_state = nodes[node].decoder;
+        reasoning_closes[node] =
+            limit_state.in_reasoning && limit_state.reasoning_limit.budget_tokens != 0 &&
+            limit_state.reasoning_limit.used_tokens >= limit_state.reasoning_limit.budget_tokens;
+    }
+    if (impl_->token_grammar) {
+        impl_->token_grammar->fill_masks(tokens, parents, words, impl_->reasoning_end_token,
+                                         allowed,
+                                         impl_->grammar_data->starts_in_reasoning
+                                             ? std::span<const std::uint8_t>(reasoning_closes)
+                                             : std::span<const std::uint8_t>{});
+    } else {
+        if (words.size() != tokens.size() * fi::TokenGrammarState::mask_words) {
+            throw std::invalid_argument("invalid replay token mask shape");
+        }
+        std::fill(words.begin(), words.end(), ~std::uint32_t{0});
+        const auto token = static_cast<std::size_t>(impl_->reasoning_end_token);
+        for (std::size_t node = 0; node < nodes.size(); ++node) {
+            if (!nodes[node].decoder.in_reasoning && !allowed[node]) {
+                words[node * fi::TokenGrammarState::mask_words + token / 32] &=
+                    ~(std::uint32_t{1} << (token % 32));
+            }
+        }
+    }
+    const auto close = static_cast<std::size_t>(impl_->reasoning_end_token);
+    for (std::size_t node = 0; node < nodes.size(); ++node) {
+        const auto& state = nodes[node].decoder;
+        if (!state.in_reasoning || state.reasoning_limit.budget_tokens == 0 ||
+            state.reasoning_limit.used_tokens < state.reasoning_limit.budget_tokens) {
+            continue;
+        }
+        auto row = words.subspan(node * fi::TokenGrammarState::mask_words,
+                                 fi::TokenGrammarState::mask_words);
+        if ((row[close / 32] & (std::uint32_t{1} << (close % 32))) == 0) {
+            throw RequestError(RequestErrorKind::InvalidOutputConstraint,
+                               "reasoning-limit close conflicts with output grammar");
+        }
+        std::fill(row.begin(), row.end(), 0);
+        row[close / 32] = std::uint32_t{1} << (close % 32);
+    }
 }
 
 Frontend::Frontend(std::shared_ptr<const Impl> impl) noexcept : impl_(std::move(impl)) {}
@@ -1402,6 +1967,26 @@ encode_round_trip(const fi::Tokenizer& tokenizer, std::string_view text, std::st
     return ids;
 }
 
+std::optional<std::vector<TokenId>>
+encode_recovery_fragment(const fi::Tokenizer& tokenizer,
+                         const fi::CompiledChatTemplate& chat_template, const PromptInput& source,
+                         std::span<const ChatMessage> insert, std::string& fragment,
+                         std::string& decoded) {
+    std::vector<ChatMessage> owned(insert.begin(), insert.end());
+    const fi::ChatRenderOptions options{
+        .add_generation_prompt = false,
+        .enable_thinking       = source.options.enable_thinking,
+        .reasoning_effort      = source.options.reasoning_effort,
+        .preserve_thinking     = source.options.preserve_thinking,
+        .add_vision_id         = false,
+        .tool_jsons            = {},
+    };
+    const auto rendered =
+        chat_template.render_fragment(convert_messages(std::move(owned)), options);
+    fragment = rendered.text;
+    return encode_round_trip(tokenizer, fragment, decoded, rendered.literal_spans);
+}
+
 bool insert_enables_tool_output(const PromptInput& source, std::span<const ChatMessage> insert) {
     if (enables_tool_output(source)) { return true; }
     return std::any_of(insert.begin(), insert.end(), [](const ChatMessage& message) {
@@ -1412,47 +1997,112 @@ bool insert_enables_tool_output(const PromptInput& source, std::span<const ChatM
 
 } // namespace
 
-std::optional<PreparedPrompt>
-Frontend::splice_recovery_prompt(std::vector<TokenId> prefix, const PromptInput& source,
-                                 std::span<const ChatMessage> insert,
-                                 std::shared_ptr<const GenerationRecoveryContext> recovery) const {
+std::uint32_t Frontend::recovery_prompt_token_bound(const PreparedPrompt& prompt,
+                                                    const GenerationRecoveryContext& context,
+                                                    std::uint32_t maximum_attempts) const {
+    if (!impl_ || !prompt.data_ || maximum_attempts > GenerationRecoveryContext::maximum_attempts) {
+        throw std::invalid_argument("invalid bounded recovery envelope");
+    }
+    const auto original = checked_token_count(prompt.data_->token_ids.size());
+    if (maximum_attempts == 0) { return original; }
+    std::array<std::vector<TokenId>, 2> prologues;
+    std::array<std::size_t, 2> closes{};
+    const std::array prologue_text{kRecoveryThinkingPrologue, kRecoveryNonThinkingPrologue};
+    const std::array close_text{kRecoveryTurnClose, kRecoveryContentTurnClose};
+    for (std::size_t phase = 0; phase != 2; ++phase) {
+        std::string decoded;
+        auto opener = encode_round_trip(*impl_->tokenizer, prologue_text[phase], decoded);
+        auto close  = encode_round_trip(*impl_->tokenizer, close_text[phase], decoded);
+        if (!opener || !close) {
+            throw std::invalid_argument("native recovery framing cannot round-trip");
+        }
+        prologues[phase] = std::move(*opener);
+        closes[phase]    = close->size();
+    }
+    std::array<std::optional<std::uint64_t>, 2> growth;
+    for (std::size_t phase = 0; phase != 2; ++phase) {
+        const auto& ids = prologues[phase];
+        if (prompt.data_->token_ids.size() >= ids.size() &&
+            std::equal(ids.rbegin(), ids.rend(), prompt.data_->token_ids.rbegin())) {
+            growth[phase] = 0;
+        }
+    }
+    if (!growth[0] && !growth[1]) {
+        throw std::invalid_argument("recovery envelope requires a native generation prologue");
+    }
+    for (std::uint32_t attempt = 1; attempt <= maximum_attempts; ++attempt) {
+        std::size_t maximum_fragment = 0;
+        for (const auto& insert : context.recovery_insert_variants(attempt)) {
+            std::string fragment, decoded;
+            const auto ids = encode_recovery_fragment(*impl_->tokenizer, impl_->chat_template,
+                                                      context.input(), insert, fragment, decoded);
+            if (!ids) { throw std::invalid_argument("native recovery feedback cannot round-trip"); }
+            maximum_fragment = std::max(maximum_fragment, ids->size());
+        }
+        std::array<std::optional<std::uint64_t>, 2> next;
+        for (std::size_t prior = 0; prior != 2; ++prior) {
+            const auto prior_growth = growth[prior];
+            if (!prior_growth) { continue; }
+            for (std::size_t phase = 0; phase != 2; ++phase) {
+                const auto value =
+                    *prior_growth + closes[prior] + maximum_fragment + prologues[phase].size();
+                next[phase] = std::max(next[phase].value_or(0), value);
+            }
+        }
+        growth = next;
+    }
+    const auto bound = static_cast<std::uint64_t>(original) +
+                       std::max(growth[0].value_or(0), growth[1].value_or(0));
+    if (bound > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::invalid_argument("recovery envelope exceeds the target token domain");
+    }
+    return static_cast<std::uint32_t>(bound);
+}
+
+std::optional<PreparedPrompt> Frontend::splice_recovery_prompt(
+    std::vector<TokenId> prefix, const PromptInput& source, std::span<const ChatMessage> insert,
+    std::shared_ptr<const GenerationRecoveryContext> recovery, bool enable_thinking) const {
     if (impl_ == nullptr || prefix.empty() || insert.empty()) { return std::nullopt; }
     try {
-        std::string prologue_decoded;
+        std::string thinking_decoded;
+        std::string content_decoded;
+        const auto thinking_ids =
+            encode_round_trip(*impl_->tokenizer, kRecoveryThinkingPrologue, thinking_decoded);
+        const auto content_ids =
+            encode_round_trip(*impl_->tokenizer, kRecoveryNonThinkingPrologue, content_decoded);
+        if (!thinking_ids || !content_ids) { return std::nullopt; }
+        const auto ends_with = [&](const auto& ids) {
+            return prefix.size() >= ids.size() &&
+                   std::equal(ids.rbegin(), ids.rend(), prefix.rbegin());
+        };
+        const bool prior_thinking = ends_with(*thinking_ids);
+        if (!prior_thinking && !ends_with(*content_ids)) { return std::nullopt; }
+        const auto& prior_ids = prior_thinking ? *thinking_ids : *content_ids;
+        const auto prior_text =
+            prior_thinking ? kRecoveryThinkingPrologue : kRecoveryNonThinkingPrologue;
+        const auto& prior_decoded = prior_thinking ? thinking_decoded : content_decoded;
+        const auto& prologue_ids  = enable_thinking ? *thinking_ids : *content_ids;
+        const auto close_text     = prior_thinking ? kRecoveryTurnClose : kRecoveryContentTurnClose;
         std::string close_decoded;
         std::string fragment_decoded;
-        const auto prologue_ids =
-            encode_round_trip(*impl_->tokenizer, kRecoveryThinkingPrologue, prologue_decoded);
-        const auto close_ids =
-            encode_round_trip(*impl_->tokenizer, kRecoveryTurnClose, close_decoded);
-        if (!prologue_ids || !close_ids) { return std::nullopt; }
+        const auto close_ids = encode_round_trip(*impl_->tokenizer, close_text, close_decoded);
+        if (!close_ids) { return std::nullopt; }
 
-        std::vector<ChatMessage> owned(insert.begin(), insert.end());
-        const fi::ChatRenderOptions fragment_options{
-            .add_generation_prompt = false,
-            .enable_thinking       = source.options.enable_thinking,
-            .reasoning_effort      = source.options.reasoning_effort,
-            .preserve_thinking     = source.options.preserve_thinking,
-            .add_vision_id         = false,
-            .tool_jsons            = {},
-        };
-        const fi::RenderedFragment rendered_fragment = impl_->chat_template.render_fragment(
-            convert_messages(std::move(owned)), fragment_options);
-        const std::string& fragment = rendered_fragment.text;
-        const auto fragment_ids = encode_round_trip(*impl_->tokenizer, fragment, fragment_decoded,
-                                                    rendered_fragment.literal_spans);
+        std::string fragment;
+        const auto fragment_ids = encode_recovery_fragment(
+            *impl_->tokenizer, impl_->chat_template, source, insert, fragment, fragment_decoded);
         if (!fragment_ids ||
-            !recovery_suffix_tokens_ok(
-                prefix, *prologue_ids, *close_ids, *fragment_ids, kRecoveryThinkingPrologue,
-                prologue_decoded, kRecoveryTurnClose, close_decoded, fragment, fragment_decoded)) {
+            !recovery_suffix_tokens_ok(prefix, prior_ids, *close_ids, *fragment_ids, prior_text,
+                                       prior_decoded, close_text, close_decoded, fragment,
+                                       fragment_decoded)) {
             return std::nullopt;
         }
 
         prefix.reserve(prefix.size() + close_ids->size() + fragment_ids->size() +
-                       prologue_ids->size());
+                       prologue_ids.size());
         prefix.insert(prefix.end(), close_ids->begin(), close_ids->end());
         prefix.insert(prefix.end(), fragment_ids->begin(), fragment_ids->end());
-        prefix.insert(prefix.end(), prologue_ids->begin(), prologue_ids->end());
+        prefix.insert(prefix.end(), prologue_ids.begin(), prologue_ids.end());
 
         const auto start = Clock::now();
         auto data        = std::make_unique<PreparedPromptData>();
@@ -1464,12 +2114,12 @@ Frontend::splice_recovery_prompt(std::vector<TokenId> prefix, const PromptInput&
             .kind     = RewriteCheckpointKind::ResponseReplay,
             .frontier = static_cast<std::uint32_t>(data->token_ids.size()),
         };
-        data->starts_in_reasoning = true;
+        data->starts_in_reasoning = enable_thinking;
         data->tool_output_enabled =
             !source.options.output_constraint && insert_enables_tool_output(source, insert);
-        data->token_grammar       = impl_->token_grammar.compile(source.options.tool_jsons, true,
-                                                                 source.options.require_tool_call,
-                                                                 source.options.output_constraint);
+        data->token_grammar = impl_->token_grammar.compile(
+            source.options.tool_jsons, enable_thinking, source.options.require_tool_call,
+            source.options.output_constraint);
         data->generation_recovery = std::move(recovery);
         data->prepare.seconds     = std::chrono::duration<double>(Clock::now() - start).count();
         return PreparedPrompt(std::move(data));
@@ -1480,14 +2130,38 @@ Frontend::splice_recovery_prompt(std::vector<TokenId> prefix, const PromptInput&
 
 OutputSession Frontend::make_output_session(const PreparedPrompt& prompt,
                                             const StopPolicy& caller_stop,
-                                            const OutputOptions& output) const {
+                                            const OutputOptions& output, bool generation_recovery,
+                                            const OutputSession* recovery_source,
+                                            runtime::ReasoningLimitAction action) const {
     if (prompt.data_ == nullptr) { throw std::invalid_argument("prepared prompt is empty"); }
+    if (output.thinking_token_budget &&
+        (*output.thinking_token_budget == 0 || output.raw ||
+         (!prompt.data_->starts_in_reasoning && !recovery_source))) {
+        throw std::invalid_argument(
+            "thinking_token_budget requires positive budget and thinking output");
+    }
     StopPolicy policy = merge_stop_policy(*impl_->tokenizer, caller_stop);
     if (output.raw) { policy.publish_stop_token = true; }
-    return OutputSession(std::make_unique<OutputSession::Impl>(
+    auto session                = OutputSession(std::make_unique<OutputSession::Impl>(
         impl_->tokenizer, std::move(policy), output, prompt.data_->starts_in_reasoning,
         prompt.data_->tool_output_enabled, impl_->reasoning_end_token, impl_->defaults.token_ids,
-        prompt.data_->token_grammar, prompt.data_->generation_recovery));
+        prompt.data_->token_grammar, prompt.data_->generation_recovery, generation_recovery));
+    session.impl_->limit_action = action;
+    if (recovery_source && recovery_source->impl_) {
+        session.impl_->state.reasoning_limit = recovery_source->impl_->state.reasoning_limit;
+        if (recovery_source->impl_->state.reasoning_limit_retry_pending) {
+            ++session.impl_->state.reasoning_limit.retries;
+        }
+    }
+    if (generation_recovery && recovery_source && recovery_source->impl_ &&
+        recovery_source->impl_->replay.repaired && recovery_source->impl_->replay.reference &&
+        !output.raw && !session.impl_->state.constrained_content) {
+        session.impl_->replay.enabled   = true;
+        session.impl_->replay.active    = true;
+        session.impl_->replay.repaired  = true;
+        session.impl_->replay.reference = recovery_source->impl_->replay.reference;
+    }
+    return session;
 }
 
 const StopPolicy& Frontend::default_stop_policy() const noexcept { return impl_->defaults; }
@@ -1501,7 +2175,8 @@ std::string_view Frontend::token_bytes(TokenId token) const {
 }
 
 PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptInput input,
-                                              frontend_internal::EncodedHistoryCache& cache) {
+                                              frontend_internal::EncodedHistoryCache& cache,
+                                              bool cache_system_prompt) {
     const auto start               = Clock::now();
     const PromptOptions& options   = input.options;
     const bool tool_output_enabled = !options.output_constraint && enables_tool_output(input);
@@ -1520,6 +2195,8 @@ PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptIn
         data->generation_recovery = recovery;
         return PreparedPrompt(std::move(data));
     };
+    auto rendering                        = render_options(options);
+    rendering.mark_system_prompt          = cache_system_prompt;
     std::vector<fi::ChatMessage> messages = convert_messages(std::move(input.messages));
     const bool has_media =
         std::any_of(messages.begin(), messages.end(),
@@ -1533,14 +2210,13 @@ PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptIn
                                 frontend.impl_->processor);
         fi::ProcessedInput processed;
         try {
-            processed = processor.process(messages, render_options(options));
+            processed = processor.process(messages, rendering);
         } catch (const fi::ProcessorError& error) { throw_processor_error(error); }
         return finish(
             make_media_prompt_data(std::move(processed), options, tool_output_enabled, start));
     }
-    fi::EncodedChat encoded =
-        fi::encode_chat_with_cache(*frontend.impl_->tokenizer, frontend.impl_->chat_template,
-                                   messages, render_options(options), cache);
+    fi::EncodedChat encoded = fi::encode_chat_with_cache(
+        *frontend.impl_->tokenizer, frontend.impl_->chat_template, messages, rendering, cache);
     return finish(make_text_prompt_data(std::move(encoded), options, tool_output_enabled, start));
 }
 

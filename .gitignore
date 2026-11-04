@@ -28,6 +28,7 @@ venv/
 # Weight artifacts (large; produced by offline tooling)
 *.bin
 *.safetensors
+*.ninfer
 *.gguf
 out/
 *.log
@@ -47,3 +48,7 @@ profiles/
 
 # Claude Code personal/local settings (may contain API tokens)
 .claude/settings.local.json
+
+# Private maintainer paths and coordination settings
+.ninfer-local.env
+AGENTS.local.md

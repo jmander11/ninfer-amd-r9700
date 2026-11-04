@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 // Diagnostic replay, not an independent numerical qualification or speed test.
 #include "artifact/reader.h"
 #include "core/device.h"
@@ -161,7 +162,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipDeviceGetPCIBusId(pci, sizeof(pci), 0));
         require(std::string(props.name) == "AMD Radeon AI PRO R9700" &&
                     std::string(props.gcnArchName) == "gfx1201" && props.warpSize == 32 &&
-                    (std::string(pci) == "0000:13:00.0" || std::string(pci) == "13:00.0"),
+                    (std::string(pci) == ninfer::r9700_qualification::configured_pci_bus_id()),
                 "wrong GPU target");
         hipStream_t stream{};
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));

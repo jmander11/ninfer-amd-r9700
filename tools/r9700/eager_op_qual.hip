@@ -1,6 +1,7 @@
 #include <hip/hip_runtime.h>
 
 #include "ops/r9700/eager/eager_ops.h"
+#include "core/decode_graph.h"
 #include "ninfer/ops/argmax.h"
 #include "ninfer/ops/cast.h"
 #include "ninfer/ops/embedding.h"
@@ -36,6 +37,7 @@
 #include <string_view>
 #include <cstring>
 #include <vector>
+#include <tuple>
 
 namespace {
 
@@ -171,7 +173,8 @@ void require_bf16_close(const std::vector<hip_bfloat16>& actual,
         const double observed = static_cast<double>(static_cast<float>(actual[index]));
         const double absolute = std::abs(observed - expected[index]);
         const double relative = absolute / std::max(1.0e-6, std::abs(expected[index]));
-        if (absolute > 2.0e-2 && relative > 2.0e-2) {
+        if (!std::isfinite(observed) || !std::isfinite(expected[index]) ||
+            (absolute > 2.0e-2 && relative > 2.0e-2)) {
             std::ostringstream message;
             message << label << " mismatch at " << index << " observed=" << observed
                     << " expected=" << expected[index];
@@ -346,6 +349,54 @@ void qualify_bf16_movement_and_cast(hipStream_t stream) {
         ninfer::ops::residual_add(addend_tensor, residual_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
         require_bf16_exact(copy_to_host(d_residual), residual_expected, "BF16 residual add");
+    }
+}
+
+// Whole represented-bit scatter, including vector cutover, alignment fallback and untouched
+// columns.
+void qualify_feature_scatter(hipStream_t stream) {
+    for (const auto [features, rows, prefix, captured] :
+         {std::tuple{5120U, 127U, 0U, false}, std::tuple{5120U, 128U, 0U, false},
+          std::tuple{5120U, 129U, 0U, false}, std::tuple{5120U, 384U, 0U, true},
+          std::tuple{5120U, 128U, 1U, false}, std::tuple{5119U, 129U, 0U, false}}) {
+        const std::uint32_t columns = rows * 2U + 1U;
+        auto source      = bf16_fixture(static_cast<std::size_t>(features) * rows + prefix, 17);
+        auto destination = bf16_fixture(static_cast<std::size_t>(features) * columns + prefix, 19);
+        for (std::size_t i = 0; i < source.size(); ++i)
+            source[i] = bf16_from_bits(static_cast<std::uint16_t>(i * 131U + 17U));
+        auto expected = destination;
+        std::vector<std::int32_t> indices(rows);
+        for (std::uint32_t row = 0; row < rows; ++row) {
+            indices[row] = static_cast<std::int32_t>(2U * (rows - row));
+            std::copy_n(source.data() + prefix + static_cast<std::size_t>(row) * features, features,
+                        expected.data() + prefix +
+                            static_cast<std::size_t>(indices[row]) * features);
+        }
+        DeviceBuffer<hip_bfloat16> d_source(source.size()), d_destination(destination.size());
+        DeviceBuffer<std::int32_t> d_indices(rows);
+        copy_to_device(d_source, source);
+        copy_to_device(d_destination, destination);
+        copy_to_device(d_indices, indices);
+        ninfer::Tensor x(d_source.get() + prefix, ninfer::DType::BF16,
+                         {static_cast<std::int32_t>(features), static_cast<std::int32_t>(rows)});
+        ninfer::Tensor y(d_destination.get() + prefix, ninfer::DType::BF16,
+                         {static_cast<std::int32_t>(features), static_cast<std::int32_t>(columns)});
+        ninfer::Tensor ids(d_indices.get(), ninfer::DType::I32, {static_cast<std::int32_t>(rows)});
+        if (captured) {
+            ninfer::DecodeGraphDefinition definition;
+            definition.capture(stream, [&] { ninfer::ops::scatter(x, ids, y, stream); });
+            ninfer::DecodeGraphExecutable executable;
+            executable.instantiate(definition);
+            executable.upload(stream);
+            executable.launch(stream);
+            HIP_CHECK(hipStreamSynchronize(stream));
+        } else {
+            ninfer::ops::scatter(x, ids, y, stream);
+            HIP_CHECK(hipStreamSynchronize(stream));
+        }
+        std::vector<std::uint16_t> bits(expected.size());
+        std::transform(expected.begin(), expected.end(), bits.begin(), bf16_bits);
+        require_bf16_exact(copy_to_host(d_destination), bits, "feature scatter exact image");
     }
 }
 
@@ -549,10 +600,23 @@ void qualify_normalization_and_activations(hipStream_t stream) {
     copy_to_device(d_weight, weight);
     copy_to_device(d_bias, bias);
     // Vision LayerNorm: 1152 features over one 1920x1080 image's 8256 patches and a ragged count.
-    for (const std::uint32_t rows : {8256U, 37U}) {
+    for (const std::uint32_t rows : {8256U, 37U, 4U}) {
         constexpr std::uint32_t kVisionFeatures = 1152;
         const std::size_t elements              = static_cast<std::size_t>(kVisionFeatures) * rows;
-        const std::vector<hip_bfloat16> input   = bf16_fixture(elements, rows + 211U);
+        std::vector<hip_bfloat16> input         = bf16_fixture(elements, rows + 211U);
+        if (rows == 4U) {
+            for (std::uint32_t feature = 0; feature < kVisionFeatures; ++feature) {
+                input[feature] = hip_bfloat16(std::ldexp(1.0F, 120));
+                input[kVisionFeatures + feature] =
+                    hip_bfloat16(std::ldexp(feature % 2 == 0 ? 1.0F : -1.0F, 127));
+                input[2U * kVisionFeatures + feature] = hip_bfloat16(
+                    std::ldexp(1.0F, 120) + std::ldexp(feature % 2 == 0 ? 1.0F : -1.0F, 113));
+                input[3U * kVisionFeatures + feature] =
+                    hip_bfloat16(feature % 3 == 0   ? std::ldexp(1.0F, 127)
+                                 : feature % 3 == 1 ? -std::ldexp(1.0F, 127)
+                                                    : std::ldexp(1.0F, -120));
+            }
+        }
         const std::vector<hip_bfloat16> vision_weight = bf16_fixture(kVisionFeatures, 223U);
         const std::vector<hip_bfloat16> vision_bias   = bf16_fixture(kVisionFeatures, 227U);
         DeviceBuffer<hip_bfloat16> d_input(elements);
@@ -581,7 +645,8 @@ void qualify_normalization_and_activations(hipStream_t stream) {
                 const double centered = static_cast<float>(input[base + feature]) - mean;
                 variance += centered * centered;
             }
-            const double inverse = 1.0 / std::sqrt(variance / kVisionFeatures + 1.0e-6);
+            const double inverse =
+                1.0 / std::sqrt(variance / kVisionFeatures + static_cast<double>(1.0e-6F));
             for (std::uint32_t feature = 0; feature < kVisionFeatures; ++feature) {
                 expected[base + feature] = (static_cast<float>(input[base + feature]) - mean) *
                                                inverse *
@@ -606,6 +671,31 @@ void qualify_normalization_and_activations(hipStream_t stream) {
         HIP_CHECK(hipEventDestroy(end));
         require_bf16_close(copy_to_host(d_output), expected, "vision LayerNorm FP64 oracle");
         std::cout << "vision LayerNorm D=1152 rows=" << rows << " time_ms=" << elapsed_ms << '\n';
+    }
+
+    {
+        // Isolate overflow in variance + eps: both reductions remain finite at D=2.
+        const std::vector<hip_bfloat16> epsilon_input{hip_bfloat16(std::ldexp(1.0F, 63)),
+                                                      hip_bfloat16(-std::ldexp(1.0F, 63))};
+        const std::vector<hip_bfloat16> epsilon_weight(2, hip_bfloat16(1.0F)),
+            epsilon_bias(2, hip_bfloat16(0.0F));
+        DeviceBuffer<hip_bfloat16> epsilon_d_input(2), epsilon_d_weight(2), epsilon_d_bias(2),
+            epsilon_d_output(2);
+        copy_to_device(epsilon_d_input, epsilon_input);
+        copy_to_device(epsilon_d_weight, epsilon_weight);
+        copy_to_device(epsilon_d_bias, epsilon_bias);
+        ninfer::Tensor x(epsilon_d_input.get(), ninfer::DType::BF16, {2, 1});
+        ninfer::Tensor w(epsilon_d_weight.get(), ninfer::DType::BF16, {2});
+        ninfer::Tensor b(epsilon_d_bias.get(), ninfer::DType::BF16, {2});
+        ninfer::Tensor y(epsilon_d_output.get(), ninfer::DType::BF16, {2, 1});
+        const float epsilon    = std::numeric_limits<float>::max();
+        const double amplitude = static_cast<float>(epsilon_input[0]);
+        const double epsilon_expected =
+            amplitude / std::sqrt(amplitude * amplitude + static_cast<double>(epsilon));
+        ninfer::ops::layer_norm(x, w, b, epsilon, y, stream);
+        HIP_CHECK(hipStreamSynchronize(stream));
+        require_bf16_close(copy_to_host(epsilon_d_output), {epsilon_expected, -epsilon_expected},
+                           "LayerNorm finite variance-plus-epsilon overflow FP64 oracle");
     }
 
     // 25..127 rows are mixed decode/prefill units served by the one-token-per-wave route.
@@ -1705,6 +1795,7 @@ int main() {
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
         qualify_i32(stream);
         qualify_bf16_movement_and_cast(stream);
+        qualify_feature_scatter(stream);
         qualify_mtp_pack_split(stream);
         qualify_normalization_and_activations(stream);
         qualify_embedding(stream);

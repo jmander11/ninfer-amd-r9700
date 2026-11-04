@@ -84,20 +84,26 @@ NInfer is a from-scratch C++/HIP inference engine for maximum single-GPU inferen
 compiled only for `gfx1201` and tuned on one AMD Radeon AI PRO R9700. The sole supported model is
 Qwen3.8-27B. Its growing Text/MTP cache has exactly three planes: FP8 E4M3FN keys, signed INT4
 values, and FP16 value scales; there is no cache dtype selector, K scale, alternate cache path, or
-retained compatibility backend. The production weights are `qwen3.8-27b/r9700-lq4` (profile
+retained compatibility backend. The production Text weights are `qwen3.8-27b/r9700-lq4` (profile
 `R9700Lq4`): GPTQ-rounded LQ4 Text projections and output head with 21 row-scaled FP8
 protections (2026-09-30), admitted by the BF16-source PPL, NIAH, exact-token, and whole-inference
 gates. The weight-precision bar is no worse than the 5090 NVFP4 build on every BF16-source cell
 (measured with the frozen 5090 scorer); protected attention query/key projections are not demoted
-below FP8. Other `-eval` identities
-remain evaluation and conversion-base artifacts. DFlash2 keeps its model-specified BF16 selector
+below FP8. The selected image/video recipe is `qwen3.8-27b/r9700-lq4-vision-bf16` (profile
+`R9700Lq4VisionBf16`): identical Text/MTP/DFlash2 payloads with exact original BF16 Vision
+matrices. Vision-off binding validates those matrices without placing them on the GPU.
+Other `-eval` identities remain evaluation and conversion-base artifacts. DFlash2 keeps its model-specified BF16 selector
 codebook and private fixed BF16 state.
 
 The workload is one R9700, one resident model instance, and a startup-fixed one to eight active
-requests. The Engine forms one compact decode batch per round boundary with bounded FIFO ingress
-and no preemption; one prefill owner at a time advances either prefill-first or in startup-fixed
+resident requests. The Engine forms one compact decode batch per round boundary with bounded FIFO
+ingress. With RAM enabled, output reservations grow in windows of at most 8192 tokens and settled
+active continuations may suspend to secured RAM under KV pressure; RAM off retains full-lifetime
+GPU entitlement. A completion cohort whose target-produced lifetime envelopes jointly fit GPU capacity and dynamic
+window-end RAM credits for other residents guarantee a feasible evacuation path; live images are never optional cache or disk-spill victims. Total logical
+requests remain bounded by concurrency plus pending capacity. One prefill owner at a time advances either prefill-first or in startup-fixed
 slices, which under DFlash share a decode round's target forward (mixed round). Large-scale or
-preemptive continuous batching, priority/QoS scheduling, additional checkpoint targets, and
+general preemptive continuous batching, priority/QoS scheduling, additional checkpoint targets, and
 retargeting to another execution platform are outside the current product. This is a trusted local, single-owner project, and requirements from a different
 workload, trust model, or deployment model are out of scope until the contract is explicitly
 changed.
@@ -132,7 +138,7 @@ routing map, not a mandatory reading list:
 
 ## Upstream synchronization
 
-Upstream `experimental` is reconciled through `edaad03a737aa1a9e8288c47af3f07ada50ae905`
+Upstream `experimental` is reconciled through `c88d194f51c52e6e1e1fff00da0f47c9f3f0c03b`
 via custom AMD ports, not merged ancestry.
 Unsupported NVIDIA paths were excluded; decisions are in `docs/maintainer/upstream-sync.md`.
 For future syncs, review upstream changes after this baseline against current AMD behavior,
@@ -241,53 +247,40 @@ concrete lifetime risk; performance changes get measurement at the claimed scope
 attribution tools only when needed; serving changes get affected OpenAI/Anthropic schema tests
 and observable request/stream behavior.
 
-## Local environment
+## Host prerequisites and workflow
 
-Conventional project resources (not a per-task checklist): Python 3.11 via `python3`; the complete
-18-shard Qwen3.8-27B BF16 source and selected converted R9700 `.ninfer` artifact are maintainer-
-provided local prerequisites and are not downloaded implicitly. The source index and all 18
-nonempty shards, about 52 GiB on disk, are currently present under
-`/path/to/local/models/qwen3.8-27b-bf16`; fresh conversion/PPL/token campaigns still
-require their explicit artifact, Python environment, and physical-GPU prerequisites. The normal
-HIP build is `build-r9700/`; profiler output is under `profiles/rocprof/` and `profiles/bench/`;
-hardware is one AMD Radeon AI PRO R9700, `gfx1201`, wave32, with the selected ROCm 10 toolchain
-under `/opt/rocm`.
-Engine, CLI, serve, and PPL use the one fixed FP8-K/INT4-V cache and expose no cache dtype selector.
-Before its first HIP call, `DeviceContext` fixes process-local ROCr host allocation to
-`HSA_USERPTR_FOR_PAGED_MEM=0` and normal SVM/unified addressing (`HSA_USE_SVM=1`). Pinned
-host arenas use HIP/GTT backing; direct artifact and disk-cache reads use ordinary-RAM staging.
-RAM KV, checkpoints, mapped weights and runtime pinned buffers share the driver GTT budget.
-This policy changes no host compaction sysctl; requested RAM capacity fails clearly if it
-cannot be allocated rather than silently shrinking or falling back to USERPTR memory.
-Use the selected Python 3.11 interpreter explicitly; do not install or upgrade dependencies unless
-the task requires it. Never select an artifact by glob, modification time, or an unqualified
-"latest" name; large artifacts, source checkpoints, and profiler outputs are local prerequisites,
-not things to download or regenerate unless in scope.
+Read `AGENTS.local.md` if present for private host instructions. Source
+`.ninfer-local.env` before manual GPU commands; maintainer shell runners load it.
+Neither file belongs in Git. The template `.ninfer-local.env.example` documents
+settings; `docs/maintainer/local-development.md` explains setup.
 
-## Local build and deployment workflow
+Python tooling uses an explicitly selected Python 3.11 interpreter. The complete
+18-shard Qwen3.8-27B BF16 source, selected converted artifact and reference
+checkpoints are local prerequisites, never downloaded implicitly. Do not install
+or upgrade dependencies unless the task requires it. Never select an artifact by
+glob, modification time or an unqualified "latest" name.
 
-GPU work in both repos must hold `flock --exclusive /path/to/local/.ninfer-coordination/gpu.lock <command>`
-through all child work. Never delete the lock; coordinate existing unleased GPU jobs/servers with their owner.
-Builds need no lock: one build per agent, at most 8 jobs (the CMake Ninja job pool enforces
-`NINFER_BUILD_JOBS`, default 8, whatever `-j` is passed). Overlap is allowed; reduce concurrency
-on memory/I/O pressure. This supersedes older shared-host rules.
+Every GPU command must hold `flock --exclusive "$NINFER_GPU_LOCK" <command>` through
+all child work. Choose the same lock for every checkout using the physical R9700;
+never delete it or stop another owner's job. Builds need no GPU lock. Run one build
+per agent with at most 8 jobs; reduce concurrency under memory or I/O pressure.
 
-For source-only development, prefer incremental CMake/Ninja builds, with 8 jobs
-(the maximum). For Compose deployment, run `docker compose up -d` (add `--wait`
-to wait for health). Keep `COMPOSE_BAKE=false` from `.env.example` in `.env` on
-the maintainer host so a changed image recreates its container. Compose builds
-before startup and reuses a locked BuildKit
-CMake/Ninja object cache for source edits; toolchain and build-dependency changes
-reset that cache automatically. The image contains the built binaries, independent
-of the cache. First-time builds or cache pruning require a full compile. Run
-relevant tests separately. To start the existing image without a build, use
-`docker compose up -d --no-build --pull never server`. Builds need no GPU lock and
-may overlap inference; reduce concurrency on memory/I/O pressure. The per-agent
-8-job cap applies to image builds too; the builder has no memory limit.
-Compose's 24 GiB/no-swap limit applies only to the server. The service joins the external
-`proxy` network at `ninfer-r9700:8080` with no published host port;
-disk prefixes persist under `/path/to/local/cache_r9700/prefix`.
-See `docs/containers.md` for setup and validation details.
+The normal HIP build is `build-r9700/`, with ROCm selected under `/opt/rocm`.
+Generated evidence belongs under ignored `profiles/`. Product inference always uses
+the fixed FP8-K/INT4-V/FP16-scale cache. `DeviceContext` sets
+`HSA_USERPTR_FOR_PAGED_MEM=0` and `HSA_USE_SVM=1` before HIP initialization. Pinned
+arenas use HIP/GTT backing and direct reads use ordinary-RAM staging. Runtime,
+checkpoints and RAM prefixes share the driver GTT budget; an unavailable requested
+allocation fails clearly. This policy changes no host compaction sysctl.
+
+Prefer incremental CMake/Ninja builds. Compose builds before startup and reuses a
+locked object cache; toolchain or dependency changes reset it. Use `docker compose
+up -d --wait` for the base proxy deployment, or include `-f compose.yaml -f
+compose.local.yaml` for localhost. Keep `COMPOSE_BAKE=false`. To use an existing
+image, pass `--no-build --pull never server`. Run relevant tests separately.
+The 24-GiB/no-swap limit applies to the server; the builder has no memory limit.
+Deployment and cache paths belong in ignored `.env`, not shared instructions.
+See `docs/containers.md`.
 
 ## Commits
 

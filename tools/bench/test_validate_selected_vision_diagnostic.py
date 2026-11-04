@@ -128,7 +128,7 @@ class ValidateSelectedVisionDiagnosticTest(unittest.TestCase):
                 for key in (
                     "production_vs_artifact_reference",
                     "production_local_op_oracles",
-                    "artifact_vs_source_bf16",
+                    "production_vs_source_bf16",
                 )
             },
             **{
@@ -226,7 +226,7 @@ class ValidateSelectedVisionDiagnosticTest(unittest.TestCase):
         for section in (
             "production_vs_artifact_reference",
             "production_local_op_oracles",
-            "artifact_vs_source_bf16",
+            "production_vs_source_bf16",
         ):
             with self.subTest(section=section):
                 self.check_rejected_report(
@@ -235,6 +235,16 @@ class ValidateSelectedVisionDiagnosticTest(unittest.TestCase):
                     ),
                     "failed numerical criteria",
                 )
+        self.check_rejected_report(
+            lambda raw: raw["production_vs_source_bf16"]["comparisons"][-1].update(
+                relative_rmse=0.051
+            ),
+            "failed numerical criteria",
+        )
+        self.check_rejected_report(
+            lambda raw: raw["production_vs_source_bf16"]["comparisons"][-1].update(cosine=0.9989),
+            "failed numerical criteria",
+        )
         self.check_rejected_report(
             lambda raw: raw["criteria"].update(local_relative_rmse=1.0), "criteria differ"
         )

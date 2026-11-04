@@ -17,7 +17,7 @@ from pathlib import Path
 from tools.bench.run_niah_check import DEFAULT_NEEDLE, file_identity, matrix_cases, resolve_fixture
 
 REPO = Path(__file__).resolve().parents[2]
-ROUTE_RESOLVER = REPO / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"
+ROUTE_RESOLVER = REPO / "tools/bench/resolve_selected_route.py"
 RUN_NIAH = REPO / "tools/bench/run_niah_check.py"
 VALIDATOR = REPO / "tools/bench/validate_selected_niah.py"
 POSITIONS = ("start", "q25", "mid", "q75", "end")

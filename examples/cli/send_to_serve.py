@@ -34,6 +34,26 @@ def load_cli_messages(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
             raise RuntimeError("messages object tools must be an array")
     if not isinstance(root, list) or not root or not all(isinstance(item, dict) for item in root):
         raise RuntimeError("messages JSON must be a non-empty message array")
+    # Match CLI acquisition: local media is relative to its owning messages file.
+    for message in root:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            for key in ("image", "video", "image_url", "video_url"):
+                source = part.get(key)
+                value_owner = source if isinstance(source, dict) else part
+                value_key = "url" if isinstance(source, dict) else key
+                source = value_owner.get(value_key)
+                if not isinstance(source, str) or source.startswith(
+                    ("http://", "https://", "data:")
+                ):
+                    continue
+                local = Path(source.removeprefix("file://"))
+                if not local.is_absolute():
+                    value_owner[value_key] = str((Path(path).absolute().parent / local).resolve())
     return root, tools
 
 

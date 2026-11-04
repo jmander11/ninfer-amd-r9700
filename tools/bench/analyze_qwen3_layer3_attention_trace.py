@@ -226,12 +226,17 @@ def _validate_provenance(value: object, label: str) -> dict:
         "device_name": "AMD Radeon AI PRO R9700",
         "architecture": "gfx1201",
         "wave_size": 32,
-        "pci": "0000:13:00.0",
         "power_profile_value": "auto",
     }
     for key, expected in exact.items():
         if value.get(key) != expected:
             fail(f"{label} provenance {key} differs")
+    if (
+        not isinstance(value.get("pci"), str)
+        or re.fullmatch(r"(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]", value["pci"])
+        is None
+    ):
+        fail(f"{label} PCI provenance is invalid")
     if not isinstance(value.get("power_profile_source"), str) or not value["power_profile_source"]:
         fail(f"{label} power profile source is invalid")
     return value

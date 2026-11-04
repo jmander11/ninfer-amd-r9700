@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 
 from tools.bench.analyze_q4_pmc import (
-    BENCHMARK_COMMANDS,
     PASS_A_INSTANCE_SUM_COUNTERS,
     PASS_A_SUM_COUNTERS,
     PASS_B_INSTANCE_SUM_COUNTERS,
@@ -15,6 +14,14 @@ from tools.bench.analyze_q4_pmc import (
     PROFILER,
     WORKLOAD,
     analyze,
+    benchmark_commands,
+)
+
+BENCHMARK_COMMANDS = benchmark_commands(
+    Path("/fixture/plan"),
+    Path("/fixture/ninfer_bench"),
+    Path("/fixture/model.ninfer"),
+    Path("/fixture/corpus.ids"),
 )
 
 

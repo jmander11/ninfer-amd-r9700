@@ -12,12 +12,6 @@ from tools.bench.prefill_chunk_authority import durable_create_json
 class PrefillChunkSelectionIoTest(unittest.TestCase):
     def test_post_chunk_publisher_uses_repo_module_invocation(self) -> None:
         repo = Path(__file__).resolve().parents[2]
-        script = (
-            repo / "profiles/bench/post-chunk-twelve-candidate-20260905/"
-            "finalize-selection-and-prepare.sh"
-        ).read_text(encoding="utf-8")
-        self.assertIn("python3 -m tools.bench.prefill_chunk_selection_io", script)
-        self.assertIn("--create-only", script)
         result = subprocess.run(
             [sys.executable, "-m", "tools.bench.prefill_chunk_selection_io", "--help"],
             cwd=repo,

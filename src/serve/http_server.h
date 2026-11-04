@@ -26,6 +26,9 @@ httplib::Server::HandlerResponse handle_unrendered_http_error(const ServeOptions
                                                               const httplib::Request& request,
                                                               httplib::Response& response);
 
+// Health reflects inference availability; a full request queue remains healthy.
+void handle_health(bool available, httplib::Response& response);
+
 class HttpServer {
 public:
     explicit HttpServer(ServeOptions options);
@@ -63,7 +66,8 @@ private:
     void log_request_start(const RequestLogContext& context);
     void log_request_rejected(const RequestRejectionLogContext& context);
     void log_request_done(const RequestLogContext& context, const GenerationOutcome& outcome);
-    void log_request_error(const RequestLogContext& context, const std::string& message);
+    void log_request_error(const RequestLogContext& context, const std::string& message,
+                           const ninfer::ReasoningLimitStats* reasoning_limit = nullptr);
     void log_throughput(const ThroughputReport& report);
     void run_stats_reporter();
     void stop_stats_reporter();

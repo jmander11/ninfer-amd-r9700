@@ -14,7 +14,7 @@ from tools.ppl.run import prepare_output_directory
 
 class PrepareSelectedExactTokenTest(unittest.TestCase):
     def test_prepare_rejects_dangling_output_before_route_resolution(self) -> None:
-        with tempfile.TemporaryDirectory(dir=REPO / "profiles/ppl") as directory:
+        with tempfile.TemporaryDirectory(dir=REPO) as directory:
             root = Path(directory)
             selection = root / "selection.json"
             selection.write_text("{}\n", encoding="utf-8")
@@ -24,7 +24,13 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
                 patch("tools.ppl.prepare_selected_exact_token.resolve_route") as resolver,
                 self.assertRaisesRegex(ValueError, "already exists"),
             ):
-                prepare(selection, output)
+                prepare(
+                    selection,
+                    output,
+                    bf16_source=root / "bf16",
+                    bf16_receipt=root / "source-receipt.json",
+                    python=root / "venv/bin/python",
+                )
             resolver.assert_not_called()
             self.assertTrue(output.is_symlink())
 
@@ -96,7 +102,7 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
                 selected_quality(selection, "winner", 16, route)
 
     def test_prepares_only_selected_c1_decode_route(self) -> None:
-        with tempfile.TemporaryDirectory(dir=REPO / "profiles/ppl") as directory:
+        with tempfile.TemporaryDirectory(dir=REPO) as directory:
             root = Path(directory)
             selection = root / "selection.json"
             artifact = root / "selected.ninfer"
@@ -133,6 +139,25 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             }
             output = root / "prepared"
             shards = {f"tensor{i}": f"model-{i:05d}-of-00018.safetensors" for i in range(1, 19)}
+            python = root / "venv/bin/python"
+            python.parent.mkdir(parents=True)
+            python.write_text("#!/bin/sh\nexit 0\n")
+            python.chmod(0o755)
+            (python.parent.parent / "pyvenv.cfg").write_text("home = /fixture/python\n")
+            (root / "source-receipt.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_type": "ninfer_qwen3_8_27b_bf16_checkpoint_preflight",
+                        "status": "passed",
+                        "source": str(root / "bf16"),
+                        "shards": {
+                            "expected_count": 18,
+                            "all_named_exactly": True,
+                            "all_regular_nonempty": True,
+                        },
+                    }
+                )
+            )
             with (
                 patch("tools.ppl.prepare_selected_exact_token.validate_bf16_repeat_comparison"),
                 patch("tools.ppl.prepare_selected_exact_token.resolve_route", return_value=route),
@@ -152,7 +177,13 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
                     return_value=shards,
                 ),
             ):
-                plan = prepare(selection, output)
+                plan = prepare(
+                    selection,
+                    output,
+                    bf16_source=root / "bf16",
+                    bf16_receipt=root / "source-receipt.json",
+                    python=root / "venv/bin/python",
+                )
             self.assertEqual(plan["workload"]["concurrency"], 1)
             self.assertEqual(plan["workload"]["lengths"], [8192, 32768])
             self.assertEqual(plan["candidate_profile"], "r9700-g32")
@@ -167,7 +198,7 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             self.assertIn("-m tools.ppl.validate_selected_exact_token", commands)
             self.assertEqual(
                 plan["python"]["launcher_path"],
-                "/path/to/local/.venv-ninfer-r9700-py311/bin/python",
+                str(python),
             )
             self.assertIn("export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib", commands)
             self.assertIn("unset PYTHONPATH PYTHONHOME", commands)
@@ -175,7 +206,7 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
                 commands.index("unset PYTHONPATH PYTHONHOME"),
                 commands.index(plan["python"]["launcher_path"]),
             )
-            self.assertIn("/sys/bus/pci/devices/0000:13:00.0/", commands)
+            self.assertIn("power_dpm_force_performance_level", commands)
             self.assertNotIn(str(REPO / "tools/ppl/validate_selected_exact_token.py"), commands)
 
     def test_selected_group_admission_not_sibling_campaign_aggregate(self) -> None:

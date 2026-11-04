@@ -1,4 +1,5 @@
 #include "serve/http_server.h"
+#include "serve/json_input.h"
 
 #include "serve/anthropic_schema.h"
 #include "serve/console_log.h"
@@ -21,6 +22,13 @@
 #include <utility>
 
 namespace ninfer::serve {
+void handle_health(bool available, httplib::Response& response) {
+    response.status = available ? 200 : 503;
+    response.set_content(
+        nlohmann::ordered_json{{"status", available ? "ok" : "unavailable"}}.dump(),
+        "application/json");
+}
+
 namespace {
 
 struct StreamingRequest {
@@ -64,6 +72,7 @@ CompletionTimings completion_timings_from_outcome(const GenerationOutcome& outco
     timings.restored_context_checkpoint_tokens = outcome.metrics.restored_context_checkpoint_tokens;
     timings.ttft_ms                            = outcome.metrics.ttft_seconds * 1000.0;
     timings.reasoning_tokens                   = outcome.reasoning_tokens;
+    timings.constraint                         = outcome.metrics.constraint;
     timings.kv_ram_save_ms                     = outcome.metrics.kv_ram_save_seconds * 1000.0;
     timings.kv_ram_load_ms                     = outcome.metrics.kv_ram_load_seconds * 1000.0;
     timings.kv_disk_save_ms                    = outcome.metrics.kv_disk_save_seconds * 1000.0;
@@ -120,7 +129,8 @@ bool report_has_activity(const ThroughputReport& report, const ninfer::RuntimeSt
            report.kv_ram_used_bytes != previous.kv_ram_used_bytes ||
            report.kv_ram_entry_count != previous.kv_ram_entry_count ||
            report.scheduler.kv_disk_spill_active || previous.kv_disk_spill_active ||
-           report.scheduler.kv_disk_compaction_active || previous.kv_disk_compaction_active ||
+           report.scheduler.kv_disk_defrag_active || previous.kv_disk_defrag_active ||
+           report.scheduler.kv_disk_storage_bytes != previous.kv_disk_storage_bytes ||
            report.scheduler.kv_disk_restore_active || previous.kv_disk_restore_active ||
            report.scheduler.kv_disk_pending_jobs != 0 || previous.kv_disk_pending_jobs != 0 ||
            report.scheduler.kv_disk_captures != previous.kv_disk_captures ||
@@ -223,9 +233,10 @@ void HttpServer::log_request_done(const RequestLogContext& context,
     write_request_done_logs(request_jsonl_, context, outcome);
 }
 
-void HttpServer::log_request_error(const RequestLogContext& context, const std::string& message) {
+void HttpServer::log_request_error(const RequestLogContext& context, const std::string& message,
+                                   const ninfer::ReasoningLimitStats* reasoning_limit) {
     log_line(format_request_error(context, message));
-    request_jsonl_.write_request_error(context, message);
+    request_jsonl_.write_request_error(context, message, reasoning_limit);
 }
 
 void HttpServer::emit_openai_error(httplib::Response& response, const ApiError& error) {
@@ -277,7 +288,7 @@ void HttpServer::record_rejection(const RequestRejectionLogContext& context,
 void HttpServer::record_failure(const RequestLogContext& context, bool tools, bool capture,
                                 bool media, const std::string& message, const ApiError* error,
                                 bool count_api_error) {
-    log_request_error(context, message);
+    log_request_error(context, message, error ? &error->reasoning_limit : nullptr);
     if (count_api_error && error != nullptr) { metrics_.observe_api_error(error->code); }
     GenerationObservation observation;
     observation.protocol          = metrics_protocol(context.protocol);
@@ -289,7 +300,10 @@ void HttpServer::record_failure(const RequestLogContext& context, bool tools, bo
     observation.tools             = tools;
     observation.capture_requested = capture;
     observation.has_media         = media;
-    if (error != nullptr) { observation.recovery = &error->recovery; }
+    if (error != nullptr) {
+        observation.recovery        = &error->recovery;
+        observation.reasoning_limit = &error->reasoning_limit;
+    }
     metrics_.observe_generation(observation);
 }
 
@@ -456,8 +470,8 @@ void HttpServer::register_routes() {
             }
         });
 
-    server_.Get("/health", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content(nlohmann::json{{"status", "ok"}}.dump(), "application/json");
+    server_.Get("/health", [this](const httplib::Request&, httplib::Response& res) {
+        handle_health(service_ != nullptr && service_->available(), res);
     });
     server_.Get("/metrics", [this](const httplib::Request&, httplib::Response& res) {
         handle_metrics_scrape(res, false);
@@ -527,9 +541,12 @@ void HttpServer::handle_model(const httplib::Request& req, httplib::Response& re
 
 void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::Response& res) {
     const auto generation_started = std::chrono::steady_clock::now();
-    nlohmann::json body;
+    nlohmann::ordered_json body;
     try {
-        body = nlohmann::json::parse(req.body);
+        body = parse_request_body(req.body);
+    } catch (const ApiException& error) {
+        emit_openai_error(res, error.error());
+        return;
     } catch (const std::exception&) {
         ApiError error;
         error.status  = 400;
@@ -600,7 +617,8 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                 prepared, log_context.id, nullptr,
                 [&req] { return req.is_connection_alive && !req.is_connection_alive(); },
                 recovery_callback(log_context.id));
-            const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens};
+            const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens,
+                                        outcome.metrics.reasoning_limit};
             const CompletionTimings timings = completion_timings_from_outcome(outcome);
             std::string response_body;
             const std::vector<TokenLogprobEntry>* logprobs =
@@ -608,7 +626,11 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
             if (!outcome.tool_calls.empty()) {
                 response_body = make_chat_completion_tool_response(
                     id, model, created, outcome.text, outcome.reasoning, outcome.tool_calls, usage,
-                    &timings, logprobs);
+                    &timings, logprobs,
+                    outcome.finish_reason == ninfer::FinishReason::StopToken ||
+                            outcome.finish_reason == ninfer::FinishReason::StopString
+                        ? "tool_calls"
+                        : finish_reason_wire(outcome.finish_reason));
             } else {
                 response_body = make_chat_completion_response(
                     id, model, created, outcome.text, outcome.reasoning,
@@ -671,6 +693,11 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                         sink, *stream,
                         make_chat_chunk_reasoning(id, model, created, text, include_usage));
                 };
+                output.on_tool_call = [&](const ninfer::ToolCallDelta& delta) {
+                    const auto chunk =
+                        make_chat_chunk_tool_delta(id, model, created, delta, include_usage);
+                    if (!chunk.empty()) write_stream_item(sink, *stream, chunk);
+                };
                 output.is_cancelled = [&] {
                     return stream->cancelled.load(std::memory_order_acquire) ||
                            (sink.is_writable && !sink.is_writable());
@@ -684,18 +711,23 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                     if (!remaining.empty()) {
                         write_stream_item(sink, *stream, content_chunk(std::string(remaining), {}));
                     }
-                    write_stream_item(sink, *stream,
-                                      make_chat_chunk_tool_calls(
-                                          id, model, created, outcome.tool_calls, include_usage));
-                    const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens};
-                    write_stream_item(sink, *stream,
-                                      make_chat_chunk_final(id, model, created, "tool_calls",
-                                                            include_usage, &timings, &usage));
+                    const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens,
+                                                outcome.metrics.reasoning_limit};
+                    write_stream_item(
+                        sink, *stream,
+                        make_chat_chunk_final(
+                            id, model, created,
+                            outcome.finish_reason == ninfer::FinishReason::StopToken ||
+                                    outcome.finish_reason == ninfer::FinishReason::StopString
+                                ? "tool_calls"
+                                : finish_reason_wire(outcome.finish_reason),
+                            include_usage, &timings, &usage));
                 } else {
                     if (tool_capable && !remaining.empty()) {
                         write_stream_item(sink, *stream, content_chunk(std::string(remaining), {}));
                     }
-                    const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens};
+                    const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens,
+                                                outcome.metrics.reasoning_limit};
                     write_stream_item(
                         sink, *stream,
                         make_chat_chunk_final(id, model, created,
@@ -705,7 +737,8 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                 // Always emit usage+timings trailer (llama.cpp timings_per_token style) so
                 // Open WebUI/LiteLLM can populate the info bubble without include_usage.
                 {
-                    const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens};
+                    const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens,
+                                                outcome.metrics.reasoning_limit};
                     write_stream_item(sink, *stream,
                                       make_chat_chunk_usage(id, model, created, usage, &timings));
                 }
@@ -748,9 +781,12 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
 
 void HttpServer::handle_count_tokens(const httplib::Request& req, httplib::Response& res) {
     metrics_.observe_token_count(MetricsProtocol::AnthropicMessages);
-    nlohmann::json body;
+    nlohmann::ordered_json body;
     try {
-        body = nlohmann::json::parse(req.body);
+        body = parse_request_body(req.body);
+    } catch (const ApiException& error) {
+        emit_messages_error(res, error.error());
+        return;
     } catch (const std::exception&) {
         ApiError error;
         error.status  = 400;
@@ -778,9 +814,12 @@ void HttpServer::handle_count_tokens(const httplib::Request& req, httplib::Respo
 
 void HttpServer::handle_messages(const httplib::Request& req, httplib::Response& res) {
     const auto generation_started = std::chrono::steady_clock::now();
-    nlohmann::json body;
+    nlohmann::ordered_json body;
     try {
-        body = nlohmann::json::parse(req.body);
+        body = parse_request_body(req.body);
+    } catch (const ApiException& error) {
+        emit_messages_error(res, error.error());
+        return;
     } catch (const std::exception&) {
         ApiError error;
         error.status  = 400;
@@ -856,7 +895,8 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
                 prepared, log_context.id, nullptr,
                 [&req] { return req.is_connection_alive && !req.is_connection_alive(); },
                 recovery_callback(log_context.id));
-            const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens};
+            const CompletionUsage usage{outcome.prompt_tokens, outcome.completion_tokens,
+                                        outcome.metrics.reasoning_limit};
             const char* stop_reason =
                 messages_stop_reason(outcome.finish_reason, !outcome.tool_calls.empty());
             const std::string response_body = make_messages_response(
@@ -902,6 +942,7 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
             int thinking_index = -1;
             bool text_open     = false;
             int text_index     = -1;
+            std::vector<int> tool_indices;
             try {
                 write_stream_item(sink, *stream, make_message_start(id, model, input_tokens));
 
@@ -932,6 +973,37 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
                     write_stream_item(sink, *stream,
                                       make_content_block_delta_text(text_index, text));
                 };
+                output.on_tool_call = [&](const ninfer::ToolCallDelta& delta) {
+                    if (delta.kind == ninfer::ToolCallDeltaKind::Start) {
+                        if (thinking_open) {
+                            write_stream_item(
+                                sink, *stream,
+                                make_content_block_delta_signature(thinking_index, id));
+                            write_stream_item(sink, *stream,
+                                              make_content_block_stop(thinking_index));
+                            thinking_open = false;
+                        }
+                        if (text_open) {
+                            write_stream_item(sink, *stream, make_content_block_stop(text_index));
+                            text_open = false;
+                        }
+                        if (delta.index != tool_indices.size())
+                            throw std::logic_error("nonsequential tool stream");
+                        const int index = next_index++;
+                        tool_indices.push_back(index);
+                        write_stream_item(sink, *stream,
+                                          make_content_block_start_tool_use(
+                                              index, ToolCall{delta.id, delta.name, {}}));
+                    } else {
+                        const int index = tool_indices.at(delta.index);
+                        if (delta.kind == ninfer::ToolCallDeltaKind::Arguments)
+                            write_stream_item(
+                                sink, *stream,
+                                make_content_block_delta_tool_json(index, delta.arguments));
+                        else
+                            write_stream_item(sink, *stream, make_content_block_stop(index));
+                    }
+                };
                 output.is_cancelled = [&] {
                     return stream->cancelled.load(std::memory_order_acquire) ||
                            (sink.is_writable && !sink.is_writable());
@@ -961,15 +1033,6 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
                             make_content_block_delta_text(idx, std::string(remaining)));
                         write_stream_item(sink, *stream, make_content_block_stop(idx));
                     }
-                    for (const ToolCall& call : outcome.tool_calls) {
-                        const int idx = next_index++;
-                        write_stream_item(sink, *stream,
-                                          make_content_block_start_tool_use(idx, call));
-                        write_stream_item(
-                            sink, *stream,
-                            make_content_block_delta_tool_json(idx, call.arguments_json));
-                        write_stream_item(sink, *stream, make_content_block_stop(idx));
-                    }
                 }
 
                 if (next_index == 0) {
@@ -981,7 +1044,8 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
                 const char* stop_reason =
                     messages_stop_reason(outcome.finish_reason, !outcome.tool_calls.empty());
                 write_stream_item(sink, *stream,
-                                  make_message_delta(stop_reason, outcome.completion_tokens));
+                                  make_message_delta(stop_reason, outcome.completion_tokens,
+                                                     outcome.metrics.reasoning_limit));
                 write_stream_item(sink, *stream, make_message_stop());
                 record_generation(log_context, std::move(outcome), generation_tools,
                                   generation_capture, generation_media, generation_started);

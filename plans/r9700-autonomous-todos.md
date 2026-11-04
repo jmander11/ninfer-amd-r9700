@@ -1,90 +1,14 @@
-# R9700 execution ledger
+# R9700 maintainer backlog
 
-Status: live work ledger. Every unchecked item is assigned work unless the user narrows or cancels
-it. Completed work and its evidence belong in `docs/performance.md`; product state is in
-`AGENTS.md` and `README.md`. The previous campaign ledger (Q4/W8 recipe selection, XAttention and
-DFlash-recipe chains, terminal selection and cutover) was retired on 2026-09-27 when the GPTQ
-LQ4 artifact was admitted; it remains in git history.
+This backlog is separate from public installation and release-preparation work. An item becomes active only when requested. Product and numerical requirements are in `AGENTS.md`; completed measurement results belong in `docs/performance.md`. Historical campaigns and the previous ledger remain in Git history.
 
-## Standing constraints
+## Constraints
 
-- GPU work holds `flock --exclusive /path/to/local/.ninfer-coordination/gpu.lock`
-  through all child work (shared with the `ninfer-amd-r9700-2` agent); builds use at most 8
-  jobs, one build per agent.
-- Precision: QK stays BF16 and PV FP16 (no FP8 QK/PV, no Sage-style attention); changes that cost
-  PPL are measured last, left uncommitted and reported for the user's decision.
-- Clocks, power and voltage are unchanged until the user starts `CLOCKS-README`.
-- Speed claims are interleaved or same-session A/Bs at the level claimed; numerical changes pass
-  the owning FP64 oracle, and weight or attention-arithmetic changes also pass NIAH.
+- Source private host configuration and use the shared GPU lock as described in `docs/maintainer/local-development.md`. Builds use at most 8 jobs.
+- Follow the current cache and numerical contract in `AGENTS.md`. The old blanket prohibition on FP8 query/key arithmetic was superseded by qualified production FP8-Q/K WMMA routes; it must not override the admitted implementation.
+- Leave clocks, power and voltage unchanged unless the user explicitly requests that experiment. Performance claims need measurements at the claimed scope; numerical changes need the owning oracle and relevant model quality gates.
 
-## Live items
+## Follow-ups awaiting a separate request
 
-- [x] `DECODE-PROFILE-FIXES` **Closed 2026-10-16: process-local mitigation qualified.**
-  T1 hosting, the measured >32-token GDN fold/record crossover and phase-metadata publication
-  ordering are promoted. Decode time reductions: 8.13% at C1/P8192, 7.31% at C1/P65536,
-  and 1.29% at C6/P8192/K7; three attention candidates were rejected by physical timing.
-  Privileged stacks identify `kcompactd0` migration triggering USERPTR invalidation and queue
-  eviction. Process-local THP disabling fails. An authorized host-policy ABBA removes the
-  observed pause at proactive compaction `0` (about 0.99% decode time at P512/G1536), then restores
-  `20`; no persistent host policy is changed. The selected process-local mitigation uses
-  driver-backed HIP/GTT host allocations with normal unified addressing and ordinary aligned
-  staging for O_DIRECT artifact/disk-cache reads. Controlled compaction ABBA with policy `20`
-  gives control maximum rounds 486.753/878.307 ms versus 25.733/26.562 ms with mitigation;
-  all 1,536 output tokens match and compaction scans remain active. Native quiet-arm timing
-  alone is inconclusive, and differently instrumented binaries do not establish a small
-  throughput gain. Startup verifies real GTT backing, pointer identity and graph transfers;
-  artifact bytes, 8-GiB RAM-cache cancellation/evict/restore, MTP/DFlash recovery, full disk-cache
-  tests, real cache-write integration (including disk restart), and affected clang-tidy checks
-  pass. C8/P8192 DFlash K7 (264 retained tokens) and C1/P65536 plain decode (33 retained tokens)
-  match the frozen pre-change control exactly. Pinned allocations share the real GTT budget
-  (about 62.43 GiB here),
-  preserve explicit requested capacity and fail clearly if it cannot fit. Artifact reads add up
-  to 512 MiB ordinary staging; disk reads use bounded reusable page/4-MiB worker staging.
-  Evidence and limits are in `docs/performance.md` and
-  `profiles/bench/r9700-decode-fixes-20261016/`. No clock, voltage or power policy changes.
-
-- [x] `LONGCTX-PREFILL` Long-context (32K-240K) prefill, closed 2026-09-27: 128K attribution
-  (attention 47%, LQ4 GEMMs 44%), attention ablations, paired-wave split rejected at Layer 0,
-  staging latency unhideable on gfx1201 at the 240-VGPR budget, chunk 4096 mixed (default 2048).
-  No mechanism with a credible whole-prefill bound remains; `docs/performance.md` has the evidence.
-- [ ] `QUALITY-GAINS` Cheap quality improvements measured against the BF16 8K/32K admission
-  cells. Done 2026-09-28: the GPTQ LQ4 output head (-0.006 to -0.008 nats/token, promoted
-  into `r9700-lq4`); GPTQ on attention gate/value and output (-0.0013 to -0.0028, NIAH
-  passes; query/key stays independent). Rejected: group-wise GPTQ activation ordering (+0.0003 to
-  +0.0043). Remaining: a larger usage calibration set. Decode
-  is not a lever here: Q4G64 and LQ4 are the same size and the Q4 drafter kernels already
-  read at ~600 GB/s.
-- [x] `ATTN-MIDROWS` Closed 2026-09-28: 9..127-row causal chunks run the dense prefill tile split
-  over context chunks with the packed route's FP32 merge (19 rows at 22K: 34 -> 0.24 ms/layer;
-  19-token follow-up TTFT at 22K 818 -> 240 ms); `docs/performance.md` has the evidence.
-- [x] `DFLASH-BATCHED-DRAFT` Closed 2026-09-28: every chain K drafts batched at C2..C4, with
-  T14/T16/T21 small-batch cells; corpus aggregate +7.6% / +5.1% / +4.0% at C2 / C3 / C4. The
-  fused GDN pair stays batch-1 (C>1 split path is weight-bound at the same cost).
-- [x] `DFLASH-K3-ROUTES` Closed 2026-09-28: T4 drafter cells and the W4 LQ4 GDN pair;
-  C1 K3 33.1 -> 30.6 ms/round.
-- [x] `DECODE-BANDWIDTH` Closed 2026-09-29 (`docs/performance.md`, Decode step attribution):
-  weight streaming runs at ~95% of the read peak; the four small-kernel candidates (quantization
-  fusion, GDN record and front, narrow drafter projections) and an overlapped replay fold gave
-  no admissible gain. Follow-ups done: the tool-mask exchange is a host mailbox (+0.7% with
-  tools) and the Q4G64 token embedding is stored row-split (gathers ~50 -> ~7 us).
-- [x] `NVFP4-MATCH` Closed 2026-09-30: the weight bar is "no worse than the 5090 NVFP4 build",
-  measured with the frozen 5090 scorer on the BF16-source cells (NVFP4 decode is only ~0.004-0.005
-  nats/token behind production, prefill ~0.01-0.02). Protections 26 -> 21 (16.75 GB; C1 decode
-  +2.3%, C4 unchanged); 3-bit MLP gate/up is not admissible (all layers, the 12 lowest-error
-  late layers and 12 mid layers each fall behind NVFP4 on decode or break a severe cap).
-  `docs/performance.md` has the evidence.
-- [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
-  clocks and at the user's undervolted/higher-clock setting.
-- [x] `MIXED-PREFILL-DECODE` [changed the product contract] Done 2026-09-29.
-  `--mixed-forward N --mixed-forward-rounds D` lets a DFlash text owner's slice fill an N-column
-  forward (a multiple of 256) beside every D-th decode round's verify columns (a mixed round);
-  other owners time-share with N-token steps. The default (`auto`, 2026-09-30) is N = 1024 under
-  DFlash with C > 1 and prefill-first otherwise. The decode-share vs prefill-throughput Pareto frontier, the serve
-  stall check, and the kernel fixes that made mixed rounds cheap are in `docs/performance.md`
-  "Mixed prefill/decode frontier". Architecture: `concurrent-inference-architecture.md` §1.2,
-  §2.5, §7.3, §8.9.
-- [x] `C8-CONCURRENCY` [changed the product contract] Done 2026-10-01 (83175b29). The startup-fixed
-  maximum concurrency is C=1..8, including DFlash adaptive draft and mixed rounds. C5..C8
-  verify-width kernels (SWA split, LQ4 deep mid-T, A8Q4 token-tile) match their C4 per-call
-  efficiency; `--mixed-forward auto` (1024) is the best width at C5..C8. `docs/performance.md`
-  has the evidence.
+- `QUALITY-GAINS`: evaluate a larger usage calibration set against the BF16 8K/32K cells. GPTQ output-head and attention gate/value/output improvements were promoted; activation ordering was rejected. Keep the admitted 21 FP8 protections and the NVFP4 comparison bar until a measured replacement is qualified.
+- `CLOCKS-README`: compare stock clocks with an explicitly supplied alternate clock and voltage profile. This remains user-gated; the published workload matrix does not qualify an alternate hardware profile.

@@ -1,6 +1,6 @@
 #pragma once
 
-// Independent, host-only numerical oracle for the proposed R9700 KV representation.
+// Independent host-only numerical oracle for the R9700 KV representation.
 //
 // Keys use the OCP E4M3FN bit pattern directly:
 //   sign[7], exponent[6:3] with bias 7, fraction[2:0].
@@ -15,8 +15,7 @@
 // nonzero group whose scale rounds down to FP16 zero, has canonical +0 scale and all-zero
 // codes. Nibbles are two's-complement, low lane first.
 //
-// This file deliberately has no device-runtime dependency. It is a mathematical/storage
-// authority for tests, not a production packer or a model-sized conversion path.
+// Host-only test reference; do not use it for production packing or model conversion.
 
 #include <algorithm>
 #include <bit>
@@ -53,7 +52,7 @@ inline std::uint8_t encode_e4m3fn(float source) {
     if (magnitude == 0.0) { return negative ? 0x80U : 0x00U; }
     if (magnitude >= 448.0) { return static_cast<std::uint8_t>((negative ? 0x80U : 0U) | 0x7eU); }
 
-    // Exhaustive selection is intentionally independent of any device conversion intrinsic.
+    // Exhaustive selection avoids depending on device conversion intrinsics.
     // Positive finite E4M3FN words are monotonic in [0x00,0x7e]. The word's low bit is
     // the retained significand LSB, so an even word is the ties-to-even winner.
     std::uint8_t best    = 0;
@@ -337,7 +336,7 @@ inline GreedyResult attention_greedy_fp64(std::span<const float> represented_que
         result.logits[row] = accumulator;
     }
 
-    // Strict comparison deliberately makes an exact tie select the lowest token id.
+    // Strict comparison selects the lowest token id on an exact tie.
     result.token = 0;
     for (std::size_t row = 1; row < vocabulary; ++row) {
         if (result.logits[row] > result.logits[result.token]) { result.token = row; }

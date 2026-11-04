@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Fast-iteration speed suite for the live NInfer serve (default :8081).
+"""Measure workloads against a running NInfer server (default :8081).
 
 Runs a scenario matrix (small/large prompts, thinking on/off, multi-turn,
 tools, context prefill, decode-heavy) against the running server and reports
 per-case prefill tok/s, decode tok/s, TTFT, and end-to-end wall time.
 
-Metrics come from the usage object's single-storage-location stats
-(usage.prompt_tokens_details.ninfer.* + completion_tokens_details):
+Metrics come from usage.prompt_tokens_details.ninfer and completion_tokens_details:
   prefill_tok_s  = ninfer.prefill.tok_s (computed non-reused suffix only)
   prefill_tail_tok_s = ninfer.prefill.tail_tok_s (steady-state rate, trailing <=1s)
   ttft_ms        = client wall time to first content/reasoning delta (stream)
@@ -40,7 +39,7 @@ from pathlib import Path
 
 
 def repo_root() -> Path:
-    """Repo root = the directory containing CMakeLists.txt (walk up from here)."""
+    """Find the repository root by walking up to CMakeLists.txt."""
     here = Path(__file__).resolve().parent
     for candidate in (here, *here.parents[:6]):
         if (candidate / "CMakeLists.txt").is_file():
@@ -58,16 +57,6 @@ def load_key(api_key: str | None) -> str:
     for name in ("NINFER_API_KEY", "LLAMA_CPP_LOCAL_API_KEY"):
         if os.environ.get(name):
             return os.environ[name]
-    for env in (
-        Path("/home/maintainer/docker/.env"),
-        ROOT.parent.parent / ".env",  # <workspace>/.env when repo is <workspace>/ninfer/repo
-        Path.cwd() / ".env",
-    ):
-        if env.exists():
-            for line in env.read_text().splitlines():
-                for prefix in ("LLAMA_CPP_REMOTE_API_KEY=", "LLAMA_CPP_LOCAL_API_KEY="):
-                    if line.startswith(prefix):
-                        return line.split("=", 1)[1].strip().strip('"')
     return ""
 
 
@@ -297,7 +286,9 @@ def main() -> int:
         "--model", default=None, help="served model id (default: first from /v1/models)"
     )
     ap.add_argument(
-        "--api-key", default=None, help="override bearer key (else NINFER_API_KEY/.env)"
+        "--api-key",
+        default=None,
+        help="override bearer key (else NINFER_API_KEY or LLAMA_CPP_LOCAL_API_KEY)",
     )
     ap.add_argument(
         "--cases", type=Path, default=ROOT / "tools" / "bench" / "speed_suite_cases.json"

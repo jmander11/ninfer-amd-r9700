@@ -1,27 +1,18 @@
 #!/usr/bin/env python3
-"""Bake the ninfer_bench meaningful-token corpus.
+"""Build a token corpus for ninfer_bench.
 
-ninfer_bench slices the first P token ids of this corpus to build a prefill of an exact
-length P, so the corpus must be real, in-distribution text (not random/dummy tokens) and at
-least as long as the largest prefill you want to benchmark.
+Uses curated Chinese, English, code and math text by default, or files passed
+with --source-text. Encoding uses the local Qwen3.8-27B tokenizer without a
+chat template or special tokens. Short inputs are tiled, rotating the built-in
+paragraphs each cycle, then truncated to exactly --tokens IDs. For natural
+long-context measurements, supply source text long enough to avoid tiling.
 
-Two content sources:
-  * built-in curated multi-domain prose (Chinese / English / code / math), the default; or
-  * one or more `--source-text` files you provide (e.g. a downloaded public-domain book or a
-    concatenated document set) for genuinely diverse, very long content.
-
-The chosen text is encoded with the local Qwen3.8-27B tokenizer WITHOUT the chat template
-and WITHOUT special tokens. If it is shorter than `--tokens`, it is tiled (built-in paragraphs are
-rotated each cycle to avoid a trivial period-1 loop) and then truncated to exactly `--tokens`
-tokens.
-
-`--check` verifies the committed `.ids` against its manifest hash and token count only. It does not
-re-tokenize, so a corpus baked from a large downloaded source stays reproducible/CI-verifiable
-without committing the source text.
+--check verifies the manifest hash and token count without re-tokenizing or
+requiring the original text.
 
 Outputs:
-  bench/fixtures/bench_corpus.ids            whitespace-separated decimal token ids (exactly --tokens)
-  bench/fixtures/bench_corpus.manifest.json  provenance (tokenizer id, token count, sha256, source)
+  bench/fixtures/bench_corpus.ids            decimal token IDs
+  bench/fixtures/bench_corpus.manifest.json  tokenizer, count, hash and source
 """
 
 from __future__ import annotations
@@ -39,11 +30,8 @@ from typing import Any
 TOKENIZER_MODEL_ID = "Qwen/Qwen3.8-27B"
 DEFAULT_TOKENS = 65536
 
-# Curated, in-distribution prose spanning several domains and languages. Order and content are part
-# of the corpus contract: changing them changes the committed ids. Repetition to reach --tokens does
-# not bias prefill/decode throughput (both are token-count/bandwidth bound, not content dependent),
-# so this bank fills long corpora by rotated tiling. For genuinely diverse very long content, pass
-# --source-text instead.
+# Order and content determine the committed IDs. Short inputs are tiled with rotated
+# paragraphs; use --source-text for natural long-context measurements.
 PARAGRAPHS: tuple[str, ...] = (
     (
         "周末旅行规划资料：目的地是一个适合亲子散步的湖边小城，市中心到湖区有直达公交，车程大约"

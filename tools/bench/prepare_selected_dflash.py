@@ -26,8 +26,6 @@ from tools.bench.run_ninfer_bench_matrix import build_hybrid_shared_workspace_au
 from tools.convert.qwen3_8_27b_r9700.dflash2_q4_inventory import companion_weights_id
 
 REPO = Path(__file__).resolve().parents[2]
-DFLASH_SOURCE = Path("/path/to/local/models/qwen3.8-27b-dflash2")
-CONVERSION_PYTHON = Path("/home/maintainer/.local/bin/python3.11")
 MODULE = "tools.bench.prepare_selected_dflash"
 
 
@@ -219,9 +217,9 @@ def prepare(
     *,
     bench: Path,
     planner: Path,
-    conversion_python: Path = CONVERSION_PYTHON,
+    conversion_python: Path,
     pythonpath: str | None = None,
-    source: Path = DFLASH_SOURCE,
+    source: Path,
 ) -> dict:
     out = out.resolve()
     if os.path.lexists(out):
@@ -405,9 +403,9 @@ def main(argv: list[str] | None = None) -> int:
     first = sub.add_parser("prepare")
     for name in ("selection", "out", "bench", "planner"):
         first.add_argument("--" + name, type=Path, required=True)
-    first.add_argument("--conversion-python", type=Path, default=CONVERSION_PYTHON)
+    first.add_argument("--conversion-python", type=Path, required=True)
     first.add_argument("--conversion-pythonpath")
-    first.add_argument("--source", type=Path, default=DFLASH_SOURCE)
+    first.add_argument("--source", type=Path, required=True)
     for name in ("validate-plan", "advance-capacity", "advance-c1", "advance-pareto"):
         sub.add_parser(name).add_argument("--plan", type=Path, required=True)
     args = parser.parse_args(argv)

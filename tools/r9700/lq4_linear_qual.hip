@@ -360,8 +360,7 @@ void run_pair(const std::vector<double>& book, std::uint32_t rows0, std::uint32_
     double worst = 0.0;
     for (const Side& side : sides) {
         const auto lead = side.leading.download(), trail = side.trailing.download();
-        // Every element published; a poisoned run: exactly the flagged token's are the canonical
-        // NaN.
+        // Every output must be written; only the flagged token may contain canonical NaNs.
         const auto published = [&](const std::vector<hip_bfloat16>& values, std::uint32_t width) {
             for (std::size_t i = 0; i < values.size(); ++i) {
                 const bool flagged = poison && i / width == poisoned_token;
@@ -461,7 +460,7 @@ void run_silu(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
                     hipMemcpyDeviceToHost),
           "s");
     const auto got = output.download();
-    // Every feature published; a poisoned run: exactly the flagged token's are the canonical NaN.
+    // Every feature must be written; only the flagged token may contain canonical NaNs.
     for (std::size_t i = 0; i < got.size(); ++i) {
         const bool flagged = poison && i / features == poisoned_token;
         require(flagged ? got[i].data == 0x7FC0U : std::isfinite(bf16_value(got[i].data)),

@@ -659,7 +659,9 @@ void append_rendered_messages(RenderBuffer& rendered, const std::vector<ChatMess
                               std::optional<RewriteCheckpointByteSpec>* rewrite_checkpoint,
                               std::vector<std::size_t>* turn_closure_offsets,
                               std::optional<std::size_t>* final_assistant_byte_begin,
-                              std::optional<bool>* latest_assistant_has_reasoning = nullptr) {
+                              std::optional<bool>* latest_assistant_has_reasoning = nullptr,
+                              std::optional<std::size_t>* system_prompt_end       = nullptr) {
+    bool leading_instructions = true;
     for (std::size_t i = begin; i < messages.size(); ++i) {
         const ChatMessage& message = messages[i];
         if (is_instruction_role(message.role)) { validate_instruction_message(message); }
@@ -669,8 +671,10 @@ void append_rendered_messages(RenderBuffer& rendered, const std::vector<ChatMess
             rendered.markup("<|im_start|>system\n");
             rendered.append(content);
             rendered.markup("<|im_end|>\n");
+            if (leading_instructions && system_prompt_end) { *system_prompt_end = rendered.size(); }
             continue;
         }
+        leading_instructions = false;
         if (message.role == ChatRole::User) {
             rendered.markup("<|im_start|>user\n");
             rendered.append(content);
@@ -846,6 +850,9 @@ RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messag
         rendered.markup("<|im_end|>\n");
     }
 
+    auto system_prompt_end       = options.mark_system_prompt && rendered.size() != 0
+                                       ? std::optional<std::size_t>(rendered.size())
+                                       : std::nullopt;
     const long last_query_index  = last_real_user_query(messages);
     const bool preserve_thinking = options.preserve_thinking.value_or(effort_template);
     std::optional<RewriteCheckpointByteSpec> rewrite_checkpoint;
@@ -854,11 +861,11 @@ RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messag
 
     int image_count = 0;
     int video_count = 0;
-    append_rendered_messages(rendered, messages, message_begin, options, effort_template,
-                             preserve_thinking, last_query_index, image_count, video_count,
-                             &rewrite_checkpoint,
-                             preserve_thinking ? nullptr : &turn_closure_offsets,
-                             &final_assistant_byte_begin, &latest_assistant_has_reasoning);
+    append_rendered_messages(
+        rendered, messages, message_begin, options, effort_template, preserve_thinking,
+        last_query_index, image_count, video_count, &rewrite_checkpoint,
+        preserve_thinking ? nullptr : &turn_closure_offsets, &final_assistant_byte_begin,
+        &latest_assistant_has_reasoning, options.mark_system_prompt ? &system_prompt_end : nullptr);
 
     if (options.add_generation_prompt) {
         rendered.markup("<|im_start|>assistant\n");
@@ -898,7 +905,8 @@ RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messag
                         .literal_spans              = std::move(fragment.literal_spans),
                         .rewrite_checkpoint         = rewrite_checkpoint,
                         .final_assistant_byte_begin = final_assistant_byte_begin,
-                        .turn_closure_offsets       = std::move(turn_closure_offsets)};
+                        .turn_closure_offsets       = std::move(turn_closure_offsets),
+                        .system_prompt_end          = system_prompt_end};
 }
 
 RenderedFragment CompiledChatTemplate::render_fragment(const std::vector<ChatMessage>& messages,

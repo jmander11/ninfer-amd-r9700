@@ -19,7 +19,7 @@ ARG NINFER_BUILD_JOBS=8
 RUN apt-get update && apt-get install --yes --no-install-recommends \
     build-essential cmake ninja-build git patch pkg-config util-linux rsync \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
-    libcurl4-openssl-dev libzstd-dev \
+    libcurl4-openssl-dev libssl-dev libzstd-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=python311 / /opt/python311/
 ENV PATH=/opt/python311/bin:$PATH

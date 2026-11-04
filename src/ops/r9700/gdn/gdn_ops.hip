@@ -124,26 +124,33 @@ __global__ __launch_bounds__(kBlock) void causal_conv1d_silu_prefill_kernel(
     const float w1                  = static_cast<float>(weight[channels + channel]);
     const float w2                  = static_cast<float>(weight[2U * channels + channel]);
     const float w3                  = static_cast<float>(weight[3U * channels + channel]);
+    const auto represented          = [&](std::int64_t source_token) {
+        if (source_token < 0) {
+            return static_cast<float>(
+                history_in[static_cast<std::size_t>(source_token + 3) * channels + channel]);
+        }
+        return static_cast<float>(
+            input[static_cast<std::size_t>(source_token) * channels + channel]);
+    };
+    // Every tile owns its incoming three samples. Carry the represented window
+    // through the tile; final history is still published after all readers.
+    float h0 = represented(static_cast<std::int64_t>(token_begin) - 3);
+    float h1 = represented(static_cast<std::int64_t>(token_begin) - 2);
+    float h2 = represented(static_cast<std::int64_t>(token_begin) - 1);
 #pragma unroll
     for (std::uint32_t local = 0; local < TokenTile; ++local) {
         const std::uint32_t token = token_begin + local;
         if (token >= tokens) { break; }
-        const auto represented = [&](std::int64_t source_token) {
-            if (source_token < 0) {
-                return history_in[static_cast<std::size_t>(source_token + 3) * channels + channel];
-            }
-            return input[static_cast<std::size_t>(source_token) * channels + channel];
-        };
-        const hip_bfloat16 h0      = represented(static_cast<std::int64_t>(token) - 3);
-        const hip_bfloat16 h1      = represented(static_cast<std::int64_t>(token) - 2);
-        const hip_bfloat16 h2      = represented(static_cast<std::int64_t>(token) - 1);
-        const hip_bfloat16 current = represented(token);
-        float sum                  = fmaf(w0, static_cast<float>(h0), 0.0F);
-        sum                        = fmaf(w1, static_cast<float>(h1), sum);
-        sum                        = fmaf(w2, static_cast<float>(h2), sum);
-        sum                        = fmaf(w3, static_cast<float>(current), sum);
+        const float current = represented(token);
+        float sum           = fmaf(w0, h0, 0.0F);
+        sum                 = fmaf(w1, h1, sum);
+        sum                 = fmaf(w2, h2, sum);
+        sum                 = fmaf(w3, current, sum);
         output[static_cast<std::size_t>(token) * channels + channel] =
             hip_bfloat16(sum / (1.0F + expf(-sum)));
+        h0 = h1;
+        h1 = h2;
+        h2 = current;
     }
 }
 

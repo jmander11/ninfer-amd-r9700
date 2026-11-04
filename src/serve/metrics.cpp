@@ -1,4 +1,5 @@
 #include "serve/metrics.h"
+#include "serve/constraint_stats.h"
 
 #include "product/speculative_options.h"
 #include "serve/request_log.h"
@@ -24,7 +25,7 @@
 namespace ninfer::serve {
 namespace {
 
-using Json = nlohmann::json;
+using Json = nlohmann::ordered_json;
 
 // Tokens per physical KV page group, the same value as ninfer::kPagedKVPageSize for every
 // device KV pool. Serve does not include the core KV header.
@@ -35,7 +36,6 @@ constexpr std::size_t kMaxDraftTokens = 15;
 static_assert(kMaxDraftTokens >= product::kMaximumMtpDraftTokens &&
               kMaxDraftTokens >= product::kMaximumDFlashDraftTokens);
 
-// ---------------------------------------------------------------------------
 // Histogram bounds. A Histogram type carries its bounds, so observation and
 // rendering cannot disagree.
 
@@ -116,7 +116,6 @@ using DecodeRateHistogram  = Histogram<kDecodeRateBounds>;
 using PrefillRateHistogram = Histogram<kPrefillRateBounds>;
 using CountHistogram       = Histogram<kCountBounds>;
 
-// ---------------------------------------------------------------------------
 // Closed label vocabularies. Array order is the storage index.
 
 constexpr const char* kProtocols[]   = {"openai_chat", "openai_responses", "anthropic_messages"};
@@ -160,18 +159,31 @@ constexpr const char* kPrefixPaths[]   = {
 constexpr const char* kPrefixSources[] = {"none", "vram_resident", "host_ram", "host_disk",
                                           "unknown"};
 constexpr const char* kRecoveryKinds[] = {
-    "cycle_exclusion",        "retry_triggered", "retry_started",
-    "retry_prefill_complete", "finished",        "exhausted",
+    "cycle_exclusion",  "retry_triggered", "retry_started", "retry_prefill_complete",
+    "replay_discarded", "finished",        "exhausted",
 };
-// Direct causes carried verbatim by non-exhausted events.
+// Direct causes carried verbatim by recovery events.
 constexpr const char* kDirectRecoveryCauses[] = {
-    "reasoning_cycle", "repeated_reasoning", "duplicate_tool_call", "cancelled",
-    "tool_calls",      "output_limit",       "context_capacity",    "stop",
-};
-constexpr const char* kRecoveryCauses[] = {
+    "reasoning_limit",
     "reasoning_cycle",
     "repeated_reasoning",
     "duplicate_tool_call",
+    "reasoning_replay",
+    "repeated_content",
+    "cancelled",
+    "tool_calls",
+    "output_limit",
+    "context_capacity",
+    "stop",
+};
+constexpr const char* kRecoveryCauses[] = {
+    "reasoning_limit",
+    "reasoning_cycle",
+    "repeated_reasoning",
+    "duplicate_tool_call",
+    "repeated_content",
+    "reasoning_replay",
+
     "cancelled",
     "tool_calls",
     "output_limit",
@@ -332,17 +344,18 @@ template <std::size_t N>
         return 2;
     case ninfer::RecoveryEventKind::RetryPrefillComplete:
         return 3;
-    case ninfer::RecoveryEventKind::Finished:
+    case ninfer::RecoveryEventKind::ReplayDiscarded:
         return 4;
-    case ninfer::RecoveryEventKind::Exhausted:
+    case ninfer::RecoveryEventKind::Finished:
         return 5;
+    case ninfer::RecoveryEventKind::Exhausted:
+        return 6;
     }
-    return 5;
+    return 6;
 }
 
 [[nodiscard]] const char* yn(bool value) { return value ? "true" : "false"; }
 
-// ---------------------------------------------------------------------------
 // Stored state.
 
 struct Startup {
@@ -374,7 +387,22 @@ struct Startup {
     std::vector<std::pair<const char*, std::string>> build_labels;
 };
 
+struct ConstraintTotals {
+    std::uint64_t requests   = 0;
+    std::uint64_t complete   = 0;
+    std::uint64_t terminated = 0;
+    std::array<std::uint64_t, 4> branches{};
+    std::array<std::uint64_t, 4> compile_cache{};
+    double compile_seconds          = 0.0;
+    double compile_wait_seconds     = 0.0;
+    std::uint64_t mask_calls        = 0;
+    std::uint64_t mask_nodes        = 0;
+    std::uint64_t mask_upload_bytes = 0;
+    double mask_seconds             = 0.0;
+};
+
 struct Series {
+    ConstraintTotals constraint;
     // Key: route << 24 | method << 16 | status (0 renders as "other").
     std::map<std::uint32_t, std::uint64_t> http_requests;
     std::array<LatencyHistogram, kRouteCount> http_duration{};
@@ -390,6 +418,11 @@ struct Series {
     TokenHistogram prompt_tokens;
     TokenHistogram completion_tokens;
     TokenHistogram reasoning_tokens;
+    std::uint64_t reasoning_limit_requests      = 0;
+    std::uint64_t reasoning_limit_tokens        = 0;
+    std::uint64_t reasoning_limit_reached       = 0;
+    std::uint64_t reasoning_limit_forced_closes = 0;
+    std::uint64_t reasoning_limit_retries       = 0;
     TokenHistogram computed_prefill_tokens;
     DecodeRateHistogram output_tokens_per_second;
     PrefillRateHistogram prefill_tokens_per_second;
@@ -420,11 +453,24 @@ struct Series {
     std::uint64_t recovery_cycle_exclusions           = 0;
     std::uint64_t recovery_discarded_reasoning_tokens = 0;
     std::uint64_t recovery_discarded_tool_calls       = 0;
+    std::uint64_t recovery_framing_repairs            = 0;
+    std::uint64_t recovery_discarded_content_tokens   = 0;
     CountHistogram recovery_attempts;
 };
 
+void observe_reasoning_limit(Series& series, const ninfer::ReasoningLimitStats& stats) {
+    if (stats.budget_tokens == 0) { return; }
+    ++series.reasoning_limit_requests;
+    series.reasoning_limit_tokens += stats.used_tokens;
+    series.reasoning_limit_reached += stats.limit_reached ? 1 : 0;
+    series.reasoning_limit_forced_closes += stats.forced_closes;
+    series.reasoning_limit_retries += stats.retries;
+}
+
 void observe_terminal_recovery(Series& series, const ninfer::GenerationRecoveryStats& stats) {
     series.recovery_cycle_exclusions += stats.cycle_exclusions;
+    series.recovery_framing_repairs += stats.framing_repairs;
+    series.recovery_discarded_content_tokens += stats.discarded_content_tokens;
     series.recovery_discarded_reasoning_tokens += stats.discarded_reasoning_tokens;
     series.recovery_discarded_tool_calls += stats.discarded_tool_calls;
     if (stats.attempts > 0) {
@@ -526,7 +572,6 @@ void observe_success(Series& series, std::size_t protocol, const GenerationOutco
     }
 }
 
-// ---------------------------------------------------------------------------
 // Prometheus text.
 
 void append_number(std::string& out, double value) {
@@ -781,6 +826,16 @@ std::string render_text(const MetricsSnapshotData& data) {
     w.histogram("ninfer_generation_prompt_tokens", "Prompt tokens.", series.prompt_tokens);
     w.histogram("ninfer_generation_completion_tokens", "Completion tokens.",
                 series.completion_tokens);
+    w.counter("ninfer_reasoning_limit_requests_total", "Requests with reasoning limits.",
+              series.reasoning_limit_requests);
+    w.counter("ninfer_reasoning_limit_tokens_total", "Policy charged reasoning tokens.",
+              series.reasoning_limit_tokens);
+    w.counter("ninfer_reasoning_limit_reached_total", "Requests reaching the reasoning limit.",
+              series.reasoning_limit_reached);
+    w.counter("ninfer_reasoning_limit_forced_closes_total", "Policy forced reasoning closes.",
+              series.reasoning_limit_forced_closes);
+    w.counter("ninfer_reasoning_limit_retries_total", "Reasoning budget retries.",
+              series.reasoning_limit_retries);
     w.histogram("ninfer_generation_reasoning_tokens", "Reasoning tokens.", series.reasoning_tokens);
     w.histogram("ninfer_generation_computed_prefill_tokens", "Prompt tokens excluding prefix hits.",
                 series.computed_prefill_tokens);
@@ -797,6 +852,40 @@ std::string render_text(const MetricsSnapshotData& data) {
               series.ignored_tool_markup);
     w.counter("ninfer_generation_media_requests_total",
               "Generation attempts whose prompt had media.", series.media_requests);
+    const auto& constraint = series.constraint;
+    w.counter("ninfer_constraint_requests_total",
+              "Terminal constrained requests with observations.", constraint.requests);
+    w.counter("ninfer_constraint_complete_total",
+              "Terminal requests with a complete constrained value.", constraint.complete);
+    w.counter("ninfer_constraint_terminated_total",
+              "Terminal requests whose constrained matcher terminated.", constraint.terminated);
+    w.family("ninfer_constraint_branch_total", "Constrained terminal branch.", "counter");
+    for (std::size_t i = 0; i < constraint.branches.size(); ++i) {
+        w.sample(label_text({{"branch",
+                              constraint_branch_name(static_cast<ninfer::ConstraintBranch>(i))}}),
+                 constraint.branches[i]);
+    }
+    w.family("ninfer_constraint_compile_cache_total", "Constrained request compile-cache outcome.",
+             "counter");
+    for (std::size_t i = 0; i < constraint.compile_cache.size(); ++i) {
+        w.sample(label_text({{"result", constraint_compile_cache_name(
+                                            static_cast<ninfer::ConstraintCompileCache>(i))}}),
+                 constraint.compile_cache[i]);
+    }
+    w.counter("ninfer_constraint_compile_seconds_total",
+              "Host compilation seconds including compiler wait and preparation.",
+              constraint.compile_seconds);
+    w.counter("ninfer_constraint_compile_wait_seconds_total",
+              "Compiler-lock wait seconds, a subset of compile seconds.",
+              constraint.compile_wait_seconds);
+    w.counter("ninfer_constraint_mask_calls_total", "Token-mask construction invocations.",
+              constraint.mask_calls);
+    w.counter("ninfer_constraint_mask_nodes_total",
+              "Reachable matcher nodes whose next-token mask was computed.", constraint.mask_nodes);
+    w.counter("ninfer_constraint_mask_seconds_total",
+              "Host matcher fork and mask-computation seconds.", constraint.mask_seconds);
+    w.counter("ninfer_constraint_mask_upload_bytes_total",
+              "Token-mask payload bytes enqueued for device upload.", constraint.mask_upload_bytes);
     w.family("ninfer_token_count_requests_total", "Token-count requests.", "counter");
     for (std::size_t i = 0; i < kProtocolCount; ++i) {
         w.sample(label_text({{"protocol", kProtocols[i]}}), series.token_count_requests[i]);
@@ -810,6 +899,18 @@ std::string render_text(const MetricsSnapshotData& data) {
             std::uint64_t{stats.decode_ready_requests});
     w.gauge("ninfer_scheduler_waiting_requests", "Requests in the pending FIFO.",
             std::uint64_t{stats.waiting_requests});
+    w.gauge("ninfer_kv_execution_window_tokens",
+            "Maximum chunked output reservation; zero disables.",
+            std::uint64_t{stats.kv_execution_window_tokens});
+    w.gauge("ninfer_kv_growth_blocked_requests", "Resident requests waiting for KV growth.",
+            std::uint64_t{stats.kv_growth_blocked_requests});
+    w.gauge("ninfer_kv_suspended_requests", "Admitted requests parked in RAM.",
+            std::uint64_t{stats.kv_suspended_requests});
+    w.counter("ninfer_kv_window_extensions_total", "Committed output window extensions.",
+              stats.kv_window_extensions);
+    w.counter("ninfer_kv_live_suspensions_total", "Completed live RAM suspensions.",
+              stats.kv_live_suspensions);
+    w.counter("ninfer_kv_live_resumes_total", "Completed live RAM resumes.", stats.kv_live_resumes);
     w.counter("ninfer_engine_computed_prefill_tokens_total", "Prompt tokens evaluated by prefill.",
               stats.computed_prefill_tokens);
     w.counter("ninfer_engine_committed_decode_tokens_total", "Tokens committed by decode rounds.",
@@ -846,6 +947,16 @@ std::string render_text(const MetricsSnapshotData& data) {
             std::uint64_t{stats.kv_ram_used_bytes});
     w.gauge("ninfer_kv_ram_entries", "Host RAM prefix cache entries.",
             std::uint64_t{stats.kv_ram_entry_count});
+    w.gauge("ninfer_kv_ram_system_prompt_limit", "Maximum retained system prefixes.",
+            std::uint64_t{stats.kv_ram_system_prompt_limit});
+    w.gauge("ninfer_kv_ram_system_prompt_entries", "Retained system prefixes.",
+            std::uint64_t{stats.kv_ram_system_prompt_entries});
+    w.gauge("ninfer_kv_ram_system_prompt_used_bytes", "RAM budget used by system prefixes.",
+            std::uint64_t{stats.kv_ram_system_prompt_used_bytes});
+    w.counter("ninfer_kv_ram_system_prompt_restores_total", "System prefix restores.",
+              stats.kv_ram_system_prompt_restores);
+    w.counter("ninfer_kv_ram_system_prompt_evictions_total", "System prefix LRU evictions.",
+              stats.kv_ram_system_prompt_evictions);
     w.counter("ninfer_kv_ram_captures_total", "Host RAM prefix captures.", stats.kv_ram_captures);
     w.counter("ninfer_kv_ram_restores_total", "Host RAM prefix restores.", stats.kv_ram_restores);
     w.counter("ninfer_kv_ram_evictions_total", "Host RAM prefix evictions.",
@@ -863,8 +974,11 @@ std::string render_text(const MetricsSnapshotData& data) {
             std::uint64_t{stats.kv_disk_entry_count});
     w.gauge("ninfer_kv_disk_spill_active", "Disk spill preparation or session active.",
             std::uint64_t{stats.kv_disk_spill_active});
-    w.gauge("ninfer_kv_disk_compaction_active", "Disk compaction active.",
-            std::uint64_t{stats.kv_disk_compaction_active});
+    w.gauge("ninfer_kv_disk_defrag_active", "Idle disk defragmentation active.",
+            std::uint64_t{stats.kv_disk_defrag_active});
+    w.gauge("ninfer_kv_disk_storage_bytes",
+            "Disk pack storage bytes, including free slots and writes in progress.",
+            std::uint64_t{stats.kv_disk_storage_bytes});
     w.gauge("ninfer_kv_disk_restore_active", "Disk restore target active.",
             std::uint64_t{stats.kv_disk_restore_active});
     w.gauge("ninfer_kv_disk_pending_jobs", "Queued disk cache jobs.",
@@ -939,6 +1053,11 @@ std::string render_text(const MetricsSnapshotData& data) {
               series.recovery_discarded_reasoning_tokens);
     w.counter("ninfer_recovery_discarded_tool_calls_total", "Tool calls discarded by recovery.",
               series.recovery_discarded_tool_calls);
+    w.counter("ninfer_recovery_framing_repairs_total", "Consumed reasoning-replay closing frames.",
+              series.recovery_framing_repairs);
+    w.counter("ninfer_recovery_discarded_content_tokens_total",
+              "Corroborated replay tokens withheld from answer publication.",
+              series.recovery_discarded_content_tokens);
     w.histogram("ninfer_recovery_attempts", "Recovery attempts on terminal requests.",
                 series.recovery_attempts);
 
@@ -953,7 +1072,6 @@ std::string render_text(const MetricsSnapshotData& data) {
     return w.take();
 }
 
-// ---------------------------------------------------------------------------
 // JSON.
 
 template <const auto& Bounds>
@@ -1065,10 +1183,23 @@ Json render_json(const MetricsSnapshotData& data) {
           {"decode_row_rounds", stats.decode_row_rounds}}},
         {"http", {{"in_flight", data.inputs.http_in_flight}}},
         {"gpu_kv", std::move(gpu_kv)},
+        {"kv_execution",
+         {{"window_tokens", stats.kv_execution_window_tokens},
+          {"growth_blocked_requests", stats.kv_growth_blocked_requests},
+          {"suspended_requests", stats.kv_suspended_requests},
+          {"window_extensions", stats.kv_window_extensions},
+          {"suspensions", stats.kv_live_suspensions},
+          {"resumes", stats.kv_live_resumes}}},
         {"kv_ram",
          {{"capacity_bytes", stats.kv_ram_capacity_bytes},
           {"used_bytes", stats.kv_ram_used_bytes},
           {"entries", stats.kv_ram_entry_count},
+          {"system_prompts",
+           {{"limit", stats.kv_ram_system_prompt_limit},
+            {"entries", stats.kv_ram_system_prompt_entries},
+            {"used_bytes", stats.kv_ram_system_prompt_used_bytes},
+            {"restores", stats.kv_ram_system_prompt_restores},
+            {"evictions", stats.kv_ram_system_prompt_evictions}}},
           {"captures", stats.kv_ram_captures},
           {"restores", stats.kv_ram_restores},
           {"evictions", stats.kv_ram_evictions},
@@ -1087,7 +1218,8 @@ Json render_json(const MetricsSnapshotData& data) {
           {"load_seconds", stats.kv_disk_load_seconds},
           {"h2d_seconds", stats.kv_disk_h2d_seconds},
           {"spill_active", stats.kv_disk_spill_active},
-          {"compaction_active", stats.kv_disk_compaction_active},
+          {"defrag_active", stats.kv_disk_defrag_active},
+          {"storage_bytes", stats.kv_disk_storage_bytes},
           {"restore_active", stats.kv_disk_restore_active},
           {"pending_jobs", stats.kv_disk_pending_jobs},
           {"spill_elapsed_seconds", stats.kv_disk_spill_elapsed_seconds},
@@ -1107,11 +1239,19 @@ Json render_json(const MetricsSnapshotData& data) {
           {"accepted_by_position", series.speculative_accepted_by_position},
           {"rounds_by_k", series.speculative_rounds_by_k},
           {"live_k", summary(series.speculative_live_k)}}},
+        {"reasoning_limit",
+         {{"requests", series.reasoning_limit_requests},
+          {"used_tokens", series.reasoning_limit_tokens},
+          {"limit_reached", series.reasoning_limit_reached},
+          {"forced_closes", series.reasoning_limit_forced_closes},
+          {"retries", series.reasoning_limit_retries}}},
         {"recovery",
          {{"events", std::move(events)},
           {"cycle_exclusions", series.recovery_cycle_exclusions},
           {"discarded_reasoning_tokens", series.recovery_discarded_reasoning_tokens},
           {"discarded_tool_calls", series.recovery_discarded_tool_calls},
+          {"framing_repairs", series.recovery_framing_repairs},
+          {"discarded_content_tokens", series.recovery_discarded_content_tokens},
           {"attempts", summary(series.recovery_attempts)}}},
         {"generation",
          {{"requests_total", requests_total},
@@ -1119,6 +1259,26 @@ Json render_json(const MetricsSnapshotData& data) {
           {"tool_calls", series.tool_calls},
           {"ignored_tool_markup", series.ignored_tool_markup},
           {"media_requests", series.media_requests},
+          {"constraint",
+           {{"requests_total", series.constraint.requests},
+            {"complete_total", series.constraint.complete},
+            {"terminated_total", series.constraint.terminated},
+            {"branches",
+             {{"none", series.constraint.branches[0]},
+              {"reasoning", series.constraint.branches[1]},
+              {"answer", series.constraint.branches[2]},
+              {"tool_call", series.constraint.branches[3]}}},
+            {"compile_cache",
+             {{"none", series.constraint.compile_cache[0]},
+              {"hit", series.constraint.compile_cache[1]},
+              {"built", series.constraint.compile_cache[2]},
+              {"waited", series.constraint.compile_cache[3]}}},
+            {"compile_seconds", series.constraint.compile_seconds},
+            {"compile_wait_seconds", series.constraint.compile_wait_seconds},
+            {"mask_calls", series.constraint.mask_calls},
+            {"mask_nodes", series.constraint.mask_nodes},
+            {"mask_seconds", series.constraint.mask_seconds},
+            {"mask_upload_bytes", series.constraint.mask_upload_bytes}}},
           {"ttft", summary_all(series.ttft)},
           {"e2e", summary_all(series.e2e)},
           {"inter_token_latency", summary_all(series.inter_token)},
@@ -1250,8 +1410,27 @@ void ServeMetrics::observe_generation(const GenerationObservation& observation) 
     if (observation.result == GenerationResult::Rejected) { return; }
     if (observation.outcome != nullptr) {
         observe_terminal_recovery(series, observation.outcome->metrics.recovery);
+        observe_reasoning_limit(series, observation.outcome->metrics.reasoning_limit);
+        const auto& constraint = observation.outcome->metrics.constraint;
+        if (constraint.active) {
+            auto& total = series.constraint;
+            ++total.requests;
+            total.complete += constraint.complete ? 1U : 0U;
+            total.terminated += constraint.terminated ? 1U : 0U;
+            ++total.branches[static_cast<std::size_t>(constraint.branch)];
+            ++total.compile_cache[static_cast<std::size_t>(constraint.compile_cache)];
+            total.compile_seconds += constraint.compile_seconds;
+            total.compile_wait_seconds += constraint.compile_wait_seconds;
+            total.mask_calls += constraint.mask_calls;
+            total.mask_nodes += constraint.mask_nodes;
+            total.mask_seconds += constraint.mask_seconds;
+            total.mask_upload_bytes += constraint.mask_upload_bytes;
+        }
     } else if (observation.recovery != nullptr) {
         observe_terminal_recovery(series, *observation.recovery);
+    }
+    if (observation.outcome == nullptr && observation.reasoning_limit != nullptr) {
+        observe_reasoning_limit(series, *observation.reasoning_limit);
     }
     if (observation.result == GenerationResult::Success && observation.outcome != nullptr) {
         observe_success(series, protocol, *observation.outcome);

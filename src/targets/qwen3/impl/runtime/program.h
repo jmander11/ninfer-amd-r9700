@@ -36,6 +36,7 @@
 #include <span>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS {
 namespace schedule {
@@ -110,17 +111,19 @@ struct RequestPlanImpl<NINFER_QWEN3_VARIANT> {
         NINFER_QWEN3_RUNTIME_NS::RewriteCheckpointAction::Drop;
     std::optional<qwen3::RewriteCheckpointSpec> rewrite_checkpoint_capture;
     ops::SamplingConfig sampling;
-    std::uint32_t text_kv_page_entitlement    = 0;
-    std::uint32_t backend_kv_page_entitlement = 0;
-    PrefixReuseSource reuse_source            = PrefixReuseSource::None;
-    std::uint64_t ram_entry_id                = 0;
-    std::uint64_t disk_entry_id               = 0;
+    std::uint32_t text_kv_page_entitlement       = 0;
+    std::uint32_t backend_kv_page_entitlement    = 0;
+    PrefixReuseSource reuse_source               = PrefixReuseSource::None;
+    std::uint64_t ram_entry_id                   = 0;
+    std::uint32_t system_prompt_cache_hit_tokens = 0;
+    std::uint64_t disk_entry_id                  = 0;
     PrefixHash128 disk_hash_f{};
     std::uint32_t disk_execution_frontier      = 0;
     std::uint64_t disk_committed_generation    = 0;
     runtime::CacheReadIntent cache_read_intent = runtime::CacheReadIntent::Consume;
     bool capture_context_checkpoints           = false;
     bool capture_context_checkpoint            = false;
+    bool capture_system_prompt                 = false;
     bool token_logprobs                        = false;
     std::shared_ptr<const std::vector<PrefixHash128>> prompt_hashes;
 };
@@ -202,9 +205,8 @@ struct DecodeGraphFamily {
     std::vector<DecodeGraphProfile> profiles;
 };
 
-// Target model continuation for one logical sequence. This state remains meaningful after the
-// request which produced it has finished, so it is deliberately separate from request lifecycle,
-// output, sampling, and round-control state.
+// Model state for continuing one logical sequence after its request has finished.
+// Kept separate from request, output, sampling and round-control state.
 enum class CacheCaptureMode : std::uint8_t { ReachableTurn, CompleteOriginal };
 
 struct SequenceState {
@@ -289,17 +291,19 @@ struct RequestControl {
         std::unique_ptr<schedule::VisionPrefillSession> vision;
         runtime::TransientRegion transient;
         std::optional<RewriteCheckpointSpec> rewrite_checkpoint_capture;
-        std::uint32_t base               = 0;
-        std::uint32_t cursor             = 0;
-        std::uint32_t prompt_tokens      = 0;
-        std::uint32_t initial_mtp_extent = 0;
-        double elapsed_seconds           = 0.0;
-        bool host_input_consumed_pending = false;
-        bool prepare_mtp                 = false;
-        ReusePath reuse                  = ReusePath::FullReset;
-        PrefixReuseSource reuse_source   = PrefixReuseSource::None;
-        MtpBridgeMode mtp_bridge         = MtpBridgeMode::None;
-        bool capture_context_checkpoints = false;
+        std::optional<std::uint32_t> system_prompt_capture;
+        std::uint32_t base                           = 0;
+        std::uint32_t cursor                         = 0;
+        std::uint32_t prompt_tokens                  = 0;
+        std::uint32_t initial_mtp_extent             = 0;
+        double elapsed_seconds                       = 0.0;
+        bool host_input_consumed_pending             = false;
+        bool prepare_mtp                             = false;
+        ReusePath reuse                              = ReusePath::FullReset;
+        PrefixReuseSource reuse_source               = PrefixReuseSource::None;
+        std::uint32_t system_prompt_cache_hit_tokens = 0;
+        MtpBridgeMode mtp_bridge                     = MtpBridgeMode::None;
+        bool capture_context_checkpoints             = false;
         // Per-chunk prefill step records (tokens processed, wall seconds) for the
         // tail-window throughput metric. One entry per advance_prefill call; the
         // finalizing call includes its sampling/bridge time.
@@ -311,8 +315,10 @@ struct RequestControl {
     qwen3::AdaptiveDraftState adaptive;
     bool typical_cycle_reasoning = false;
     // The occupying request reports token logprobs: its rounds set the frame's row flag.
-    bool token_logprobs         = false;
-    std::uint32_t prompt_tokens = 0;
+    bool token_logprobs                   = false;
+    std::uint32_t prompt_tokens           = 0;
+    std::uint32_t effective_output_tokens = 0;
+    std::uint32_t window_output_tokens    = 0;
 };
 
 class ProgramImplCore {
@@ -339,6 +345,26 @@ public:
     can_admit_lane_after_releasing(std::uint32_t lane, const RequestPlan& plan,
                                    std::span<const std::uint32_t> release_lanes) const noexcept;
     [[nodiscard]] runtime::AdmissionResources admission_capacity() const noexcept;
+    [[nodiscard]] bool chunked_execution_enabled() const noexcept;
+    [[nodiscard]] runtime::AdmissionResources
+    completion_resources(const RequestBasePlan& base, std::uint32_t prompt_token_bound) const;
+    [[nodiscard]] bool shrink_window(std::uint32_t lane, const runtime::ExecutionWindow& window);
+    [[nodiscard]] runtime::ExecutionWindow plan_window(std::uint32_t lane,
+                                                       std::uint32_t output_tokens) const;
+    [[nodiscard]] runtime::ExecutionWindow plan_suspended_window(std::uint64_t owner,
+                                                                 std::uint32_t output_tokens) const;
+    [[nodiscard]] bool grant_window(std::uint32_t lane, const runtime::ExecutionWindow& window);
+    [[nodiscard]] bool reserve_suspension_credit(std::uint64_t owner, std::size_t bytes);
+    void release_suspension_credit(std::uint64_t owner);
+    [[nodiscard]] bool start_suspend(std::uint32_t lane, std::uint64_t owner);
+    [[nodiscard]] bool suspension_ready(std::uint64_t owner) const;
+    void finish_suspend(std::uint32_t lane, std::uint64_t owner);
+    [[nodiscard]] bool start_resume(std::uint32_t lane, std::uint64_t owner,
+                                    const runtime::ExecutionWindow& window);
+    [[nodiscard]] bool resume_ready(std::uint64_t owner) const;
+    void finish_resume(std::uint32_t lane, std::uint64_t owner);
+    void discard_suspended(std::uint64_t owner);
+
     [[nodiscard]] runtime::PrefillStepResult
     start_prefill_lane(std::uint32_t lane, PreparedPromptData&& prompt, RequestPlan&& plan,
                        runtime::TransientRegion transient,
@@ -439,7 +465,7 @@ public:
     [[nodiscard]] bool copy_hold_cancel_settled() const;
     void discard_ram_capture(std::uint64_t ram_id);
     void shutdown_kv_tiers(LoadProgress progress = {});
-    void request_idle_spill();
+    void set_cache_idle(bool idle);
     void install_pending_disk_restore_checkpoints();
     [[nodiscard]] qwen3::detail::KvRamSnapshot kv_ram_snapshot() const noexcept;
     qwen3::detail::KvRamCopySeconds harvest_kv_ram_copy_seconds();
@@ -503,6 +529,7 @@ public:
     const bool use_device_graph;
     const std::size_t kv_payload_bytes;
     const std::size_t kv_ram_capacity_bytes;
+    const std::uint32_t kv_ram_system_prompts;
     const std::size_t expected_graph_definition_count;
     const std::size_t expected_graph_executable_count;
     const std::size_t kv_disk_capacity_bytes;
@@ -540,6 +567,9 @@ public:
     // Pinned landing area of the prefill-sampled token and its logprob record.
     struct PrefillRoundHost {
         TokenId token = 0;
+        std::array<std::uint32_t,
+                   static_cast<std::size_t>(qwen3::kDFlashDecodeMaximumWidth) * kMaximumConcurrency>
+            nonfinite_logits{};
         qwen3::RoundLogprobRecords<1> logprobs;
     };
 
@@ -577,6 +607,29 @@ public:
     std::uint64_t pending_disk_restore_ticket_ = 0;
 
 private:
+    struct SuspendedRequest {
+        SequenceState sequence;
+        RequestControl request;
+        std::uint64_t entry_id              = 0;
+        std::size_t sampling_counts_offset  = 0;
+        bool sampling_counts_present        = false;
+        std::size_t pending_features_offset = 0;
+        std::size_t checkpoint_count        = 0;
+        // Image page floors remain available to admission without decoding host descriptors.
+        std::uint32_t text_pages                                = 0;
+        std::uint32_t backend_pages                             = 0;
+        std::uint32_t lane                                      = 0;
+        enum class Phase { Capturing, Parked, Restoring } phase = Phase::Capturing;
+    };
+
+    std::unordered_map<std::uint64_t, SuspendedRequest> suspended_requests_;
+    [[nodiscard]] runtime::ExecutionWindow
+    execution_window(std::uint32_t prompt_tokens, std::uint32_t output_tokens,
+                     std::size_t identity_extra_bytes, std::size_t checkpoint_count,
+                     runtime::AdmissionResources minimum = {}) const;
+    [[nodiscard]] bool select_imported_checkpoint(std::uint32_t frontier,
+                                                  qwen3::detail::ContextCheckpointKind kind,
+                                                  std::span<std::uint8_t> selected) const;
     void clear_lane(SequenceState& sequence, RequestControl& request) noexcept;
     // Applies the pending deferred folds of `lanes` (all lanes when empty) with the eager
     // all-layer fold, before anything else reads their GDN state or rewrites their records.
@@ -592,6 +645,9 @@ private:
     void copy_tail(SequenceState& sequence, const Tensor& source);
     void copy_round_token();
     void copy_prefill_logprobs();
+    void clear_nonfinite_logits(std::uint32_t lane);
+    void copy_nonfinite_logits();
+    void validate_finite_logits(std::uint32_t lane, std::uint32_t columns) const;
     void resolve_non_speculative_pending(SequenceState& sequence, RequestControl& request,
                                          std::uint32_t accepted_tokens, bool terminal);
     // Runs the owner's chunk inside a mixed DFlash round instead of alone: receives the owner's
@@ -628,6 +684,8 @@ private:
                                        std::span<const std::uint32_t> counts);
     void validate_licensed_tokens(std::span<const TokenId> tokens) const;
     void mark_workspace_usage(std::size_t phase_bytes) noexcept;
+    void order_persistent_decode_after_transfers(std::size_t batch_size,
+                                                 const DecodeGraphExecutable* executable);
     [[nodiscard]] runtime::BatchedGeneratedRound
     decode_ordinary_batch(std::span<const std::uint32_t> lanes,
                           std::span<const runtime::RoundBudget> budgets);
@@ -675,6 +733,8 @@ private:
                               const PreparedPromptData& prompt, const RequestBasePlanImpl& base);
     void finish_request_plan(RequestPlanImpl& plan, const ResidentStateView* view,
                              const PreparedPromptData& prompt, const RequestBasePlanImpl& base);
+    void capture_system_prompt(SequenceState& sequence, RequestControl::Prefill& staged,
+                               std::uint32_t processed_tokens);
     [[nodiscard]] bool capture_cuts_at_rewrite(const SequenceState& sequence) const noexcept;
     [[nodiscard]] qwen3::detail::RamCaptureSource
     ram_capture_source(SequenceState& sequence, qwen3::detail::ResidentPrefixIdentity& cut_identity,
@@ -717,7 +777,8 @@ private:
     void clear_context_checkpoints(SequenceState& sequence) noexcept;
     void install_ram_context_checkpoints(SequenceState& sequence,
                                          const qwen3::detail::RamRestoredHost& host,
-                                         std::uint64_t entry_id, std::uint32_t reuse_base);
+                                         std::uint64_t entry_id, std::uint32_t reuse_base,
+                                         bool live_restore = false);
     void recycle_pending_disk_checkpoint_heads() noexcept;
     [[nodiscard]] bool staging_holds(std::uint32_t lane, qwen3::detail::PrefixHash128 hash,
                                      std::uint32_t frontier) const noexcept;

@@ -65,6 +65,70 @@ __global__ __launch_bounds__(Split ? kSplitBlock : kCombinedBlock) void rope_ker
     }
 }
 
+// Each lane owns four adjacent features, including their opposite-half partners.
+// Load both halves before the barrier: stores may otherwise overtake another lane's partner.
+constexpr int kVisionVectorBlock = 128;
+
+__global__ __launch_bounds__(kVisionVectorBlock) void vision_rope_vector_kernel(
+    const std::int32_t* positions, hip_bfloat16* q, hip_bfloat16* k, int tokens,
+    std::int64_t q_stride, std::int64_t k_stride) {
+    constexpr int vectors = 2 * kVisionH * kVisionD / 4;
+    constexpr int items   = (vectors + kVisionVectorBlock - 1) / kVisionVectorBlock;
+    const int token       = static_cast<int>(blockIdx.x);
+    __shared__ float sine[36];
+    __shared__ float cosine[36];
+    if (threadIdx.x < 36) {
+        coefficient<Profile::Vision2D>(positions, tokens, token, static_cast<int>(threadIdx.x),
+                                       &sine[threadIdx.x], &cosine[threadIdx.x]);
+    }
+    uint2 original[items], partner[items];
+#pragma unroll
+    for (int i = 0; i < items; ++i) {
+        const int index = static_cast<int>(threadIdx.x) + i * kVisionVectorBlock;
+        if (index < vectors) {
+            const int head    = index / 18;
+            const int feature = index % 18 * 4;
+            const auto* data =
+                head < kVisionH
+                    ? q + static_cast<std::int64_t>(token) * q_stride + head * 72
+                    : k + static_cast<std::int64_t>(token) * k_stride + (head - kVisionH) * 72;
+            original[i] = *reinterpret_cast<const uint2*>(data + feature);
+            partner[i]  = *reinterpret_cast<const uint2*>(
+                data + (feature < 36 ? feature + 36 : feature - 36));
+        }
+    }
+    __syncthreads();
+#pragma unroll
+    for (int i = 0; i < items; ++i) {
+        const int index = static_cast<int>(threadIdx.x) + i * kVisionVectorBlock;
+        if (index < vectors) {
+            const int head    = index / 18;
+            const int feature = index % 18 * 4;
+            auto* data =
+                head < kVisionH
+                    ? q + static_cast<std::int64_t>(token) * q_stride + head * 72
+                    : k + static_cast<std::int64_t>(token) * k_stride + (head - kVisionH) * 72;
+            const std::uint32_t own[2]      = {original[i].x, original[i].y};
+            const std::uint32_t opposite[2] = {partner[i].x, partner[i].y};
+            std::uint32_t words[2]          = {};
+#pragma unroll
+            for (int j = 0; j < 4; ++j) {
+                hip_bfloat16 a, b;
+                a.data             = static_cast<std::uint16_t>(own[j / 2] >> (16 * (j % 2)));
+                b.data             = static_cast<std::uint16_t>(opposite[j / 2] >> (16 * (j % 2)));
+                const int pair     = (feature + j) % 36;
+                const float first  = static_cast<float>(a);
+                const float second = static_cast<float>(b);
+                const auto value =
+                    hip_bfloat16(feature < 36 ? first * cosine[pair] - second * sine[pair]
+                                              : first * cosine[pair] + second * sine[pair]);
+                words[j / 2] |= static_cast<std::uint32_t>(value.data) << (16 * (j % 2));
+            }
+            *reinterpret_cast<uint2*>(data + feature) = {words[0], words[1]};
+        }
+    }
+}
+
 // DFlash drafter front: one wave per (token, head) of the fused [Q|K|V] rows, four features per
 // lane (feature 4 * lane + i). Normalized heads sum their squares serially in feature order in
 // every lane (broadcast loads), exactly as the eager RMSNorm's single summing thread; RoPE pairs
@@ -328,10 +392,14 @@ void launch(Profile profile, const Tensor& positions, Tensor& q, Tensor* k, hipS
                                                              stream);
         break;
     case Profile::Vision2D:
-        if (k != nullptr)
+        if (k != nullptr && tokens >= 256 && reinterpret_cast<std::uintptr_t>(q_data) % 8U == 0U &&
+            reinterpret_cast<std::uintptr_t>(k_data) % 8U == 0U && qs % 4 == 0 && ks % 4 == 0) {
+            vision_rope_vector_kernel<<<tokens, kVisionVectorBlock, 0, stream>>>(
+                pos, q_data, k_data, tokens, qs, ks);
+        } else if (k != nullptr) {
             launch_profile<Profile::Vision2D, 72, 36, 16, 16>(pos, q_data, k_data, tokens, qs, ks,
                                                               stream);
-        else
+        } else
             launch_profile<Profile::Vision2D, 72, 36, 16, 0>(pos, q_data, nullptr, tokens, qs, 0,
                                                              stream);
         break;

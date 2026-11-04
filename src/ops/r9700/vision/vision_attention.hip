@@ -22,7 +22,6 @@ constexpr int kMatrixTile    = 16;
 constexpr int kWave          = 32;
 constexpr int kWavesPerBlock = 8;
 constexpr int kQueryTile     = kWavesPerBlock * kMatrixTile;
-constexpr int kThreads       = kWave * kWavesPerBlock;
 // Keys staged per iteration; the score and value products run over these two 16-key subtiles.
 constexpr int kKeyTile      = 32;
 constexpr int kKeySubtiles  = kKeyTile / kMatrixTile;
@@ -72,28 +71,31 @@ __device__ __forceinline__ short bf16_bits(float value) {
     return static_cast<short>(hip_bfloat16(value).data);
 }
 
-// Flash attention over one segment-bounded 128-query tile and one head. Scores are formed
+// Flash attention over one segment-bounded 64- or 128-query tile and one head. Scores are formed
 // transposed, S^T = K Q^T, so each lane owns one query column of the accumulator: the
 // softmax statistics are per-lane values combined with the partner half-wave, and the
 // accumulator already has the B-operand layout of O^T = V^T P^T, with no LDS transpose. K and a
 // transposed V are staged per 32-key tile with 16-byte loads; probabilities enter the value
 // product as a BF16 high part plus its BF16 residual.
-__global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
+template <int Waves>
+__global__ __launch_bounds__(Waves* kWave) void vision_attention_wave32_kernel(
     const hip_bfloat16* __restrict__ q, const hip_bfloat16* __restrict__ k,
     const hip_bfloat16* __restrict__ v, const VisionAttentionTile* __restrict__ tiles, int patches,
     int uniform_segment_length, hip_bfloat16* __restrict__ output, std::int64_t q_stride_t,
     std::int64_t k_stride_t, std::int64_t v_stride_t) {
+    constexpr int kTileQueries = Waves * kMatrixTile;
+    constexpr int kTileThreads = Waves * kWave;
     VisionAttentionTile tile;
     if (tiles != nullptr) {
         tile = tiles[blockIdx.x];
     } else if (uniform_segment_length > 0) {
-        const int tiles_per_segment = (uniform_segment_length + kQueryTile - 1) / kQueryTile;
+        const int tiles_per_segment = (uniform_segment_length + kTileQueries - 1) / kTileQueries;
         const int segment           = static_cast<int>(blockIdx.x) / tiles_per_segment;
         const int within            = static_cast<int>(blockIdx.x) - segment * tiles_per_segment;
         const int begin             = segment * uniform_segment_length;
-        tile = {begin + within * kQueryTile, begin, begin + uniform_segment_length, 0};
+        tile = {begin + within * kTileQueries, begin, begin + uniform_segment_length, 0};
     } else {
-        tile = {static_cast<int>(blockIdx.x) * kQueryTile, 0, patches, 0};
+        tile = {static_cast<int>(blockIdx.x) * kTileQueries, 0, patches, 0};
     }
     if (tile.q0 < 0) { return; }
 
@@ -110,10 +112,10 @@ __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
     const bool query_valid = query < tile.end;
 
     // Padding features 72..79 of K and of V^T stay zero for every key tile.
-    for (int index = tid; index < kKeyTile; index += kThreads) {
+    for (int index = tid; index < kKeyTile; index += kTileThreads) {
         *reinterpret_cast<uint4*>(&keys[index * kKeyPitch + kHeadDim]) = uint4{};
     }
-    for (int index = tid; index < (kPaddedDim - kHeadDim) * kValuePitch; index += kThreads) {
+    for (int index = tid; index < (kPaddedDim - kHeadDim) * kValuePitch; index += kTileThreads) {
         values_t[kHeadDim * kValuePitch + index] = 0;
     }
 
@@ -140,7 +142,7 @@ __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
 
     for (int key_base = tile.begin; key_base < tile.end; key_base += kKeyTile) {
         __syncthreads();
-        for (int index = tid; index < kKeyTile * kChunks; index += kThreads) {
+        for (int index = tid; index < kKeyTile * kChunks; index += kTileThreads) {
             const int key_local = index / kChunks;
             const int chunk     = index - key_local * kChunks;
             const int key       = key_base + key_local;
@@ -294,11 +296,12 @@ std::int64_t stride_elements(const Tensor& tensor, int dimension) {
     return tensor.nb[dimension] / static_cast<std::int64_t>(sizeof(hip_bfloat16));
 }
 
+template <int Waves>
 void launch_attention(const Tensor& q, const Tensor& k, const Tensor& v,
                       const VisionAttentionTile* tiles, int uniform_segment_length, int query_tiles,
                       Tensor& out, hipStream_t stream) {
     const dim3 grid(static_cast<unsigned>(query_tiles), static_cast<unsigned>(kHeads), 1U);
-    vision_attention_wave32_kernel<<<grid, kThreads, 0, stream>>>(
+    vision_attention_wave32_kernel<Waves><<<grid, Waves * kWave, 0, stream>>>(
         static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
         static_cast<const hip_bfloat16*>(v.data), tiles, q.ne[2], uniform_segment_length,
         static_cast<hip_bfloat16*>(out.data), stride_elements(q, 2), stride_elements(k, 2),
@@ -353,7 +356,7 @@ void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v, const T
             patches);
         HIP_CHECK(hipGetLastError());
     }
-    launch_attention(q, k, v, descriptors, 0, query_tiles, out, stream);
+    launch_attention<kWavesPerBlock>(q, k, v, descriptors, 0, query_tiles, out, stream);
 }
 
 void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
@@ -370,9 +373,18 @@ void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
     if (segment_length <= 0 || patches % segment_length != 0) {
         throw std::invalid_argument("vision_attention: invalid uniform segment length");
     }
-    const int segments    = patches / segment_length;
-    const int query_tiles = segments * ((segment_length + kQueryTile - 1) / kQueryTile);
-    launch_attention(q, k, v, nullptr, segment_length, query_tiles, out, stream);
+    const int segments = patches / segment_length;
+    // Multiple short segments otherwise spend half (or more) of each 128-query CTA on
+    // inactive queries. Keep the existing descriptor/planning route and long segments intact.
+    if (segments > 1 && segment_length >= 4 && segment_length <= 64) {
+        constexpr int query_tile = 4 * kMatrixTile;
+        const int query_tiles    = segments * ((segment_length + query_tile - 1) / query_tile);
+        launch_attention<4>(q, k, v, nullptr, segment_length, query_tiles, out, stream);
+    } else {
+        const int query_tiles = segments * ((segment_length + kQueryTile - 1) / kQueryTile);
+        launch_attention<kWavesPerBlock>(q, k, v, nullptr, segment_length, query_tiles, out,
+                                         stream);
+    }
 }
 
 } // namespace ninfer::ops

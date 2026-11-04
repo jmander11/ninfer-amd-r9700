@@ -1,9 +1,7 @@
-"""Build the provisional direct-BF16-source R9700 integer candidate artifact.
+"""Build the direct-BF16-source R9700 integer evaluation artifact.
 
-The resulting qwen3.8-27b/r9700-int-candidate artifact is admitted only as the
-provisional evaluation identity. It makes source inventory, packing, artifact
-framing, and HIP qualification concrete before real-model accuracy and
-performance evidence selects and names the production recipe.
+The qwen3.8-27b/r9700-int-candidate identity is used for converter and kernel
+qualification. It is not the selected production weight recipe.
 """
 
 from __future__ import annotations

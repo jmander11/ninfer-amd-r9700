@@ -49,7 +49,7 @@ class PrepareSelectedNiahTest(unittest.TestCase):
             self.assertTrue(output.is_symlink())
 
     def test_generated_commands_use_importable_repo_modules(self) -> None:
-        with tempfile.TemporaryDirectory(dir=REPO / "profiles/bench") as directory:
+        with tempfile.TemporaryDirectory(dir=REPO) as directory:
             root = Path(directory)
             selection = root / "selection.json"
             selection.write_text("{}\n")

@@ -6,24 +6,24 @@
     "chunk": 2048,
     "samples": {
       "wiki": {
-        "source": "/path/to/local/ninfer-amd-r9700/tools/ppl/corpus.ids",
+        "source": "tools/ppl/corpus.ids",
         "source_sha256": "aa1ba6d9932a4bcefdfd1c395bde73911daeba083c6b45d353a421dcd1eae077",
         "ids_sha256": "e0a77c47014ae57bd42a6cc19480fb3370921ed91b88a2a3e51252746fcb1475"
       },
       "technical": {
-        "source": "/path/to/local/ninfer-amd-r9700/docs/maintainer/concurrent-inference-architecture.md",
+        "source": "docs/maintainer/concurrent-inference-architecture.md",
         "source_sha256": "576063f8c343536ca9970aa00f5a7bb10be2fb27423b2e3a68e82590290851b7",
         "ids_sha256": "2e20931f45d9185af7b0bd456d2aba477e01c3838457a64118749564e9ff0170"
       },
       "code": {
-        "source": "/path/to/local/ninfer-amd-r9700/src/targets/qwen3/impl/runtime/program_impl.h",
+        "source": "src/targets/qwen3/impl/runtime/program_impl.h",
         "source_sha256": "adb709a8fe97d32a8408aa2b569429c3e6e218561e9b9b56ae0c30fe107af630",
         "ids_sha256": "c271d964bb108ffd72a07ec924411e64534a896b253e241cb0b412351cfca3f1"
       }
     },
     "nvidia_commit": "dfc818ae32c4e0e1ded7b9252b87930338fb8455",
     "nvidia_binary_sha256": "0fe229f45fc2f6ae69a7724294f7322f18743fb86ca0f1d96170f01ee75d649e",
-    "nvidia_model": "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+    "nvidia_model": "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
     "amd_commit": "34cd86405db333ab30f22abb8a16698ddbbcebf8"
   },
   "samples": {
@@ -32,7 +32,7 @@
       "prefill": {
         "report": {
           "scheme": "nvfp4",
-          "weights": "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "weights": "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "model_id": "qwen3.8-27b",
           "weights_id": "nvfp4",
           "kv_dtype": "nvfp4",
@@ -58,11 +58,11 @@
           "score_seconds": 0.35228298
         },
         "command": [
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
           "--weights",
-          "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "--ids",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/wiki.ids",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/wiki.ids",
           "--tokens",
           "4096",
           "--skip",
@@ -76,7 +76,7 @@
           "--scheme",
           "nvfp4",
           "--out-json",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/quality-nvfp4-wiki/report.json",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/quality-nvfp4-wiki/report.json",
           "--kv-dtype",
           "nvfp4"
         ],
@@ -91,7 +91,7 @@
       "decode": {
         "report": {
           "scheme": "nvfp4",
-          "weights": "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "weights": "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "model_id": "qwen3.8-27b",
           "weights_id": "nvfp4",
           "kv_dtype": "nvfp4",
@@ -117,11 +117,11 @@
           "score_seconds": 1.876359473
         },
         "command": [
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
           "--weights",
-          "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "--ids",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/wiki.ids",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/wiki.ids",
           "--tokens",
           "4096",
           "--skip",
@@ -135,7 +135,7 @@
           "--scheme",
           "nvfp4",
           "--out-json",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/decode-quality-nvfp4-wiki/report.json",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/decode-quality-nvfp4-wiki/report.json",
           "--kv-dtype",
           "nvfp4"
         ],
@@ -153,7 +153,7 @@
       "prefill": {
         "report": {
           "scheme": "nvfp4",
-          "weights": "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "weights": "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "model_id": "qwen3.8-27b",
           "weights_id": "nvfp4",
           "kv_dtype": "nvfp4",
@@ -179,11 +179,11 @@
           "score_seconds": 0.349682762
         },
         "command": [
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
           "--weights",
-          "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "--ids",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/technical.ids",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/technical.ids",
           "--tokens",
           "4096",
           "--skip",
@@ -197,7 +197,7 @@
           "--scheme",
           "nvfp4",
           "--out-json",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/quality-nvfp4-technical/report.json",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/quality-nvfp4-technical/report.json",
           "--kv-dtype",
           "nvfp4"
         ],
@@ -212,7 +212,7 @@
       "decode": {
         "report": {
           "scheme": "nvfp4",
-          "weights": "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "weights": "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "model_id": "qwen3.8-27b",
           "weights_id": "nvfp4",
           "kv_dtype": "nvfp4",
@@ -238,11 +238,11 @@
           "score_seconds": 1.879292103
         },
         "command": [
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
           "--weights",
-          "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "--ids",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/technical.ids",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/technical.ids",
           "--tokens",
           "4096",
           "--skip",
@@ -256,7 +256,7 @@
           "--scheme",
           "nvfp4",
           "--out-json",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/decode-quality-nvfp4-technical/report.json",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/decode-quality-nvfp4-technical/report.json",
           "--kv-dtype",
           "nvfp4"
         ],
@@ -274,7 +274,7 @@
       "prefill": {
         "report": {
           "scheme": "nvfp4",
-          "weights": "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "weights": "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "model_id": "qwen3.8-27b",
           "weights_id": "nvfp4",
           "kv_dtype": "nvfp4",
@@ -300,11 +300,11 @@
           "score_seconds": 0.350062481
         },
         "command": [
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
           "--weights",
-          "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "--ids",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/code.ids",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/code.ids",
           "--tokens",
           "4096",
           "--skip",
@@ -318,7 +318,7 @@
           "--scheme",
           "nvfp4",
           "--out-json",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/quality-nvfp4-code/report.json",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/quality-nvfp4-code/report.json",
           "--kv-dtype",
           "nvfp4"
         ],
@@ -333,7 +333,7 @@
       "decode": {
         "report": {
           "scheme": "nvfp4",
-          "weights": "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "weights": "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "model_id": "qwen3.8-27b",
           "weights_id": "nvfp4",
           "kv_dtype": "nvfp4",
@@ -359,11 +359,11 @@
           "score_seconds": 1.878299263
         },
         "command": [
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl",
           "--weights",
-          "/path/to/local/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
+          "/path/to/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer",
           "--ids",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/code.ids",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/code.ids",
           "--tokens",
           "4096",
           "--skip",
@@ -377,7 +377,7 @@
           "--scheme",
           "nvfp4",
           "--out-json",
-          "/path/to/local/ninfer-amd-r9700/profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/decode-quality-nvfp4-code/report.json",
+          "profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/decode-quality-nvfp4-code/report.json",
           "--kv-dtype",
           "nvfp4"
         ],
@@ -390,5 +390,6 @@
         "nll_sha256": "3257ad14074134824bdd2c3e4af318f0d6229c7574497b644ce3ba80b8bafff2"
       }
     }
-  }
+  },
+  "path_normalization": "Machine-local path prefixes replaced for publication; numerical values and recorded hashes are unchanged. Original receipt is retained in the private pre-redaction recovery bundle."
 }

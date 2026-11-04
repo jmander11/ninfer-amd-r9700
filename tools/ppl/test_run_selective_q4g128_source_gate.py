@@ -33,7 +33,7 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
                 patch.object(runner, "COMPARISON", comparison),
                 self.assertRaisesRegex(ValueError, "partial"),
             ):
-                runner.run()
+                runner.run(weights=Path("/fixture/bf16"))
             arms["q4g64-absmax"].unlink()
             (output / "foreign").write_text("x")
             with (
@@ -42,7 +42,7 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
                 patch.object(runner, "COMPARISON", comparison),
                 self.assertRaisesRegex(ValueError, "unexpected"),
             ):
-                runner.run()
+                runner.run(weights=Path("/fixture/bf16"))
 
     def test_resume_revalidates_complete_arm_and_runs_only_missing_work(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -67,7 +67,7 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
                 patch.object(runner, "validate_comparison", return_value={"pass": True}),
                 patch.object(runner.subprocess, "run", side_effect=fake_run),
             ):
-                self.assertEqual(runner.run(), 0)
+                self.assertEqual(runner.run(weights=Path("/fixture/bf16")), 0)
             self.assertEqual(len(commands), 2)
             self.assertIn("q4g128-mse", commands[0])
             self.assertNotIn("q4g64-absmax", commands[0])
@@ -88,7 +88,7 @@ class RunSelectiveQ4G128SourceGateTest(unittest.TestCase):
                 patch.object(runner, "validate_comparison", return_value={"pass": False}),
                 patch.object(runner.subprocess, "run") as execute,
             ):
-                self.assertEqual(runner.run(), 1)
+                self.assertEqual(runner.run(weights=Path("/fixture/bf16")), 1)
                 execute.assert_not_called()
 
 

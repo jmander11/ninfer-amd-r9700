@@ -27,7 +27,7 @@ inline constexpr std::uint32_t kWaveSize  = 32U;
 inline constexpr std::uint32_t kBlockSize = 256U;
 inline constexpr float kE4M3FiniteMaximum = 448.0F;
 
-// ---- Arbitrary-width rows, one CTA per row (kBlockSize threads at launch). The row maximum and
+// Arbitrary-width rows, one CTA per row (kBlockSize threads at launch). The row maximum and
 // nonfinite flag are order-independent and the codes elementwise, so any CTA width of at most
 // kWaveSize waves encodes the row identically.
 inline constexpr std::uint32_t kQuantizeMaximumWaves = kWaveSize;
@@ -163,7 +163,7 @@ __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
     std::uint32_t tokens, std::uint32_t columns, std::uint32_t padded, CacheWarm warm,
     std::uint32_t work_ctas);
 
-// ---- K5120 RMSNorm with the eager row-CTA reduction: one 16-byte vector per launch thread of a
+// K5120 RMSNorm with the eager row-CTA reduction: one 16-byte vector per launch thread of a
 // 640-thread row, per-thread FMA sum of squares, wave butterfly, then the wave sums in ascending
 // order.
 inline constexpr std::uint32_t kNormFeatures = 5120U;
@@ -259,7 +259,7 @@ __global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
     std::uint8_t* codes, float* scales, std::uint32_t* status, hip_bfloat16* normalized,
     CacheWarm warm, std::uint32_t tokens);
 
-// ---- Output gate over K = 8 * Vectors features.
+// Output gate over K = 8 * Vectors features.
 __device__ __forceinline__ void gate_vector(const hip_bfloat16* gate, const float* attention,
                                             std::size_t offset, float (&values)[8]) {
     float gates[8];
@@ -307,7 +307,7 @@ __global__ __launch_bounds__(Threads) void fp8_quantize_gated_kernel(
                                           scales, status, warm, tokens);
 }
 
-// ---- Gated per-head RMSNorm of the GDN recurrent output x [T, 48 x 128] with gate z:
+// Gated per-head RMSNorm of the GDN recurrent output x [T, 48 x 128] with gate z:
 // BF16(x * rsqrt(mean_head(x^2) + eps) * w * silu(z)); the 16 lanes of a DPP row hold one head
 // (eight features each), so vector j sits in lane j % 32 at any CTA width.
 inline constexpr std::uint32_t kGatedNormColumns = 6144U;

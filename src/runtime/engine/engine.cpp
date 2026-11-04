@@ -146,7 +146,12 @@ public:
         load                  = std::move(constructed.load);
         sampling_defaults     = constructed.sampling_defaults;
         options.mixed_forward = active->program->mixed_forward();
-        executor              = std::make_unique<Executor>(*active, device, options);
+#if defined(NINFER_QUALIFY_REASONING_RETRY)
+        constexpr auto reasoning_limit_action = runtime::ReasoningLimitAction::Retry;
+#else
+        constexpr auto reasoning_limit_action = runtime::ReasoningLimitAction::Close;
+#endif
+        executor = std::make_unique<Executor>(*active, device, options, reasoning_limit_action);
     }
 
     ~Impl() noexcept {
@@ -180,7 +185,8 @@ PreparedPrompt Engine::prepare(PromptInput input) const {
     const auto& target = impl_->active;
     if (target == nullptr) { throw std::logic_error("Engine target is not active"); }
     auto prepared = targets::qwen3::EncodedHistoryPrepare::prepare(
-        target->loaded->frontend, std::move(input), impl_->host_encode_cache);
+        target->loaded->frontend, std::move(input), impl_->host_encode_cache,
+        impl_->options.kv_ram_system_prompts != 0);
     PromptSummary info = prepared.summary();
     if (info.prompt_tokens > target->capacity) {
         throw RequestError(RequestErrorKind::ContextLengthExceeded,
@@ -374,6 +380,10 @@ MemorySummary Engine::memory_summary() const {
         throw std::logic_error("concurrent Engine executor is unavailable");
     }
     return impl_->executor->memory_summary();
+}
+
+bool Engine::available() const {
+    return impl_ != nullptr && impl_->executor != nullptr && impl_->executor->available();
 }
 
 RuntimeStats Engine::runtime_stats() const {

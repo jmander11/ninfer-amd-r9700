@@ -11,6 +11,7 @@ from tools.r9700.check_split512_report import (
     split_workspace_bytes,
     validate_report,
 )
+from tools.r9700.host import power_profile_path
 
 
 def report() -> dict:
@@ -50,7 +51,7 @@ def report() -> dict:
             "scope": "full-numerical-rejection-device-graph",
         },
         "power_profile": {
-            "path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+            "path": str(power_profile_path()),
             "value": "auto",
             "required": "auto",
         },

@@ -76,10 +76,12 @@ std::uint64_t projected_service_work(const runtime::RequestPlanSummary& summary,
                                      const PreparedPromptData& prompt, std::uint32_t reuse_base,
                                      std::uint32_t prefill_chunk,
                                      std::span<const VisionUseSpan> vision_uses,
-                                     const std::optional<RewriteCheckpointSpec>& rewrite) noexcept {
+                                     const std::optional<RewriteCheckpointSpec>& rewrite,
+                                     bool capture_system_prompt) noexcept {
     const std::uint64_t prefill_units = qwen3::detail::projected_prefill_work(
         prompt, reuse_base, prefill_chunk, vision_uses,
-        rewrite ? std::optional<std::uint32_t>(rewrite->frontier) : std::nullopt);
+        rewrite ? std::optional<std::uint32_t>(rewrite->frontier) : std::nullopt,
+        capture_system_prompt ? prompt.system_prompt_frontier : std::nullopt);
     const std::uint64_t decode_units =
         summary.effective_output_tokens == 0 ? 0ULL : summary.effective_output_tokens - 1ULL;
     return prefill_units + decode_units;
@@ -113,6 +115,10 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
         throw std::invalid_argument("Vision is disabled for this Engine");
     }
     validate_sampling(options.sampling);
+    if (chunked_execution_enabled() && options.requested_output_tokens != 0 &&
+        options.reservation_window_tokens == 0) {
+        throw std::invalid_argument("chunked admission needs a positive output reservation");
+    }
 
     auto base                             = std::make_unique<RequestBasePlanImpl>();
     base->summary.prompt_tokens           = static_cast<std::uint32_t>(prompt.token_ids.size());
@@ -155,38 +161,29 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
         throw std::invalid_argument(
             "capture_context_checkpoint requires prefix reuse and a speculative backend");
     }
-    const std::uint32_t reserved_context_tokens =
-        base->summary.prompt_tokens + (base->summary.effective_output_tokens == 0
-                                           ? 0U
-                                           : base->summary.effective_output_tokens - 1U);
-    std::uint32_t main_kv_tokens = reserved_context_tokens;
-    if (speculative_backend == SpeculativeBackend::DFlash) {
-        // Decode always materializes up to execution_frontier + dflash_verify_width (see
-        // decode_dflash_batch). Tree verify needs that headroom for unique packed slots;
-        // chain verify (e.g. live k=5 W=6) still materializes the same extent, so Main KV
-        // entitlement must cover verify_width in both modes or the last rounds / short
-        // max_tokens requests throw "materialize extent is outside entitlement" and poison
-        // the executor.
-        main_kv_tokens = static_cast<std::uint32_t>(std::min<std::uint64_t>(
-            capacity, static_cast<std::uint64_t>(reserved_context_tokens) + dflash_verify_width));
-    }
-    base->text_kv_page_entitlement = pages_for_tokens(main_kv_tokens);
-    if (speculative_backend == SpeculativeBackend::Mtp) {
-        const std::uint32_t mtp_tokens    = static_cast<std::uint32_t>(std::min<std::uint64_t>(
-            capacity, static_cast<std::uint64_t>(reserved_context_tokens) + draft_window - 1ULL));
-        base->backend_kv_page_entitlement = pages_for_tokens(mtp_tokens);
-    } else if (speculative_backend == SpeculativeBackend::DFlash) {
-        if constexpr (DFlashConfig::full_layers > 0) {
-            base->backend_kv_page_entitlement = pages_for_tokens(reserved_context_tokens);
-        } else {
-            base->backend_kv_page_entitlement = 0;
-        }
-    }
-    base->summary.admission = runtime::AdmissionResources{
-        .active_lanes     = 1,
-        .main_kv_pages    = base->text_kv_page_entitlement,
-        .backend_kv_pages = base->backend_kv_page_entitlement,
-    };
+    qwen3::detail::ResidentPrefixIdentity initial_identity;
+    initial_identity.assign(prompt);
+    const std::size_t identity_extra =
+        initial_identity.packed_bytes() - 13ULL * initial_identity.size();
+    const std::size_t checkpoint_bound =
+        1 + static_cast<std::size_t>(std::upper_bound(context_marks.begin(), context_marks.end(),
+                                                      base->summary.prompt_tokens) -
+                                     context_marks.begin());
+    const auto lifetime =
+        execution_window(base->summary.prompt_tokens, base->summary.effective_output_tokens,
+                         identity_extra, checkpoint_bound);
+    const auto window = execution_window(base->summary.prompt_tokens,
+                                         chunked_execution_enabled()
+                                             ? std::min({8192U, options.reservation_window_tokens,
+                                                         base->summary.effective_output_tokens})
+                                             : base->summary.effective_output_tokens,
+                                         identity_extra, checkpoint_bound);
+    base->summary.lifetime_admission   = lifetime.admission;
+    base->summary.window_output_tokens = window.output_tokens;
+    base->summary.suspension_bytes     = window.suspension_bytes;
+    base->summary.admission            = window.admission;
+    base->text_kv_page_entitlement     = window.admission.main_kv_pages;
+    base->backend_kv_page_entitlement  = window.admission.backend_kv_pages;
     std::vector<VisionUseSpan> cold_vision_uses;
     if (prompt.has_media()) {
         auto control = std::make_shared<qwen3::VisionControl>(qwen3::build_vision_control(prompt));
@@ -224,13 +221,18 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
         }
         base->rewrite_checkpoint = candidate;
     }
-    base->summary.service_work_quanta =
-        projected_service_work(base->summary, prompt, 0, projected_step_tokens(), cold_vision_uses,
-                               base->rewrite_checkpoint);
-    if (prompt.generation_recovery && base->sampling.p_less) {
+    base->summary.service_work_quanta = projected_service_work(
+        base->summary, prompt, 0, projected_step_tokens(), cold_vision_uses,
+        base->rewrite_checkpoint,
+        kv_ram_system_prompts != 0 && base->cache_write && base->allow_prefix_reuse);
+    if (prompt.generation_recovery) {
         base->summary.service_work_quanta +=
             qwen3::GenerationRecoveryContext::maximum_attempts *
-            (schedule::prefill_chunk_count(reserved_context_tokens, projected_step_tokens()) +
+            (schedule::prefill_chunk_count(base->summary.prompt_tokens +
+                                               (base->summary.effective_output_tokens
+                                                    ? base->summary.effective_output_tokens - 1U
+                                                    : 0U),
+                                           projected_step_tokens()) +
              2ULL);
     }
     return RequestBasePlan(std::move(base));
@@ -340,6 +342,8 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
         speculative_backend == SpeculativeBackend::Mtp ||
             speculative_backend == SpeculativeBackend::DFlash);
     plan.capture_context_checkpoint = base.capture_context_checkpoint;
+    plan.capture_system_prompt =
+        kv_ram_system_prompts != 0 && base.cache_write && base.allow_prefix_reuse;
 
     if (base.vision_control != nullptr) {
         VisionPrefillPlan vision;
@@ -372,8 +376,8 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
         projected_service_work(plan.summary, prompt, plan.reuse_base, projected_step_tokens(),
                                plan.vision ? std::span<const VisionUseSpan>(plan.vision->uses)
                                            : std::span<const VisionUseSpan>{},
-                               plan.rewrite_checkpoint_capture);
-    if (prompt.generation_recovery && plan.sampling.p_less) {
+                               plan.rewrite_checkpoint_capture, plan.capture_system_prompt);
+    if (prompt.generation_recovery) {
         plan.summary.service_work_quanta +=
             qwen3::GenerationRecoveryContext::maximum_attempts *
             (schedule::prefill_chunk_count(plan.summary.prompt_tokens +
@@ -457,6 +461,7 @@ RequestPlan ProgramImplCore::plan_ram_reuse(const PreparedPromptData& prompt,
     }
 
     qwen3::detail::RamRestoredHost host = kv_ram_cache_->load_host(match->entry_id);
+    const bool system_prompt_entry      = kv_ram_cache_->is_system_prompt(match->entry_id);
     ResidentStateView view;
     view.ledger             = &host.ledger;
     view.identity           = &host.identity;
@@ -483,6 +488,7 @@ RequestPlan ProgramImplCore::plan_ram_reuse(const PreparedPromptData& prompt,
     }
     plan->reuse_source = PrefixReuseSource::HostRam;
     plan->ram_entry_id = match->entry_id;
+    if (system_prompt_entry) { plan->system_prompt_cache_hit_tokens = plan->reuse_base; }
     finish_request_plan(*plan, &view, prompt, base);
     return RequestPlan(std::move(plan));
 }

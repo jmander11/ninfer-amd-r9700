@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -13,21 +14,33 @@
 
 namespace ninfer::r9700_qualification {
 
-// This is a physical-target receipt for local baseline measurements, not a device-discovery
-// policy. Construct before the first HIP call, then select exactly the bound PCI function.
+inline std::string configured_pci_bus_id() {
+    const char* value = std::getenv("NINFER_R9700_PCI_BUS_ID");
+    if (value == nullptr || value[0] == '\0')
+        throw std::runtime_error("set NINFER_R9700_PCI_BUS_ID to the R9700 PCI address");
+    const std::string pci(value);
+    if (pci.size() != 12U || pci[4] != ':' || pci[7] != ':' || pci[10] != '.')
+        throw std::runtime_error("NINFER_R9700_PCI_BUS_ID must be domain:bus:device.function");
+    for (std::size_t i = 0; i < pci.size(); ++i) {
+        if (i == 4U || i == 7U || i == 10U) continue;
+        if (!std::isxdigit(static_cast<unsigned char>(pci[i])))
+            throw std::runtime_error("invalid R9700 PCI address");
+    }
+    return pci;
+}
+
+inline std::filesystem::path configured_pci_path() {
+    return std::filesystem::path("/sys/bus/pci/devices") / configured_pci_bus_id();
+}
+
+// Bind measurements to the configured PCI device. Construct before the first HIP call,
+// then select that device.
 class DeviceGuard {
 public:
     DeviceGuard() {
-        const char* requested = std::getenv("NINFER_R9700_PCI_BUS_ID");
-        pci_                  = requested == nullptr ? "0000:13:00.0" : requested;
-        if (pci_.size() != 12U || pci_[4] != ':' || pci_[7] != ':' || pci_[10] != '.')
-            throw std::runtime_error("NINFER_R9700_PCI_BUS_ID must be domain:bus:device.function");
-        for (std::size_t i = 0; i < pci_.size(); ++i) {
-            if (i == 4U || i == 7U || i == 10U) continue;
-            const auto ch = static_cast<unsigned char>(pci_[i]);
-            if (!std::isxdigit(ch)) throw std::runtime_error("invalid R9700 PCI address");
-            pci_[i] = static_cast<char>(std::tolower(ch));
-        }
+        pci_ = configured_pci_bus_id();
+        std::transform(pci_.begin(), pci_.end(), pci_.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         directory_ = "/sys/bus/pci/devices/" + pci_ + '/';
         check_sysfs("before-HIP");
     }

@@ -17,7 +17,7 @@
 
 namespace ninfer::serve {
 
-inline constexpr int kRequestLogSchemaVersion        = 24;
+inline constexpr int kRequestLogSchemaVersion        = 29;
 inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log";
 
 // Closed wire names shared by the request log and the GET /metrics exposition.
@@ -89,6 +89,8 @@ inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log
         return "retry_started";
     case ninfer::RecoveryEventKind::RetryPrefillComplete:
         return "retry_prefill_complete";
+    case ninfer::RecoveryEventKind::ReplayDiscarded:
+        return "replay_discarded";
     case ninfer::RecoveryEventKind::Finished:
         return "finished";
     case ninfer::RecoveryEventKind::Exhausted:
@@ -118,7 +120,12 @@ struct RequestLogContext {
     bool requested_output_tokens_client_set = false;
     std::size_t tool_count                  = 0;
     ToolChoice tool_choice;
-    bool has_tool_history                  = false;
+    bool has_tool_history = false;
+    std::optional<RequestedReasoningEffort> reasoning_effort;
+    std::string reasoning_effort_param;
+    std::optional<ninfer::ReasoningEffort> effective_reasoning_effort;
+    std::optional<std::uint32_t> thinking_token_budget;
+    std::string thinking_token_budget_param;
     bool enable_thinking                   = true;
     bool preserve_thinking                 = false;
     bool preserve_thinking_semantic_change = false;
@@ -223,7 +230,8 @@ std::string format_request_done_json(const std::string& server_instance_id, std:
                                      const GenerationOutcome& outcome);
 std::string format_request_error_json(const std::string& server_instance_id,
                                       std::uint64_t timestamp, const RequestLogContext& context,
-                                      const std::string& message);
+                                      const std::string& message,
+                                      const ninfer::ReasoningLimitStats* reasoning_limit = nullptr);
 std::string format_recovery_event_json(const std::string& server_instance_id,
                                        std::uint64_t timestamp, std::uint64_t request_id,
                                        const ninfer::RecoveryEvent& event);
@@ -256,7 +264,8 @@ public:
     void write_request_start(const RequestLogContext& context);
     void write_request_rejected(const RequestRejectionLogContext& context);
     void write_request_done(const RequestLogContext& context, const GenerationOutcome& outcome);
-    void write_request_error(const RequestLogContext& context, const std::string& message);
+    void write_request_error(const RequestLogContext& context, const std::string& message,
+                             const ninfer::ReasoningLimitStats* reasoning_limit = nullptr);
     void write_recovery(std::uint64_t request_id, const ninfer::RecoveryEvent& event);
     void write_throughput(const ThroughputReport& report);
 

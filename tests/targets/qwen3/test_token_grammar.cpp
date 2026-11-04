@@ -1026,13 +1026,16 @@ int main(int argc, char** argv) {
         auto multi_all_of = Json::parse(tools[0]);
         multi_all_of["function"]["parameters"]["properties"]["limit"] =
             Json{{"allOf", {Json{{"type", "integer"}}, Json{{"minimum", 0}}}}};
-        rejected = false;
-        try {
-            (void)compiler.compile(std::vector<std::string>{multi_all_of.dump()}, false);
-        } catch (const ninfer::RequestError& error) {
-            rejected = error.kind() == ninfer::RequestErrorKind::InvalidToolSchema;
+        const auto conjunction =
+            compiler.compile(std::vector<std::string>{multi_all_of.dump()}, false);
+        for (const auto& [value, valid] : std::vector<std::pair<std::string, bool>>{
+                 {"0", true}, {"2", true}, {"-1", false}, {"0.5", false}}) {
+            xgrammar::GrammarMatcher matcher(conjunction->compiled);
+            check((matcher.AcceptString(
+                       envelope("read", {{"limit", value}, {"filePath", "notes"}})) &&
+                   matcher.IsCompleted()) == valid,
+                  "tool allOf did not enforce every numeric conjunct");
         }
-        check(rejected, "a multi-branch allOf was silently dropped");
     }
     for (const std::string malformed : {"{", R"({"type":"function","function":{"name":7}})"}) {
         bool input_error = false;
@@ -1070,13 +1073,16 @@ int main(int argc, char** argv) {
         auto& property      = constrained["function"]["parameters"]["properties"]["filePath"];
         property["pattern"] = "^[a-z]+$";
         property[bound]     = 4;
-        rejected            = false;
-        try {
-            (void)compiler.compile(std::vector<std::string>{constrained.dump()}, false);
-        } catch (const ninfer::RequestError& error) {
-            rejected = error.kind() == ninfer::RequestErrorKind::InvalidToolSchema;
+        const auto bounded  = compiler.compile(std::vector<std::string>{constrained.dump()}, false);
+        for (const std::string value : {"abc", "abcd", "abcde", "abcd1"}) {
+            const bool valid =
+                value.find('1') == std::string::npos &&
+                (std::string_view(bound) == "minLength" ? value.size() >= 4 : value.size() <= 4);
+            xgrammar::GrammarMatcher matcher(bounded->compiled);
+            check((matcher.AcceptString(envelope("read", {{"limit", "2"}, {"filePath", value}})) &&
+                   matcher.IsCompleted()) == valid,
+                  "tool pattern and length conjunction changed its language");
         }
-        check(rejected, "pattern silently overrode a string length assertion");
     }
     auto alternatives                        = Json::parse(tools[0]);
     const auto string_branch                 = alternatives["function"]["parameters"];
@@ -1120,6 +1126,68 @@ int main(int argc, char** argv) {
     const auto embedded_value = embedded_grammar->decode_call(embedded_call);
     check(embedded_value && Json::parse(embedded_value->arguments_json)["filePath"] == literal,
           "literal XML-looking argument was truncated or interpreted as another parameter");
+    {
+        bool precision_rejected = false;
+        try {
+            (void)compiler.compile(
+                {}, false, false,
+                ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonSchema,
+                                         R"({"const":9007199254740993.0})"});
+        } catch (const ninfer::RequestError& error) {
+            precision_rejected = error.kind() == ninfer::RequestErrorKind::InvalidOutputConstraint;
+        }
+        check(precision_rejected, "direct Engine schema silently rounded a numeric literal");
+        precision_rejected = false;
+        try {
+            (void)compiler.compile(
+                std::vector<std::string>{
+                    R"({"function":{"name":"number","parameters":{"type":"object","properties":{"n":{"const":9007199254740993.0}}}}})"},
+                false);
+        } catch (const ninfer::RequestError& error) {
+            precision_rejected = error.kind() == ninfer::RequestErrorKind::InvalidToolSchema;
+        }
+        check(precision_rejected, "direct Engine tool schema silently rounded a numeric literal");
+    }
+    {
+        const std::string source =
+            R"({"$defs":{"range":{"type":"number","minimum":0.0000001,"maximum":0.0000002}},"type":"object","properties":{"value":{"$ref":"#/$defs/range"}},"required":["value"],"allOf":[{"type":"object"}]})";
+        bool located = false;
+        try {
+            (void)compiler.compile(
+                {}, false, false,
+                ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonSchema, source});
+        } catch (const ninfer::RequestError& error) {
+            located = error.kind() == ninfer::RequestErrorKind::InvalidOutputConstraint &&
+                      error.location() && error.location()->pointer == "/$defs/range" &&
+                      !error.location()->tool_index;
+        }
+        check(located, "response compiler error lost its referenced source schema location");
+        located = false;
+        const std::string failing_tool =
+            Json{{"function", Json{{"name", "narrow_range"}, {"parameters", Json::parse(source)}}}}
+                .dump();
+        try {
+            (void)compiler.compile(std::vector<std::string>{tools.front(), failing_tool}, false);
+        } catch (const ninfer::RequestError& error) {
+            located = error.kind() == ninfer::RequestErrorKind::InvalidToolSchema &&
+                      error.location() && error.location()->pointer == "/$defs/range" &&
+                      error.location()->tool_index == 1;
+        }
+        check(located,
+              "tool compiler error lost its submitted index or referenced source location");
+        const ninfer::OutputConstraint probe{
+            ninfer::OutputConstraintKind::Choice, "", {"diagnostic-cache-probe"}};
+        const auto built     = compiler.compile({}, false, false, probe);
+        const auto hit       = compiler.compile({}, false, false, probe);
+        const auto reasoning = compiler.compile({}, true, false, probe);
+        check(built->constraint.compile_cache == ninfer::ConstraintCompileCache::Built &&
+                  hit->constraint.compile_cache == ninfer::ConstraintCompileCache::Hit &&
+                  reasoning->constraint.compile_cache == ninfer::ConstraintCompileCache::Built,
+              "constraint cache observations did not distinguish source and reasoning framing");
+        check(hit->constraint.active &&
+                  hit->constraint.compile_seconds >= hit->constraint.compile_wait_seconds,
+              "constraint compilation observations are inconsistent");
+    }
     std::cout << "tool grammar failures=" << failures << '\n';
     return failures ? 1 : 0;
 }

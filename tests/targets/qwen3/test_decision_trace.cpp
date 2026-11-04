@@ -125,6 +125,44 @@ void test_graph_execution_is_rejected_when_enabled() {
                  "enabled decision tracing rejects Device Graph execution");
 }
 
+void test_sampling_capture_format() {
+    expect(trace::parse_watch_tokens("248046,248044") == std::vector<std::int32_t>{248046, 248044},
+           "sampling capture retains the explicit stop-token watch list");
+    expect_throw([] { (void)trace::parse_watch_tokens("1,"); }, "empty watch-list entry rejected");
+    expect_throw([] { (void)trace::parse_watch_tokens("-1"); }, "negative watch token rejected");
+    const auto stem =
+        std::filesystem::temp_directory_path() /
+        ("ninfer-sampling-capture-" + std::to_string(static_cast<long long>(getpid())));
+    if (setenv("NINFER_SAMPLING_CAPTURE_PREFIX", stem.c_str(), 1) != 0)
+        throw std::runtime_error("setenv failed");
+    const std::array<std::uint16_t, 8> logits{bf16(1), bf16(2), bf16(3), bf16(99),
+                                              bf16(4), bf16(5), bf16(6), bf16(99)};
+    ninfer::ops::SamplingConfig cfg{};
+    cfg.seed        = 12190875781131817020ULL;
+    cfg.temperature = 1.5F;
+    cfg.p_less      = 1;
+    trace::capture_sampling({{"kind", "dflash_chain"}}, cfg, logits, 4, 2, 3);
+    const auto manifest_path = stem.string() + "-0.json";
+    const auto logits_path   = stem.string() + "-0.bf16";
+    std::ifstream manifest_file(manifest_path);
+    const auto manifest = nlohmann::json::parse(manifest_file);
+    expect(manifest["config"]["seed"].get<unsigned long long>() == cfg.seed &&
+               manifest["logits"]["shape"] == nlohmann::json::array({2, 3}) &&
+               manifest["source_column_pitch_bytes"] == 8 &&
+               manifest["allowed_token_words"].is_null(),
+           "capture preserves integer seed, logical shape, physical pitch and unmasked domain");
+    std::array<std::uint16_t, 6> actual{};
+    std::ifstream logits_file(logits_path, std::ios::binary);
+    logits_file.read(reinterpret_cast<char*>(actual.data()), sizeof(actual));
+    expect(actual ==
+               std::array<std::uint16_t, 6>{bf16(1), bf16(2), bf16(3), bf16(4), bf16(5), bf16(6)},
+           "capture removes physical padding without changing represented BF16 bits");
+    expect_throw([&] { trace::write_capture_bytes(logits_path, actual.data(), sizeof(actual)); },
+                 "sampling capture refuses to overwrite represented inputs");
+    std::filesystem::remove(manifest_path);
+    std::filesystem::remove(logits_path);
+}
+
 } // namespace
 
 int main() {
@@ -132,6 +170,7 @@ int main() {
     test_valid_domain_and_nonfinite_guards();
     test_frontier_and_acceptance_contract();
     test_machine_readable_envelope();
+    test_sampling_capture_format();
     test_graph_execution_is_rejected_when_enabled();
     if (failures != 0) {
         std::cerr << failures << " target decision trace checks failed\n";

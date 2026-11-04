@@ -19,12 +19,15 @@ struct Options {
     std::filesystem::path json_schema_path;
     std::filesystem::path grammar_path;
     bool json_object = false;
+    std::optional<std::string> output_regex;
+    std::vector<std::string> output_choices;
 
-    std::uint32_t max_new              = 128;
-    std::uint32_t max_context          = 2048;
-    KvCapacityPolicy kv_capacity       = KvCapacityPolicy::explicit_capacity(2048);
-    std::size_t kv_ram_capacity_bytes  = 0;
-    std::size_t kv_disk_capacity_bytes = 0;
+    std::uint32_t max_new               = 128;
+    std::uint32_t max_context           = 2048;
+    KvCapacityPolicy kv_capacity        = KvCapacityPolicy::explicit_capacity(2048);
+    std::size_t kv_ram_capacity_bytes   = 0;
+    std::uint32_t kv_ram_system_prompts = 0;
+    std::size_t kv_disk_capacity_bytes  = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
     std::uint32_t prefill_chunk     = kDefaultPrefillChunk;
@@ -37,6 +40,7 @@ struct Options {
     bool capture_context_checkpoint = false;
     std::optional<std::vector<std::uint32_t>> context_checkpoint_marks;
 
+    std::optional<std::uint32_t> thinking_token_budget;
     bool raw_output      = false;
     bool print_token_ids = false;
     bool enable_thinking = true;

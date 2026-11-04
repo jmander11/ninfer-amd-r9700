@@ -1878,9 +1878,11 @@ std::optional<std::size_t> Variant::calibrated_dflash_graph_allowance_bytes(
         !ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled &&
         !ops::r9700::gdn_recurrence::kVerifyWaveQkCandidate && ops::r9700::kv::kFp8QkWmmaDecode &&
         !ops::r9700::kv::kTextP129WmmaTailCandidate;
-    if (!qualified_build || profile != WeightsProfile::R9700Lq4 || features.vision ||
+    const bool qualified_chunk =
+        prefill_chunk == 2048U || (prefill_chunk == 1024U && concurrency == 6U);
+    if (!qualified_build || !is_lq4_text_profile(profile) || features.vision ||
         !features.dflash() || !features.optimized_proposal() || capacity != maximum_context ||
-        concurrency == 0U || concurrency > 8U || prefill_chunk != 2048U || draft_window != 7U ||
+        concurrency == 0U || concurrency > 8U || !qualified_chunk || draft_window != 7U ||
         !adaptive_draft)
         return std::nullopt;
 
@@ -1894,12 +1896,17 @@ std::optional<std::size_t> Variant::calibrated_dflash_graph_allowance_bytes(
         setting("ROC_SKIP_KERNEL_ARG_COPY", "0") &&
         setting("HSA_DISABLE_FRAGMENT_ALLOCATOR", "1")) {
         // Shared run images and the complete C1..8 inventory on HIP 7.15.26333.
+        // C6/chunk1024 uses the same 62-MiB complete inventory; its auto-capacity
+        // and runtime headroom are qualified separately from chunk2048.
         // C1 remeasured after decode hosting and host-allocation changes.
         // profiles/bench/readme-refresh-20261017/
         constexpr std::array<std::size_t, 8> host_argument_graph_mib{72, 56, 60, 60,
                                                                      62, 62, 62, 62};
         return host_argument_graph_mib[concurrency - 1U] << 20U;
     }
+
+    // The chunk1024 measurement applies only to the bulk host-argument route above.
+    if (prefill_chunk != 2048U) { return std::nullopt; }
 
     // Complete immutable inventory, measured separately at every C on gfx1201.
     // profiles/bench/r9700-vram-runtime-budget-20261015/
@@ -2037,7 +2044,7 @@ void Variant::full_attention(const Tensor& normalized_query,
     auto attention_scope                        = workspace.scope();
     const std::size_t attention_workspace_bytes = r9700_full_attention_workspace_capacity_bytes(
         static_cast<std::uint32_t>(normalized_query.ne[2]), cache_read.visible_frontier(),
-        ancestor_masks != nullptr || active_query_rows != nullptr);
+        ancestor_masks != nullptr);
     DeviceSpan attention_workspace{};
     if (attention_workspace_bytes != 0U) {
         attention_workspace = workspace.alloc_bytes(attention_workspace_bytes);
@@ -2934,6 +2941,7 @@ QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
     case WeightsProfile::R9700Q4W8Evaluation:
         return QType::W8G32_F16S;
     case WeightsProfile::R9700Lq4:
+    case WeightsProfile::R9700Lq4VisionBf16:
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) case WeightsProfile::symbol:
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
@@ -3041,6 +3049,7 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile, std
         return ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
                                                     TextConfig::intermediate);
     case WeightsProfile::R9700Lq4:
+    case WeightsProfile::R9700Lq4VisionBf16:
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) case WeightsProfile::symbol:
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
@@ -3052,6 +3061,7 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile, std
 std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profile,
                                                             std::int32_t tokens) {
     validate_profile(profile);
+    if (profile == WeightsProfile::R9700Lq4VisionBf16) return 0U;
     profile = fp8_capped_base_profile(profile);
     switch (profile) {
     case WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation:
@@ -3095,6 +3105,7 @@ std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profi
         return ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
                                                     VisionConfig::merger_hidden);
     case WeightsProfile::R9700Lq4:
+    case WeightsProfile::R9700Lq4VisionBf16:
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) case WeightsProfile::symbol:
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT

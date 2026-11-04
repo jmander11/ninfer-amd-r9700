@@ -25,7 +25,7 @@ using lq4_kernels::round_bf16;      // NOLINT(misc-unused-using-decls): device-p
 using lq4_kernels::silu_pair_value; // NOLINT(misc-unused-using-decls): device-pass use
 using lq4_kernels::U32x4;
 
-// ---- Mid T (T 33..128, kTiles token tiles of 16): eight waves; wave w owns row block w %
+// Mid T (T 33..128, kTiles token tiles of 16): eight waves; wave w owns row block w %
 // kRowBlocks (16 rows) over K split kSplit-ways (w / kRowBlocks). Each 64-column step, the waves of
 // one K split stage that step's T x 64 activation bytes into LDS once for all their row blocks,
 // instead of every 16-row CTA re-reading the whole activation (the small-T route's L2 cost past T
@@ -247,7 +247,7 @@ __device__ __forceinline__ void lds_barrier() {
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 }
 
-// ---- Deep mid-T (T 33..128, codebook weights; deep_shape selects it). The mid-T CTA (kRowBlocks
+// Deep mid-T (T 33..128, codebook weights; deep_shape selects it). The mid-T CTA (kRowBlocks
 // blocks of 16 rows, K split kSplit-ways, each split's T x 64 activation bytes staged in LDS once
 // per step) with kDepth 64-column steps of weight codes, group codes and staging units in flight
 // per wave. Loads return in order: the mid-T kernel issues step s + 1's loads in step s and waits
@@ -470,7 +470,7 @@ __global__ __launch_bounds__(256) void lq4_mid_deep_kernel(KernelArgs a) {
 #endif
 }
 
-// ---- Prefill: a 256-token x 128-row CTA of eight waves (4 along tokens x 2 along rows), each
+// Prefill: a 256-token x 128-row CTA of eight waves (4 along tokens x 2 along rows), each
 // owning 4x4 WMMA fragments. Per 64-column slab every thread decodes one 32-column group of one
 // weight row into the double-buffered LDS tile; the waves read the activation fragments straight
 // from global memory, 32 contiguous bytes per lane, paired with the identical permutation of the

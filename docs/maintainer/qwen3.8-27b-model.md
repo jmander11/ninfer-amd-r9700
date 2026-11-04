@@ -1,24 +1,18 @@
 # Qwen3.8-27B Model Reference
 
-This reference records the exact Text, MTP, Vision, multimodal-position, numeric, and persistent-state
-semantics used by the registered target. Fixed dimensions are encoded in the target's
-`impl/config.h`; artifact assignment and binding are defined in
-[`qwen3.8-27b-artifact.md`](qwen3.8-27b-artifact.md).
+This reference records the exact Text, MTP, Vision, multimodal-position, numeric, and persistent-state semantics used by the registered target. Fixed dimensions are encoded in the target's `impl/config.h`; artifact assignment and binding are defined in [`qwen3.8-27b-artifact.md`](qwen3.8-27b-artifact.md).
 
 ## 1. Model identity
 
-The registered target is Qwen3.8-27B and uses the `qwen3_5` / `qwen3_5_text` architecture names
-in Hugging Face implementations. It is a dense multimodal model with three runtime components:
+The registered target is Qwen3.8-27B and uses the `qwen3_5` / `qwen3_5_text` architecture names in Hugging Face implementations. It is a dense multimodal model with three runtime components:
 
 - a 64-layer hybrid Text decoder;
 - a one-layer MTP draft model;
 - a 27-layer Vision transformer and patch merger.
 
-The target may additionally bind an optional DFlash2 companion when `dflash/` objects are
-present.
+The target may additionally bind an optional DFlash2 companion when `dflash/` objects are present.
 
-The implementation is fixed to this checkpoint shape. A different layer count, hidden size, head
-layout, or Vision tower is a different model implementation rather than a runtime configuration.
+The implementation is fixed to this checkpoint shape. A different layer count, hidden size, head layout, or Vision tower is a different model implementation rather than a runtime configuration.
 
 ## 2. Global dimensions
 
@@ -39,8 +33,7 @@ layout, or Vision tower is a different model implementation rather than a runtim
 | checkpoint position capacity | 262144 |
 | MTP layers | 1 |
 
-Layer `i` is full attention exactly when `(i + 1) % 4 == 0`; all other layers are GDN. The model
-has a dense SwiGLU MLP in every layer and does not contain MoE experts.
+Layer `i` is full attention exactly when `(i + 1) % 4 == 0`; all other layers are GDN. The model has a dense SwiGLU MLP in every layer and does not contain MoE experts.
 
 ### 2.2 Full attention
 
@@ -55,15 +48,9 @@ has a dense SwiGLU MLP in every layer and does not contain MoE experts.
 | Q heads per KV head | 6 |
 | attention scale | `1/sqrt(256) = 0.0625` |
 
-Each query projection also produces a 256-dimensional per-head output gate. Q and K use
-zero-centered `(1+w)` RMSNorm before partial NeoX RoPE. The attention result is multiplied by
-`sigmoid(gate)` before the output projection.
+Each query projection also produces a 256-dimensional per-head output gate. Q and K use zero-centered `(1+w)` RMSNorm before partial NeoX RoPE. The attention result is multiplied by `sigmoid(gate)` before the output projection.
 
-Ordinary decode and prefill use causal visibility through each query's cache position. Packed-tree
-verification additionally supplies one prefix length and one 32-bit ancestor mask per query row:
-logical token `j` is visible exactly when `j < prefix` or bit `j-prefix` is set. The represented
-suffix must contain fewer than 32 tokens. These masks affect QK/softmax/PV visibility only; they do
-not change the FP8-K or INT4-V persistent codec boundary.
+Ordinary decode and prefill use causal visibility through each query's cache position. Packed-tree verification additionally supplies one prefix length and one 32-bit ancestor mask per query row: logical token `j` is visible exactly when `j < prefix` or bit `j-prefix` is set. The represented suffix must contain fewer than 32 tokens. These masks affect QK/softmax/PV visibility only; they do not change the FP8-K or INT4-V persistent codec boundary.
 
 ### 2.3 Gated DeltaNet
 
@@ -82,8 +69,7 @@ not change the FP8-K or INT4-V persistent codec boundary.
 | recurrent state dtype | FP32 |
 | delta-rule scale | `1/sqrt(128)` |
 
-Every group of three V heads shares one Q/K head. GDN state size is fixed per layer and does not grow
-with context length.
+Every group of three V heads shares one Q/K head. GDN state size is fixed per layer and does not grow with context length.
 
 ### 2.4 Vision
 
@@ -105,25 +91,13 @@ with context length.
 
 ### 2.5 Runtime extents
 
-`T` denotes the Text/MTP token extent supplied to an Op. It is any positive tensor extent that
-fits the applicable storage or explicit state capacity. Decode (`T=1`), verification-sized calls,
-and prefill chunks are workload points and private implementation routes, not different Op domains.
-The configured prefill chunk controls target workspace and request decomposition; its default 2048
-does not cap an Op's `T`.
+`T` denotes the Text/MTP token extent supplied to an Op. It is any positive tensor extent that fits the applicable storage or explicit state capacity. Decode (`T=1`), verification-sized calls, and prefill chunks are workload points and private implementation routes, not different Op domains. The configured prefill chunk controls target workspace and request decomposition; its default 2048 does not cap an Op's `T`.
 
-Vision uses different axes. `P` is the aggregate raw-patch count and must be a positive multiple of
-4 because of the 2x2 spatial merge; `V=P/4` is the aggregate merged-token count. The registered 27B
-processor/implementation envelope is `4<=P<=131072` and `1<=V<=32768`, with the frontend's media,
-attention-pair, and prompt budgets imposing any additional request-specific restriction. These
-Vision columns are not Text token `T` and are not expanded beyond that envelope.
+Vision uses different axes. `P` is the aggregate raw-patch count and must be a positive multiple of 4 because of the 2x2 spatial merge; `V=P/4` is the aggregate merged-token count. The registered 27B processor/implementation envelope is `4<=P<=131072` and `1<=V<=32768`, with the frontend's media, attention-pair, and prompt budgets imposing any additional request-specific restriction. These Vision columns are not Text token `T` and are not expanded beyond that envelope.
 
 ### 2.6 DFlash2 companion (Qwen3.8-27B)
 
-Qwen3.8-27B may carry an optional DFlash2 draft companion. The values below are from Hugging Face
-`z-lab/Qwen3.8-27B-DFlash2` revision
-`50307d4c4cde6860d4eee73e2547cd786fe8e8a4` and pinned `z-lab/dflash` `model.py`
-`95c8aeca5e4b4c4f9c0c967c05ab89fa3ed24f4c` (`DFlash2DraftModel`). It is not
-`z-lab/Qwen3.8-27B-DFlash` or a DSpark drafter.
+Qwen3.8-27B may carry an optional DFlash2 draft companion. The values below are from Hugging Face `z-lab/Qwen3.8-27B-DFlash2` revision `50307d4c4cde6860d4eee73e2547cd786fe8e8a4` and pinned `z-lab/dflash` `model.py` `95c8aeca5e4b4c4f9c0c967c05ab89fa3ed24f4c` (`DFlash2DraftModel`). It is not `z-lab/Qwen3.8-27B-DFlash` or a DSpark drafter.
 
 | Field | Value |
 |---|---:|
@@ -149,11 +123,7 @@ Qwen3.8-27B may carry an optional DFlash2 draft companion. The values below are 
 | selector | rank 256, unsorted top-16 |
 | full-context DFlash KV pool | none (`full_layers=0`) |
 
-The companion is five dense Qwen3 decoder blocks at 27B width, not a copy of the target's hybrid
-GDN/full-attention topology. It contains no embedding table, output head, Vision tower, GDN state,
-or projection bias. It reuses the target input embedding and independent target `lm_head` (or the
-`[131072,5120]` Q4 shortlist on the product `--lm-head-draft` path). Internal mask id 248070 is a
-legal tokenizer id used only as the padded query token; it is not a sampled draft.
+The companion is five dense Qwen3 decoder blocks at 27B width, not a copy of the target's hybrid GDN/full-attention topology. It contains no embedding table, output head, Vision tower, GDN state, or projection bias. It reuses the target input embedding and independent target `lm_head` (or the `[131072,5120]` Q4 shortlist on the product `--lm-head-draft` path). Internal mask id 248070 is a legal tokenizer id used only as the padded query token; it is not a sampled draft.
 
 ## 3. Shared decoder layer skeleton
 
@@ -166,12 +136,9 @@ h = RMSNorm(x, post_attention_norm, unit_offset=true)
 x = x + down_proj(SiLU(gate_proj(h)) * up_proj(h))
 ```
 
-The registered `.ninfer` target stores some projection groups as fused logical views, and its
-private kernels may fuse projection, activation, or residual work. Those are storage/execution
-choices; the mathematical result remains the schedule above.
+The registered `.ninfer` target stores some projection groups as fused logical views, and its private kernels may fuse projection, activation, or residual work. Those are storage/execution choices; the mathematical result remains the schedule above.
 
-All ordinary layer norms and Q/K norms use zero-centered weights: the effective scale is `(1+w)`.
-The GDN internal gated norm is a plain ones-initialized RMSNorm and does not use the unit offset.
+All ordinary layer norms and Q/K norms use zero-centered weights: the effective scale is `(1+w)`. The GDN internal gated norm is a plain ones-initialized RMSNorm and does not use the unit offset.
 
 ## 4. Full-attention layer
 
@@ -191,23 +158,11 @@ a = a * sigmoid(gate)
 x = x + o_projection(a)
 ```
 
-Prefill and decode append represented BF16 K/V through the typed cache transaction. The sole
-growing-cache representation stores OCP E4M3FN K plus signed INT4 V with one FP16 scale per selected
-V group; the transaction publishes a new frontier only after every required layer reports zero
-device status. Main Text attention consumes a generation-bound pending or committed layer-read
-capability and evaluates the target-private gfx1201 leaf into FP32 before the explicit BF16 gating
-boundary. Its production route is checked directly against an independent naive FP64 attention
-oracle; the old homogeneous multi-dtype GQA cache contract no longer exists.
+Prefill and decode append represented BF16 K/V through the typed cache transaction. The sole growing-cache representation stores OCP E4M3FN K plus signed INT4 V with one FP16 scale per selected V group; the transaction publishes a new frontier only after every required layer reports zero device status. Main Text attention consumes a generation-bound pending or committed layer-read capability and evaluates the target-private gfx1201 leaf into FP32 before the explicit BF16 gating boundary. Its production route is checked directly against an independent naive FP64 attention oracle; the old homogeneous multi-dtype GQA cache contract no longer exists.
 
-Text-only positions use the same scalar position for temporal, height, and width MRoPE sections.
-Multimodal prefill supplies distinct three-axis positions. Only 64 of each 256-dimensional head are
-rotated, divided across the model's interleaved MRoPE sections `[11,11,10]`.
+Text-only positions use the same scalar position for temporal, height, and width MRoPE sections. Multimodal prefill supplies distinct three-axis positions. Only 64 of each 256-dimensional head are rotated, divided across the model's interleaved MRoPE sections `[11,11,10]`.
 
-For the registered R9700 candidate, attention projection consumes direct artifact-bound matrix
-planes and produces Q, Gate, K, and V without runtime repacking. The complete BF16 source is local;
-the final integer recipe and any projection fusion remain gated on direct model parity, paired
-quality guardrails, and whole-Op/whole-inference timing. The four tensors remain the logical outputs
-regardless of the selected private implementation profile.
+For the registered R9700 candidate, attention projection consumes direct artifact-bound matrix planes and produces Q, Gate, K, and V without runtime repacking. The complete BF16 source is local; the final integer recipe and any projection fusion remain gated on direct model parity, paired quality guardrails, and whole-Op/whole-inference timing. The four tensors remain the logical outputs regardless of the selected private implementation profile.
 
 ## 5. Gated DeltaNet layer
 
@@ -222,46 +177,20 @@ a = in_a(h)       # [48,T]
 b = in_b(h)       # [48,T]
 ```
 
-Q/K/V are concatenated into `[10240,T]` and passed through the depthwise causal width-4 convolution
-and SiLU. Q and K are then L2-normalized per head with epsilon `1e-6`. The production GDN Op always
-receives raw BF16 convolution outputs. Its recurrent implementation keeps normalized values in FP32
-registers; when it selects the chunked implementation, it privately materializes normalized BF16
-q/k for the chunked body and recurrent tail. The decay and update controls `g` and `beta` are
-observable FP32 values with the logical formula:
+Q/K/V are concatenated into `[10240,T]` and passed through the depthwise causal width-4 convolution and SiLU. Q and K are then L2-normalized per head with epsilon `1e-6`. The production GDN Op always receives raw BF16 convolution outputs. Its recurrent implementation keeps normalized values in FP32 registers; when it selects the chunked implementation, it privately materializes normalized BF16 q/k for the chunked body and recurrent tail. The decay and update controls `g` and `beta` are observable FP32 values with the logical formula:
 
 ```text
 g    = -exp(A_log) * softplus(a + dt_bias)
 beta = sigmoid(b)
 ```
 
-For `T=1..16`, the target GDN input-projection leaf keeps QK and V as two independent
-projections but gives each launcher a row slice of the final `[10240,T]` tensor with leading
-dimension 10240. It therefore allocates no concat workspace and performs no input-projection D2D
-copy. The grouped `T>=17` route is unchanged. Public `linear` output remains contiguous-only; the
-pitched row slices are private to this Op implementation.
+For `T=1..16`, the target GDN input-projection leaf keeps QK and V as two independent projections but gives each launcher a row slice of the final `[10240,T]` tensor with leading dimension 10240. It therefore allocates no concat workspace and performs no input-projection D2D copy. The grouped `T>=17` route is unchanged. Public `linear` output remains contiguous-only; the pitched row slices are private to this Op implementation.
 
-Ordinary width-one decode invokes the target's `gdn_input_projection_snapshot` leaf with the
-initial and destination selectors both set to the lane's current slot. This is an in-place state
-update and does not retain a speculative trajectory. MTP target verification instead invokes
-`gdn_input_projection_record`: the leaf combines projection, causal convolution, SiLU, direct
-q/k/v placement, and publication of the represented convolution column to the Program-owned
-ReplaySSM record row while leaving persistent state unchanged. The recurrent stage likewise emits
-raw key/value/gate records; after output resolution, one all-layer Fold applies only the committed
-record prefix to the lane's current state. A continuing DFlash chain row instead defers its Fold
-into its next verification forward. For a batched chain above 32 aggregate tokens, `gdn_replay_prepare_layer` publishes
-convolution history and preserves the committed raw K/V/gate prefix in caller workspace before
-the front overwrites the record row. `gated_delta_net_replay_record` then folds that prefix at
-its initial FP32 state load, publishes the committed state, and continues the current unaccepted
-recurrence without another state read. Smaller forwards and state-observing diagnostic taps retain the front
-Fold (`gdn_replay_fold_layer`, fused into the FP8 front). Both routes are bitwise the all-layer
-Fold; tree and mixed rounds retain their existing Fold ownership.
+Ordinary width-one decode invokes the target's `gdn_input_projection_snapshot` leaf with the initial and destination selectors both set to the lane's current slot. This is an in-place state update and does not retain a speculative trajectory. MTP target verification instead invokes `gdn_input_projection_record`: the leaf combines projection, causal convolution, SiLU, direct q/k/v placement, and publication of the represented convolution column to the Program-owned ReplaySSM record row while leaving persistent state unchanged. The recurrent stage likewise emits raw key/value/gate records; after output resolution, one all-layer Fold applies only the committed record prefix to the lane's current state. A continuing DFlash chain row instead defers its Fold into its next verification forward. For a batched chain above 32 aggregate tokens, `gdn_replay_prepare_layer` publishes convolution history and preserves the committed raw K/V/gate prefix in caller workspace before the front overwrites the record row. `gated_delta_net_replay_record` then folds that prefix at its initial FP32 state load, publishes the committed state, and continues the current unaccepted recurrence without another state read. Smaller forwards and state-observing diagnostic taps retain the front Fold (`gdn_replay_fold_layer`, fused into the FP8 front). Both routes are bitwise the all-layer Fold; tree and mixed rounds retain their existing Fold ownership.
 
-The eliminated qkv intermediate is not a semantic cast boundary; each exact route uses its
-directly oracle-qualified private precision and staging. The separate Z projection remains in the
-target output-gate leaf.
+The eliminated qkv intermediate is not a semantic cast boundary; each exact route uses its directly oracle-qualified private precision and staging. The separate Z projection remains in the target output-gate leaf.
 
-For V head `j`, let `q` and `k` come from Q/K head `j // 3`. With recurrent state
-`S[128,128]`, one token performs:
+For V head `j`, let `q` and `k` come from Q/K head `j // 3`. With recurrent state `S[128,128]`, one token performs:
 
 ```text
 k  = k / ||k||
@@ -273,11 +202,7 @@ S  = S + u outer k
 o  = (S @ q) * (1/sqrt(128))
 ```
 
-The HIP recurrence uses an algebraically equivalent ordering appropriate to the kernel. Normalized
-prefill widths 64..8192 stage normalized FP32 q/k and exp(g) once and run a barrier-free
-token-sequential FP32 recurrence (four state rows per wave); other widths use the general
-sequential kernel. Ordinary decode uses the width-one in-place path, while MTP verification and
-Fold share the same finite-precision recurrent transition through their Record and Fold modes.
+The HIP recurrence uses an algebraically equivalent ordering appropriate to the kernel. Normalized prefill widths 64..8192 stage normalized FP32 q/k and exp(g) once and run a barrier-free token-sequential FP32 recurrence (four state rows per wave); other widths use the general sequential kernel. Ordinary decode uses the width-one in-place path, while MTP verification and Fold share the same finite-precision recurrent transition through their Record and Fold modes.
 
 The per-head output is normalized and gated before projection:
 
@@ -286,34 +211,14 @@ on = gated_rmsnorm(o, gdn_norm, z)    # RMSNorm(o) * SiLU(z)
 x  = x + out_projection(on)
 ```
 
-For `C=max_concurrency`, the Program reserves `C` complete all-layer GDN state slots when speculation
-is off, and `C+1` when MTP or DFlash is on:
+For `C=max_concurrency`, the Program reserves `C` complete all-layer GDN state slots when speculation is off, and `C+1` when MTP or DFlash is on:
 
 - `[0,C)` is the current committed convolution history and FP32 recurrent state for each lane;
-- slot `C` (MTP or DFlash) is Engine-wide GDN storage: the hot turn-rollback occupant, borrowed by
-  prefill context-checkpoint freeze (then reloaded) and by rewrite-checkpoint capture. Staging hidden is a
-  separate `[5120,1]` BF16 tensor, not `[5120,2C]`. DFlash2 checkpoint heads snapshot cyclic through
-  a matching 1-lane Engine-wide staging window (D2D live→staging on compute, D2H from staging on
-  `copy_stream`) so suffix prefill can mutate live local; restore writes the host image back and
-  sets `dflash_context_frontier` to `F`.
+- slot `C` (MTP or DFlash) is Engine-wide GDN storage: the hot turn-rollback occupant, borrowed by prefill context-checkpoint freeze (then reloaded) and by rewrite-checkpoint capture. Staging hidden is a separate `[5120,1]` BF16 tensor, not `[5120,2C]`. DFlash2 checkpoint heads snapshot cyclic through a matching 1-lane Engine-wide staging window (D2D live→staging on compute, D2H from staging on `copy_stream`) so suffix prefill can mutate live local; restore writes the host image back and sets `dflash_context_frontier` to `F`.
 
-The turn (rewrite) checkpoint used by thinking-aware prefix reuse is not a device slot. Each lane
-owns a startup-allocated pinned host image (48 × 60 KiB convolution + 48 × 3 MiB recurrent, plus
-the 40 MiB DFlash cyclic lane when DFlash is on; about 187 MiB per lane) with one completion
-event. Capture runs after the prefill chunk that ends at the rewrite frontier: MTP/DFlash engines
-copy the lane's GDN slot and DFlash lane into the staging slot and staging lane on the compute
-stream, then `copy_stream` drains staging into the image with one linear copy per layer and
-component while later prefill and decode continue. Ordinary engines have no staging slot and copy
-the live slot to the image on the compute stream. Restore copies staging back on device while
-staging still holds that lane's image generation; otherwise the compute stream waits for the
-image event and copies the image to the current slot and DFlash lane with the same per-layer
-linear H2D copies. The rewrite hidden stays a device `[5120,C]` tensor.
+The turn (rewrite) checkpoint used by thinking-aware prefix reuse is not a device slot. Each lane owns a startup-allocated pinned host image (48 × 60 KiB convolution + 48 × 3 MiB recurrent, plus the 40 MiB DFlash cyclic lane when DFlash is on; about 187 MiB per lane) with one completion event. Capture runs after the prefill chunk that ends at the rewrite frontier: MTP/DFlash engines copy the lane's GDN slot and DFlash lane into the staging slot and staging lane on the compute stream, then `copy_stream` drains staging into the image with one linear copy per layer and component while later prefill and decode continue. Ordinary engines have no staging slot and copy the live slot to the image on the compute stream. Restore copies staging back on device while staging still holds that lane's image generation; otherwise the compute stream waits for the image event and copies the image to the current slot and DFlash lane with the same per-layer linear H2D copies. The rewrite hidden stays a device `[5120,C]` tensor.
 
-When MTP or DFlash is enabled, a separate Program-owned ReplaySSM arena holds `C` physical record
-rows for every GDN layer. Its startup-fixed storage width is the maximum captured `K+1` for MTP
-and the maximum resolved captured verify width for DFlash (just the configured width without
-adaptive drafting). Records are pending-round scratch, not sequence state or
-additional checkpoint slots.
+When MTP or DFlash is enabled, a separate Program-owned ReplaySSM arena holds `C` physical record rows for every GDN layer. Its startup-fixed storage width is the maximum captured `K+1` for MTP and the maximum resolved captured verify width for DFlash (just the configured width without adaptive drafting). Records are pending-round scratch, not sequence state or additional checkpoint slots.
 
 ## 6. Text prefill and decode
 
@@ -341,9 +246,7 @@ The eager and Device Graph record/replay paths execute the same model schedule.
 
 ## 7. MTP draft model
 
-The checkpoint contains one MTP decoder layer. It is a small draft model conditioned on both the
-target hidden state and the token that follows it; it is not another `lm_head` attached directly to
-the main decoder.
+The checkpoint contains one MTP decoder layer. It is a small draft model conditioned on both the target hidden state and the token that follows it; it is not another `lm_head` attached directly to the main decoder.
 
 The MTP stem is:
 
@@ -354,37 +257,19 @@ x = fc(concat(e, h))
 attention_residual = RMSNorm(x, input_norm, unit_offset=true)
 ```
 
-The single MTP layer is a full-attention layer with the same 24 Q heads, 4 KV heads, 256 head
-dimension, Q/K norm, partial MRoPE, gated output, and 17408-wide SwiGLU MLP as a Text full-attention
-layer. It has its own one-layer KV cache. A final MTP norm produces the draft hidden state.
+The single MTP layer is a full-attention layer with the same 24 Q heads, 4 KV heads, 256 head dimension, Q/K norm, partial MRoPE, gated output, and 17408-wide SwiGLU MLP as a Text full-attention layer. It has its own one-layer KV cache. A final MTP norm produces the draft hidden state.
 
-MTP reuses the Text embedding and full `lm_head` semantics; the checkpoint does not contain a tied
-MTP embedding/head pair. At proposal sites the runtime may instead use the optional
-`[131072,5120]` Q4 shortlisted head and remap its row index to a real vocabulary id. Target
-verification always uses the full `lm_head`.
+MTP reuses the Text embedding and full `lm_head` semantics; the checkpoint does not contain a tied MTP embedding/head pair. At proposal sites the runtime may instead use the optional `[131072,5120]` Q4 shortlisted head and remap its row index to a real vocabulary id. Target verification always uses the full `lm_head`.
 
 ## 8. DFlash2 block-diffusion draft model
 
-DFlash2 replaces repeated autoregressive draft steps with one masked-block forward. Prefill
-captures the five target residuals after completing layers `5, 19, 33, 47, 61` (Hugging Face
-`hidden_states[layer_id+1]`), projects them with `fc` + `hidden_norm`, and writes cyclic K/V for
-all five draft layers. Decode appends only newly committed target features. Rejected query K/V is
-not context. There is no growing DFlash Full pool.
+DFlash2 replaces repeated autoregressive draft steps with one masked-block forward. Prefill captures the five target residuals after completing layers `5, 19, 33, 47, 61` (Hugging Face `hidden_states[layer_id+1]`), projects them with `fc` + `hidden_norm`, and writes cyclic K/V for all five draft layers. Decode appends only newly committed target features. Rejected query K/V is not context. There is no growing DFlash Full pool.
 
-Context projection binds the 2048 K/V rows of the original 6144-row packed QKV weight as a
-passive row view; it neither computes unused Q rows nor repacks weights. Q4 context layers share
-one producer-written activation image of the context panel, consumed before any subsequent
-producer overwrites that serialized region. One native Op consumes
-the compact BF16 K/V panel, normalizes K per head, applies RoPE, and appends directly to the
-private BF16 cyclic lane selected by device counts and lane IDs. V is copied exactly; rejected
-rows and other lanes remain untouched. The normalization's private BF16 staging is a qualified
-implementation profile, not an extra semantic boundary.
+Context projection binds the 2048 K/V rows of the original 6144-row packed QKV weight as a passive row view; it neither computes unused Q rows nor repacks weights. Q4 context layers share one producer-written activation image of the context panel, consumed before any subsequent producer overwrites that serialized region. One native Op consumes the compact BF16 K/V panel, normalizes K per head, applies RoPE, and appends directly to the private BF16 cyclic lane selected by device counts and lane IDs. V is copied exactly; rejected rows and other lanes remain untouched. The normalization's private BF16 staging is a qualified implementation profile, not an extra semantic boundary.
 
 One propose block:
 
-1. Query rows are the anchor embedding plus the configured K MASK embeddings (id **248070**) at
-   positions `E .. E+K`. The R9700 product uses a single block, K<=7, within the checkpoint's native
-   block capacity. `input_embedding_scale` is 1.0.
+1. Query rows are the anchor embedding plus the configured K MASK embeddings (id **248070**) at positions `E .. E+K`. The R9700 product uses a single block, K<=7, within the checkpoint's native block capacity. `input_embedding_scale` is 1.0.
 2. For each of the five layers, from pinned `Qwen3DFlashDecoderLayer`:
    - `h = RMSNorm(residual, input_norm)`
    - `h, attn_k1 = attention_conv.prepare(h)`
@@ -397,107 +282,38 @@ One propose block:
    - `h = RMSNorm(residual, post_attention_norm)`
    - `h, mlp_k1 = mlp_conv.prepare(h)`; SiLU-GLU MLP; `mlp_conv.finish`; residual add
 3. Final RMSNorm → draft-head logits on the K mask columns (not the anchor).
-4. Path selector (`dflash2_path_select`): unsorted top-16 of those logits, then the Markov score
-   `score = unary + ⟨pred_code(prev) ⊙ W_h h_t , succ_code(cand)⟩`. Greedy chooses the maximum;
-   ordinary truncated sampling draws from the temperature-scaled 16-way distribution and retains
-   that row as `q`. P-less draws from the same 16-way distribution at the row's separate draft
-   temperature (0 is greedy with point-mass q); its own temperature controls the target
-   distribution. `--dflash-p-less-draft-temperature` pins the draft temperature; unset, the
-   Program calibrates it online (below).
-   Selector RNG is keyed by request seed, the round's first position, and the hop, independent of
-   compact batch row. `--lm-head-draft` runs top-16 on the shortlist and gathers codebooks by token id.
-5. The 27B target verifies the chain in one causal forward of width `W=k+1`. Greedy accepts the
-   matching prefix. Sampling uses Leviathan `min(1,p/q)` acceptance and samples the first correction
-   from normalized `max(0,p-q)`; all-accepted rounds sample a target bonus. ReplaySSM Fold commits
-   the corresponding sequential prefix. Under p-less, verification uses the recorded selector q,
-   full eligible-vocabulary target support, and the first-position-only cycle-exit restriction, and
-   replaces per-hop Leviathan with block verification (Sun et al. 2024) over the chain: exact, never
-   shorter in expectation, correction from normalized `max(0, p_τ p' − q)`, bonus from its column's
-   p-less distribution. Draft and block-accept uniforms are keyed by the round's first position and
-   the hop, so a round never reuses a uniform the previous round conditioned on. The R9700 package does not expose
-   packed-tree or two-block runtime schedules. Production performance claims require matched
-   whole-round acceptance and throughput evidence.
+4. Path selector (`dflash2_path_select`): unsorted top-16 of those logits, then the Markov score `score = unary + ⟨pred_code(prev) ⊙ W_h h_t , succ_code(cand)⟩`. Greedy chooses the maximum; ordinary truncated sampling draws from the temperature-scaled 16-way distribution and retains that row as `q`. P-less draws from the same 16-way distribution at the row's separate draft temperature (0 is greedy with point-mass q); its own temperature controls the target distribution. `--dflash-p-less-draft-temperature` pins the draft temperature; unset, the Program calibrates it online (below). Selector RNG is keyed by request seed, the round's first position, and the hop, independent of compact batch row. `--lm-head-draft` runs top-16 on the shortlist and gathers codebooks by token id.
+5. The 27B target verifies the chain in one causal forward of width `W=k+1`. Greedy accepts the matching prefix. Sampling uses Leviathan `min(1,p/q)` acceptance and samples the first correction from normalized `max(0,p-q)`; all-accepted rounds sample a target bonus. ReplaySSM Fold commits the corresponding sequential prefix. Under p-less, verification uses the recorded selector q, full eligible-vocabulary target support, and the first-position-only cycle-exit restriction, and replaces per-hop Leviathan with block verification (Sun et al. 2024) over the chain: exact, never shorter in expectation, correction from normalized `max(0, p_τ p' − q)`, bonus from its column's p-less distribution. Draft and block-accept uniforms are keyed by the round's first position and the hop, so a round never reuses a uniform the previous round conditioned on. The R9700 package does not expose packed-tree or two-block runtime schedules. Production performance claims require matched whole-round acceptance and throughput evidence.
 
-The fixed-policy production campaign compares K4/W5 and K5/W6: four or five predicted drafts from one
-masked block, followed by chain verification whose width includes the anchor. Their companion
-matrix recipe is independently selected from the real BF16 DFlash2 checkpoint among canonical
-Q4G64, source-MSE Q4G64, and source-MSE W8G32, with row-scaled E4M3 conditional on physical and
-quality evidence. Both selector codebooks and all private persistent DFlash state remain BF16.
+The fixed-policy production campaign compares K4/W5 and K5/W6: four or five predicted drafts from one masked block, followed by chain verification whose width includes the anchor. Their companion matrix recipe is independently selected from the real BF16 DFlash2 checkpoint among canonical Q4G64, source-MSE Q4G64, and source-MSE W8G32, with row-scaled E4M3 conditional on physical and quality evidence. Both selector codebooks and all private persistent DFlash state remain BF16.
 
-Optional adaptive drafting is fixed on/off at startup. It reserves and captures the supported
-K graph set (DFlash `{3..N}` for `--draft-tokens N>=5`, MTP `{3,4,5}`), chooses one live K per
-compact batch from measured round time and conditional acceptance, and respects row budgets. For
-DFlash, hops deeper than a request has observed continue its deepest observed conditional
-acceptance, and a newly reached hop starts from that value (Beta weight 4), so a request that
-started at a shallow K can still move to a deeper one. Storage and previous pending feature views keep the maximum
-captured width when K shrinks; only the live proposal/verification views shrink. This policy does
-not change the target sampling law or imply a measured advantage over fixed K.
+Optional adaptive drafting is fixed on/off at startup. It reserves and captures the supported K graph set (DFlash `{3..N}` for `--draft-tokens N>=5`, MTP `{3,4,5}`), chooses one live K per compact batch from measured round time and conditional acceptance, and respects row budgets. For DFlash, hops deeper than a request has observed continue its deepest observed conditional acceptance, and a newly reached hop starts from that value (Beta weight 4), so a request that started at a shallow K can still move to a deeper one. Storage and previous pending feature views keep the maximum captured width when K shrinks; only the live proposal/verification views shrink. This policy does not change the target sampling law or imply a measured advantage over fixed K.
 
-DFlash may consume features from a Vision-conditioned target prefill. Target verification converts
-each lane's logical proposal positions to that lane's MRoPE positions using its position delta;
-draft cyclic state remains the checkpoint-specified BF16 local state.
+DFlash may consume features from a Vision-conditioned target prefill. Target verification converts each lane's logical proposal positions to that lane's MRoPE positions using its position delta; draft cyclic state remains the checkpoint-specified BF16 local state.
 
-**P-less proposal calibration.** Unless `--dflash-p-less-draft-temperature` pins it, the Program
-chooses each p-less chain round's draft temperature `T_d` online (`p_less_draft_calibration.h`).
-A p-less row draws hop j from `q_j = softmax(score_j / T_d)` over its 16 selector candidates, so
-re-tempering the recorded `q_j` gives any other temperature's proposal without drafter work:
-`q'_j ∝ q_j^(T_d/T')`. The chain accept op scores the grid
-`T' ∈ {0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.25}` on every such round:
-`α_j(T') = Σ_c min(p'_j(c), q'_j(c))`, with `p'_j` the represented p-less target law of verify
-column j (typical exclusion at hop 0 only); the values reach the host in the round's egress.
-Per p-less target temperature (eight tracked, least recently observed replaced), the Program keeps
-discounted sums (memory 256 rounds) of the prefix acceptance `S_j(T') = Π_{i≤j} α_i(T')` over
-rounds that drafted hop j, predicts a k-draft chain's committed length `1 + Σ_{j<k} mean S_j(T')`,
-and drafts the next round at the grid temperature with the greatest prediction for that round's
-k. Every candidate is scored on the same verified content, so the choice needs no exploration and
-carries no selection bias; the prediction scores token verification of the drafted prefix, which
-block verification never shortens. Until a temperature has eight discounted rounds the 27B prior
-`clamp(0.8·(T−1), 0.2, 1.25)` applies (0.4 at the production T=1.5). Captured DFlash graphs
-contain the scoring kernel as a startup property. Tied predictions choose the grid temperature
-nearest the prior in log temperature. The device egress starts poisoned with NaNs; an unwritten
-overlap fails calibration. `SpeculativeStats::p_less_draft_temperature` reports the last p-less
-chain round’s temperature (zero when none ran). The calibration changes only
-which valid proposal is drawn; output remains the p-less target distribution. Like adaptive K, it
-makes a request's realized sample for a fixed seed depend on what the Engine verified before,
-including co-scheduled requests; pin the temperature where seed-level reproducibility across batch
-compositions matters.
+**P-less proposal calibration.** Unless `--dflash-p-less-draft-temperature` pins it, the Program chooses each p-less chain round's draft temperature `T_d` online (`p_less_draft_calibration.h`). A p-less row draws hop j from `q_j = softmax(score_j / T_d)` over its 16 selector candidates, so re-tempering the recorded `q_j` gives any other temperature's proposal without drafter work: `q'_j ∝ q_j^(T_d/T')`. The chain accept op scores the grid `T' ∈ {0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.25}` on every such round: `α_j(T') = Σ_c min(p'_j(c), q'_j(c))`, with `p'_j` the represented p-less target law of verify column j (typical exclusion at hop 0 only); the values reach the host in the round's egress.
 
-`GroupedDynamicCausalConv` is grouped size-16, kernel 2, left-padded (causal along the query
-block): `prepare` before the sublayer on the pre-norm hidden, `finish` on that sublayer's output.
+Per p-less target temperature (eight tracked, least recently observed replaced), the Program keeps discounted sums (memory 256 rounds) of the prefix acceptance `S_j(T') = Π_{i≤j} α_i(T')` over rounds that drafted hop j, predicts a k-draft chain's committed length `1 + Σ_{j<k} mean S_j(T')`, and drafts the next round at the grid temperature with the greatest prediction for that round's k. Every candidate is scored on the same verified content, so the choice needs no exploration and carries no selection bias; the prediction scores token verification of the drafted prefix, which block verification never shortens.
+
+Until a temperature has eight discounted rounds the 27B prior `clamp(0.8·(T−1), 0.2, 1.25)` applies (0.4 at the production T=1.5).
+
+Captured DFlash graphs contain the scoring kernel as a startup property. Tied predictions choose the grid temperature nearest the prior in log temperature. The device egress starts poisoned with NaNs; an unwritten overlap fails calibration. `SpeculativeStats::p_less_draft_temperature` reports the last p-less chain round’s temperature (zero when none ran).
+
+The calibration changes only which valid proposal is drawn; output remains the p-less target distribution. Like adaptive K, it makes a request's realized sample for a fixed seed depend on what the Engine verified before, including co-scheduled requests; pin the temperature where seed-level reproducibility across batch compositions matters.
+
+`GroupedDynamicCausalConv` is grouped size-16, kernel 2, left-padded (causal along the query block): `prepare` before the sublayer on the pre-norm hidden, `finish` on that sublayer's output.
 
 ## 9. Speculative round semantics
 
-For `k` configured draft tokens, the runtime prepares a candidate window, runs target verification,
-and accepts only the prefix licensed by the target distribution.
+For `k` configured draft tokens, the runtime prepares a candidate window, runs target verification, and accepts only the prefix licensed by the target distribution.
 
-In greedy mode, MTP and DFlash2 accept the longest draft prefix matching the target argmax. In
-sampling mode both use chain rejection sampling against the represented target distribution
-(per-hop Leviathan for truncated sampling, block verification for p-less). A bad
-draft therefore reduces acceptance and throughput; it must not change the distribution of emitted
-target tokens. DFlash2 differs by producing the whole candidate chain in one masked-block forward.
+In greedy mode, MTP and DFlash2 accept the longest draft prefix matching the target argmax. In sampling mode both use chain rejection sampling against the represented target distribution (per-hop Leviathan for truncated sampling, block verification for p-less). A bad draft therefore reduces acceptance and throughput; it must not change the distribution of emitted target tokens. DFlash2 differs by producing the whole candidate chain in one masked-block forward.
 
-P-less is a full eligible-domain softmax at positive temperature: retain probabilities at least
-`max(sum(p*p)*exp(-2*0.0625/T), 1/1024)` and renormalize. The epsilon relaxation does not lower the
-floor, and the route has no top-k=20 cap. Suppression and tool-schema masks define eligibility
-before this calculation. Legacy top-k/top-p/min-p and frequency/presence penalties are ignored;
-temperature zero remains exact eligible argmax. Thinking-cycle exclusion removes one atom after
-membership (with mode/runner-up fallback), and is applied only at the first round position.
-Transactional tool grammar advances only for published tokens, never for unverified draft paths.
+P-less is a full eligible-domain softmax at positive temperature: retain probabilities at least `max(sum(p*p)*exp(-2*0.0625/T), 1/1024)` and renormalize. The epsilon relaxation does not lower the floor, and the route has no top-k=20 cap. Suppression and tool-schema masks define eligibility before this calculation. Legacy top-k/top-p/min-p and frequency/presence penalties are ignored; temperature zero remains exact eligible argmax. Thinking-cycle exclusion removes one atom after membership (with mode/runner-up fallback), and is applied only at the first round position. Transactional tool grammar advances only for published tokens, never for unverified draft paths.
 
-Target verification writes candidate KV into provisioned but unpublished extents. After the final
-per-row output prefix is known, one all-layer Fold commits the accepted sequential prefix into the
-lane's current state (deferred layer by layer into the next round for continuing DFlash chain rows). The transaction trims rejected KV, commits continuation hidden and MTP or
-DFlash cyclic state, and only then advances the authoritative frontier and publishes output. Near
-context capacity, the Engine falls back to the one-token target path when a complete safe round
-does not fit.
+Target verification writes candidate KV into provisioned but unpublished extents. After the final per-row output prefix is known, one all-layer Fold commits the accepted sequential prefix into the lane's current state (deferred layer by layer into the next round for continuing DFlash chain rows). The transaction trims rejected KV, commits continuation hidden and MTP or DFlash cyclic state, and only then advances the authoritative frontier and publishes output. Near context capacity, the Engine falls back to the one-token target path when a complete safe round does not fit.
 
-Rejected publication/recovery rounds restore typed Text/MTP publication to the round base, undo
-unpublished sampling-count/statistics changes, and invalidate speculative tail state. Reported
-accepted drafts count only the committed licensed prefix. A bounded repetition retry restores a
-complete prompt-frontier checkpoint on the same admitted lane and prefills only the recovery
-suffix, cold-prefilling when none is ready; it never truncates KV at an arbitrary token with stale
-GDN recurrence. Its request budget and publication semantics are defined in
-`concurrent-inference-architecture.md`.
+Rejected publication/recovery rounds restore typed Text/MTP publication to the round base, undo unpublished sampling-count/statistics changes, and invalidate speculative tail state. Reported accepted drafts count only the committed licensed prefix. A bounded repetition retry restores a complete prompt-frontier checkpoint on the same admitted lane and prefills only the recovery suffix, cold-prefilling when none is ready; it never truncates KV at an arbitrary token with stale GDN recurrence. Its request budget and publication semantics are defined in `concurrent-inference-architecture.md`.
 
 ## 10. Vision preprocessing
 
@@ -512,16 +328,11 @@ The native processor accepts structured text/image/video message parts. For each
 7. constructs Vision grids, timestamps, token types, and three-axis text positions;
 8. computes `rope_delta` for subsequent Text decode positions.
 
-Images repeat a frame to form the temporal pair. Videos are sampled at the configured rate and
-packed in temporal pairs. Source bytes, decoded pixels, media count, raw patches, and Vision-token
-budgets reject oversized media work before Vision execution. The computed attention-pair count is
-diagnostic rather than an admission limit. The processor does not impose a separate prompt-token
-ceiling; Engine `max_context` admits the complete rendered text-plus-media prompt.
+Images repeat a frame to form the temporal pair. Videos are sampled at the configured rate and packed in temporal pairs. Source bytes, decoded pixels, media count, raw patches, and Vision-token budgets reject oversized media work before Vision execution. The computed attention-pair count is diagnostic rather than an admission limit. The processor does not impose a separate prompt-token ceiling; Engine `max_context` admits the complete rendered text-plus-media prompt.
 
 ## 11. Vision tower
 
-Patch rows are converted to BF16 and projected into `[1152,P]`. The runtime adds a bilinearly
-interpolated learned 48×48 position table.
+Patch rows are converted to BF16 and projected into `[1152,P]`. The runtime adds a bilinearly interpolated learned 48×48 position table.
 
 Each of the 27 transformer blocks performs:
 
@@ -537,8 +348,7 @@ h = GELU_tanh(fc1(h) + bias)
 x = x + fc2(h) + bias
 ```
 
-Attention is segmented by image or video frame grid using cumulative sequence lengths; unrelated
-media/frame segments do not attend to each other.
+Attention is segmented by image or video frame grid using cumulative sequence lengths; unrelated media/frame segments do not attend to each other.
 
 The merger applies LayerNorm, groups each spatial 2×2 patch block into width 4608, then computes:
 
@@ -546,54 +356,33 @@ The merger applies LayerNorm, groups each spatial 2×2 patch block into width 46
 visual = fc2(GELU_exact(fc1(merged) + bias)) + bias    # [5120,V]
 ```
 
-The result replaces the matching placeholder embedding columns before Text prefill. Vision state is
-not retained for autoregressive decode.
+The result replaces the matching placeholder embedding columns before Text prefill. Vision state is not retained for autoregressive decode.
 
 ## 12. Multimodal positions
 
-The family prepared prompt's `positions` value is axis-major `[3,T]` in temporal, height, width
-order.
+The family prepared prompt's `positions` value is axis-major `[3,T]` in temporal, height, width order.
 
 - ordinary text tokens advance all three axes together;
 - image/video placeholder tokens receive positions derived from the merged Vision grid;
 - following text resumes after the maximum multimodal position;
-- `rope_delta = next_multimodal_position - token_count` converts later scalar decode indices into
-  the correct MRoPE position.
+- `rope_delta = next_multimodal_position - token_count` converts later scalar decode indices into the correct MRoPE position.
 
-The Text RoPE kernel consumes these positions during multimodal prefill and uses the saved
-`rope_delta` during decode. This is why Vision can disappear after prefill while Text positions
-remain consistent.
+The Text RoPE kernel consumes these positions during multimodal prefill and uses the saved `rope_delta` during decode. This is why Vision can disappear after prefill while Text positions remain consistent.
 
 ## 13. Precision and oracle boundaries
 
 - activations are BF16 at public model/operator boundaries;
-- ordinary and Q/K norm oracles evaluate their reductions in FP32/FP64 and compare the declared
-  BF16 outputs; production reduction and staging are route-private choices;
-- GDN `g`, `beta`, and recurrent state are FP32; the chunked prefill route (widths >= 64) forms
-  its intra-chunk and state products as FP16 WMMA with FP32 accumulation and keeps the state in
-  FP32 accumulators (about 5e-4 relative state error versus FP64 on long synthetic runs, inside
-  the GDN Op criterion); decode, verification, and replay routes stay FP32;
-- the ideal GQA oracle evaluates dot products, stable softmax, and value reduction in FP64 from
-  BF16 Q and logical cache values; the BF16 Op output is promoted to FP64 for comparison;
+- ordinary and Q/K norm oracles evaluate their reductions in FP32/FP64 and compare the declared BF16 outputs; production reduction and staging are route-private choices;
+- GDN `g`, `beta`, and recurrent state are FP32; the chunked prefill route (widths >= 64) forms its intra-chunk and state products as FP16 WMMA with FP32 accumulation and keeps the state in FP32 accumulators (about 5e-4 relative state error versus FP64 on long synthetic runs, inside the GDN Op criterion); decode, verification, and replay routes stay FP32;
+- the ideal GQA oracle evaluates dot products, stable softmax, and value reduction in FP64 from BF16 Q and logical cache values; the BF16 Op output is promoted to FP64 for comparison;
 - low-bit weight storage changes representation, not the intended dequantized matrix;
-- the growing cache's ideal logical K is the FP32 decode of its stored E4M3FN byte, and its ideal
-  logical V is the FP32 product of each stored signed INT4 code and its selected FP16 group scale;
-- Text/MTP attention consumes represented BF16 Q and the decoded cache values in the common ideal
-  oracle; a private FP8-Q WMMA challenger is admitted only through its separately named compute
-  profile and the same oracle, PPL, token, and speed gates;
-- the full target `lm_head` is used for prefill, verification, and ordinary decode regardless of
-  draft-head mode.
+- the growing cache's ideal logical K is the FP32 decode of its stored E4M3FN byte, and its ideal logical V is the FP32 product of each stored signed INT4 code and its selected FP16 group scale;
+- Text/MTP attention consumes represented BF16 Q and the decoded cache values in the common ideal oracle; a private FP8-Q WMMA challenger is admitted only through its separately named compute profile and the same oracle, PPL, token, and speed gates;
+- the full target `lm_head` is used for prefill, verification, and ordinary decode regardless of draft-head mode.
 
-These points define public representations and mathematical oracles, not a mandatory kernel
-operation order. Private accumulator precision, matrix-instruction operand staging, intermediate
-materialization, workspace dtype, and reduction association are selected by each implementation
-route and accepted against the Op's criterion for that implementation profile.
+These points define public representations and mathematical oracles, not a mandatory kernel operation order. Private accumulator precision, matrix-instruction operand staging, intermediate materialization, workspace dtype, and reduction association are selected by each implementation route and accepted against the Op's criterion for that implementation profile.
 
-Text/MTP attention qualification covers the registered D256/Hq24/Hkv4 geometry, decode and
-prefill widths, page boundaries, fragmented maps, causal and packed-tree visibility, and malformed
-metadata. Append codec and cached attention are each checked directly against their independent
-exact or FP64 oracle; equality between different private compute profiles is supplementary rather
-than the semantic acceptance criterion.
+Text/MTP attention qualification covers the registered D256/Hq24/Hkv4 geometry, decode and prefill widths, page boundaries, fragmented maps, causal and packed-tree visibility, and malformed metadata. Append codec and cached attention are each checked directly against their independent exact or FP64 oracle; equality between different private compute profiles is supplementary rather than the semantic acceptance criterion.
 
 ## 14. State inventory
 
@@ -614,27 +403,11 @@ Let `C=max_concurrency`.
 | Program scratch | Text/MTP/Vision phase temporaries | one phase in the shared workspace arena |
 | Vision request transient | encoded Vision output `[8192,V]` | active prefix during request begin |
 
-KV memory grows with configured context. The fixed GDN state pool depends on `C` and, when MTP or
-DFlash is on, one extra staging slot; it is independent of the speculative window. Enabling MTP
-or DFlash adds the separate ReplaySSM arena, whose capacity is `C*dflash_verify_width` record columns
-per GDN layer. DFlash2 adds five cyclic windows of capacity 2048
-(current and rewrite, `C` lanes each) plus one Engine-wide 1-lane staging window for context-checkpoint
-D2H, and does not allocate a growing
-DFlash Full pool.
+KV memory grows with configured context. The fixed GDN state pool depends on `C` and, when MTP or DFlash is on, one extra staging slot; it is independent of the speculative window. Enabling MTP or DFlash adds the separate ReplaySSM arena, whose capacity is `C*dflash_verify_width` record columns per GDN layer. DFlash2 adds five cyclic windows of capacity 2048 (current and rewrite, `C` lanes each) plus one Engine-wide 1-lane staging window for context-checkpoint D2H, and does not allocate a growing DFlash Full pool.
 
-The Program freezes its feature set and memory plan at startup. The Qwen3 family builds named
-Text-prefill, ordinary-round, MTP-prefill, MTP-round, and Vision phase capacities from the
-configured execution domains and reserves the maximum as one pure scratch arena. Sequential
-phases and scoped child Ops reuse it. Prefill allocations use
-`min(prefill_chunk,max_context)`; Vision is bounded by both the registered frontend geometry and
-`max_context`.
+The Program freezes its feature set and memory plan at startup. The Qwen3 family builds named Text-prefill, ordinary-round, MTP-prefill, MTP-round, and Vision phase capacities from the configured execution domains and reserves the maximum as one pure scratch arena. Sequential phases and scoped child Ops reuse it. Prefill allocations use `min(prefill_chunk,max_context)`; Vision is bounded by both the registered frontend geometry and `max_context`.
 
-Vision encoded output is not part of that arena: its separate request-transient allocation is
-reserved at startup and only an active prefix is exposed to a request. A zero MTP draft window has no MTP weight view, MTP KV cache, or optimized proposal head. A DFlash
-Engine without `dflash/` objects fails at bind. With Vision disabled, it has no
-Vision weight view, Vision scratch phase, or request-transient allocation; media is rejected by the
-matching Frontend. Device Graph driver allowance is budgeted separately from both arenas. The
-complete artifact inventory is still validated before these resident views are published.
+Vision encoded output is not part of that arena: its separate request-transient allocation is reserved at startup and only an active prefix is exposed to a request. A zero MTP draft window has no MTP weight view, MTP KV cache, or optimized proposal head. A DFlash Engine without `dflash/` objects fails at bind. With Vision disabled, it has no Vision weight view, Vision scratch phase, or request-transient allocation; media is rejected by the matching Frontend. Device Graph driver allowance is budgeted separately from both arenas. The complete artifact inventory is still validated before these resident views are published.
 
 ## 15. Implementation map
 
@@ -657,25 +430,12 @@ complete artifact inventory is still validated before these resident views are p
 | checkpoint-direct source-BF16 Text scorer | `tools/reference/qwen3_8_27b_bf16` |
 | source-BF16 Vision comparison | `tools/parity/qwen3_8_27b` |
 
-The Python reference is an independent executable implementation for model/artifact inspection and
-diagnosis; it is not the per-Op mathematical oracle, does not prescribe private C++ kernel
-precision, and does not define cross-runtime generated-token equality. Each Op is checked against
-its own naive FP32/FP64 or exact oracle. The C++ target
-implements the complete Text/Vision/MTP product over `.ninfer` through the closed Engine
-architecture.
+The Python reference is an independent executable implementation for model/artifact inspection and diagnosis; it is not the per-Op mathematical oracle, does not prescribe private C++ kernel precision, and does not define cross-runtime generated-token equality. Each Op is checked against its own naive FP32/FP64 or exact oracle. The C++ target implements the complete Text/Vision/MTP product over `.ninfer` through the closed Engine architecture.
 
 ## 16. Family runtime and Variant structure
 
-The Qwen3.8-27B execution package (`src/targets/qwen3_8_27b`) instantiates the identity-free
-Qwen3 family runtime (`src/targets/qwen3`).
+The Qwen3.8-27B execution package (`src/targets/qwen3_8_27b`) instantiates the identity-free Qwen3 family runtime (`src/targets/qwen3`).
 
-The family owns the shared `SequencePlan<Variant>`, `RequestPlan<Variant>`, and `Program<Variant>`
-algorithms; frontend and output semantics; Text/Vision/speculative schedules; state transactions;
-workspace composition; and Device Graph capture/replay mechanics. The package owns its registered
-artifact identity and bindings, immutable model view, dimensions/storage facts, three
-closed execution-leaf families (attention projection, GDN projection/control, post-mixer), graph
-frontier data, and Program instance bytes.
+The family owns the shared `SequencePlan<Variant>`, `RequestPlan<Variant>`, and `Program<Variant>` algorithms; frontend and output semantics; Text/Vision/speculative schedules; state transactions; workspace composition; and Device Graph capture/replay mechanics. The package owns its registered artifact identity and bindings, immutable model view, dimensions/storage facts, three closed execution-leaf families (attention projection, GDN projection/control, post-mixer), graph frontier data, and Program instance bytes.
 
-Invariants: no mutable state or device allocation is shared between Programs, and there is no
-runtime family selection or target-dependent branch inside family scheduling. The artifact embeds
-the six frontend resources, and a prepared prompt carries no exact-target tag.
+Invariants: no mutable state or device allocation is shared between Programs, and there is no runtime family selection or target-dependent branch inside family scheduling. The artifact embeds the six frontend resources, and a prepared prompt carries no exact-target tag.

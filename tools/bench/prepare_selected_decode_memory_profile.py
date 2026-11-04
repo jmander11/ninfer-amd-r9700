@@ -8,7 +8,11 @@ import hashlib
 import json
 import os
 import shlex
+import sys
 from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.bench.run_ninfer_bench_matrix import (
     DECODE_ATTENTION_PROFILE,
@@ -24,17 +28,16 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_report_phase_timing,
 )
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
+from tools.r9700.host import power_profile_path
 
 REPO = Path(__file__).resolve().parents[2]
 ROCPROF = Path("/opt/rocm/core-10.0/bin/rocprofv3")
 ROCPROF_AVAIL = Path("/opt/rocm/bin/rocprofv3-avail")
-POWER = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
+POWER = power_profile_path()
 MARKER_SOURCE = REPO / "src/targets/qwen3/impl/runtime/program_impl.h"
 PROFILE_BUILD_DIR = REPO / "build-r9700-selected-ordinary-decode-profile-20260921"
 PROFILE_BUILD_PRODUCER = REPO / "tools/bench/build_selected_decode_profile.py"
-PROFILE_ROUTE_RESOLVER = (
-    REPO / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"
-)
+PROFILE_ROUTE_RESOLVER = REPO / "tools/bench/resolve_selected_route.py"
 COUNTERS = (
     "SQ_WAIT_ANY",
     "SQ_WAIT_INST_ANY",

@@ -303,7 +303,10 @@ __launch_bounds__(kDflash2PathSelectBlock) __global__ void dflash2_path_select_k
                 const float inv_temp = 1.0f / temperature;
                 float sum            = 0.0f;
                 for (int c = 0; c < kDflash2PathSelectK; ++c) {
-                    scores[c] = expf((scores[c] - m) * inv_temp);
+                    const float delta = scores[c] - m;
+                    // A positive subnormal temperature can overflow its reciprocal. Divide
+                    // directly then so a maximal score's zero delta stays zero, including ties.
+                    scores[c] = expf(isfinite(inv_temp) ? delta * inv_temp : delta / temperature);
                     sum += scores[c];
                 }
                 // Keyed by the round's first position and the hop: block verification's accepted

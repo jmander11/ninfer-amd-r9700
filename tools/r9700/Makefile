@@ -17,15 +17,16 @@ PROFILE_DIR ?= ../../profiles/r9700
 ROCM_AUDIT_JSON ?= ../../profiles/r9700/rocm10-tool-capability-audit.json
 ROCM_AUDIT := audit_rocm_tools.py
 ROCM_AUDIT_TEST := test_audit_rocm_tools.py
-TRACE_EVIDENCE_DB ?= ../../profiles/r9700/rocm10-final-trace-page66/HOST/510178_results.db
-PMC_EVIDENCE_DB ?= ../../profiles/r9700/rocm10-final-pmc-page66/HOST/509405_results.db
+# Pass retained capture paths explicitly; no machine-local database defaults.
+TRACE_EVIDENCE_DB ?=
+PMC_EVIDENCE_DB ?=
 TRACE_EVIDENCE_COMMAND ?= ./build/kv_op_qual --context 66 --iterations 1
 PMC_EVIDENCE_COMMAND ?= ./build/kv_op_qual --context 66 --iterations 1
-VALU_EVIDENCE_DB ?= ../../profiles/r9700/rocm10-gfx12-pmc-probe/wave32-valu/HOST/3329702_results.db
-LDS_EVIDENCE_DB ?= ../../profiles/r9700/rocm10-gfx12-pmc-probe/wave32-lds/HOST/3329827_results.db
-TCP_EVIDENCE_DB ?= ../../profiles/r9700/rocm10-gfx12-pmc-probe/tcp/HOST/3329949_results.db
-GL2C_EVIDENCE_DB ?= ../../profiles/r9700/rocm10-gfx12-pmc-probe/gl2c/HOST/3329684_results.db
-GENERIC_VALU_EVIDENCE_DB ?= ../../profiles/r9700/rocm10-pmc-isolated-valu/HOST/524501_results.db
+VALU_EVIDENCE_DB ?=
+LDS_EVIDENCE_DB ?=
+TCP_EVIDENCE_DB ?=
+GL2C_EVIDENCE_DB ?=
+GENERIC_VALU_EVIDENCE_DB ?=
 Q4G64_LINEAR_JSON ?= ../../profiles/bench/r9700-a8q4g64-linear-qualification.json
 Q4_HARDWARE_PEAK_JSON ?= ../../profiles/bench/r9700-q4-hardware-peak-probe.json
 A8Q4_SHAPE_SWEEP_JSON ?= ../../profiles/bench/r9700-a8q4g64-artifact-shape-sweep.json
@@ -874,17 +875,17 @@ run: all
 # Override an evidence path explicitly when validating a newly retained capture.
 rocm-tool-audit: $(ROCM_AUDIT)
 	$(PYTHON) $(ROCM_AUDIT) \
-		--trace-db $(TRACE_EVIDENCE_DB) \
-		--pmc-db $(PMC_EVIDENCE_DB) \
+		--trace-db "$(TRACE_EVIDENCE_DB)" \
+		--pmc-db "$(PMC_EVIDENCE_DB)" \
 		--expected-trace-command "$(TRACE_EVIDENCE_COMMAND)" \
 		--expected-pmc-command "$(PMC_EVIDENCE_COMMAND)" \
-		--zero-probe SQ_INSTS_WAVE32_VALU=$(VALU_EVIDENCE_DB) \
-		--zero-probe SQ_INSTS_WAVE32_LDS=$(LDS_EVIDENCE_DB) \
-		--zero-probe SQ_INSTS_VALU=$(GENERIC_VALU_EVIDENCE_DB) \
-		--zero-probe TCP_REQ=$(TCP_EVIDENCE_DB) \
-		--zero-probe TCP_REQ_MISS=$(TCP_EVIDENCE_DB) \
-		--zero-probe GL2C_HIT=$(GL2C_EVIDENCE_DB) \
-		--zero-probe GL2C_MISS=$(GL2C_EVIDENCE_DB) \
+		--zero-probe SQ_INSTS_WAVE32_VALU="$(VALU_EVIDENCE_DB)" \
+		--zero-probe SQ_INSTS_WAVE32_LDS="$(LDS_EVIDENCE_DB)" \
+		--zero-probe SQ_INSTS_VALU="$(GENERIC_VALU_EVIDENCE_DB)" \
+		--zero-probe TCP_REQ="$(TCP_EVIDENCE_DB)" \
+		--zero-probe TCP_REQ_MISS="$(TCP_EVIDENCE_DB)" \
+		--zero-probe GL2C_HIT="$(GL2C_EVIDENCE_DB)" \
+		--zero-probe GL2C_MISS="$(GL2C_EVIDENCE_DB)" \
 		--output $(ROCM_AUDIT_JSON)
 
 rocm-tool-audit-test: $(ROCM_AUDIT) $(ROCM_AUDIT_TEST)

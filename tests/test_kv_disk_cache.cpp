@@ -130,6 +130,9 @@ void verify_crc() {
     }
 }
 
+std::uint64_t restore_with_submitted_join_check(cache::KVDiskCache& disk, std::uint64_t entry_id,
+                                                const cache::DiskRestoreTarget& target);
+
 void run_roundtrip(ninfer::DeviceContext& device, ninfer::KvDiskCompress compression) {
     TemporaryDirectory directory;
     Pool source_pool(8);
@@ -238,7 +241,7 @@ void run_roundtrip(ninfer::DeviceContext& device, ninfer::KvDiskCompress compres
     target.reuse          = match.value().reuse;
     target.reuse_base     = match.value().reuse_base;
     target.stream         = device.copy_stream;
-    const auto ticket     = reopened.restore_device(match.value().entry_id, target);
+    const auto ticket = restore_with_submitted_join_check(reopened, match.value().entry_id, target);
     reopened.wait_copies(ticket);
     require(!reopened.restore_failed(), "disk restore failed");
     device.synchronize_all();
@@ -271,7 +274,7 @@ void run_roundtrip(ninfer::DeviceContext& device, ninfer::KvDiskCompress compres
     require(!reopened.plan_match(retained, chain), "invalidated corrupt prefix remained reusable");
 }
 
-// ---- Disk I/O stays off the decode and admission paths ----
+// Disk I/O stays off the decode and admission paths.
 
 template <class Predicate>
 bool wait_pred(Predicate predicate, std::chrono::milliseconds limit) {
@@ -280,6 +283,87 @@ bool wait_pred(Predicate predicate, std::chrono::milliseconds limit) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return predicate();
+}
+
+// The compute-round join covers submitted private scatter work, but must not wait for SSD
+// reads that have not produced GPU work yet. An independent stream avoids the full-restore
+// join already present on target.stream masking a missing submitted-work dependency.
+std::uint64_t restore_with_submitted_join_check(cache::KVDiskCache& disk, std::uint64_t entry_id,
+                                                const cache::DiskRestoreTarget& target) {
+    struct Probe {
+        cache::KVDiskCache& disk;
+        hipStream_t stream = nullptr;
+        hipEvent_t done    = nullptr;
+
+        explicit Probe(cache::KVDiskCache& owner) : disk(owner) {
+            HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            try {
+                HIP_CHECK(hipEventCreateWithFlags(&done, hipEventDisableTiming));
+            } catch (...) {
+                (void)hipStreamDestroy(stream);
+                throw;
+            }
+        }
+
+        void release_gates() {
+            disk.test_release_page_read_barrier();
+            disk.test_release_scatter_record_barrier();
+        }
+
+        ~Probe() {
+            release_gates();
+            (void)hipStreamSynchronize(stream);
+            (void)hipEventDestroy(done);
+            (void)hipStreamDestroy(stream);
+        }
+
+        bool ready() const {
+            const hipError_t status = hipEventQuery(done);
+            if (status == hipErrorNotReady) { return false; }
+            HIP_CHECK(status);
+            return true;
+        }
+    } probe(disk);
+
+    std::uint64_t ticket = 0;
+    try {
+        disk.test_arm_page_read_barrier();
+        ticket = disk.restore_device(entry_id, target);
+        require(wait_pred([&] { return disk.test_page_read_entered(); }, std::chrono::seconds(2)),
+                "submitted join fixture did not enter its held SSD read");
+        disk.join_submitted_restore(probe.stream);
+        HIP_CHECK(hipEventRecord(probe.done, probe.stream));
+        require(wait_pred([&] { return probe.ready(); }, std::chrono::seconds(2)),
+                "submitted restore join waited for a future SSD read");
+
+        disk.test_arm_scatter_record_barrier(0);
+        disk.test_release_page_read_barrier();
+        require(wait_pred(
+                    [&] {
+                        disk.pump_restore(target.stream);
+                        return disk.test_scatter_record_entered();
+                    },
+                    std::chrono::seconds(2)),
+                "submitted join fixture did not enqueue its held scatter completion");
+        HIP_CHECK(hipEventRecord(probe.done, probe.stream));
+        require(wait_pred([&] { return probe.ready(); }, std::chrono::seconds(2)),
+                "independent stream could not progress beside the held scatter");
+        disk.join_submitted_restore(probe.stream);
+        HIP_CHECK(hipEventRecord(probe.done, probe.stream));
+        require(!wait_pred([&] { return probe.ready(); }, std::chrono::milliseconds(100)),
+                "submitted restore join omitted the pending private scatter");
+        disk.test_release_scatter_record_barrier();
+        require(wait_pred([&] { return probe.ready(); }, std::chrono::seconds(2)),
+                "submitted restore join did not complete after scatter release");
+        return ticket;
+    } catch (...) {
+        probe.release_gates();
+        if (ticket != 0) {
+            disk.cancel_restore();
+            disk.release_restore_ticket(ticket);
+        }
+        throw;
+    }
 }
 
 // Blocks a stream behind a host callback until released, so copies enqueued after it stay pending.
@@ -372,9 +456,105 @@ std::uint64_t capture_tokens(cache::KVRamCache& ram, Pool& pool,
     return result.entry_id;
 }
 
-std::vector<std::uint8_t> read_bytes(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+struct PackedObjectLocation {
+    std::filesystem::path path;
+    std::uint64_t offset = 0;
+    std::uint64_t extent = 0;
+    std::uint64_t stored = 0;
+};
+
+std::optional<PackedObjectLocation> packed_object_location(const std::filesystem::path& root,
+                                                           cache::DiskObjectKind kind,
+                                                           std::uint64_t id) {
+    const auto bytes = [&]() -> std::vector<std::uint8_t> {
+        std::ifstream in(root / "PACKSET", std::ios::binary);
+        std::vector<std::uint8_t> out((std::istreambuf_iterator<char>(in)), {});
+        return out;
+    }();
+    if (bytes.size() != 32) { return std::nullopt; }
+    std::uint64_t generation = 0;
+    std::memcpy(&generation, bytes.data() + 12, sizeof(generation));
+    auto location_from_payload = [&](const std::array<std::uint8_t, 52>& payload) {
+        std::uint32_t segment = 0;
+        std::uint64_t offset = 0, extent = 0, stored = 0;
+        std::memcpy(&segment, payload.data() + 12, sizeof(segment));
+        std::memcpy(&offset, payload.data() + 16, sizeof(offset));
+        std::memcpy(&extent, payload.data() + 24, sizeof(extent));
+        std::memcpy(&stored, payload.data() + 32, sizeof(stored));
+        char name[32]{};
+        std::snprintf(name, sizeof(name), "%08u.pack", segment);
+        const char* dir = kind == cache::DiskObjectKind::Main      ? "main"
+                          : kind == cache::DiskObjectKind::Backend ? "backend"
+                          : kind == cache::DiskObjectKind::State   ? "state"
+                          : kind == cache::DiskObjectKind::Ledger  ? "ledger"
+                                                                   : "identity";
+        return PackedObjectLocation{root / "packs" / "1" / dir / name, offset, extent, stored};
+    };
+    std::optional<PackedObjectLocation> found;
+    std::ifstream base(root / "maps" / ("objects-" + std::to_string(generation) + ".base"),
+                       std::ios::binary);
+    std::array<std::uint8_t, 48> base_header{};
+    if (base.read(reinterpret_cast<char*>(base_header.data()), base_header.size())) {
+        std::uint64_t count = 0;
+        std::memcpy(&count, base_header.data() + 32, sizeof(count));
+        for (std::uint64_t n = 0; n < count; ++n) {
+            std::array<std::uint8_t, 52> payload{};
+            base.read(reinterpret_cast<char*>(payload.data()), payload.size());
+            if (!base) { return std::nullopt; }
+            std::uint64_t seen = 0;
+            std::memcpy(&seen, payload.data(), sizeof(seen));
+            if (seen == id && payload[8] == static_cast<std::uint8_t>(kind)) {
+                found = location_from_payload(payload);
+            }
+        }
+    }
+    std::ifstream in(root / "maps" / ("objects-" + std::to_string(generation) + ".log"),
+                     std::ios::binary);
+    for (;;) {
+        std::uint32_t frame = 0;
+        in.read(reinterpret_cast<char*>(&frame), sizeof(frame));
+        if (!in) { return found; }
+        if (frame != 60) { return std::nullopt; }
+        std::array<std::uint8_t, 56> frame_payload{};
+        std::uint32_t crc = 0;
+        in.read(reinterpret_cast<char*>(frame_payload.data()), frame_payload.size());
+        in.read(reinterpret_cast<char*>(&crc), sizeof(crc));
+        if (!in) { return found; }
+        if ((frame_payload[0] != 1 && frame_payload[0] != 2 && frame_payload[0] != 3) ||
+            frame_payload[1] != 0 || frame_payload[2] != 0 || frame_payload[3] != 0) {
+            return std::nullopt;
+        }
+        std::array<std::uint8_t, 52> payload{};
+        std::copy(frame_payload.begin() + 4, frame_payload.end(), payload.begin());
+        std::uint64_t seen = 0;
+        std::memcpy(&seen, payload.data(), sizeof(seen));
+        if (seen != id || payload[8] != static_cast<std::uint8_t>(kind)) { continue; }
+        if (frame_payload[0] == 2) {
+            found.reset();
+        } else {
+            found = location_from_payload(payload);
+        }
+    }
+}
+
+std::uint64_t pack_file_bytes(const std::filesystem::path& root) {
+    std::uint64_t bytes = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root / "packs"))
+        if (entry.is_regular_file() && entry.path().extension() == ".pack")
+            bytes += entry.file_size();
+    return bytes;
+}
+
+void fill_pages(Pool& pool, ninfer::PagedKVAllocation& allocation, ninfer::DeviceContext& device,
+                std::uint8_t seed) {
+    const auto bytes = ninfer::paged_kv_logical_page_bytes(*pool.storage);
+    ninfer::PinnedHostBuffer page(bytes);
+    auto* data = static_cast<std::uint8_t*>(page.data());
+    for (std::size_t i = 0; i < bytes; ++i) data[i] = static_cast<std::uint8_t>(i * 31 + seed);
+    for (std::uint32_t i = 0; i < 2; ++i)
+        ninfer::unpack_paged_kv_logical_page_from_host(allocation, *pool.storage, page.data(), i,
+                                                       device.copy_stream);
+    device.synchronize_all();
 }
 
 // A lookup that reuses the whole `tokens` prefix of a TextCapture without tail hidden state.
@@ -618,50 +798,155 @@ void spill_pin_waits_only_its_entry(ninfer::DeviceContext& device) {
     require(spilled, "spill-own-copy spill failed");
 }
 
-// Compaction copies the whole live pack store. Lookups on the scheduler thread must not wait for
-// that copy, and the worker still publishes the new generation.
-void plan_match_during_compaction(ninfer::DeviceContext& device) {
-    TemporaryDirectory directory;
-    Pool pool(8);
-    cache::KVRamCache ram(64ULL << 20);
-    auto allocation = pool.storage->reserve(4);
-    allocation.materialize_pages(3, device.stream);
-    const auto options =
-        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
-    const std::vector<ninfer::TokenId> tokens_a(64, 25);
-    const std::vector<ninfer::TokenId> tokens_b(128, 26);
-    {
-        cache::KVDiskCache disk(options);
-        for (const auto* tokens : {&tokens_a, &tokens_b}) {
-            const auto ram_id = capture_tokens(ram, pool, allocation, device, *tokens);
-            disk.note_ram_resident(ram_id, 0);
-            require(disk.emergency_spill_ram(ram_id), "compaction-lock fixture spill failed");
+// Relocation yields to requests, preserves in-flight readers, and journals each move.
+void bounded_idle_defrag(ninfer::DeviceContext& device) {
+    for (int scenario = 0; scenario < 7; ++scenario) {
+        TemporaryDirectory directory;
+        Pool pool(8);
+        cache::KVRamCache ram(16ULL << 20);
+        auto allocation = pool.storage->reserve(3);
+        allocation.materialize_pages(2, device.stream);
+        const auto options =
+            config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
+        const std::vector<ninfer::TokenId> retained(128, 103);
+        std::uint64_t page = 0;
+        std::vector<std::uint8_t> expected;
+        {
+            cache::KVDiskCache disk(options);
+            for (int round = 0; round < 3; ++round) {
+                fill_pages(pool, allocation, device, static_cast<std::uint8_t>(51 + round));
+                const auto ram_id = capture_tokens(ram, pool, allocation, device,
+                                                   std::vector<ninfer::TokenId>(128, 101 + round));
+                disk.note_ram_resident(ram_id, 0);
+                require(disk.emergency_spill_ram(ram_id), "defrag fixture spill failed");
+                require(ram.evict_one_unpinned(ram_id), "defrag RAM retirement failed");
+                disk.forget_ram_resident(ram_id);
+            }
+            disk.wait_idle_and_fsync();
+            const auto match = plan_tokens(disk, retained);
+            require(match.has_value(), "defrag fixture missing");
+            page = disk.test_main_page_ids(match.value().entry_id).at(0);
+            const auto before =
+                packed_object_location(directory.path, cache::DiskObjectKind::Main, page).value();
+            require(before.offset != 0, "defrag fixture lacks movable page");
+            expected.resize(before.stored);
+            require(disk.test_read_object(cache::DiskObjectKind::Main, page, expected.data(),
+                                          expected.size()),
+                    "defrag oracle read failed");
+            require(disk.test_fifo_evict_one() && disk.test_fifo_evict_one(),
+                    "defrag eviction failed");
+            const auto storage = pack_file_bytes(directory.path);
+            disk.request_idle_spill();
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            require(packed_object_location(directory.path, cache::DiskObjectKind::Main, page)
+                            .value()
+                            .offset == before.offset,
+                    "write-behind relocated without Engine idle permission");
+            if (scenario == 0 || scenario == 1) {
+                UnlockedIoHold hold(disk, scenario == 0 ? cache::DiskUnlockedIo::DefragCopy
+                                                        : cache::DiskUnlockedIo::DefragPublish);
+                disk.set_cache_idle(true);
+                const bool entered = hold.entered();
+                bool admitted      = false;
+                if (entered) {
+                    hold.arm();
+                    admitted = plan_tokens(disk, retained).has_value();
+                    admitted = hold.disarm() && admitted;
+                    disk.set_cache_idle(false);
+                }
+                hold.release();
+                disk.wait_idle_and_fsync();
+                require(entered && admitted, "admission waited for idle relocation");
+                require(packed_object_location(directory.path, cache::DiskObjectKind::Main, page)
+                                .value()
+                                .offset == before.offset,
+                        "cancelled move published");
+            } else if (scenario == 2) {
+                UnlockedIoHold hold(disk, cache::DiskUnlockedIo::PayloadRead);
+                std::vector<std::uint8_t> actual(expected.size());
+                std::atomic<bool> ok{false};
+                std::jthread reader([&] {
+                    ok.store(disk.test_read_object(cache::DiskObjectKind::Main, page, actual.data(),
+                                                   actual.size()));
+                });
+                const bool entered = hold.entered();
+                disk.set_cache_idle(true);
+                const bool moved = wait_pred(
+                    [&] {
+                        const auto loc = packed_object_location(directory.path,
+                                                                cache::DiskObjectKind::Main, page);
+                        return loc && loc->offset < before.offset;
+                    },
+                    std::chrono::seconds(5));
+                const bool preserved =
+                    std::filesystem::file_size(before.path) >= before.offset + before.extent;
+                hold.release();
+                reader.join();
+                require(entered && moved && preserved && ok.load() && actual == expected,
+                        "move invalidated a reader lease");
+            } else if (scenario == 3 || scenario == 4) {
+                UnlockedIoHold hold(disk, scenario == 3 ? cache::DiskUnlockedIo::DefragPublish
+                                                        : cache::DiskUnlockedIo::DefragMapped);
+                disk.set_cache_idle(true);
+                const bool entered = hold.entered();
+                TemporaryDirectory crash;
+                if (entered)
+                    std::filesystem::copy(directory.path, crash.path,
+                                          std::filesystem::copy_options::recursive |
+                                              std::filesystem::copy_options::overwrite_existing);
+                hold.release();
+                require(entered, "durability window not reached");
+                auto recovered_options     = options;
+                recovered_options.location = crash.path;
+                cache::KVDiskCache recovered(recovered_options);
+                std::vector<std::uint8_t> actual(expected.size());
+                const auto loc =
+                    packed_object_location(crash.path, cache::DiskObjectKind::Main, page);
+                require(loc && (loc->offset < before.offset) == (scenario == 4) &&
+                            recovered.test_read_object(cache::DiskObjectKind::Main, page,
+                                                       actual.data(), actual.size()) &&
+                            actual == expected,
+                        "crash recovery selected invalid move");
+            } else {
+                const auto drops = disk.snapshot().drops;
+                disk.test_arm_fault(scenario == 5 ? cache::DiskFaultPoint::AfterMoveAppend
+                                                  : cache::DiskFaultPoint::AfterMoveSync);
+                disk.set_cache_idle(true);
+                require(wait_pred([&] { return disk.snapshot().drops > drops; },
+                                  std::chrono::seconds(5)),
+                        "move durability fault not reached");
+                disk.set_cache_idle(false);
+                disk.wait_idle_and_fsync();
+                require(packed_object_location(directory.path, cache::DiskObjectKind::Main, page)
+                                .value()
+                                .offset == before.offset,
+                        "failed move changed durable location");
+            }
+            disk.set_cache_idle(true);
+            require(wait_pred(
+                        [&] {
+                            const auto loc = packed_object_location(
+                                directory.path, cache::DiskObjectKind::Main, page);
+                            return loc && loc->offset < before.offset &&
+                                   std::filesystem::file_size(loc->path) <
+                                       before.offset + before.extent;
+                        },
+                        std::chrono::seconds(8)),
+                    "idle defrag did not move and trim");
+            disk.set_cache_idle(false);
+            disk.wait_idle_and_fsync();
+            require(pack_file_bytes(directory.path) <= storage &&
+                        disk.snapshot().storage_bytes == pack_file_bytes(directory.path),
+                    "defrag grew or miscounted pack storage");
         }
-        require(disk.test_fifo_evict_one(), "compaction-lock fixture eviction failed");
+        cache::KVDiskCache reopened(options);
+        std::vector<std::uint8_t> actual(expected.size());
+        require(plan_tokens(reopened, retained).has_value() &&
+                    reopened.test_read_object(cache::DiskObjectKind::Main, page, actual.data(),
+                                              actual.size()) &&
+                    actual == expected,
+                "defrag changed persisted payload");
     }
-    const auto before = read_bytes(directory.path / "PACKSET");
-    cache::KVDiskCache disk(options);
-    bool copying         = false;
-    bool prompt_returned = false;
-    bool matched         = false;
-    {
-        UnlockedIoHold copy(disk, cache::DiskUnlockedIo::CompactionCopy);
-        std::jthread maintenance([&] { disk.wait_idle_and_fsync(); });
-        copying = copy.entered();
-        if (copying) {
-            copy.arm();
-            matched         = plan_tokens(disk, tokens_b).has_value();
-            prompt_returned = copy.disarm();
-        }
-        copy.release();
-    }
-    const auto after = read_bytes(directory.path / "PACKSET");
-    require(copying, "compaction-lock maintenance never started copying");
-    require(prompt_returned, "plan_match waited for the compaction copy");
-    require(matched, "compaction-lock lost the retained entry");
-    require(before.size() == 32 && after.size() == 32 &&
-                std::memcmp(before.data() + 12, after.data() + 12, sizeof(std::uint64_t)) != 0,
-            "compaction-lock maintenance did not publish a new generation");
 }
 
 // Retries a non-blocking reclaim until it evicts. Reclaim has side effects, so it must not be a
@@ -721,6 +1006,36 @@ void ram_reclaim_never_blocks_on_disk(ninfer::DeviceContext& device) {
             "non-blocking reclaim never evicted the spilled entry");
     require(disk.snapshot().drops == drops, "non-blocking reclaim dropped an unsaved RAM entry");
     require(on_disk, "reclaimed RAM entry is not on disk");
+}
+
+void ram_reclaim_allocation_failure(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
+    const auto entry =
+        capture_tokens(ram, pool, allocation, device, std::vector<ninfer::TokenId>(64, 47));
+    disk.note_ram_resident(entry, 0);
+    require(disk.emergency_spill_ram(entry), "allocation fixture spill failed");
+    disk.wait_idle_and_fsync();
+    ram.wait_pending_copies();
+    const auto before = disk.snapshot();
+    for (const bool may_block : {false, true}) {
+        cache::KVRamCache::test_fail_next_eviction_snapshot_allocation();
+        require(disk.reclaim_ram_entry(may_block) == cache::RamReclaim::Failed &&
+                    !cache::KVRamCache::test_eviction_snapshot_allocation_pending() &&
+                    ram.fifo_ids() == std::vector<std::uint64_t>{entry} &&
+                    !disk.ram_reclaim_pending(),
+                "reclaim allocation failure escaped or changed its source");
+    }
+    const auto reason = static_cast<std::size_t>(ninfer::KvDiskDropReason::OptionalAlloc);
+    require(disk.snapshot().drop_reasons[reason] == before.drop_reasons[reason] + 2 &&
+                disk.reclaim_ram_entry(false) == cache::RamReclaim::Evicted &&
+                ram.fifo_ids().empty(),
+            "reclaim did not recover after allocation pressure");
 }
 
 // Under sustained load write-behind is still spilling the oldest entry when RAM fills. That entry
@@ -1414,92 +1729,40 @@ void capacity_eviction_tombstone_failure(ninfer::DeviceContext& device, bool qua
     require(restart_ok, "failed eviction round exposed the wrong restart generation");
 }
 
-// Compaction writes and renames PACKSET, and reaps the retired generation (remove_all and
-// directory fsyncs), with the index mutex released. Admission completes while either window is
-// held, and the old generation is gone once the reap finishes.
-void compaction_publish_and_reap_run_without_index_mutex(ninfer::DeviceContext& device) {
+// Repeated FIFO churn must reuse holes without exceeding the actual pack budget.
+void actual_disk_capacity(ninfer::DeviceContext& device) {
     TemporaryDirectory directory;
     Pool pool(8);
-    cache::KVRamCache ram(48ULL << 20);
+    cache::KVRamCache ram(16ULL << 20);
     auto allocation = pool.storage->reserve(3);
     allocation.materialize_pages(2, device.stream);
-    const auto options =
-        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
-    const std::vector<ninfer::TokenId> dropped(64, 101);
-    const std::vector<ninfer::TokenId> retained(128, 102);
+    const auto budget  = 4 * ninfer::paged_kv_logical_page_bytes(*pool.storage) + (128ULL << 10);
+    const auto options = config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, budget);
     {
         cache::KVDiskCache disk(options);
-        for (const auto* tokens : {&dropped, &retained}) {
-            const auto ram_id = capture_tokens(ram, pool, allocation, device, *tokens);
+        for (int round = 0; round < 12; ++round) {
+            fill_pages(pool, allocation, device, static_cast<std::uint8_t>(round));
+            const auto ram_id = capture_tokens(ram, pool, allocation, device,
+                                               std::vector<ninfer::TokenId>(128, 200 + round));
             disk.note_ram_resident(ram_id, 0);
-            require(disk.emergency_spill_ram(ram_id), "compaction-unlocked fixture spill failed");
+            require(disk.emergency_spill_ram(ram_id), "capacity churn spill failed");
+            require(ram.evict_one_unpinned(ram_id), "capacity RAM retirement failed");
+            disk.forget_ram_resident(ram_id);
+            disk.wait_idle_and_fsync();
+            require(pack_file_bytes(directory.path) <= budget &&
+                        disk.snapshot().storage_bytes == pack_file_bytes(directory.path),
+                    "physical pack storage exceeded capacity");
+            require(plan_tokens(disk, std::vector<ninfer::TokenId>(128, 200 + round)).has_value(),
+                    "newest capacity entry missing");
         }
-        require(disk.test_fifo_evict_one(), "compaction-unlocked fixture eviction failed");
+        require(disk.snapshot().evictions > 0, "capacity fixture did not evict");
     }
-    cache::KVDiskCache disk(options);
-    const auto packset           = read_bytes(directory.path / "PACKSET");
-    std::uint64_t old_generation = 0;
-    if (packset.size() == 32) {
-        std::memcpy(&old_generation, packset.data() + 12, sizeof(old_generation));
-    }
-    const auto old_root                = directory.path / "packs" / std::to_string(old_generation);
-    const std::uint64_t retained_entry = planned_entry(disk, retained);
-    require(old_generation != 0 && std::filesystem::exists(old_root) && retained_entry != 0,
-            "compaction-unlocked fixture is invalid");
-    const std::vector<ninfer::TokenId> urgent(64, 103);
-    // Captured up front; it is noted for the disk only while publication is held.
-    const auto urgent_ram = capture_tokens(ram, pool, allocation, device, urgent);
-    bool published        = false;
-    bool publish_admitted = false;
-    bool urgent_deferred  = false;
-    bool reaped           = false;
-    bool reap_admitted    = false;
-    std::atomic<bool> urgent_done{false};
-    std::atomic<bool> urgent_ok{false};
-    {
-        UnlockedIoHold publish(disk, cache::DiskUnlockedIo::CompactionPackset);
-        UnlockedIoHold reap(disk, cache::DiskUnlockedIo::GenerationReap);
-        std::jthread maintenance([&] { disk.wait_idle_and_fsync(); });
-        std::jthread urgent_spill;
-        published = publish.entered();
-        if (published) {
-            publish.arm();
-            const bool round = disk_admission_round(disk, retained, retained_entry);
-            publish_admitted = publish.disarm() && round;
-            // An emergency spill must not install an object writer while the generation switch
-            // is in flight; it starts once publication completes.
-            disk.note_ram_resident(urgent_ram, 0);
-            urgent_spill = std::jthread([&] {
-                try {
-                    urgent_ok.store(disk.emergency_spill_ram(urgent_ram));
-                    // NOLINTNEXTLINE(bugprone-empty-catch): a throw leaves urgent_ok false
-                } catch (...) {}
-                urgent_done.store(true);
-            });
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            urgent_deferred = !urgent_done.load() && !disk.ram_is_durable(urgent_ram);
-            publish.release();
-            reaped = reap.entered();
-            if (reaped) {
-                reap.arm();
-                const bool reap_round = disk_admission_round(disk, retained, retained_entry);
-                reap_admitted         = reap.disarm() && reap_round;
-            }
-        }
-        publish.release();
-        reap.release();
-    }
-    // wait_idle_and_fsync returns only after every in-flight reap has finished.
-    const bool old_removed   = !std::filesystem::exists(old_root);
-    const bool retained_kept = disk_admission_round(disk, retained, retained_entry);
-    require(published, "compaction-unlocked compaction never reached PACKSET publication");
-    require(publish_admitted, "admission waited for compaction PACKSET publication");
-    require(urgent_deferred, "emergency spill ran during compaction PACKSET publication");
-    require(reaped, "compaction-unlocked publication never reaped the retired generation");
-    require(reap_admitted, "admission waited for the retired-generation reap");
-    require(urgent_ok.load(), "emergency spill failed after publication");
-    require(old_removed, "retired pack generation was not reaped");
-    require(retained_kept, "retained entry was lost across the unlocked compaction");
+    cache::KVDiskCache reopened(options);
+    require(plan_tokens(reopened, std::vector<ninfer::TokenId>(128, 211)).has_value(),
+            "capacity churn lost newest entry on restart");
+    require(reopened.snapshot().storage_bytes == pack_file_bytes(directory.path) &&
+                pack_file_bytes(directory.path) <= budget,
+            "reopen miscounted physical storage");
 }
 
 // invalidate_entry never throws or waits for a spill that pins the entry: the quarantine is
@@ -1600,8 +1863,9 @@ void discard_while_spill_pinned_defers_free(ninfer::DeviceContext& device) {
 void run_stall_cases(ninfer::DeviceContext& device) {
     idle_cancel_during_capacity_eviction(device);
     spill_pin_waits_only_its_entry(device);
-    plan_match_during_compaction(device);
+    bounded_idle_defrag(device);
     ram_reclaim_never_blocks_on_disk(device);
+    ram_reclaim_allocation_failure(device);
     ram_reclaim_waits_for_inflight_spill(device);
     ram_reclaim_skips_attempt_captures(device);
     restore_setup_ready_tracks_window_reads(device);
@@ -1614,7 +1878,7 @@ void run_stall_cases(ninfer::DeviceContext& device) {
     capacity_eviction_tombstone_runs_without_index_mutex(device);
     capacity_eviction_tombstone_failure(device, false);
     capacity_eviction_tombstone_failure(device, true);
-    compaction_publish_and_reap_run_without_index_mutex(device);
+    actual_disk_capacity(device);
     invalidate_during_spill_defers_eviction(device);
     discard_while_spill_pinned_defers_free(device);
 }

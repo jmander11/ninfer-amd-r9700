@@ -1,29 +1,24 @@
 #pragma once
 
-// Family host policy for the DFlash2 p-less proposal temperature. No HIP.
+// Host policy for the DFlash2 p-less proposal temperature.
 //
-// A p-less chain round draws hop j from q_j = softmax(score_j / T_d) over the 16 selector
-// candidates and verifies against the p-less target law p'_j. Re-tempering the recorded q_j to
-// any T' needs no drafter work (q_j^(T_d/T') renormalized), so the accept op scores every grid
-// temperature on every round: alpha_j(T') = sum_c min(p'_j(c), q'_j(c)), the per-hop acceptance
-// T' would have had on the same verify columns (ops::speculative_accept_greedy_drafts, proposal
-// calibration). Every temperature is evaluated on the same content, so choosing among them needs
-// no exploration and carries no selection bias.
+// Each hop draws from q_j = softmax(score_j / T_d) over 16 selector candidates and verifies
+// against target law p'_j. Re-tempering to T' only needs q_j^(T_d/T') renormalized, so the
+// accept Op scores every grid temperature on the same verify columns without more drafter work:
+// alpha_j(T') = sum_c min(p'_j(c), q'_j(c)). Comparing temperatures needs no exploration.
 //
-// Per p-less target temperature T, the policy keeps discounted sums of the prefix acceptance
-// S_j(T') = prod_{i<=j} alpha_i(T') over rounds that drafted hop j, and predicts the accepted
-// length of a k-draft chain as 1 + sum_{j<k} mean S_j(T'). The round's draft temperature is the
-// grid temperature with the greatest prediction for the round's k. The estimate scores token
-// verification of the drafted prefix; block verification accepts at least as much, and offline
-// replay ranked proposal laws identically under both. Until a temperature has kWarmRounds of
-// evidence, the Variant's prior applies, and grid temperatures the evidence does not separate
-// resolve to the one nearest that prior.
+// For each target temperature T, keep discounted prefix acceptance sums
+// S_j(T') = prod_{i<=j} alpha_i(T') over rounds that drafted hop j. Predict the yield of a
+// k-draft chain as 1 + sum_{j<k} mean S_j(T') and choose the grid temperature with greatest
+// yield. Use the Variant's prior until kWarmRounds of evidence; ties favor the nearest prior.
+// This estimate scores token verification. Block verification accepts at least as much, and
+// offline replay ranked proposal laws identically under both.
 //
-// The product of per-hop overlaps is a deliberately low-variance estimate. The exact
-// block-verification acceptance P(tau >= j) = E[W_{j-1} * sum_c min(q'_j(c), p_{j-1} p'_j(c))],
-// with p the verifier's carried weight and W the importance weight of the realized prefix under
-// T', is unbiased for every T' but its per-round spread is about ten times larger on recorded
-// rounds, and inside this memory it selects worse than the product does.
+// The product estimate has lower variance than exact block-verification acceptance:
+// P(tau >= j) = E[W_{j-1} * sum_c min(q'_j(c), p_{j-1} p'_j(c))], where p is the carried
+// verifier weight and W is the realized prefix's importance weight under T'. The exact estimate
+// is unbiased for every T', but its per-round spread was about ten times larger on recorded
+// rounds and it chose worse temperatures over this policy's memory window.
 
 #include "ninfer/ops/p_less_proposal_calibration.h"
 

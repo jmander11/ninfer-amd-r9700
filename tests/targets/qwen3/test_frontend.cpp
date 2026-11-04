@@ -2,6 +2,7 @@
 #include <ninfer/targets/qwen3/frontend_resources.h>
 #include <ninfer/targets/qwen3/generation_recovery.h>
 
+#include "runtime/contract/reasoning_recovery.h"
 #include "targets/qwen3/impl/frontend/chat_template.h"
 #include "targets/qwen3/impl/frontend/encoded_history_cache.h"
 #include "targets/qwen3/impl/frontend/processor.h"
@@ -350,6 +351,17 @@ int test_official_tokenizer_merge() {
         failures += check(encoded == std::vector<int>{id} && tokenizer.is_special_token(id) &&
                               tokenizer.decode_token_bytes(id) == text,
                           "official tokenizer_config.json token did not merge exactly");
+    }
+
+    // Frozen independent official-tokenizer results exercise heap adjacency invalidation,
+    // rank ties and the short/long word boundary, including represented NFC text.
+    const auto merge_cases =
+        nlohmann::json::parse(read_file(NINFER_SOURCE_DIR "/tests/fixtures/tokenizer_merge.json"));
+    for (const auto& item : merge_cases.at("cases")) {
+        const auto expected = item.at("expected").get<std::vector<int>>();
+        failures +=
+            check(tokenizer.encode(item.at("text").get<std::string>()) == expected,
+                  ("official BPE rank regression: " + item.at("name").get<std::string>()).c_str());
     }
 
     FrontendResources conflicting = resources();
@@ -1626,6 +1638,443 @@ int test_single_reasoning_close(const Frontend& frontend) {
     return failures;
 }
 
+int test_reasoning_token_limit(const Frontend& frontend) {
+    using ninfer::FinishReason;
+    using ninfer::OutputChannel;
+    using ninfer::TokenId;
+    using ninfer::runtime::ReasoningLimitAction;
+    int failures = 0;
+    ninfer::PromptInput input;
+    ninfer::ChatMessage user;
+    user.role = ninfer::ChatRole::User;
+    user.parts.push_back({.text = "x"});
+    input.messages.push_back(user);
+    input.options.enable_thinking = true;
+    const auto prompt             = frontend.prepare(input);
+    const ninfer::OutputOptions cap{.thinking_token_budget = 1};
+    auto session = frontend.make_output_session(prompt, {}, cap);
+    failures += check(session.has_token_masks(), "reasoning cap did not enable framing masks");
+    const std::array<TokenId, 4> nodes{0, 1, 248069, 15};
+    const std::array<std::int32_t, 4> parents{-1, 0, 1, 2};
+    std::vector<std::uint32_t> masks(nodes.size() * fi::TokenGrammarState::mask_words);
+    const auto permits = [&](std::size_t node, TokenId token) {
+        return ((masks[node * fi::TokenGrammarState::mask_words +
+                       static_cast<std::size_t>(token) / 32] >>
+                 (static_cast<unsigned>(token) % 32)) &
+                1U) != 0;
+    };
+    session.fill_token_masks(nodes, parents, masks);
+    failures += check(permits(0, 1) && permits(1, 248069) && !permits(1, 15) &&
+                          !permits(2, 248069) && permits(2, 15),
+                      "reasoning cap did not fork the exact speculative eligibility boundary");
+    auto decision =
+        session.preview(std::array<TokenId, 3>{1, 248069, 15}, 10, FinishReason::OutputLimit);
+    failures += check(decision.accepted_tokens == 1 && !decision.finished(),
+                      "reasoning boundary accepted speculative answer or close prematurely");
+    session.discard_preview();
+    failures += check(session.reasoning_limit_stats().used_tokens == 0 &&
+                          !session.reasoning_limit_forced_close_token(),
+                      "rejected reasoning proposal consumed the committed allowance");
+    (void)session.preview(std::array<TokenId, 1>{1}, 10, FinishReason::OutputLimit);
+    failures +=
+        check(channel_text(session.commit_preview(), OutputChannel::Reasoning) == "helloST" &&
+                  session.reasoning_limit_stats().used_tokens == 1 &&
+                  session.reasoning_limit_forced_close_token() == 248069,
+              "committed reasoning body failed to reach the exact cap");
+    decision = session.preview(std::array<TokenId, 2>{248069, 15}, 9, FinishReason::OutputLimit);
+    failures +=
+        check(decision.accepted_tokens == 1 && session.preview_token_channels()[0] == std::nullopt,
+              "policy close was not isolated framing without channel confidence");
+    (void)session.commit_preview();
+    failures +=
+        check(!session.in_reasoning() && session.reasoning_limit_stats().forced_closes == 1 &&
+                  session.reasoning_limit_stats().used_tokens == 1,
+              "forced close changed reasoning allowance or failed to close");
+    (void)session.preview(std::array<TokenId, 1>{15}, 1, FinishReason::OutputLimit);
+    failures += check(channel_text(session.commit_preview(), OutputChannel::Content) == "answer",
+                      "reasoning limit prevented ordinary answer continuation");
+
+    auto natural = frontend.make_output_session(prompt, {}, {.thinking_token_budget = 3});
+    (void)natural.preview(std::array<TokenId, 2>{3, 4}, 10, FinishReason::OutputLimit);
+    (void)natural.commit_preview();
+    failures += check(!natural.in_reasoning() && natural.reasoning_limit_stats().used_tokens == 1 &&
+                          natural.reasoning_limit_stats().forced_closes == 0,
+                      "textual close framing was charged as reasoning or marked forced");
+    auto partial = frontend.make_output_session(prompt, {}, cap);
+    (void)partial.preview(std::array<TokenId, 1>{3}, 10, FinishReason::OutputLimit);
+    failures +=
+        check(channel_text(partial.commit_preview(), OutputChannel::Reasoning) == "thought</thi",
+              "partial closing marker escaped the capped reasoning channel");
+    (void)partial.preview(std::array<TokenId, 1>{248069}, 9, FinishReason::OutputLimit);
+    failures += check(channel_text(partial.commit_preview(), OutputChannel::Content).empty(),
+                      "native forced close leaked a partial marker into answer text");
+    auto utf8 = frontend.make_output_session(prompt, {}, cap);
+    (void)utf8.preview(std::array<TokenId, 1>{10}, 10, FinishReason::OutputLimit);
+    failures +=
+        check(channel_text(utf8.commit_preview(), OutputChannel::Reasoning) == kUtf8Replacement &&
+                  utf8.reasoning_limit_stats().used_tokens == 1,
+              "incomplete UTF-8 hid a committed reasoning token at the cap");
+
+    auto constrained_input = input;
+    constrained_input.options.output_constraint =
+        ninfer::OutputConstraint{ninfer::OutputConstraintKind::Grammar, "root ::= \"answer\""};
+    const auto constrained_prompt = frontend.prepare(constrained_input);
+    for (const TokenId fragment : {TokenId{10}, TokenId{3}}) {
+        auto constrained = frontend.make_output_session(constrained_prompt, {}, cap);
+        (void)constrained.preview(std::array<TokenId, 1>{fragment}, 10, FinishReason::OutputLimit);
+        (void)constrained.commit_preview();
+        const std::array<TokenId, 1> root{0};
+        const std::array<std::int32_t, 1> root_parent{-1};
+        std::vector<std::uint32_t> mask(fi::TokenGrammarState::mask_words);
+        constrained.fill_token_masks(root, root_parent, mask);
+        failures += check((mask[248069 / 32] & (1U << (248069 % 32))) != 0,
+                          "pending reasoning fragment made constrained close ineligible");
+        (void)constrained.preview(std::array<TokenId, 1>{248069}, 9, FinishReason::OutputLimit);
+        constrained.discard_preview();
+        failures += check(constrained.in_reasoning() &&
+                              constrained.reasoning_limit_stats().forced_closes == 0,
+                          "discarded semantic close reset committed constrained grammar");
+        (void)constrained.preview(std::array<TokenId, 1>{248069}, 9, FinishReason::OutputLimit);
+        (void)constrained.commit_preview();
+        decision = constrained.preview(std::array<TokenId, 2>{15, 6}, 8, FinishReason::OutputLimit);
+        failures += check(decision.finish_reason == FinishReason::StopToken &&
+                              channel_text(constrained.commit_preview(), OutputChannel::Content) ==
+                                  "answer" &&
+                              constrained.reasoning_limit_stats().forced_closes == 1,
+                          "semantic first close failed to preserve constrained answer grammar");
+    }
+
+    auto retry =
+        frontend.make_output_session(prompt, {}, cap, false, nullptr, ReasoningLimitAction::Retry);
+    (void)retry.preview(std::array<TokenId, 2>{1, 15}, 10, FinishReason::OutputLimit);
+    (void)retry.commit_preview();
+    failures += check(retry.reasoning_limit_retry_required(),
+                      "budget retry incorrectly depended on generation recovery enabling");
+    input.options.enable_thinking = false;
+    const auto nonthinking_prompt = frontend.prepare(input);
+    auto replacement = frontend.make_output_session(nonthinking_prompt, {}, cap, false, &retry,
+                                                    ReasoningLimitAction::Retry);
+    failures +=
+        check(!replacement.in_reasoning() && !replacement.reasoning_limit_retry_required() &&
+                  replacement.reasoning_limit_stats().used_tokens == 1 &&
+                  replacement.reasoning_limit_stats().retries == 1,
+              "budget retry lost cumulative usage or retained a pending retry");
+    (void)replacement.preview(std::array<TokenId, 1>{15}, 1, FinishReason::OutputLimit);
+    failures +=
+        check(channel_text(replacement.commit_preview(), OutputChannel::Content) == "answer",
+              "exhausted reasoning budget blocked nonthinking replacement output");
+
+    auto terminal =
+        frontend.make_output_session(prompt, {}, cap, false, nullptr, ReasoningLimitAction::Retry);
+    decision = terminal.preview(std::array<TokenId, 1>{1}, 1, FinishReason::OutputLimit);
+    (void)terminal.commit_preview();
+    failures += check(decision.finish_reason == FinishReason::OutputLimit &&
+                          !terminal.reasoning_limit_retry_required() &&
+                          terminal.reasoning_limit_stats().forced_closes == 0,
+                      "reasoning policy overrode the total output limit");
+    ninfer::StopPolicy stop;
+    stop.token_ids = {248069};
+    auto stopped   = frontend.make_output_session(prompt, stop, cap);
+    (void)stopped.preview(std::array<TokenId, 1>{1}, 10, FinishReason::OutputLimit);
+    (void)stopped.commit_preview();
+    decision = stopped.preview(std::array<TokenId, 1>{248069}, 9, FinishReason::OutputLimit);
+    (void)stopped.commit_preview();
+    failures += check(decision.finish_reason == FinishReason::StopToken &&
+                          stopped.reasoning_limit_stats().forced_closes == 0,
+                      "policy intervention replaced an explicit caller stop");
+    for (const auto invalid : {ninfer::OutputOptions{.thinking_token_budget = 0},
+                               ninfer::OutputOptions{.raw = true, .thinking_token_budget = 1}}) {
+        failures += check(throws_invalid_argument(
+                              [&] { (void)frontend.make_output_session(prompt, {}, invalid); }),
+                          "contradictory reasoning budget was accepted");
+    }
+    failures += check(throws_invalid_argument(
+                          [&] { (void)frontend.make_output_session(nonthinking_prompt, {}, cap); }),
+                      "nonthinking request silently ignored its reasoning budget");
+    return failures;
+}
+
+int test_reasoning_replay_publication() {
+    auto owned     = resources();
+    auto tokenizer = nlohmann::json::parse(owned.tokenizer_json);
+    // Tool declarations are literal template input; use the same complete ASCII
+    // component vocabulary as the existing declared-tool publication regressions.
+    auto& vocab = tokenizer["model"]["vocab"];
+    for (int byte = 32; byte < 256; ++byte) {
+        const auto symbol = byte_level_symbol(static_cast<std::uint8_t>(byte));
+        if (!vocab.contains(symbol)) { vocab[symbol] = 1000 + byte; }
+    }
+    owned.tokenizer_json = tokenizer.dump();
+    const auto frontend  = FrontendFactory::create_component(owned);
+    using ninfer::FinishReason;
+    using ninfer::OutputChannel;
+    using ninfer::TokenId;
+    int failures = 0;
+    const std::vector<TokenId> reference(256, 0);
+    const auto step = [&](auto& session, std::span<const TokenId> tokens,
+                          std::uint32_t budget = 10000, bool caller = false) {
+        const auto decision = session.preview(tokens, budget, FinishReason::OutputLimit);
+        const auto channels = session.preview_token_channels();
+        std::vector<ninfer::TokenLogprob> logprobs;
+        for (std::size_t j = 0; j < channels.size(); ++j) {
+            if (channels[j] == OutputChannel::Content) {
+                logprobs.push_back({.token = tokens[j], .logprob = -0.25F});
+            }
+        }
+        auto published = session.commit_preview();
+        for (auto& delta : published) {
+            if (!delta.tool_call && delta.channel == OutputChannel::Content) {
+                delta.logprobs = std::move(logprobs);
+                break;
+            }
+        }
+        return std::pair{decision, session.filter_reasoning_replay(std::move(published),
+                                                                   decision.finish_reason, caller)};
+    };
+    const auto content_logprobs = [](const auto& publication) {
+        std::size_t count = 0;
+        for (const auto& delta : publication.output) {
+            if (delta.channel == OutputChannel::Content) { count += delta.logprobs.size(); }
+        }
+        return count;
+    };
+    for (const bool tools : {false, true}) {
+        ninfer::PromptInput input;
+        ninfer::ChatMessage user;
+        user.role = ninfer::ChatRole::User;
+        user.parts.push_back({.text = "x"});
+        input.messages.push_back(user);
+        input.options.enable_thinking = true;
+        if (tools) {
+            input.options.tool_jsons.push_back(
+                R"({"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{},"additionalProperties":false}}})");
+        }
+        const auto prompt = frontend.prepare(input);
+        const auto fresh  = [&] { return frontend.make_output_session(prompt, {}, {}, true); };
+        const auto start  = [&](auto& session) {
+            (void)step(session, reference);
+            (void)step(session, std::array<TokenId, 1>{248069});
+        };
+        const auto repair = [&](auto& session) {
+            start(session);
+            const auto held = step(session, reference);
+            failures += check(held.second.output.empty(), "initial exact replay was published");
+            const auto repaired = step(session, std::array<TokenId, 1>{248069});
+            failures += check(
+                repaired.second.output.empty() && repaired.second.discarded_content_tokens == 256 &&
+                    repaired.second.framing_repairs == 1 && !repaired.second.retry_required,
+                "corroborated replay did not perform one bounded framing repair");
+        };
+
+        if (!tools) {
+            auto boundary = fresh();
+            (void)step(boundary, reference);
+            failures += check(!boundary.has_token_masks(),
+                              "plain reasoning did unnecessary replay hypothesis work");
+            const auto close_boundary = boundary.preview(std::array<TokenId, 2>{248069, 15}, 10000,
+                                                         FinishReason::OutputLimit);
+            failures += check(close_boundary.accepted_tokens == 1,
+                              "plain first close did not end its speculative prefix");
+            auto first_close = boundary.commit_preview();
+            (void)boundary.filter_reasoning_replay(std::move(first_close),
+                                                   close_boundary.finish_reason, false);
+            failures += check(boundary.has_token_masks(),
+                              "committed plain reasoning close did not enable replay masks");
+        }
+
+        auto session = fresh();
+        start(session);
+        (void)step(session, std::array<TokenId, 1>{14}); // stripped framing whitespace
+        (void)step(session, std::span(reference).first(255));
+        failures += check(session.has_token_masks() && !session.suppressed_reasoning_end_token(),
+                          "replay masks were overridden by static reasoning-close suppression");
+        const std::array<TokenId, 4> nodes{0, 0, 248069, 15};
+        const std::array<std::int32_t, 4> parents{-1, 0, 1, 2};
+        std::vector<std::uint32_t> masks(nodes.size() * fi::TokenGrammarState::mask_words);
+        const auto permits = [&](std::size_t node, TokenId token) {
+            return (masks[node * fi::TokenGrammarState::mask_words +
+                          static_cast<std::size_t>(token) / 32] >>
+                    (static_cast<unsigned>(token) % 32)) &
+                   1U;
+        };
+        session.fill_token_masks(nodes, parents, masks);
+        failures += check(!permits(0, 248069) && permits(1, 248069) && !permits(2, 248069) &&
+                              permits(2, 15),
+                          "hypothetical exact replay/repair masks disagree with committed policy");
+        (void)session.preview(std::array<TokenId, 1>{0}, 10000, FinishReason::OutputLimit);
+        session.discard_preview();
+        session.fill_token_masks(nodes, parents, masks);
+        failures += check(!permits(0, 248069) && permits(1, 248069),
+                          "discarded replay preview changed committed matching state");
+        (void)step(session, std::array<TokenId, 1>{0});
+        const auto close = step(session, std::array<TokenId, 3>{248069, 15, 6});
+        failures +=
+            check(close.first.accepted_tokens == 1 && !close.first.finished() &&
+                      close.second.framing_repairs == 1 &&
+                      close.second.discarded_content_tokens == 256 && close.second.output.empty(),
+                  "repair did not cut before the same-round answer tail");
+        const auto answer = step(session, std::array<TokenId, 2>{15, 6});
+        failures += check(channel_text(answer.second.output, OutputChannel::Content) == "answer" &&
+                              !answer.second.retry_required && content_logprobs(answer.second) == 1,
+                          "post-repair novel answer was hidden or retried");
+
+        auto repeat = fresh();
+        repair(repeat);
+        auto tail = reference;
+        tail.push_back(15);
+        tail.push_back(6);
+        const auto repeated = step(repeat, tail);
+        failures += check(
+            repeated.first.accepted_tokens == reference.size() && !repeated.first.finished() &&
+                repeated.second.retry_required && repeated.second.discarded_content_tokens == 256 &&
+                repeated.second.framing_repairs == 0 && repeated.second.output.empty(),
+            "second complete replay leaked or failed to request a bounded retry");
+
+        for (const std::size_t copied : {128U, 256U}) {
+            auto legitimate = fresh();
+            start(legitimate);
+            (void)step(legitimate, std::span(reference).first(copied));
+            const auto stopped = step(legitimate, std::array<TokenId, 1>{6});
+            failures += check(channel_text(stopped.second.output, OutputChannel::Content) ==
+                                      std::string(copied, 'x') &&
+                                  content_logprobs(stopped.second) == copied &&
+                                  !stopped.second.retry_required &&
+                                  stopped.second.discarded_content_tokens == 0,
+                              "uncorroborated legitimate copy or its logprobs were lost at EOS");
+        }
+        auto divergent = fresh();
+        start(divergent);
+        (void)step(divergent, std::span(reference).first(128));
+        const auto diverged = step(divergent, std::array<TokenId, 1>{15});
+        failures +=
+            check(channel_text(diverged.second.output, OutputChannel::Content) ==
+                          std::string(128, 'x') + "answer" &&
+                      content_logprobs(diverged.second) == 129 && !diverged.second.retry_required,
+                  "divergence did not flush the original ordered content/logprobs");
+
+        for (const auto reason : {FinishReason::OutputLimit, FinishReason::Cancelled}) {
+            auto terminal = fresh();
+            start(terminal);
+            (void)step(terminal, std::span(reference).first(128));
+            (void)terminal.preview_terminal(reason);
+            const auto result = terminal.filter_reasoning_replay(terminal.commit_preview(), reason,
+                                                                 reason == FinishReason::Cancelled);
+            failures += check(channel_text(result.output, OutputChannel::Content) ==
+                                      std::string(128, 'x') &&
+                                  !result.retry_required && result.discarded_content_tokens == 0,
+                              "uncorroborated terminal flush altered a legitimate copy");
+        }
+        for (const bool caller : {false, true}) {
+            auto after_repair = fresh();
+            repair(after_repair);
+            (void)step(after_repair, std::span(reference).first(128));
+            const auto stopped = step(after_repair, std::array<TokenId, 1>{6}, 10000, caller);
+            failures += check(stopped.second.retry_required == !caller &&
+                                  stopped.second.discarded_content_tokens == (caller ? 0U : 128U) &&
+                                  channel_text(stopped.second.output, OutputChannel::Content) ==
+                                      (caller ? std::string(128, 'x') : std::string{}),
+                              "post-repair partial replay terminal/caller precedence is incorrect");
+        }
+        auto empty =
+            frontend.make_output_session(prompt, {}, {.preserve_special_tokens = true}, true);
+        repair(empty);
+        const auto empty_end = step(empty, std::array<TokenId, 1>{6});
+        failures += check(empty_end.second.retry_required && empty_end.second.output.empty(),
+                          "repaired empty answer ended as normal successful output");
+
+        ninfer::StopPolicy literal_stop;
+        literal_stop.include_model_defaults = false;
+        auto literal_session                = frontend.make_output_session(
+            prompt, literal_stop, {.preserve_special_tokens = true}, true);
+        start(literal_session);
+        (void)step(literal_session, std::span(reference).first(128));
+        const auto literal_eos = step(literal_session, std::array<TokenId, 1>{6});
+        failures += check(!literal_eos.first.finished() &&
+                              channel_text(literal_eos.second.output, OutputChannel::Content) ==
+                                  std::string(128, 'x') + "<eos>" &&
+                              !literal_eos.second.retry_required,
+                          "disabled model stop was ignored inside an allegedly exact replay");
+        (void)step(literal_session, std::span(reference).first(128));
+        if (literal_session.has_token_masks()) {
+            literal_session.fill_token_masks(nodes, parents, masks);
+            failures += check(!permits(0, 248069),
+                              "literal model-stop interruption incorrectly enabled repair");
+        } else {
+            failures += check(literal_session.suppressed_reasoning_end_token() == 248069,
+                              "literal interruption removed ordinary close suppression");
+        }
+
+        if (tools) {
+            auto argument_input               = input;
+            const std::string literal         = std::string(256, 'x') + "</think>";
+            argument_input.options.tool_jsons = {nlohmann::json{
+                {"type", "function"},
+                {"function",
+                 {{"name", "f"},
+                  {"parameters",
+                   {{"type", "object"},
+                    {"properties", {{"value", {{"const", literal}}}}},
+                    {"required", {"value"}},
+                    {"additionalProperties",
+                     false}}}}}}.dump()};
+            auto argument_prompt              = frontend.prepare(argument_input);
+            auto argument = frontend.make_output_session(argument_prompt, {}, {}, true);
+            start(argument);
+            const fi::Tokenizer encoder(
+                {owned.tokenizer_json, owned.tokenizer_config_json, owned.generation_config_json});
+            const auto call = encoder.encode("<tool_call>\n<function=f>\n<parameter=value>\n" +
+                                             literal + "\n</parameter>\n</function>\n</tool_call>");
+            for (const auto token : call) {
+                const auto result = step(argument, std::span<const TokenId>(&token, 1));
+                failures += check(result.second.framing_repairs == 0 &&
+                                      result.second.discarded_content_tokens == 0 &&
+                                      !result.second.retry_required,
+                                  "tool argument literal activated reasoning replay repair");
+            }
+            failures += check(argument.tool_calls().size() == 1 &&
+                                  nlohmann::json::parse(
+                                      argument.tool_calls()[0].arguments_json)["value"] == literal,
+                              "replay policy changed literal tool argument bytes");
+        } else {
+            auto constrained_input    = input;
+            const std::string literal = std::string(256, 'x') + "</think>";
+            constrained_input.options.output_constraint =
+                ninfer::OutputConstraint{ninfer::OutputConstraintKind::Choice, {}, {literal}};
+            auto constrained_prompt = frontend.prepare(constrained_input);
+            auto constrained = frontend.make_output_session(constrained_prompt, {}, {}, true);
+            start(constrained);
+            auto literal_ids = reference;
+            literal_ids.push_back(248069);
+            const auto result = step(constrained, literal_ids);
+            failures +=
+                check(channel_text(result.second.output, OutputChannel::Content) == literal &&
+                          result.second.framing_repairs == 0 && !result.second.retry_required,
+                      "replay policy changed schema-constrained literal output");
+            auto raw     = frontend.make_output_session(prompt, {}, {.raw = true}, true);
+            auto raw_ids = reference;
+            raw_ids.push_back(248069);
+            raw_ids.insert(raw_ids.end(), reference.begin(), reference.end());
+            raw_ids.push_back(248069);
+            const auto raw_result = step(raw, raw_ids);
+            failures += check(channel_text(raw_result.second.output, OutputChannel::Content) ==
+                                      literal + literal &&
+                                  raw_result.second.framing_repairs == 0 &&
+                                  !raw_result.second.retry_required,
+                              "replay policy interpreted raw framing bytes");
+        }
+
+        auto short_reasoning = fresh();
+        (void)step(short_reasoning, std::span(reference).first(128));
+        (void)step(short_reasoning, std::array<TokenId, 1>{248069});
+        const auto short_copy = step(short_reasoning, std::span(reference).first(128));
+        failures += check(channel_text(short_copy.second.output, OutputChannel::Content) ==
+                                  std::string(128, 'x') &&
+                              !short_copy.second.retry_required,
+                          "short reasoning enabled the substantial-replay guard");
+    }
+    return failures;
+}
+
 // Token logprob records follow preview_token_channels(): one entry per accepted token.
 int test_preview_token_channels(const Frontend& frontend) {
     using Channel        = std::optional<ninfer::OutputChannel>;
@@ -1688,6 +2137,25 @@ int test_preview_token_channels(const Frontend& frontend) {
                       "stop-string tokens lost their content attribution");
     (void)stopped.commit_preview();
 
+    // Raw output publishes model-stop text, so the token is a content token whether it continues
+    // generation (model defaults excluded) or ends it as a stop token.
+    ninfer::StopPolicy no_model_stops;
+    no_model_stops.include_model_defaults = false;
+    for (const ninfer::StopPolicy& raw_stop : {no_model_stops, ninfer::StopPolicy{}}) {
+        auto raw =
+            frontend.make_output_session(frontend.prepare_tokens({0}), raw_stop, {.raw = true});
+        const auto raw_decision = raw.preview(std::array<ninfer::TokenId, 2>{15, 6}, 4,
+                                              ninfer::FinishReason::OutputLimit);
+        const bool stops        = raw_stop.include_model_defaults;
+        failures += check(
+            raw_decision.accepted_tokens == 2 &&
+                raw_decision.finish_reason ==
+                    (stops ? ninfer::FinishReason::StopToken : ninfer::FinishReason::None) &&
+                channels_of(raw) == std::vector<Channel>{content, content} &&
+                channel_text(raw.commit_preview(), ninfer::OutputChannel::Content) == "answer<eos>",
+            "raw model-stop text lost its content attribution");
+    }
+
     // With tool output enabled, tool-call markup publishes to neither channel.
     ninfer::ChatMessage assistant_call;
     assistant_call.role = ninfer::ChatRole::Assistant;
@@ -1700,12 +2168,28 @@ int test_preview_token_channels(const Frontend& frontend) {
     tool_input.messages.push_back(std::move(assistant_call));
     tool_input.messages.push_back(user_turn());
     tool_input.options.enable_thinking = false;
-    auto tool = frontend.make_output_session(frontend.prepare(std::move(tool_input)), {});
+    const auto tool_prompt             = frontend.prepare(std::move(tool_input));
+    auto tool                          = frontend.make_output_session(tool_prompt, {});
     (void)tool.preview(std::array<ninfer::TokenId, 4>{22, 21, 23, 20}, 8,
                        ninfer::FinishReason::OutputLimit);
     failures += check(channels_of(tool) == std::vector<Channel>{content, none, none, none},
                       "tool-call markup tokens were attributed to content");
     (void)tool.commit_preview();
+
+    // Raw output publishes tool markup as content, including a stop inside an open call.
+    for (const auto& raw_turn : {std::vector<ninfer::TokenId>{22, 21, 23, 6},
+                                 std::vector<ninfer::TokenId>{22, 21, 23, 20, 6}}) {
+        auto raw_tool           = frontend.make_output_session(tool_prompt, {}, {.raw = true});
+        const auto raw_decision = raw_tool.preview(raw_turn, 8, ninfer::FinishReason::OutputLimit);
+        const auto expected     = raw_turn.size() == 4 ? "preface<tool_call>call<eos>"
+                                                       : "preface<tool_call>call</tool_call><eos>";
+        failures += check(
+            raw_decision.accepted_tokens == raw_turn.size() &&
+                raw_decision.finish_reason == ninfer::FinishReason::StopToken &&
+                channels_of(raw_tool) == std::vector<Channel>(raw_turn.size(), content) &&
+                channel_text(raw_tool.commit_preview(), ninfer::OutputChannel::Content) == expected,
+            "raw tool markup or published stop lost its content attribution");
+    }
     return failures;
 }
 
@@ -2371,6 +2855,50 @@ int test_constrained_output() {
     failures +=
         check(ignored_stop_content == answer, "disabled model EOS leaked into constrained content");
 
+    // Literal choices are raw text, not regex/EBNF; regex matches the whole answer.
+    for (const auto& [constraint, instances] : std::vector<
+             std::pair<ninfer::OutputConstraint, std::vector<std::pair<std::string, bool>>>>{
+             {{ninfer::OutputConstraintKind::Choice,
+               {},
+               {"", "a|b", "你😀", "\"\\", "<tool_call>"}},
+              {{"", true},
+               {"a|b", true},
+               {"a", false},
+               {"b", false},
+               {"你😀", true},
+               {"你", false},
+               {"\"\\", true},
+               {"<tool_call>", true}}},
+             {{ninfer::OutputConstraintKind::Regex, "[A-Z]{2}[0-9]{1,2}"},
+              {{"AB1", true},
+               {"AB12", true},
+               {"AB123", false},
+               {"xAB1", false},
+               {"AB1x", false},
+               {"ab1", false}}},
+             {{ninfer::OutputConstraintKind::Regex, "你(好|们)"},
+              {{"你好", true}, {"你们", true}, {"你", false}, {"你好吗", false}}}}) {
+        auto constrained_input                      = input;
+        constrained_input.options.output_constraint = constraint;
+        const auto constrained_prompt               = frontend.prepare(constrained_input);
+        const auto compiled = FrontendFactory::inspect(constrained_prompt).token_grammar;
+        for (const auto& [text, valid] : instances) {
+            xgrammar::GrammarMatcher matcher(compiled->compiled);
+            failures += check((matcher.AcceptString(text) && matcher.IsCompleted()) == valid,
+                              "literal choice or full-match regex changed its language");
+            if (!valid || text.empty()) continue;
+            auto session = frontend.make_output_session(constrained_prompt, {});
+            auto encoded = tokenizer.encode(text);
+            (void)session.preview(encoded, 100, ninfer::FinishReason::OutputLimit);
+            session.discard_preview();
+            (void)session.preview(encoded, 100, ninfer::FinishReason::OutputLimit);
+            std::string visible_choice;
+            for (const auto& delta : session.commit_preview()) visible_choice += delta.text;
+            failures +=
+                check(visible_choice == text, "discarded choice/regex preview changed publication");
+        }
+    }
+
     ninfer::PromptInput length_input = input;
     length_input.options.output_constraint =
         ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonSchema,
@@ -2393,7 +2921,8 @@ int test_constrained_output() {
                                                    {"\"a\"b\"", false}}) {
         xgrammar::GrammarMatcher matcher(length_grammar->compiled);
         const bool accepted = matcher.AcceptString(text) && matcher.IsCompleted();
-        failures += check(accepted == valid, "length grammar disagrees with Unicode string oracle");
+        failures += check(accepted == valid,
+                          ("length grammar disagrees with Unicode string oracle: " + text).c_str());
         if (accepted) {
             failures += check(nlohmann::json::accept(text), "length grammar accepted invalid JSON");
         }
@@ -2433,6 +2962,12 @@ int test_constrained_output() {
     const std::array<std::int32_t, 3> parents{-1, 0, 0};
     std::vector<std::uint32_t> masks(3 * fi::TokenGrammarState::mask_words);
     transactional.fill_token_masks(nodes, parents, masks);
+    const auto work_before_preview = transactional.constraint_stats();
+    failures +=
+        check(work_before_preview.active && !work_before_preview.complete &&
+                  !work_before_preview.terminated && work_before_preview.mask_calls == 1 &&
+                  work_before_preview.mask_nodes == 2 && work_before_preview.mask_upload_bytes == 0,
+              "constraint observations did not count real matcher work only");
     const auto root_masks = std::vector<std::uint32_t>(
         masks.begin(), masks.begin() + fi::TokenGrammarState::mask_words);
     (void)transactional.preview(first, 100, ninfer::FinishReason::OutputLimit);
@@ -2440,6 +2975,17 @@ int test_constrained_output() {
     transactional.fill_token_masks(nodes, parents, masks);
     failures += check(std::equal(root_masks.begin(), root_masks.end(), masks.begin()),
                       "discarded constrained prefix advanced the matcher");
+    failures +=
+        check(!transactional.constraint_stats().complete &&
+                  transactional.constraint_stats().branch == ninfer::ConstraintBranch::Answer,
+              "discarded constraint preview changed committed observations");
+    (void)transactional.preview(tokens, 100, ninfer::FinishReason::OutputLimit);
+    failures += check(!transactional.constraint_stats().complete,
+                      "uncommitted completed constraint leaked into observations");
+    (void)transactional.commit_preview();
+    failures += check(transactional.constraint_stats().complete &&
+                          transactional.constraint_stats().terminated,
+                      "committed completed constraint lost completion/termination observations");
     const auto invalid_node = std::span(masks).subspan(2 * fi::TokenGrammarState::mask_words);
     failures += check(std::all_of(invalid_node.begin(), invalid_node.end(),
                                   [](std::uint32_t word) { return word == ~std::uint32_t{0}; }),
@@ -2626,8 +3172,7 @@ int test_constrained_output() {
     }
 
     for (const std::string& invalid :
-         {std::string(R"({"type":"array","uniqueItems":true})"), std::string(R"({"minLength":3})"),
-          std::string(R"({"type":"string","pattern":"^.*$"})"),
+         {std::string(R"({"type":"array","uniqueItems":true})"),
           std::string(R"({"type":"string","minLength":4294967296})"),
           std::string(R"({"$ref":"#missing"})"),
           std::string(R"({"type":"object","minProperties":2})"),
@@ -2662,12 +3207,17 @@ int test_declared_tool_publication() {
     // This component tokenizer must encode the rendered tool declaration, which is literal client
     // text, so every printable ASCII byte needs an ordinary byte-level vocabulary symbol.
     auto& vocab = tokenizer["model"]["vocab"];
-    std::array<ninfer::TokenId, 128> ascii_ids{};
-    for (int c = 32; c < 127; ++c) {
+    std::array<ninfer::TokenId, 256> ascii_ids{};
+    for (int c = 32; c < 256; ++c) {
         const std::string symbol = byte_level_symbol(static_cast<std::uint8_t>(c));
         if (!vocab.contains(symbol)) { vocab[symbol] = 1000 + c; }
         ascii_ids[static_cast<std::size_t>(c)] = vocab[symbol].get<ninfer::TokenId>();
     }
+    const std::string empty_call = "<tool_call>\n<function=f>\n\n</function>\n</tool_call>";
+    const auto two_calls         = std::string(empty_call).append("\n").append(empty_call);
+    std::string two_call_symbol;
+    for (unsigned char c : two_calls) two_call_symbol += byte_level_symbol(c);
+    vocab[two_call_symbol]  = 2000;
     owned.tokenizer_json    = tokenizer.dump();
     const Frontend frontend = FrontendFactory::create_component(owned);
     ninfer::PromptInput input;
@@ -2683,6 +3233,7 @@ int test_declared_tool_publication() {
     int failures = check(output.has_token_grammar(), "declared tools did not attach a grammar");
     const std::vector<ninfer::TokenId> tokens{22, 16, 17, 32, 18, 32, 32, 19, 32, 20};
     std::string visible;
+    std::vector<ninfer::ToolCallDelta> events;
     for (auto token : tokens) {
         (void)output.preview(std::span<const ninfer::TokenId>(&token, 1), 100,
                              ninfer::FinishReason::OutputLimit);
@@ -2690,8 +3241,16 @@ int test_declared_tool_publication() {
         failures += check(output.tool_calls().empty(), "discard published a completed tool");
         (void)output.preview(std::span<const ninfer::TokenId>(&token, 1), 100,
                              ninfer::FinishReason::OutputLimit);
-        for (const auto& delta : output.commit_preview()) { visible += delta.text; }
+        for (const auto& delta : output.commit_preview()) {
+            visible += delta.text;
+            if (delta.tool_call) events.push_back(*delta.tool_call);
+        }
     }
+    failures += check(
+        events.size() == 3 && events[0].kind == ninfer::ToolCallDeltaKind::Start &&
+            events[1].kind == ninfer::ToolCallDeltaKind::Arguments && events[1].arguments == "{}" &&
+            events[2].kind == ninfer::ToolCallDeltaKind::Completed,
+        "committed empty-call lifecycle duplicated a discarded preview or missed completion");
     failures += check(visible == "preface", "tool markup leaked into streamed content");
     failures += check(output.tool_calls().size() == 1 && output.tool_calls()[0].name == "f" &&
                           output.tool_calls()[0].arguments_json == "{}",
@@ -2704,11 +3263,32 @@ int test_declared_tool_publication() {
     failures += check(visible == "preface" && output.tool_calls().size() == 1,
                       "terminal publication repeated a tool or leaked markup");
 
+    auto multiple = frontend.make_output_session(prompt, {});
+    try {
+        (void)multiple.preview(std::array<ninfer::TokenId, 1>{2000}, 100,
+                               ninfer::FinishReason::OutputLimit);
+    } catch (const std::exception& error) {
+        throw std::runtime_error(std::string("two-call token fixture: ") + error.what());
+    }
+    failures += check(multiple.preview_token_channels().size() == 1 &&
+                          !multiple.preview_token_channels()[0],
+                      "whole-envelope token was attributed as content logprob");
+    const auto multiple_events = multiple.commit_preview();
+    failures += check(multiple.tool_calls().size() == 2 && multiple_events.size() == 6 &&
+                          multiple_events[3].tool_call && multiple_events[3].tool_call->index == 1,
+                      "one target token could not publish two ordered tool lifecycles");
+
     auto interrupted = frontend.make_output_session(prompt, {});
-    (void)interrupted.preview(std::array<ninfer::TokenId, 3>{16, 17, 32}, 3,
+    (void)interrupted.preview(std::array<ninfer::TokenId, 5>{16, 17, 32, 18, 32}, 5,
                               ninfer::FinishReason::OutputLimit);
-    failures += check(interrupted.commit_preview().empty() && interrupted.tool_calls().empty(),
-                      "output budget published a partial declared tool");
+    const auto interrupted_events = interrupted.commit_preview();
+    failures +=
+        check(channel_text(interrupted_events, ninfer::OutputChannel::Content).empty() &&
+                  interrupted.tool_calls().empty() && interrupted_events.size() == 2 &&
+                  interrupted_events[0].tool_call && interrupted_events[1].tool_call &&
+                  interrupted_events[0].tool_call->kind == ninfer::ToolCallDeltaKind::Start &&
+                  interrupted_events[1].tool_call->kind == ninfer::ToolCallDeltaKind::Incomplete,
+              "output budget missed incomplete lifecycle or published an executable partial tool");
     for (bool between_rounds : {false, true}) {
         auto partial = frontend.make_output_session(prompt, {});
         std::string partial_visible;
@@ -2753,7 +3333,8 @@ int test_declared_tool_publication() {
         check(call_decision.finish_reason == ninfer::FinishReason::StopString &&
                   stopped_call.commit_preview().empty() && stopped_call.tool_calls().size() == 1,
               "caller stop lost a preceding complete tool call");
-    const std::string literal = "<tool_call>\n</invoke>\n</parameter>\n</function>\n</tool_call>";
+    const std::string literal =
+        "<tool_call>\n</invoke>\n</parameter>\n</function>\n</tool_call>" + std::string(5000, 'a');
     ninfer::PromptInput embedded_input;
     ninfer::ChatMessage embedded_user;
     embedded_user.role = ninfer::ChatRole::User;
@@ -2774,17 +3355,123 @@ int test_declared_tool_publication() {
     auto embedded_output     = frontend.make_output_session(embedded_prompt, {});
     const auto embedded_text = "<tool_call>\n<function=f>\n<parameter=value>\n" + literal +
                                "\n</parameter>\n</function>\n</tool_call>";
+    ninfer::runtime::RepeatedChannelSpan embedded_repeat;
+    bool monitor_content = true;
     for (const unsigned char c : embedded_text) {
         const ninfer::TokenId token = c == '\n' ? 32 : ascii_ids[c];
         (void)embedded_output.preview(std::span<const ninfer::TokenId>(&token, 1), 1000,
                                       ninfer::FinishReason::OutputLimit);
-        failures +=
-            check(embedded_output.commit_preview().empty(), "literal tool close leaked as prose");
+        monitor_content &= embedded_output.preview_free_text_content();
+        if (monitor_content) {
+            embedded_repeat.observe(std::span<const ninfer::TokenId>(&token, 1),
+                                    embedded_output.preview_token_channels(),
+                                    ninfer::OutputChannel::Content);
+        }
+        const auto publication = embedded_output.commit_preview();
+        failures += check(channel_text(publication, ninfer::OutputChannel::Content).empty(),
+                          "literal tool close leaked as prose");
+        for (const auto& delta : publication)
+            if (delta.tool_call && delta.tool_call->kind == ninfer::ToolCallDeltaKind::Arguments)
+                failures += check(!embedded_output.tool_calls().empty(),
+                                  "const string streamed before full schema validation");
     }
+    failures += check(!monitor_content && !embedded_repeat.detected(),
+                      "literal tool closing markup re-enabled answer repetition detection");
     failures += check(embedded_output.tool_calls().size() == 1 &&
                           nlohmann::json::parse(
                               embedded_output.tool_calls()[0].arguments_json)["value"] == literal,
                       "streamed XML-looking string was lost or split into another call");
+    // A plain string's raw-first interpretation guarantees an incremental JSON prefix.
+    // Embedded candidate delimiters freeze that prefix until whole-call backtracking resolves
+    // them; constrained/union values remain buffered. Preview/discard must publish nothing.
+    ninfer::PromptInput streamed_input;
+    streamed_input.messages.push_back(ninfer::ChatMessage{
+        .role = ninfer::ChatRole::User, .parts = {ninfer::MessagePart{.text = "x"}}});
+    streamed_input.options.enable_thinking = false;
+    streamed_input.options.tool_jsons.push_back(
+        R"({"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}}})");
+    auto annotated_input  = streamed_input;
+    auto annotated_tool   = nlohmann::json::parse(annotated_input.options.tool_jsons[0]);
+    auto& annotated_value = annotated_tool["function"]["parameters"]["properties"]["value"];
+    annotated_value["description"]        = "a client-visible string";
+    annotated_value["title"]              = "Value";
+    annotated_value["default"]            = "example";
+    annotated_value["examples"]           = {"example"};
+    annotated_input.options.tool_jsons[0] = annotated_tool.dump();
+    const auto streamed_prompt            = frontend.prepare(std::move(streamed_input));
+    const auto annotated_prompt           = frontend.prepare(std::move(annotated_input));
+    for (const auto* candidate_prompt : {&streamed_prompt, &annotated_prompt})
+        for (const std::string& value :
+             {std::string(" \"quoted\" \\ text\n"),
+              std::string("prefix\n</parameter>not another parameter"), std::string("null"),
+              std::string("\"json-looking\""), std::string("你😀\n"), std::string()}) {
+            auto streamed   = frontend.make_output_session(*candidate_prompt, {});
+            const auto text = "<tool_call>\n<function=f>\n<parameter=value>\n" + value +
+                              "\n</parameter>\n</function>\n</tool_call>";
+            std::string arguments;
+            int starts = 0, completed = 0, fragments = 0;
+            bool early_fragment = false;
+            for (std::size_t offset = 0; offset < text.size(); ++offset) {
+                const unsigned char c       = static_cast<unsigned char>(text[offset]);
+                const ninfer::TokenId token = c == '\n' ? 32 : ascii_ids[c];
+                try {
+                    (void)streamed.preview(std::span<const ninfer::TokenId>(&token, 1), 1000,
+                                           ninfer::FinishReason::OutputLimit);
+                } catch (const std::exception& error) {
+                    throw std::runtime_error("raw string fixture " + nlohmann::json(value).dump() +
+                                             " at byte " + std::to_string(offset) + ": " +
+                                             error.what());
+                }
+                streamed.discard_preview();
+                failures +=
+                    check(streamed.tool_calls().empty(), "discard published raw-string tool");
+                (void)streamed.preview(std::span<const ninfer::TokenId>(&token, 1), 1000,
+                                       ninfer::FinishReason::OutputLimit);
+                for (const auto& delta : streamed.commit_preview()) {
+                    failures += check(delta.text.empty(), "raw tool data leaked to content");
+                    if (!delta.tool_call) continue;
+                    const auto& event = *delta.tool_call;
+                    failures +=
+                        check(event.index == 0 && event.name == "f", "tool event identity changed");
+                    if (event.kind == ninfer::ToolCallDeltaKind::Start) ++starts;
+                    if (event.kind == ninfer::ToolCallDeltaKind::Completed) ++completed;
+                    if (event.kind == ninfer::ToolCallDeltaKind::Arguments) {
+                        ++fragments;
+                        arguments += event.arguments;
+                        early_fragment |= offset + 1 < text.size();
+                    }
+                }
+                // Before final envelope completion, no partial executable call is observable.
+                if (offset + 1 < text.size())
+                    failures += check(streamed.tool_calls().empty(),
+                                      "raw-string partial entered executable history");
+            }
+            failures +=
+                check(starts == 1 && completed == 1 && fragments >= 2 && early_fragment &&
+                          nlohmann::json::parse(arguments) == nlohmann::json{{"value", value}} &&
+                          streamed.tool_calls().size() == 1 &&
+                          streamed.tool_calls()[0].arguments_json == arguments,
+                      "raw-string incremental arguments changed decoder semantics or lifecycle");
+        }
+    auto cancelled_string          = frontend.make_output_session(streamed_prompt, {});
+    const std::string partial_text = "<tool_call>\n<function=f>\n<parameter=value>\npartial";
+    for (unsigned char c : partial_text) {
+        const ninfer::TokenId token = c == '\n' ? 32 : ascii_ids[c];
+        (void)cancelled_string.preview(std::span<const ninfer::TokenId>(&token, 1), 1000,
+                                       ninfer::FinishReason::OutputLimit);
+        (void)cancelled_string.commit_preview();
+    }
+    (void)cancelled_string.preview_terminal(ninfer::FinishReason::Cancelled);
+    const auto cancelled_events = cancelled_string.commit_preview();
+    failures +=
+        check(cancelled_events.size() == 1 && cancelled_events[0].tool_call &&
+                  cancelled_events[0].tool_call->kind == ninfer::ToolCallDeltaKind::Incomplete &&
+                  cancelled_string.tool_calls().empty(),
+              "cancelled raw string lost incomplete lifecycle");
+    failures +=
+        check(cancelled_string.constraint_stats().branch == ninfer::ConstraintBranch::ToolCall &&
+                  !cancelled_string.constraint_stats().complete,
+              "cancelled partial tool lost its committed branch observations");
     failures += check(ninfer::targets::qwen3::unconstrained_tool_call_names(
                           "prefix<tool_call><function=f><parameter=x>true</parameter>"
                           "</function></tool_call>",
@@ -2936,7 +3623,7 @@ int test_recovery_prompt_splice(const Frontend& frontend) {
     notice.parts.push_back(
         ninfer::MessagePart{.kind = ninfer::MessagePartKind::Text, .text = "x", .media = {}});
     const std::span<const ninfer::ChatMessage> insert(&notice, 1);
-    const auto spliced = frontend.splice_recovery_prompt(prefix, source, insert, recovery);
+    const auto spliced = frontend.splice_recovery_prompt(prefix, source, insert, recovery, true);
     int failures       = check(spliced.has_value(), "a prologue-terminated prefix was not spliced");
     if (!spliced) { return failures; }
 
@@ -2995,11 +3682,12 @@ int test_recovery_prompt_splice(const Frontend& frontend) {
 
     auto bad   = prefix;
     bad.back() = 0;
-    failures += check(!frontend.splice_recovery_prompt(std::move(bad), source, insert, recovery),
-                      "a prefix that does not end with the prologue was spliced");
+    failures +=
+        check(!frontend.splice_recovery_prompt(std::move(bad), source, insert, recovery, true),
+              "a prefix that does not end with the prologue was spliced");
 
     const auto first_ids = data.token_ids;
-    const auto stacked   = frontend.splice_recovery_prompt(first_ids, source, insert, recovery);
+    const auto stacked = frontend.splice_recovery_prompt(first_ids, source, insert, recovery, true);
     failures += check(stacked.has_value(), "attempt 2 did not splice onto the previous prompt");
     if (stacked) {
         const auto& again = FrontendFactory::inspect(*stacked);
@@ -3012,10 +3700,38 @@ int test_recovery_prompt_splice(const Frontend& frontend) {
                   "attempt 2 did not keep the previous prompt and move the rewrite frontier");
     }
 
+    const auto content = frontend.splice_recovery_prompt(prefix, source, insert, recovery, false);
+    failures += check(content.has_value(), "thinking to non-thinking recovery splice failed");
+    if (content) {
+        const auto& content_data = FrontendFactory::inspect(*content);
+        auto expected            = prefix;
+        expected.insert(expected.end(), close_ids.begin(), close_ids.end());
+        expected.insert(expected.end(), fragment_ids.begin(), fragment_ids.end());
+        const auto content_prologue = encode(ninfer::targets::qwen3::kRecoveryNonThinkingPrologue);
+        expected.insert(expected.end(), content_prologue.begin(), content_prologue.end());
+        failures += check(content_data.token_ids == expected && !content_data.starts_in_reasoning,
+                          "non-thinking recovery changed history or its native prologue");
+        const auto content_again =
+            frontend.splice_recovery_prompt(expected, source, insert, recovery, false);
+        failures += check(content_again.has_value(), "second non-thinking splice failed");
+        if (content_again) {
+            const auto& again_data   = FrontendFactory::inspect(*content_again);
+            const auto content_close = encode(ninfer::targets::qwen3::kRecoveryContentTurnClose);
+            expected.insert(expected.end(), content_close.begin(), content_close.end());
+            expected.insert(expected.end(), fragment_ids.begin(), fragment_ids.end());
+            expected.insert(expected.end(), content_prologue.begin(), content_prologue.end());
+            failures +=
+                check(again_data.token_ids == expected && !again_data.starts_in_reasoning &&
+                          again_data.identity.rewrite_checkpoint.has_value() &&
+                          again_data.identity.rewrite_checkpoint->frontier == expected.size(),
+                      "second non-thinking splice fabricated a reasoning close or lost history");
+        }
+    }
+
     ninfer::PromptInput tools = source;
     tools.options.tool_jsons.push_back(
         R"({"type":"function","function":{"name":"f","parameters":{"type":"object"}}})");
-    const auto with_tools = frontend.splice_recovery_prompt(prefix, tools, insert, recovery);
+    const auto with_tools = frontend.splice_recovery_prompt(prefix, tools, insert, recovery, true);
     failures += check(with_tools && FrontendFactory::inspect(*with_tools).token_grammar != nullptr,
                       "declared tools did not compile a grammar onto the spliced prompt");
     return failures;
@@ -3067,8 +3783,8 @@ int test_official_recovery_splice() {
                       "historical reasoning was absent from the prepared prompt");
 
     auto accept = [&](std::span<const ninfer::ChatMessage> insert, const char* label) {
-        const auto spliced = frontend.splice_recovery_prompt(prepared_data.token_ids,
-                                                             recovery->input(), insert, recovery);
+        const auto spliced = frontend.splice_recovery_prompt(
+            prepared_data.token_ids, recovery->input(), insert, recovery, true);
         if (!spliced) {
             std::cerr << label << '\n';
             return 1;
@@ -3093,8 +3809,147 @@ int test_official_recovery_splice() {
     ninfer::ToolCall call;
     call.name           = "read";
     call.arguments_json = R"({"path":"a.cpp"})";
-    const auto rejected = recovery->recovery_insert(std::span<const ninfer::ToolCall>(&call, 1), 1);
+    call.id             = "rejected";
+    ninfer::ChatMessage candidate;
+    candidate.role = ninfer::ChatRole::Assistant;
+    candidate.tool_calls.push_back(call);
+    ninfer::ChatMessage feedback;
+    feedback.role         = ninfer::ChatRole::Tool;
+    feedback.tool_call_id = call.id;
+    feedback.parts.push_back(ninfer::MessagePart{.text = "No tool was executed."});
+    const std::array rejected{candidate, feedback};
     failures += accept(rejected, "official rejected call did not splice onto the prepared prompt");
+
+    auto duplicate_input = input;
+    duplicate_input.options.tool_jsons.push_back(
+        R"({"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}})");
+    duplicate_input.messages.resize(1);
+    std::string repeated;
+    for (int index = 0; index < 80; ++index) { repeated += "step" + std::to_string(index) + " "; }
+    for (int index = 0; index != 2; ++index) {
+        auto prior              = candidate;
+        prior.reasoning_content = repeated;
+        prior.tool_calls[0].id  = "prior" + std::to_string(index);
+        auto result             = feedback;
+        result.tool_call_id     = prior.tool_calls[0].id;
+        result.parts[0].text    = "unchanged represented tool result";
+        duplicate_input.messages.push_back(std::move(prior));
+        duplicate_input.messages.push_back(std::move(result));
+    }
+    const auto duplicate_context =
+        ninfer::targets::qwen3::GenerationRecoveryContext::analyze(duplicate_input);
+    failures += check(duplicate_context && duplicate_context->has_repeated_tool_history(),
+                      "envelope fixture did not prove its known repeated batch");
+    for (const auto& context : {recovery, duplicate_context}) {
+        const auto original     = frontend.prepare(context->input());
+        const auto original_ids = FrontendFactory::inspect(original).token_ids;
+        failures += check(frontend.recovery_prompt_token_bound(original, *context, 0) ==
+                              original_ids.size(),
+                          "zero-retry envelope changed the original prompt");
+        std::array<std::optional<ninfer::targets::qwen3::PreparedPrompt>, 2> largest;
+        std::size_t first_maximum = 0;
+        for (const auto& variant : context->recovery_insert_variants(1)) {
+            for (std::size_t phase = 0; phase != 2; ++phase) {
+                auto spliced = frontend.splice_recovery_prompt(original_ids, context->input(),
+                                                               variant, context, phase == 0);
+                failures +=
+                    check(spliced.has_value(), "supported envelope first suffix did not splice");
+                if (!spliced) { continue; }
+                const auto size      = FrontendFactory::inspect(*spliced).token_ids.size();
+                first_maximum        = std::max(first_maximum, size);
+                auto& largest_prompt = largest[phase];
+                if (!largest_prompt ||
+                    size > FrontendFactory::inspect(*largest_prompt).token_ids.size()) {
+                    largest_prompt = std::move(spliced);
+                }
+            }
+        }
+        failures +=
+            check(frontend.recovery_prompt_token_bound(original, *context, 1) == first_maximum,
+                  "one-retry envelope differs from complete native suffix maximum");
+        std::size_t second_maximum = 0;
+        for (const auto& prefix : largest) {
+            if (!prefix) { continue; }
+            const auto& prefix_ids = FrontendFactory::inspect(*prefix).token_ids;
+            for (const auto& variant : context->recovery_insert_variants(2)) {
+                for (const bool thinking : {false, true}) {
+                    auto spliced = frontend.splice_recovery_prompt(prefix_ids, context->input(),
+                                                                   variant, context, thinking);
+                    failures += check(spliced.has_value(),
+                                      "supported envelope second suffix did not splice");
+                    if (spliced) {
+                        second_maximum = std::max(
+                            second_maximum, FrontendFactory::inspect(*spliced).token_ids.size());
+                    }
+                }
+            }
+        }
+        failures +=
+            check(frontend.recovery_prompt_token_bound(original, *context) == second_maximum,
+                  "two-retry envelope differs from native notice/batch/prologue maximum");
+    }
+    return failures;
+}
+
+int test_system_prompt_frontiers() {
+    if (skip_without_official_tokenizer("system prompt frontiers")) { return 0; }
+    int failures = 0;
+    for (const auto* chat : {&thinking_toggle_template(), &reasoning_effort_template()}) {
+        fi::ChatMessage system;
+        system.role = ninfer::ChatRole::System;
+        system.parts.push_back(fi::ChatPart::text_part("Shared café instructions <|im_end|>."));
+        fi::ChatMessage extra;
+        extra.role = ninfer::ChatRole::System;
+        extra.parts.push_back(fi::ChatPart::text_part("Additional leading policy."));
+        fi::ChatMessage user;
+        user.role = ninfer::ChatRole::User;
+        user.parts.push_back(fi::ChatPart::text_part("FIRST_USER_ALPHA entirely distinct."));
+        std::vector<fi::ChatMessage> messages{system, extra, user};
+        fi::ChatRenderOptions options;
+        options.mark_system_prompt = true;
+        options.tool_jsons         = {
+            R"({"type":"function","function":{"name":"read","description":"read a file","parameters":{"type":"object","properties":{}}}})"};
+        const auto rendered = chat->render(messages, options);
+        const auto first    = fi::encode_rendered_chat(official_tokenizer(), rendered);
+        failures += check(first.system_prompt_frontier.has_value(), "system frontier missing");
+        if (!first.system_prompt_frontier) { continue; }
+        const auto frontier = *first.system_prompt_frontier;
+        const std::vector<int> prefix(first.input_ids.begin(), first.input_ids.begin() + frontier);
+        const auto text = official_tokenizer().decode(prefix);
+        failures += check(text.find("Shared") != std::string::npos &&
+                              text.find("Additional leading policy") != std::string::npos &&
+                              text.find("read a file") != std::string::npos &&
+                              text.find("FIRST_USER_ALPHA") == std::string::npos,
+                          "system boundary included user text or omitted system/tools");
+        messages.back().parts = {
+            fi::ChatPart::text_part("OTHER_USER_BETA has a different request.")};
+        fi::EncodedHistoryCache cache;
+        const auto second =
+            fi::encode_chat_with_cache(official_tokenizer(), *chat, messages, options, cache);
+        const auto hot =
+            fi::encode_chat_with_cache(official_tokenizer(), *chat, messages, options, cache);
+        failures +=
+            check(second.system_prompt_frontier == first.system_prompt_frontier &&
+                      hot.system_prompt_frontier == first.system_prompt_frontier &&
+                      std::equal(prefix.begin(), prefix.end(), second.input_ids.begin()) &&
+                      second.input_ids != first.input_ids && hot.input_ids == second.input_ids,
+                  "system identity depends on first user or host encoding cache");
+        options.tool_jsons.front().replace(options.tool_jsons.front().find("read a file"), 11,
+                                           "inspect a file");
+        const auto changed =
+            fi::encode_rendered_chat(official_tokenizer(), chat->render(messages, options));
+        failures += check(changed.system_prompt_frontier &&
+                              std::vector<int>(changed.input_ids.begin(),
+                                               changed.input_ids.begin() +
+                                                   *changed.system_prompt_frontier) != prefix,
+                          "different tool definitions reused a system identity");
+        options.mark_system_prompt = false;
+        const auto disabled =
+            fi::encode_rendered_chat(official_tokenizer(), chat->render(messages, options));
+        failures +=
+            check(!disabled.system_prompt_frontier && disabled.input_ids == changed.input_ids,
+                  "opt-out changed tokens or retained capture metadata");
+    }
     return failures;
 }
 
@@ -3103,6 +3958,7 @@ int main() {
     const FrontendResources owned = resources();
     const Frontend frontend       = FrontendFactory::create_component(owned);
     int failures                  = 0;
+    failures += test_system_prompt_frontiers();
     failures += test_official_tokenizer_merge();
     failures += test_official_chat_template();
     failures += test_literal_content_provenance();
@@ -3128,6 +3984,8 @@ int main() {
     failures += test_terminal_flush(frontend);
     failures += test_reasoning_split(frontend);
     failures += test_single_reasoning_close(frontend);
+    failures += test_reasoning_token_limit(frontend);
+    failures += test_reasoning_replay_publication();
     failures += test_preview_token_channels(frontend);
     failures += test_structured_model_stop_eligibility(frontend);
     failures += test_utf8_and_hidden_eos(frontend);

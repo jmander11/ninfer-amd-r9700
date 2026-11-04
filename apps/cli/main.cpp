@@ -179,6 +179,22 @@ void print_metric(std::string_view label, std::string_view value) {
 class StreamingSink final : public ninfer::OutputSink {
 public:
     void publish(ninfer::OutputDelta delta) override {
+        if (delta.tool_call) {
+            const auto& call = *delta.tool_call;
+            const char* kind = call.kind == ninfer::ToolCallDeltaKind::Start       ? "start"
+                               : call.kind == ninfer::ToolCallDeltaKind::Arguments ? "arguments"
+                               : call.kind == ninfer::ToolCallDeltaKind::Completed ? "completed"
+                                                                                   : "incomplete";
+            std::cerr << nlohmann::ordered_json{{"tool_call_event", kind},
+                                                {"index", call.index},
+                                                {"id", call.id},
+                                                {"name", call.name},
+                                                {"arguments_delta", call.arguments}}
+                             .dump()
+                      << '\n';
+            std::cerr.flush();
+            return;
+        }
         std::ostream& output =
             delta.channel == ninfer::OutputChannel::Reasoning ? std::cerr : std::cout;
         output << delta.text;
@@ -239,6 +255,48 @@ void print_generation_summary(const ninfer::GenerationResult& result,
     const std::size_t decoded  = generated > prefill_samples ? generated - prefill_samples : 0;
     const double model_seconds = result.timings.vision_seconds + result.timings.prefill_seconds +
                                  result.timings.decode_seconds + result.recovery.prefill_seconds;
+    if (result.constraint.active) {
+        const auto& constraint = result.constraint;
+        const char* branch     = "none";
+        switch (constraint.branch) {
+        case ninfer::ConstraintBranch::None:
+            break;
+        case ninfer::ConstraintBranch::Reasoning:
+            branch = "reasoning";
+            break;
+        case ninfer::ConstraintBranch::Answer:
+            branch = "answer";
+            break;
+        case ninfer::ConstraintBranch::ToolCall:
+            branch = "tool_call";
+            break;
+        }
+        const char* cache = "none";
+        switch (constraint.compile_cache) {
+        case ninfer::ConstraintCompileCache::None:
+            break;
+        case ninfer::ConstraintCompileCache::Hit:
+            cache = "hit";
+            break;
+        case ninfer::ConstraintCompileCache::Built:
+            cache = "built";
+            break;
+        case ninfer::ConstraintCompileCache::Waited:
+            cache = "waited";
+            break;
+        }
+        print_metric("constraint", std::string("branch=") + branch +
+                                       " complete=" + (constraint.complete ? "yes" : "no") +
+                                       " terminated=" + (constraint.terminated ? "yes" : "no"));
+        print_metric("constraint cache", cache);
+        print_metric("constraint compile", format_seconds(constraint.compile_seconds));
+        print_metric("constraint wait", format_seconds(constraint.compile_wait_seconds));
+        print_metric("constraint mask host", format_seconds(constraint.mask_seconds));
+        print_metric("constraint masks", std::to_string(constraint.mask_calls) + " calls / " +
+                                             std::to_string(constraint.mask_nodes) +
+                                             " computed nodes");
+        print_metric("constraint uploads", format_bytes(constraint.mask_upload_bytes));
+    }
     print_metric("sampling", format_sampling(sampling));
     print_metric("finish reason", format_finish(result.finish_reason));
     print_metric("prompt tokens", std::to_string(result.prompt.prompt_tokens));
@@ -361,7 +419,8 @@ int main(int argc, char** argv) {
                 : ninfer::product::prompt_from_messages(cli.messages_path, cli.enable_thinking,
                                                         cli.enable_vision);
         input.options.reasoning_effort = cli.reasoning_effort;
-        if (cli.json_object || !cli.json_schema_path.empty() || !cli.grammar_path.empty()) {
+        if (cli.json_object || !cli.json_schema_path.empty() || !cli.grammar_path.empty() ||
+            cli.output_regex || !cli.output_choices.empty()) {
             ninfer::OutputConstraint constraint;
             if (!cli.json_schema_path.empty() || !cli.grammar_path.empty()) {
                 const bool schema = !cli.json_schema_path.empty();
@@ -379,6 +438,13 @@ int main(int argc, char** argv) {
                                            : ninfer::OutputConstraintKind::Grammar;
                 constraint.source = std::move(source).str();
             }
+            if (cli.output_regex) {
+                constraint.kind   = ninfer::OutputConstraintKind::Regex;
+                constraint.source = *cli.output_regex;
+            } else if (!cli.output_choices.empty()) {
+                constraint.kind    = ninfer::OutputConstraintKind::Choice;
+                constraint.choices = cli.output_choices;
+            }
             input.options.output_constraint = std::move(constraint);
         }
 
@@ -388,6 +454,7 @@ int main(int argc, char** argv) {
         request.execution.capture_context_checkpoint = cli.capture_context_checkpoint;
         request.stop.token_ids                       = cli.stop_token_ids;
         request.stop.strings                         = cli.stop_strings;
+        request.output.thinking_token_budget         = cli.thinking_token_budget;
         request.output.raw                           = cli.raw_output;
 
         std::cerr << "phase       detail                      elapsed/progress\n";
@@ -399,6 +466,7 @@ int main(int argc, char** argv) {
         engine_options.max_context              = cli.max_context;
         engine_options.kv_capacity              = cli.kv_capacity;
         engine_options.kv_ram_capacity_bytes    = cli.kv_ram_capacity_bytes;
+        engine_options.kv_ram_system_prompts    = cli.kv_ram_system_prompts;
         engine_options.kv_disk_capacity_bytes   = cli.kv_disk_capacity_bytes;
         engine_options.kv_disk_location         = cli.kv_disk_location;
         engine_options.kv_disk_compress         = cli.kv_disk_compress;

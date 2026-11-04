@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include <hip/hip_runtime.h>
 
 #include "ops/r9700/eager/eager_ops.h"
@@ -26,8 +27,12 @@ namespace {
 constexpr std::uint32_t kFeatures     = 17408U;
 constexpr std::uint32_t kPackedStride = 34816U;
 constexpr std::size_t kSamples        = 7U;
-constexpr std::string_view kPowerPath =
-    "/sys/class/drm/card2/device/power_dpm_force_performance_level";
+
+std::string qualification_power_path() {
+    return (ninfer::r9700_qualification::configured_pci_path() /
+            "power_dpm_force_performance_level")
+        .string();
+}
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
@@ -117,7 +122,7 @@ void select_r9700() {
 }
 
 void require_auto() {
-    std::ifstream input{std::string(kPowerPath)};
+    std::ifstream input{std::string(qualification_power_path())};
     std::string value;
     if (!input || !std::getline(input, value) || value != "auto") {
         fail("physical timing requires card2 power profile auto");

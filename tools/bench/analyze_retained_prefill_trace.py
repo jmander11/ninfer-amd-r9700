@@ -25,6 +25,7 @@ import itertools
 from tools.bench.analyze_whole_profile import analyze
 from tools.bench.run_ninfer_bench_matrix import R9700_KV_PLANE_LAYOUTS
 from tools.bench.validate_profile_trace import _parse_database
+from tools.r9700.host import power_profile_path
 
 PLAN_TYPE = "ninfer_r9700_retained_prefill_trace_plan"
 EVIDENCE_TYPE = "ninfer_r9700_retained_prefill_trace"
@@ -517,7 +518,7 @@ def validate(plan_path: Path, root: Path, repair_path: Path | None = None) -> di
         or plan.get("limitations") != EXPECTED_LIMITATIONS
         or plan.get("power_profile")
         != {
-            "path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
+            "path": str(power_profile_path()),
             "required_before_after": "auto",
         }
     ):

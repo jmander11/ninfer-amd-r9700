@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 #include "ninfer/ops/normalized_linear.h"
@@ -17,7 +18,7 @@ constexpr float kNormEps         = 1.0e-6F;
 constexpr std::size_t kNormGuard = 256;
 
 std::filesystem::path norm_power_path() {
-    return "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
+    return ninfer::r9700_qualification::configured_pci_path() / "power_dpm_force_performance_level";
 }
 
 void auto_power() {
@@ -590,7 +591,9 @@ int main(int argc, char** argv) {
                "replays\":3,"
             << "\"canaries\":true,\"malformed_alias_rejections\":true,\"t2_fallback\":true,"
                "\"immutable_inputs\":true},"
-            << "\"power_profile\":{\"pci\":\"0000:13:00.0\",\"before_hip\":\"auto\",\"after_"
+            << "\"power_profile\":{\"pci\":\""
+            << ninfer::r9700_qualification::configured_pci_bus_id()
+            << "\",\"before_hip\":\"auto\",\"after_"
                "correctness\":\"auto\",\"after_timing\":\"auto\"},"
             << "\"timing\":{\"complete_boundary_graph\":true,\"copies\":3,\"scrub_bytes\":83886080,"
             << "\"control_median_ms\":" << sorted_median(control_ms)

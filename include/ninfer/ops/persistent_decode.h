@@ -33,9 +33,10 @@ private:
  * Op: persistent_decode_lower
  *
  * Rewrites a captured single-stream Device Graph in place: every run of at least two consecutive
- * kernel nodes whose kernels the persistent decode kernel hosts becomes one persistent decode
- * kernel node, which executes the run's launches as phases in capture order, one grid-wide
- * barrier between consecutive phases. Each phase runs the captured launch's kernel body on
+ * kernel nodes whose kernels the persistent decode kernel hosts becomes one child graph
+ * containing a cooperative persistent kernel, which executes the run's launches as phases in
+ * capture order, one grid-wide barrier between consecutive phases. Each phase runs the captured
+ * launch's kernel body on
  * virtual CTAs with the captured arguments, block and grid indices, or a re-tiled body of the
  * same Op over its own virtual grid (the GDN record: one CTA per sequence and head), so every
  * hosted launch produces exactly the bytes it produces as its own kernel node; a launch's CTAs
@@ -53,6 +54,10 @@ private:
  * packed into fixed-address arenas. Graphs sharing an image must execute on one ordered stream
  * without overlap, because their grid-barrier counter is shared too. The represented phases and
  * their order are unchanged.
+ * These kernels require cooperative dispatch; occupancy alone is insufficient for whole-grid
+ * synchronization. Before replay, the caller must order other streams' already-submitted
+ * compute/transfer kernels before the resident grid; the Engine joins load, copy, and disk
+ * scatter work at its single worker's round boundary.
  */
 [[nodiscard]] PersistentDecodeImageOwners persistent_decode_lower(hipGraph_t graph,
                                                                   PersistentDecodeStorage& images);

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
+from itertools import pairwise
 
 import torch
 import torch.nn.functional as F
@@ -133,8 +135,6 @@ def apply_vision_rope(
 
 
 def _sdpa(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    if q.device.type != "cuda":
-        return F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
     try:
         from torch.nn.attention import SDPBackend, sdpa_kernel
 
@@ -143,6 +143,23 @@ def _sdpa(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
             return F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
     except (ImportError, AttributeError):
         return F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+
+
+def vision_attention_oracle(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cu_seqlens: torch.Tensor
+) -> torch.Tensor:
+    """Complete segmented softmax(Q K^T / sqrt(D)) V in FP64 from represented inputs.
+
+    No probability rounding, library SDPA, private staging or output cast is copied.
+    """
+    boundaries = [int(value) for value in cu_seqlens.cpu().tolist()]
+    q, k, v = (value.to(dtype=torch.float64) for value in (q, k, v))
+    out = torch.empty_like(q)
+    for begin, end in pairwise(boundaries):
+        qh, kh, vh = (value[begin:end].transpose(0, 1) for value in (q, k, v))
+        scores = (qh @ kh.transpose(-2, -1)) / math.sqrt(q.shape[-1])
+        out[begin:end] = (torch.softmax(scores, dim=-1) @ vh).transpose(0, 1)
+    return out
 
 
 def vision_attention(
@@ -154,6 +171,10 @@ def vision_attention(
     boundaries = [int(value) for value in cu_seqlens.cpu().tolist()]
     if not boundaries or boundaries[0] != 0 or boundaries[-1] != q.shape[0]:
         raise ValueError("vision cu_seqlens do not cover q/k/v")
+    if q.device.type == "cpu":
+        # CPU library BF16 SDPA is an implementation reference, not the mathematical
+        # authority. Use the complete oracle, then publish the BF16 schedule boundary.
+        return bf16(vision_attention_oracle(q, k, v, cu_seqlens))
     out = torch.empty_like(q)
     segment = 0
     while segment + 1 < len(boundaries):

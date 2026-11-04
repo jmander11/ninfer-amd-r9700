@@ -1274,13 +1274,70 @@ __global__ void wave8_linear_kernel(const hip_bfloat16* input, const void* weigh
 // GFX12 wave32 WMMA's owned raw map is A[axis][8*half+element],
 // B[8*half+element][axis], and C[8*half+element][axis]. This is the same
 // asymmetric fragment map independently checked by the R9700 opcode probe.
-// This is the exact BF16 input/weight contract; W8G32 cannot use it without
-// an observable (and uncontracted) dequantization/rounding change.
 #if defined(__HIPCC__)
 using WmmaBf16Fragment = __attribute__((__vector_size__(8 * sizeof(short)))) short;
 using WmmaF32Fragment  = __attribute__((__vector_size__(8 * sizeof(float)))) float;
 using WmmaI32x2        = int __attribute__((ext_vector_type(2)));
 using WmmaI32x8        = int __attribute__((ext_vector_type(8)));
+
+// Exact represented BF16 operands, cooperatively staged once per K64 tile.
+// Four or sixteen wave32 consumers reuse the tile without decoding or rounding weights.
+template <std::uint32_t Side>
+__global__ __launch_bounds__((Side / 16U) * (Side / 16U) * 32U) void bf16_vision_prefill_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* weights, hip_bfloat16* output,
+    std::uint32_t rows, std::uint32_t columns, std::uint32_t tokens) {
+    constexpr std::uint32_t kTile          = 64U;
+    constexpr std::uint32_t kPitch         = kTile + 8U;
+    constexpr std::uint32_t kWavesPerAxis  = Side / 16U;
+    constexpr std::uint32_t kVisionThreads = kWavesPerAxis * kWavesPerAxis * 32U;
+    __shared__ __attribute__((aligned(16))) short input_tile[Side * kPitch];
+    __shared__ __attribute__((aligned(16))) short weight_tile[Side * kPitch];
+    const std::uint32_t thread     = threadIdx.x;
+    const std::uint32_t lane       = thread % 32U;
+    const std::uint32_t wave       = thread / 32U;
+    const std::uint32_t axis       = lane % 16U;
+    const std::uint32_t half       = lane / 16U;
+    const std::uint32_t row_base   = blockIdx.x * Side;
+    const std::uint32_t token_base = blockIdx.y * Side;
+    WmmaF32Fragment accum{};
+    for (std::uint32_t base = 0; base < columns; base += kTile) {
+        // All admitted Vision K extents are multiples of eight. Vector bounds
+        // also cover K=4304's final partial tile; zero only nonlogical operands.
+        for (std::uint32_t chunk = thread; chunk < Side * kTile / 8U; chunk += kVisionThreads) {
+            const std::uint32_t row    = chunk / (kTile / 8U);
+            const std::uint32_t column = base + (chunk % (kTile / 8U)) * 8U;
+            WmmaBf16Fragment x{}, w{};
+            if (column + 8U <= columns) {
+                if (token_base + row < tokens)
+                    x = *reinterpret_cast<const WmmaBf16Fragment*>(
+                        input + static_cast<std::size_t>(token_base + row) * columns + column);
+                if (row_base + row < rows)
+                    w = *reinterpret_cast<const WmmaBf16Fragment*>(
+                        weights + static_cast<std::size_t>(row_base + row) * columns + column);
+            }
+            *reinterpret_cast<WmmaBf16Fragment*>(input_tile + row * kPitch + column - base)  = x;
+            *reinterpret_cast<WmmaBf16Fragment*>(weight_tile + row * kPitch + column - base) = w;
+        }
+        __syncthreads();
+#    pragma unroll
+        for (std::uint32_t part = 0; part < kTile / 16U; ++part) {
+            const std::uint32_t column = part * 16U + half * 8U;
+            const auto x               = *reinterpret_cast<const WmmaBf16Fragment*>(
+                input_tile + ((wave / kWavesPerAxis) * 16U + axis) * kPitch + column);
+            const auto w = *reinterpret_cast<const WmmaBf16Fragment*>(
+                weight_tile + ((wave % kWavesPerAxis) * 16U + axis) * kPitch + column);
+            accum = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(x, w, accum);
+        }
+        __syncthreads();
+    }
+#    pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const std::uint32_t token = token_base + (wave / kWavesPerAxis) * 16U + half * 8U + element;
+        const std::uint32_t row   = row_base + (wave % kWavesPerAxis) * 16U + axis;
+        if (token < tokens && row < rows)
+            output[static_cast<std::size_t>(token) * rows + row] = hip_bfloat16(accum[element]);
+    }
+}
 
 __device__ short bf16_bits(hip_bfloat16 value) { return static_cast<short>(value.data); }
 
@@ -5308,7 +5365,41 @@ hipError_t w8g32_linear(const W8G32LinearArgs& args, hipStream_t stream) noexcep
                              : w8g32_linear_wave8(args, stream);
 }
 
+namespace {
+constexpr bool vision_matrix_shape(std::uint32_t rows, std::uint32_t columns) noexcept {
+    return (rows == 1152U && (columns == 1536U || columns == 1152U || columns == 4304U)) ||
+           ((rows == 3456U || rows == 4304U) && columns == 1152U) ||
+           ((rows == 4608U || rows == 5120U) && columns == 4608U);
+}
+} // namespace
+
 hipError_t bf16_linear_prefill(const Bf16LinearArgs& args, hipStream_t stream) noexcept {
+    // Dense Linear accepts two-byte-aligned BF16 views. Cooperative vector loads
+    // require 16-byte bases; the ordinary WMMA route owns other legal alignments.
+    if (vision_matrix_shape(args.rows, args.columns) &&
+        ((reinterpret_cast<std::uintptr_t>(args.input) |
+          reinterpret_cast<std::uintptr_t>(args.weights)) &
+         15U) == 0U) {
+        if (!valid_prefill(args.input, args.output, args.tokens, args.rows, args.columns) ||
+            args.weights == nullptr)
+            return hipErrorInvalidValue;
+        const bool small = ((args.rows == 4304U || args.columns == 4608U) && args.tokens <= 64U) ||
+                           (args.tokens == 1024U && args.rows == 1152U && args.columns <= 1536U) ||
+                           (args.tokens == 256U && args.rows != 4304U && args.columns != 4608U) ||
+                           (args.tokens == 512U && args.rows == 4304U);
+        if (small) {
+            hipLaunchKernelGGL((bf16_vision_prefill_kernel<32U>),
+                               dim3((args.rows + 31U) / 32U, (args.tokens + 31U) / 32U), dim3(128),
+                               0, stream, args.input, args.weights, args.output, args.rows,
+                               args.columns, args.tokens);
+        } else {
+            hipLaunchKernelGGL((bf16_vision_prefill_kernel<64U>),
+                               dim3((args.rows + 63U) / 64U, (args.tokens + 63U) / 64U), dim3(512),
+                               0, stream, args.input, args.weights, args.output, args.rows,
+                               args.columns, args.tokens);
+        }
+        return hipGetLastError();
+    }
     // Fixed prefill dispatch selected only after gfx1201 qualification. The
     // wave32 BF16xBF16->FP32 WMMA route retains represented BF16 operands.
     return bf16_linear_wmma16(args, stream);
@@ -5317,7 +5408,7 @@ hipError_t bf16_linear_prefill(const Bf16LinearArgs& args, hipStream_t stream) n
 hipError_t w8g32_linear_prefill(const W8G32LinearArgs& args, hipStream_t stream) noexcept {
     // The W8G32 scale is per K32 code group, so no gfx1201 WMMA operand form
     // preserves the codec exactly. Sixteen wave32 consumers reuse each decoded
-    // 256-K tile while keeping the mandated FP32 dequantized FMA path.
+    // 256-K tile while keeping the direct FP32 dequantized FMA path.
     return w8g32_linear_wave16(args, stream);
 }
 

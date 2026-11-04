@@ -1,0 +1,285 @@
+{
+  "measured_on": "2026-10-17",
+  "hardware": {
+    "gpu": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "rocm": "10",
+    "hip": "7.15.26333"
+  },
+  "artifact_identity": "qwen3.8-27b/r9700-lq4",
+  "settings": {
+    "build": "Release",
+    "device_graphs": true,
+    "power": "auto",
+    "max_context": 65536,
+    "prefill_chunk": 2048,
+    "kv_capacity": "auto",
+    "vision": false,
+    "ram_prefix_cache": false,
+    "disk_prefix_cache": false,
+    "speculative_backend": "dflash",
+    "adaptive_draft": true,
+    "max_draft_tokens": 7,
+    "optimized_draft_head": true,
+    "p_less_sampling": true,
+    "temperature": 1.5,
+    "output_tokens_per_request": 512,
+    "warmup_waves": 1,
+    "measured_waves": 3
+  },
+  "graph_environment": {
+    "DEBUG_HIP_GRAPH_CLASSIC_PATH": "0",
+    "ROC_ENABLE_LARGE_BAR": "0",
+    "ROC_SKIP_KERNEL_ARG_COPY": "0",
+    "HSA_DISABLE_FRAGMENT_ALLOCATOR": "1",
+    "DEBUG_HIP_GRAPH_BATCH_SIZE": "16384"
+  },
+  "metric": "committed decode tokens / full-batch decode-only periodic wall interval seconds",
+  "aggregation": "concurrency 6 is aggregate throughput; divide by six for average per active request",
+  "excludes": [
+    "startup",
+    "prefill",
+    "intervals after any lane finishes"
+  ],
+  "includes": [
+    "reasoning tokens",
+    "host scheduling between rounds"
+  ],
+  "quality_scored": false,
+  "runner": "tools/bench/run_readme_workloads.py",
+  "workloads": "tools/bench/fixtures/readme_workloads.json",
+  "notes": [
+    "Prompt prefixes were seeded by untimed requests.",
+    "Each cell reports three measured waves after one warmup.",
+    "Standard deviation is the sample standard deviation.",
+    "Python cells use the corrected no-tools instruction; initial tool-call cells were excluded.",
+    "Raw reports remain local under profiles/; these are the admitted summary values."
+  ],
+  "results": [
+    {
+      "workload": "English story",
+      "concurrency": 1,
+      "mean_tok_s": 88.29097655109861,
+      "stdev_tok_s": 1.0756138068366414,
+      "prompt_tokens": [
+        146
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.23068589315668755
+    },
+    {
+      "workload": "Math reasoning",
+      "concurrency": 1,
+      "mean_tok_s": 126.26301440190605,
+      "stdev_tok_s": 8.821698418378295,
+      "prompt_tokens": [
+        346
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.4018990658960148
+    },
+    {
+      "workload": "Document summary 8K",
+      "concurrency": 1,
+      "mean_tok_s": 92.56091972613314,
+      "stdev_tok_s": 2.2110077012942764,
+      "prompt_tokens": [
+        8192
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.2604394563055807
+    },
+    {
+      "workload": "Document summary 32K",
+      "concurrency": 1,
+      "mean_tok_s": 97.42647691349907,
+      "stdev_tok_s": 5.595450723803939,
+      "prompt_tokens": [
+        32779
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.30953128034615995
+    },
+    {
+      "workload": "English story",
+      "concurrency": 6,
+      "mean_tok_s": 355.8634094640104,
+      "stdev_tok_s": 3.5669068488878737,
+      "prompt_tokens": [
+        146
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.23121209479114485
+    },
+    {
+      "workload": "Math reasoning",
+      "concurrency": 6,
+      "mean_tok_s": 491.0728201012356,
+      "stdev_tok_s": 7.778120261974529,
+      "prompt_tokens": [
+        346
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.37126806178740573
+    },
+    {
+      "workload": "Document summary 8K",
+      "concurrency": 6,
+      "mean_tok_s": 340.3517054181197,
+      "stdev_tok_s": 12.390918272711046,
+      "prompt_tokens": [
+        8192
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.2910592796907279
+    },
+    {
+      "workload": "Document summary 32K",
+      "concurrency": 6,
+      "mean_tok_s": 299.6513209041712,
+      "stdev_tok_s": 7.10285591632823,
+      "prompt_tokens": [
+        32779
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.4167042263346328
+    },
+    {
+      "workload": "Python package",
+      "concurrency": 1,
+      "mean_tok_s": 135.0990742836473,
+      "stdev_tok_s": 22.1358551828655,
+      "prompt_tokens": [
+        171
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.43137081524278137
+    },
+    {
+      "workload": "Python package",
+      "concurrency": 6,
+      "mean_tok_s": 534.5505862321145,
+      "stdev_tok_s": 24.39874319950157,
+      "prompt_tokens": [
+        171
+      ],
+      "completion_tokens": [
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512,
+        512
+      ],
+      "acceptance": 0.4336692275464678
+    }
+  ]
+}

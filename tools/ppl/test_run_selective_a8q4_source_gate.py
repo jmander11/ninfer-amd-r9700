@@ -33,7 +33,7 @@ class RunSelectiveA8Q4SourceGateTest(unittest.TestCase):
                 patch.object(runner, "COMPARISON", comparison),
                 self.assertRaisesRegex(ValueError, "partial"),
             ):
-                runner.run()
+                runner.run(weights=Path("/fixture/bf16"))
             arms["a8g64-q4g64-control"].unlink()
             (output / "foreign").write_text("x")
             with (
@@ -42,7 +42,7 @@ class RunSelectiveA8Q4SourceGateTest(unittest.TestCase):
                 patch.object(runner, "COMPARISON", comparison),
                 self.assertRaisesRegex(ValueError, "unexpected"),
             ):
-                runner.run()
+                runner.run(weights=Path("/fixture/bf16"))
 
     def test_resume_runs_only_missing_candidate_then_comparator(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -67,7 +67,7 @@ class RunSelectiveA8Q4SourceGateTest(unittest.TestCase):
                 patch.object(runner, "validate_comparison", return_value={"pass": True}),
                 patch.object(runner.subprocess, "run", side_effect=execute),
             ):
-                self.assertEqual(runner.run(), 0)
+                self.assertEqual(runner.run(weights=Path("/fixture/bf16")), 0)
             self.assertEqual(len(commands), 2)
             self.assertIn("a8g128-q4g128-mse", commands[0])
             self.assertNotIn("a8g64-q4g64-control", commands[0])

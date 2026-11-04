@@ -24,12 +24,14 @@ inline constexpr char kDiskTombstoneMagic[8]   = {'N', 'I', 'D', 'K', 'T', 'B', 
 inline constexpr char kDiskPackSetMagic[8]     = {'N', 'I', 'D', 'K', 'P', 'S', '0', '1'};
 inline constexpr char kDiskObjectMapMagic[8]   = {'N', 'I', 'D', 'K', 'O', 'M', '0', '1'};
 
-inline constexpr std::uint32_t kDiskFormatVersion         = 7;
+inline constexpr std::uint32_t kDiskFormatVersion         = 8;
 inline constexpr std::uint32_t kDiskPageHeaderBytes       = 16;
 inline constexpr std::uint32_t kDiskPageIoAlignment       = 4096;
 inline constexpr std::uint32_t kDiskCodecHeaderBytes      = 24;
 inline constexpr std::uint32_t kDiskStatePayloadOffset    = 4096;
 inline constexpr std::uint32_t kDiskFingerprintPlaneBytes = 20;
+
+enum class DiskMapRecordKind : std::uint8_t { Put = 1, Delete = 2, Move = 3 };
 
 enum class DiskCodec : std::uint8_t {
     Raw  = 0,
@@ -91,7 +93,7 @@ struct DiskPlaneSchema {
 };
 
 struct DiskFingerprint {
-    std::string artifact_file_identity;
+    std::string artifact_tensor_identity;
     std::string model_id;
     std::string weights_id;
     Fp8KInt4VSemanticFingerprint text_semantics;
@@ -106,7 +108,6 @@ struct DiskFingerprint {
     std::uint32_t cyclic_padded       = 0;
     std::int32_t cyclic_kv_heads      = 0;
     std::int32_t cyclic_head_dim      = 0;
-    std::int32_t cyclic_lane_capacity = 0;
     std::uint32_t snapshot_version    = kDiskFormatVersion;
     std::vector<DiskPlaneSchema> text_planes;
     std::vector<DiskPlaneSchema> backend_planes;

@@ -1,10 +1,8 @@
 #pragma once
 
-// Anthropic Messages API wire-format layer: parses /v1/messages request JSON into
-// the internal GenerationRequest and serializes internal results back into
-// Anthropic message bodies / SSE events. This is a sibling of openai_schema.h;
-// both map to the same wire-agnostic GenerationRequest / GenerationOutcome, so the
-// engine and generation service below know nothing about either protocol.
+// Parses Anthropic /v1/messages requests and serializes response bodies and SSE events.
+// Shares GenerationRequest / GenerationOutcome with the OpenAI adapter; the Engine and
+// generation service do not depend on either wire format.
 
 #include "serve/request.h"
 #include "ninfer/types.h"
@@ -22,7 +20,8 @@ namespace ninfer::serve {
 // assistant tool_use blocks become tool calls. Throws ApiException on malformed /
 // unsupported requests. The `model` field is accepted verbatim (any Claude model
 // name) and echoed back, never validated against the loaded model.
-GenerationRequest parse_messages_request(const nlohmann::json& body, const RequestLimits& limits);
+GenerationRequest parse_messages_request(const nlohmann::ordered_json& body,
+                                         const RequestLimits& limits);
 
 // Map an internal finish reason (+ whether tool calls were produced) onto the
 // Anthropic stop_reason wire value.
@@ -50,7 +49,8 @@ std::string make_content_block_delta_tool_json(int index, const std::string& par
 // Closes a thinking block's opaque signature; streamed once, just before its content_block_stop.
 std::string make_content_block_delta_signature(int index, const std::string& signature);
 std::string make_content_block_stop(int index);
-std::string make_message_delta(const char* stop_reason, int output_tokens);
+std::string make_message_delta(const char* stop_reason, int output_tokens,
+                               const ninfer::ReasoningLimitStats& reasoning_limit = {});
 std::string make_message_stop();
 std::string make_messages_ping();
 

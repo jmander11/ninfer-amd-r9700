@@ -10,25 +10,27 @@ import importlib.util
 import json
 import os
 import shlex
+import sys
 import tempfile
 from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.bench.run_ninfer_bench_matrix import inspect_executable
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
 from tools.ppl.run import QUALITY_TIERS, validate_bf16_repeat_comparison
+from tools.r9700.host import power_profile_path
 from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
 
 REPO = Path(__file__).resolve().parents[2]
-RESOLVER = REPO / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"
+RESOLVER = REPO / "tools/bench/resolve_selected_route.py"
 RUNNER = REPO / "tools/ppl/run.py"
 VALIDATOR = REPO / "tools/ppl/validate_selected_exact_token.py"
 BF16_SCORER = REPO / "tools/reference/qwen3_8_27b_bf16/ppl.py"
 BF16_PROTOCOL = REPO / "tools/reference/qwen3_8_27b_bf16/protocol.py"
-BF16_SOURCE = Path("/path/to/local/models/qwen3.8-27b-bf16")
-BF16_RECEIPT = REPO / "profiles/ppl/r9700-bf16-source-checkpoint-preflight-20260905.json"
 IDS = REPO / "tools/ppl/corpus.ids"
-PYTHON = Path("/path/to/local/.venv-ninfer-r9700-py311/bin/python")
-POWER = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
+POWER = power_profile_path()
 LENGTHS = (8192, 32768)
 AT_FDCWD = -100
 RENAME_NOREPLACE = 1
@@ -102,7 +104,9 @@ def selected_quality(selection: Path, winner: str, group: int, route: dict) -> t
     return {"path": str(path), "sha256": sha(path)}, {"tier": tiers.pop(), "profile": profile}
 
 
-def prepare(selection: Path, output: Path) -> dict:
+def prepare(
+    selection: Path, output: Path, *, bf16_source: Path, bf16_receipt: Path, python: Path
+) -> dict:
     selection = selection.resolve(strict=True)
     output = output if output.is_absolute() else Path.cwd() / output
     output = output.parent.resolve(strict=True) / output.name
@@ -123,17 +127,17 @@ def prepare(selection: Path, output: Path) -> dict:
     scorer = Path(route["build_directory"]).resolve(strict=True) / "apps/ninfer-ppl"
     scorer_identity = inspect_executable(scorer)
     bf16_scorer_identity = inspect_executable(BF16_SCORER)
-    if not PYTHON.is_file() or not os.access(PYTHON, os.X_OK):
+    if not python.is_file() or not os.access(python, os.X_OK):
         raise ValueError("selected ROCm Python interpreter is unavailable")
-    pyvenv = PYTHON.parent.parent / "pyvenv.cfg"
+    pyvenv = python.parent.parent / "pyvenv.cfg"
     if not pyvenv.is_file():
         raise ValueError("selected ROCm Python launcher lacks pyvenv.cfg")
-    receipt = json.loads(BF16_RECEIPT.read_text(encoding="utf-8"))
-    source_validation = validate_checkpoint_files(BF16_SOURCE)
+    receipt = json.loads(bf16_receipt.read_text(encoding="utf-8"))
+    source_validation = validate_checkpoint_files(bf16_source)
     if (
         receipt.get("artifact_type") != "ninfer_qwen3_8_27b_bf16_checkpoint_preflight"
         or receipt.get("status") != "passed"
-        or receipt.get("source") != str(BF16_SOURCE)
+        or receipt.get("source") != str(bf16_source)
         or receipt.get("shards", {}).get("expected_count") != 18
         or receipt.get("shards", {}).get("all_named_exactly") is not True
         or receipt.get("shards", {}).get("all_regular_nonempty") is not True
@@ -148,12 +152,12 @@ def prepare(selection: Path, output: Path) -> dict:
     campaign = output / "campaign"
     admission = output / "admission.json"
     command = [
-        str(PYTHON),
+        str(python),
         str(RUNNER),
         "--bf16-reference-ppl-bin",
         str(BF16_SCORER),
         "--bf16-reference-weights",
-        str(BF16_SOURCE),
+        str(bf16_source),
         f"{group_flag}-ppl-bin",
         str(scorer),
         f"{group_flag}-weights",
@@ -205,13 +209,13 @@ def prepare(selection: Path, output: Path) -> dict:
             "terminal_route": route,
             "terminal_selection": {"path": str(selection), "sha256": sha(selection)},
             "quality_authority": quality,
-            "bf16_source_receipt": {"path": str(BF16_RECEIPT), "sha256": sha(BF16_RECEIPT)},
+            "bf16_source_receipt": {"path": str(bf16_receipt), "sha256": sha(bf16_receipt)},
             "bf16_reference_authority": reference,
             "bf16_repeat_authority": {"path": repeat["path"], "sha256": repeat["sha256"]},
-            "bf16_source": {"path": str(BF16_SOURCE), "shard_count": 18},
+            "bf16_source": {"path": str(bf16_source), "shard_count": 18},
             "python": {
-                "launcher_path": str(PYTHON),
-                "sha256": sha(PYTHON),
+                "launcher_path": str(python),
+                "sha256": sha(python),
                 "pyvenv_cfg": {"path": str(pyvenv), "sha256": sha(pyvenv)},
             },
             "candidate_scorer": scorer_identity,
@@ -253,12 +257,12 @@ def prepare(selection: Path, output: Path) -> dict:
             'test "$(cat "$power")" = auto\n'
             'test ! -e "$root/campaign" && test ! -L "$root/campaign"\n'
             'test ! -e "$root/admission.json" && test ! -L "$root/admission.json"\n'
-            f"{shlex.quote(str(PYTHON))} -c 'from pathlib import Path; from "
+            f"{shlex.quote(str(python))} -c 'from pathlib import Path; from "
             "tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files; "
-            f'validate_checkpoint_files(Path("{BF16_SOURCE}"))\'\n'
+            f'validate_checkpoint_files(Path("{bf16_source}"))\'\n'
             f"{shlex.join(command)}\n"
             'test "$(cat "$power")" = auto\n'
-            f"{shlex.quote(str(PYTHON))} -m tools.ppl.validate_selected_exact_token "
+            f"{shlex.quote(str(python))} -m tools.ppl.validate_selected_exact_token "
             '--plan "$root/plan.json" '
             '--campaign "$root/campaign/results.json" --out "$root/admission.json"\n',
             encoding="utf-8",
@@ -270,9 +274,9 @@ def prepare(selection: Path, output: Path) -> dict:
             RESOLVER,
             BF16_SCORER,
             BF16_PROTOCOL,
-            PYTHON,
+            python,
             pyvenv,
-            BF16_RECEIPT,
+            bf16_receipt,
             IDS,
             selection,
             Path(quality["path"]),
@@ -301,9 +305,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selection", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--bf16-source", required=True, type=Path)
+    parser.add_argument("--bf16-receipt", required=True, type=Path)
+    parser.add_argument("--python", required=True, type=Path)
     args = parser.parse_args()
     try:
-        prepare(args.selection, args.out)
+        prepare(
+            args.selection,
+            args.out,
+            bf16_source=args.bf16_source,
+            bf16_receipt=args.bf16_receipt,
+            python=args.python,
+        )
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise SystemExit(str(error)) from error
     return 0

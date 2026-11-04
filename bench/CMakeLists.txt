@@ -35,3 +35,11 @@ target_link_libraries(ninfer_qwen3_8_27b_mtp_round_bench PRIVATE
   ninfer_r9700_qwen3_8_27b_runtime
   ninfer_r9700_core
   hip::host)
+
+# Saved continuation diagnostic through Engine; its syncing sampler trace is timing-ineligible.
+add_executable(ninfer_qwen3_8_27b_generation_trace
+  ${PROJECT_SOURCE_DIR}/tools/parity/qwen3_8_27b/generation_trace.cpp)
+target_include_directories(ninfer_qwen3_8_27b_generation_trace PRIVATE
+  ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(ninfer_qwen3_8_27b_generation_trace PRIVATE
+  ninfer_engine ninfer_product_prompt_input)

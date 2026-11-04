@@ -10,6 +10,7 @@ import json
 import os
 import re
 import stat
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -17,10 +18,15 @@ from pathlib import Path
 from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
 from tools.bench.validate_profile_trace import _parse_database
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.r9700.host import power_profile_path
+
 REPO = Path(__file__).resolve().parents[2]
-RESOLVER = REPO / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"
+RESOLVER = REPO / "tools/bench/resolve_selected_route.py"
 MIXED_ID = "r9700-q4-w8-mse-n16k16-eval"
-POWER = Path("/sys/class/drm/card2/device/power_dpm_force_performance_level")
+POWER = power_profile_path()
 QUALIFIER_SOURCE = REPO / "tools/r9700/w8a8_wmma_linear_qual.hip"
 KERNEL_SOURCE = REPO / "src/ops/r9700/linear/r9700_linear.hip"
 PROFILE_SOURCE = REPO / "src/ops/r9700/linear/r9700_w8_activation_profile.h"

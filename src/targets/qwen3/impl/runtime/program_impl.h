@@ -285,20 +285,34 @@ void validate_graph_profiles(const std::vector<GraphExecutionProfile>& profiles,
 
 // Keeps the tool-mask matcher armed exactly while one speculative round can execute.
 struct TokenMaskRoundGuard {
-    explicit TokenMaskRoundGuard(qwen3::TokenMaskExchange& exchange) : exchange(exchange) {
+    TokenMaskRoundGuard(qwen3::TokenMaskExchange& exchange, DeviceContext& device)
+        : exchange(exchange), stream(device.stream) {
         exchange.arm();
     }
 
-    ~TokenMaskRoundGuard() { exchange.disarm(); }
+    ~TokenMaskRoundGuard() {
+        // Enqueue failures can unwind with a publish/acquire still in flight. Keep the
+        // matcher alive until that work drains, including during Program construction.
+        if (!finished) { (void)hipStreamSynchronize(stream); }
+        exchange.disarm();
+    }
+
+    // Called only after round synchronization. Avoid another HIP wait on the normal path.
+    void finish() {
+        finished = true;
+        exchange.finish_round();
+    }
 
     TokenMaskRoundGuard(const TokenMaskRoundGuard&)            = delete;
     TokenMaskRoundGuard& operator=(const TokenMaskRoundGuard&) = delete;
     qwen3::TokenMaskExchange& exchange;
+    hipStream_t stream;
+    bool finished = false;
 };
 
 template <class Prepare>
 void instantiate_graph_family(DecodeGraphFamily& family, const char* label, DeviceContext& device,
-                              Prepare&& prepare) {
+                              Prepare&& prepare, qwen3::TokenMaskExchange& token_masks) {
     if (family.profiles.empty()) {
         throw std::logic_error(std::string(label) + " Device Graph family has no profiles");
     }
@@ -321,8 +335,10 @@ void instantiate_graph_family(DecodeGraphFamily& family, const char* label, Devi
         if (has_larger_representative) { continue; }
         prepare(profile.min_execution_frontier, profile.batch_size, profile.draft_tokens);
         device.synchronize();
+        TokenMaskRoundGuard token_mask_round(token_masks, device);
         profile.executable.launch(device.stream);
         device.synchronize();
+        token_mask_round.finish();
     }
 }
 
@@ -341,6 +357,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
       vision_enabled(plan.features.vision), use_device_graph(plan.use_device_graph),
       kv_payload_bytes(plan.persistent.kv_payload_bytes),
       kv_ram_capacity_bytes(plan.kv_ram_capacity_bytes),
+      kv_ram_system_prompts(plan.kv_ram_system_prompts),
       expected_graph_definition_count(plan.graph_definition_count),
       expected_graph_executable_count(plan.graph_executable_count),
       kv_disk_capacity_bytes(plan.kv_disk_capacity_bytes),
@@ -547,6 +564,8 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
     }
     HIP_CHECK(hipMemsetAsync(token_counts.data, 0, token_counts.bytes(), device.stream));
     HIP_CHECK(hipMemsetAsync(sampling_config.data, 0, sampling_config.bytes(), device.stream));
+    HIP_CHECK(
+        hipMemsetAsync(io.nonfinite_logits.data, 0, io.nonfinite_logits.bytes(), device.stream));
     device.synchronize();
     prepare_graphs();
     if (calibrates_p_less_drafts()) {
@@ -569,7 +588,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
         if (kv_ram_arena == nullptr || kv_ram_arena->capacity() != kv_ram_capacity_bytes) {
             throw std::invalid_argument("KV RAM cache host arena does not match the sequence plan");
         }
-        kv_ram_cache_.emplace(std::move(*kv_ram_arena));
+        kv_ram_cache_.emplace(std::move(*kv_ram_arena), kv_ram_system_prompts);
     }
     if (kv_disk_capacity_bytes != 0) {
         const PagedKVPool& text_pool    = decoder->text_kv.pool();
@@ -586,7 +605,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
         disk.max_context    = capacity;
         disk.ram            = kv_ram_cache_ ? &*kv_ram_cache_ : nullptr;
         disk.fingerprint    = qwen3::detail::make_disk_fingerprint(
-            plan.model_id, plan.weights_id, plan.artifact_file_identity, speculative_backend,
+            plan.model_id, plan.weights_id, plan.artifact_tensor_identity, speculative_backend,
             text_pool, backend_pool, decoder->text_kv.fingerprint(),
             backend != nullptr ? std::optional(backend->fingerprint()) : std::nullopt,
             &decoder->linear_attention, dflash ? &dflash->local : nullptr);
@@ -642,6 +661,428 @@ ProgramImplCore::~ProgramImplCore() noexcept {
     }
     if (device.stream != nullptr) { (void)hipStreamSynchronize(device.stream); }
     if (device.copy_stream != nullptr) { (void)hipStreamSynchronize(device.copy_stream); }
+}
+
+bool ProgramImplCore::chunked_execution_enabled() const noexcept {
+#if defined(NINFER_QUALIFY_FULL_KV_RESERVATION)
+    return false;
+#else
+    return kv_ram_cache_.has_value();
+#endif
+}
+
+runtime::ExecutionWindow
+ProgramImplCore::execution_window(std::uint32_t prompt_tokens, std::uint32_t output_tokens,
+                                  std::size_t identity_extra_bytes, std::size_t checkpoint_count,
+                                  runtime::AdmissionResources minimum) const {
+    const std::uint32_t frontier = prompt_tokens + (output_tokens ? output_tokens - 1 : 0);
+    const auto extent            = [&](std::uint32_t extra) {
+        return static_cast<std::uint32_t>(
+            std::min<std::uint64_t>(capacity, static_cast<std::uint64_t>(frontier) + extra));
+    };
+    runtime::ExecutionWindow result;
+    result.output_tokens           = output_tokens;
+    result.admission.active_lanes  = 1;
+    result.admission.main_kv_pages = pages_for_tokens(
+        extent(speculative_backend == SpeculativeBackend::DFlash ? dflash_verify_width : 0));
+    if (speculative_backend == SpeculativeBackend::Mtp) {
+        result.admission.backend_kv_pages = pages_for_tokens(extent(draft_window - 1));
+    } else if (speculative_backend == SpeculativeBackend::DFlash) {
+        if constexpr (DFlashConfig::full_layers > 0) {
+            result.admission.backend_kv_pages = pages_for_tokens(frontier);
+        }
+    }
+    // A settled speculative round may leave mapped tail pages beyond a smaller future
+    // output window. Shrinking entitlement never discards those represented current pages.
+    result.admission.main_kv_pages =
+        std::max(result.admission.main_kv_pages, minimum.main_kv_pages);
+    result.admission.backend_kv_pages =
+        std::max(result.admission.backend_kv_pages, minimum.backend_kv_pages);
+    if (kv_ram_cache_) {
+        result.suspension_bytes = qwen3::detail::KVRamCache::live_image_budget(
+            decoder->text_kv.pool(), backend_kv_pool(), result.admission.main_kv_pages,
+            result.admission.backend_kv_pages, frontier + 1ULL,
+            identity_extra_bytes + 13ULL * (frontier + 1ULL),
+            decoder->linear_attention.conv_host_image_bytes(),
+            decoder->linear_attention.recurrent_host_image_bytes(),
+            tail_hidden_store.bytes() / max_concurrency,
+            dflash ? dflash->local.lane_host_bytes() : 0, checkpoint_count);
+        result.suspension_bytes +=
+            static_cast<std::size_t>(TextConfig::token_domain) * sizeof(std::int32_t);
+        if (dflash) {
+            result.suspension_bytes += dflash->pending_features.bytes() / max_concurrency;
+        }
+    }
+    return result;
+}
+
+runtime::AdmissionResources
+ProgramImplCore::completion_resources(const RequestBasePlan& base,
+                                      std::uint32_t prompt_token_bound) const {
+    if (!base.impl_ || prompt_token_bound < base.impl_->summary.prompt_tokens) {
+        throw std::invalid_argument("completion bound is shorter than its prepared prompt");
+    }
+    const auto output   = base.impl_->summary.effective_output_tokens;
+    const auto frontier = static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(capacity, static_cast<std::uint64_t>(prompt_token_bound) +
+                                              (output ? output - 1ULL : 0ULL)));
+    return execution_window(frontier, 1, 0, 0).admission;
+}
+
+bool ProgramImplCore::shrink_window(std::uint32_t lane, const runtime::ExecutionWindow& window) {
+    if (lane >= max_concurrency) { throw std::out_of_range("window lane out of range"); }
+    auto& sequence = sequences[lane];
+    auto& request  = requests[lane];
+    if (request.lifecycle != Lifecycle::Active || request.pending.kind != PendingKind::None ||
+        request.prefill || !sequence.kv || window.output_tokens >= request.window_output_tokens ||
+        window.output_tokens <= sequence.ledger_frontier - request.prompt_tokens) {
+        return false;
+    }
+    const auto expected = plan_window(lane, window.output_tokens);
+    if (expected.admission.main_kv_pages != window.admission.main_kv_pages ||
+        expected.admission.backend_kv_pages != window.admission.backend_kv_pages) {
+        throw std::logic_error("invalid target window shrink");
+    }
+    resize_sequence_kv_entitlement(sequence, window.admission.main_kv_pages,
+                                   window.admission.backend_kv_pages);
+    request.window_output_tokens = window.output_tokens;
+    return true;
+}
+
+runtime::ExecutionWindow ProgramImplCore::plan_window(std::uint32_t lane,
+                                                      std::uint32_t output_tokens) const {
+    if (lane >= max_concurrency) { throw std::out_of_range("window lane out of range"); }
+    const auto& sequence = sequences[lane];
+    const auto& request  = requests[lane];
+    if (!sequence.kv || output_tokens > request.effective_output_tokens) {
+        throw std::logic_error("window exceeds live request lifetime");
+    }
+    return execution_window(request.prompt_tokens, output_tokens,
+                            sequence.prefix_identity.packed_bytes() -
+                                13ULL * sequence.prefix_identity.size(),
+                            sequence.context_checkpoints.size(),
+                            {1, sequence.kv->text.mapped_page_count(),
+                             sequence.kv->backend ? sequence.kv->backend->mapped_page_count() : 0});
+}
+
+runtime::ExecutionWindow ProgramImplCore::plan_suspended_window(std::uint64_t owner,
+                                                                std::uint32_t output_tokens) const {
+    const auto& parked = suspended_requests_.at(owner);
+    if (parked.phase != SuspendedRequest::Phase::Parked ||
+        output_tokens > parked.request.effective_output_tokens) {
+        throw std::logic_error("window exceeds suspended request lifetime");
+    }
+    return execution_window(parked.request.prompt_tokens, output_tokens,
+                            parked.sequence.prefix_identity.packed_bytes() -
+                                13ULL * parked.sequence.prefix_identity.size(),
+                            parked.checkpoint_count, {1, parked.text_pages, parked.backend_pages});
+}
+
+bool ProgramImplCore::grant_window(std::uint32_t lane, const runtime::ExecutionWindow& window) {
+    if (lane >= max_concurrency) { throw std::out_of_range("window lane out of range"); }
+    auto& sequence      = sequences[lane];
+    auto& request       = requests[lane];
+    const auto expected = plan_window(lane, window.output_tokens);
+    if (expected.admission.main_kv_pages != window.admission.main_kv_pages ||
+        expected.admission.backend_kv_pages != window.admission.backend_kv_pages ||
+        window.output_tokens < request.window_output_tokens) {
+        throw std::logic_error("invalid target window grant");
+    }
+    const auto can_replace = [](const PagedKVPool& pool, std::uint32_t old_pages,
+                                std::uint32_t new_pages) {
+        return old_pages <= pool.entitled_pages() && new_pages <= pool.logical_page_capacity() &&
+               new_pages <= pool.page_group_count() - (pool.entitled_pages() - old_pages);
+    };
+    if (!can_replace(decoder->text_kv.pool(), sequence.kv.value().text.page_entitlement(),
+                     window.admission.main_kv_pages)) {
+        return false;
+    }
+    if (const auto* backend = backend_kv_pool();
+        backend && !can_replace(*backend, sequence.kv.value().backend.value().page_entitlement(),
+                                window.admission.backend_kv_pages)) {
+        return false;
+    }
+    try {
+        resize_sequence_kv_entitlement(sequence, window.admission.main_kv_pages,
+                                       window.admission.backend_kv_pages);
+    } catch (const std::bad_alloc&) {
+        // The bundle reserves every host page vector before committing any entitlement.
+        return false;
+    }
+    request.window_output_tokens = window.output_tokens;
+    return true;
+}
+
+bool ProgramImplCore::reserve_suspension_credit(std::uint64_t owner, std::size_t bytes) {
+    if (!kv_ram_cache_) { return false; }
+    return kv_ram_cache_.value().reserve_live_credit(owner, bytes);
+}
+
+void ProgramImplCore::release_suspension_credit(std::uint64_t owner) {
+    if (kv_ram_cache_) { kv_ram_cache_.value().release_live_credit(owner); }
+}
+
+bool ProgramImplCore::start_suspend(std::uint32_t lane, std::uint64_t owner) {
+    if (!kv_ram_cache_ || lane >= max_concurrency || owner == 0) { return false; }
+    auto& sequence = sequences[lane];
+    auto& request  = requests[lane];
+    if ((request.lifecycle != Lifecycle::Active && request.lifecycle != Lifecycle::Complete) ||
+        request.prefill || request.pending.kind != PendingKind::None || !sequence.kv ||
+        suspended_requests_.contains(owner)) {
+        throw std::logic_error("suspension requires a settled active request");
+    }
+    flush_deferred_gdn_fold(lane);
+    device.order_copy_after_compute();
+    auto it = suspended_requests_.end();
+    try {
+        it = suspended_requests_.try_emplace(owner).first;
+    } catch (const std::bad_alloc&) { return false; }
+    it->second.lane             = lane;
+    it->second.checkpoint_count = sequence.context_checkpoints.size();
+    const bool was_retained     = sequence.retained;
+    try {
+        sequence.retained = true;
+        qwen3::detail::ResidentPrefixIdentity unused;
+        auto source = ram_capture_source(sequence, unused, CacheCaptureMode::CompleteOriginal);
+        sequence.retained     = was_retained;
+        source.live_owner     = owner;
+        it->second.text_pages = source.text_pages.value_or(source.text->mapped_page_count());
+        it->second.backend_pages =
+            source.backend ? source.backend_pages.value_or(source.backend->mapped_page_count()) : 0;
+        const auto [block, bytes] = kv_ram_cache_.value().live_credit_view(owner);
+        std::size_t tail_bytes    = 0;
+        if (request.sampling_host.token_counts) {
+            const std::size_t count_bytes =
+                static_cast<std::size_t>(TextConfig::token_domain) * sizeof(std::int32_t);
+            tail_bytes += count_bytes;
+            if (bytes < tail_bytes) {
+                throw std::logic_error("sampling count credit is too small");
+            }
+            it->second.sampling_counts_present = true;
+            it->second.sampling_counts_offset  = bytes - tail_bytes;
+            HIP_CHECK(
+                hipMemcpyAsync(static_cast<std::byte*>(block) + it->second.sampling_counts_offset,
+                               request.sampling_host.token_counts, count_bytes,
+                               hipMemcpyDeviceToHost, device.copy_stream));
+        }
+        if (dflash) {
+            const auto features =
+                dflash->pending_features.slice(2, static_cast<std::int32_t>(lane), 1);
+            tail_bytes += features.bytes();
+            if (bytes < tail_bytes) {
+                throw std::logic_error("pending DFlash feature credit is too small");
+            }
+            it->second.pending_features_offset = bytes - tail_bytes;
+            HIP_CHECK(hipMemcpyAsync(
+                static_cast<std::byte*>(block) + it->second.pending_features_offset, features.data,
+                features.bytes(), hipMemcpyDeviceToHost, device.copy_stream));
+        }
+        source.live_reserved_tail_bytes = tail_bytes;
+        auto result                     = kv_ram_cache_.value().capture(source);
+        if (result.status != qwen3::detail::RamCaptureStatus::Captured) {
+            HIP_CHECK(hipStreamSynchronize(device.copy_stream));
+            suspended_requests_.erase(it);
+            return false;
+        }
+        it->second.entry_id = result.entry_id;
+        return true;
+    } catch (const std::bad_alloc&) {
+        device.synchronize_all();
+        sequence.retained = was_retained;
+        suspended_requests_.erase(it);
+        return false;
+    } catch (...) {
+        (void)hipStreamSynchronize(device.copy_stream);
+        sequence.retained = was_retained;
+        suspended_requests_.erase(it);
+        throw;
+    }
+}
+
+bool ProgramImplCore::suspension_ready(std::uint64_t owner) const {
+    const auto& saved = suspended_requests_.at(owner);
+    return kv_ram_cache_.value().live_image_ready(saved.entry_id);
+}
+
+void ProgramImplCore::finish_suspend(std::uint32_t lane, std::uint64_t owner) {
+    auto& saved = suspended_requests_.at(owner);
+    if (saved.phase != SuspendedRequest::Phase::Capturing || saved.lane != lane ||
+        !suspension_ready(owner)) {
+        throw std::logic_error("suspension capture is not settled");
+    }
+    auto& sequence = sequences[lane];
+    auto& request  = requests[lane];
+    unbind_sequence_kv(sequence);
+    sequence.kv.reset();
+    if ((staging_.occupied || staging_.rewrite) && staging_.lane == lane) { unoccupy_staging(); }
+    clear_context_checkpoints(sequence);
+    saved.sequence = std::move(sequence);
+    saved.request  = std::move(request);
+    // Physical tensor slices and rewrite image slots belong to the vacated lane, not the
+    // logical parked request. Their contents are already secured in its live RAM image.
+    sequence             = SequenceState{};
+    sequence.lane        = lane;
+    sequence.tail_hidden = std::exchange(saved.sequence.tail_hidden, {});
+    sequence.rewrite_checkpoint_hidden =
+        std::exchange(saved.sequence.rewrite_checkpoint_hidden, {});
+    sequence.rewrite_image = std::move(saved.sequence.rewrite_image);
+    request                = RequestControl{};
+    saved.phase            = SuspendedRequest::Phase::Parked;
+}
+
+bool ProgramImplCore::start_resume(std::uint32_t lane, std::uint64_t owner,
+                                   const runtime::ExecutionWindow& window) {
+    auto& saved = suspended_requests_.at(owner);
+    if (saved.phase != SuspendedRequest::Phase::Parked || lane >= max_concurrency ||
+        requests[lane].lifecycle != Lifecycle::Empty || sequences[lane].kv) {
+        throw std::logic_error("resume requires a parked request and an empty lane");
+    }
+    const auto expected = plan_suspended_window(owner, window.output_tokens);
+    if (expected.admission.main_kv_pages != window.admission.main_kv_pages ||
+        expected.admission.backend_kv_pages != window.admission.backend_kv_pages ||
+        window.output_tokens < saved.request.window_output_tokens) {
+        throw std::logic_error("invalid suspended window grant");
+    }
+    if (!decoder->text_kv.pool().can_reserve(window.admission.main_kv_pages) ||
+        (backend_kv_pool() && !backend_kv_pool()->can_reserve(window.admission.backend_kv_pages))) {
+        return false;
+    }
+    auto& sequence = sequences[lane];
+    // A reused physical lane may still have a rewrite staging identity from its previous
+    // logical owner. Its generation can coincide with the parked request's generation.
+    if ((staging_.occupied || staging_.rewrite) && staging_.lane == lane) { unoccupy_staging(); }
+    try {
+        const auto host_view = kv_ram_cache_.value().host_kv(saved.entry_id);
+        if (context_checkpoint_pool_.size() < host_view.ladder_images.size()) { return false; }
+        reserve_sequence_kv(sequence, window.admission.main_kv_pages,
+                            window.admission.backend_kv_pages);
+        device.order_copy_after_compute();
+        auto& kv = sequence.kv.value();
+        kv.text.materialize_pages(host_view.text_pages, device.copy_stream);
+        if (kv.backend) {
+            kv.backend->materialize_pages(host_view.backend_pages, device.copy_stream);
+        }
+        qwen3::detail::RamRestoreTarget target;
+        target.text_dst_pages    = host_view.text_pages;
+        target.backend_dst_pages = host_view.backend_pages;
+        target.text              = &kv.text;
+        target.text_pool         = &decoder->text_kv.pool();
+        target.text_semantics    = decoder->text_kv.fingerprint();
+        if (kv.backend) {
+            target.backend      = &*kv.backend;
+            target.backend_pool = backend_kv_pool();
+            if (speculative_backend == SpeculativeBackend::Mtp) {
+                target.backend_semantics = decoder->mtp_cache()->fingerprint();
+            }
+        }
+        target.gdn              = &decoder->linear_attention;
+        target.gdn_current_slot = LinearStateSlots::current_state_slot(lane, max_concurrency);
+        target.rewrite_state    = rewrite_state_host_target(sequence);
+        target.tail_hidden      = &sequence.tail_hidden;
+        target.rewrite_checkpoint_hidden = &sequence.rewrite_checkpoint_hidden;
+        target.reuse                     = ReusePath::AppendAtFrontier;
+        target.reuse_base                = saved.sequence.execution_frontier;
+        if (dflash) {
+            target.dflash_local = &dflash->local;
+            target.dflash_lane  = static_cast<std::int32_t>(lane);
+        }
+        target.stream = device.copy_stream;
+        if (saved.sampling_counts_present) {
+            const auto [block, bytes] = kv_ram_cache_.value().live_credit_view(owner);
+            const std::size_t count_bytes =
+                static_cast<std::size_t>(TextConfig::token_domain) * sizeof(std::int32_t);
+            if (saved.sampling_counts_offset + count_bytes > bytes) {
+                throw std::logic_error("suspended sampling counts exceed their RAM credit");
+            }
+            Tensor counts = token_counts.slice(1, static_cast<std::int32_t>(lane), 1);
+            HIP_CHECK(hipMemcpyAsync(
+                counts.data, static_cast<const std::byte*>(block) + saved.sampling_counts_offset,
+                count_bytes, hipMemcpyHostToDevice, device.copy_stream));
+        }
+        if (dflash) {
+            const auto [block, bytes] = kv_ram_cache_.value().live_credit_view(owner);
+            const auto features =
+                dflash->pending_features.slice(2, static_cast<std::int32_t>(lane), 1);
+            if (saved.pending_features_offset + features.bytes() > bytes) {
+                throw std::logic_error("suspended DFlash features exceed their RAM credit");
+            }
+            HIP_CHECK(hipMemcpyAsync(
+                features.data, static_cast<const std::byte*>(block) + saved.pending_features_offset,
+                features.bytes(), hipMemcpyHostToDevice, device.copy_stream));
+        }
+        auto host = kv_ram_cache_.value().unpack_device(saved.entry_id, target);
+        install_ram_context_checkpoints(sequence, host, saved.entry_id,
+                                        saved.sequence.execution_frontier, true);
+        if (sequence.context_checkpoints.size() != host.ladder_images.size()) {
+            throw std::logic_error("live resume must restore every checkpoint image");
+        }
+        saved.request.window_output_tokens = window.output_tokens;
+        saved.lane                         = lane;
+        saved.phase                        = SuspendedRequest::Phase::Restoring;
+        return true;
+    } catch (const std::bad_alloc&) {
+        // Fence readers before releasing a partial destination; the source remains parked.
+        device.synchronize_all();
+        clear_lane(sequence, requests[lane]);
+        return false;
+    } catch (...) {
+        synchronize_all_while_unwinding(device);
+        clear_lane(sequence, requests[lane]);
+        throw;
+    }
+}
+
+bool ProgramImplCore::resume_ready(std::uint64_t owner) const {
+    const auto& saved = suspended_requests_.at(owner);
+    if (!kv_ram_cache_.value().live_image_ready(saved.entry_id)) { return false; }
+    for (const auto& head : sequences[saved.lane].context_checkpoints) {
+        const auto status = hipEventQuery(head.copies_done);
+        if (status == hipErrorNotReady) { return false; }
+        HIP_CHECK(status);
+    }
+    return true;
+}
+
+void ProgramImplCore::finish_resume(std::uint32_t lane, std::uint64_t owner) {
+    auto& saved = suspended_requests_.at(owner);
+    if (saved.phase != SuspendedRequest::Phase::Restoring || saved.lane != lane ||
+        !resume_ready(owner)) {
+        throw std::logic_error("resume is not settled");
+    }
+    auto& sequence                     = sequences[lane];
+    auto physical                      = std::move(sequence);
+    sequence                           = std::move(saved.sequence);
+    sequence.lane                      = lane;
+    sequence.kv                        = std::move(physical.kv);
+    sequence.tail_hidden               = physical.tail_hidden;
+    sequence.rewrite_checkpoint_hidden = physical.rewrite_checkpoint_hidden;
+    sequence.rewrite_image             = std::move(physical.rewrite_image);
+    sequence.context_checkpoints       = std::move(physical.context_checkpoints);
+    if (saved.request.lifecycle == Lifecycle::Active) { bind_sequence_kv(sequence); }
+    requests[lane]            = std::move(saved.request);
+    auto& sampling            = requests[lane].sampling_host;
+    sampling.nonfinite_logits = static_cast<std::uint32_t*>(io.nonfinite_logits.data) +
+                                lane * qwen3::kDFlashDecodeMaximumWidth;
+    if (saved.sampling_counts_present) {
+        sampling.token_counts = static_cast<std::int32_t*>(
+            token_counts.slice(1, static_cast<std::int32_t>(lane), 1).data);
+    }
+    requests[lane].prefill_sampling_host = sampling;
+    kv_ram_cache_.value().retire_live_image(saved.entry_id);
+    suspended_requests_.erase(owner);
+}
+
+void ProgramImplCore::discard_suspended(std::uint64_t owner) {
+    auto it = suspended_requests_.find(owner);
+    if (it == suspended_requests_.end()) { return; }
+    auto& saved = it->second;
+    kv_ram_cache_.value().wait_live_image(saved.entry_id);
+    if (saved.phase == SuspendedRequest::Phase::Restoring) {
+        device.synchronize_all();
+        clear_lane(sequences[saved.lane], requests[saved.lane]);
+    }
+    kv_ram_cache_.value().retire_live_image(saved.entry_id);
+    suspended_requests_.erase(it);
 }
 
 bool ProgramImplCore::can_admit_lane(std::uint32_t lane, const RequestPlan& plan) const noexcept {
@@ -1099,26 +1540,33 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(
         if (host_input_consumed) { prompt.release_media_payload(); }
 
         RequestControl::Prefill prefill{
-            .prompt                      = std::move(prompt),
-            .vision_plan                 = std::move(request_plan.vision),
-            .vision                      = nullptr,
-            .transient                   = transient,
-            .rewrite_checkpoint_capture  = request_plan.rewrite_checkpoint_capture,
-            .base                        = base,
-            .cursor                      = base,
-            .prompt_tokens               = prompt_tokens,
-            .initial_mtp_extent          = initial_mtp_extent,
-            .elapsed_seconds             = 0.0,
-            .host_input_consumed_pending = host_input_consumed,
-            .prepare_mtp                 = request_plan.prepare_mtp,
-            .reuse                       = request_plan.reuse,
-            .reuse_source                = request_plan.reuse_source,
-            .mtp_bridge                  = request_plan.mtp_bridge,
-            .capture_context_checkpoints = request_plan.capture_context_checkpoints,
+            .prompt                         = std::move(prompt),
+            .vision_plan                    = std::move(request_plan.vision),
+            .vision                         = nullptr,
+            .transient                      = transient,
+            .rewrite_checkpoint_capture     = request_plan.rewrite_checkpoint_capture,
+            .base                           = base,
+            .cursor                         = base,
+            .prompt_tokens                  = prompt_tokens,
+            .initial_mtp_extent             = initial_mtp_extent,
+            .elapsed_seconds                = 0.0,
+            .host_input_consumed_pending    = host_input_consumed,
+            .prepare_mtp                    = request_plan.prepare_mtp,
+            .reuse                          = request_plan.reuse,
+            .reuse_source                   = request_plan.reuse_source,
+            .system_prompt_cache_hit_tokens = request_plan.system_prompt_cache_hit_tokens,
+            .mtp_bridge                     = request_plan.mtp_bridge,
+            .capture_context_checkpoints    = request_plan.capture_context_checkpoints,
         };
         request.prefill.emplace(std::move(prefill));
-        request.prompt_tokens = prompt_tokens;
-        auto& staged          = *request.prefill;
+        request.prompt_tokens           = prompt_tokens;
+        request.window_output_tokens    = request_plan.summary.window_output_tokens;
+        request.effective_output_tokens = request_plan.summary.effective_output_tokens;
+        auto& staged                    = *request.prefill;
+        if (request_plan.capture_system_prompt && staged.prompt.system_prompt_frontier &&
+            *staged.prompt.system_prompt_frontier > base) {
+            staged.system_prompt_capture = staged.prompt.system_prompt_frontier;
+        }
         if (staged.vision_plan) {
             staged.vision = std::make_unique<schedule::VisionPrefillSession>(
                 device, model, work, staged.prompt, *staged.vision_plan, staged.transient);
@@ -1873,6 +2321,91 @@ void ProgramImplCore::evict_retained_lane(std::uint32_t lane) noexcept {
     clear_lane(sequences[lane], requests[lane]);
 }
 
+void ProgramImplCore::capture_system_prompt(SequenceState& sequence,
+                                            RequestControl::Prefill& staged,
+                                            std::uint32_t processed_tokens) {
+    const auto frontier = staged.cursor;
+    if (!kv_ram_cache_ || frontier == 0 || frontier >= staged.prompt_tokens) { return; }
+    if (!sequence.kv) { throw std::logic_error("system capture requires mapped sequence KV"); }
+    auto& kv  = *sequence.kv;
+    auto& ram = *kv_ram_cache_;
+    try {
+        qwen3::detail::ResidentPrefixIdentity identity = sequence.prefix_identity;
+        identity.truncate(frontier + 1);
+        qwen3::detail::RamCaptureSource source;
+        source.system_prompt      = true;
+        source.execution_frontier = frontier;
+        source.ledger_frontier    = frontier + 1;
+        source.rope_delta         = sequence.rope_delta;
+        source.text_kv_valid      = frontier;
+        // MTP column F-1 was prepared with lookahead token F, which belongs to the new user.
+        // Keep only the independent columns; BeforeSuffix regenerates the bridge column.
+        source.mtp_kv_valid            = staged.prepare_mtp ? frontier - 1 : 0;
+        source.dflash_context_frontier = dflash ? frontier : 0;
+        source.tail_hidden_valid       = staged.prepare_mtp;
+        Tensor mtp_hidden;
+        if (staged.prepare_mtp) {
+            mtp_hidden =
+                prefill_hidden.slice(1, static_cast<std::int32_t>(processed_tokens - 1), 1);
+            source.tail_hidden = &mtp_hidden;
+        }
+        source.ledger   = std::span<const TokenId>(sequence.ledger).first(frontier + 1);
+        source.identity = &identity;
+        source.hash_f =
+            sequence.prefix_hashes.at(sequence.ledger, sequence.prefix_identity, frontier);
+        if (ram.has_system_prompt(staged.prompt, source.hash_f)) { return; }
+        source.text           = &kv.text;
+        source.text_pool      = &decoder->text_kv.pool();
+        source.text_semantics = decoder->text_kv.fingerprint();
+        source.text_pages     = ninfer::pages_for_tokens(frontier);
+        if (kv.backend) {
+            source.backend      = &*kv.backend;
+            source.backend_pool = backend_kv_pool();
+            source.backend_pages =
+                ninfer::pages_for_tokens(dflash ? frontier : source.mtp_kv_valid);
+            if (speculative_backend == SpeculativeBackend::Mtp) {
+                source.backend_semantics = decoder->mtp_cache()->fingerprint();
+            }
+        }
+        source.gdn = &decoder->linear_attention;
+        source.gdn_current_slot =
+            LinearStateSlots::current_state_slot(sequence.lane, max_concurrency);
+        if (dflash) {
+            source.dflash_local = &dflash->local;
+            source.dflash_lane  = static_cast<std::int32_t>(sequence.lane);
+        }
+        device.order_copy_after_compute();
+        source.stream = device.copy_stream;
+        for (;;) {
+            const auto captured = ram.capture(source);
+            if (captured.status == qwen3::detail::RamCaptureStatus::Captured) {
+                // The next compute may overwrite GDN/cyclic state or the last copied KV page.
+                // The copy stream owns any H2D readers; compute waits before reusing those bytes.
+                ram.wait_entry_copies_on_stream(captured.entry_id, device.stream);
+                return;
+            }
+            if (captured.status == qwen3::detail::RamCaptureStatus::Dropped) { return; }
+            if (ram.retired_fence_pending()) {
+                ram.record_drop();
+                return;
+            }
+            if (kv_disk_cache_) {
+                const auto reclaimed = kv_disk_cache_->reclaim_ram_entry(false, {});
+                if (reclaimed == qwen3::detail::RamReclaim::Evicted ||
+                    reclaimed == qwen3::detail::RamReclaim::Retry) {
+                    continue;
+                }
+            } else {
+                const auto victims = ram.unpinned_ids();
+                if (!victims.empty() && ram.evict_one_unpinned(victims.front())) { continue; }
+            }
+            if (ram.evict_system_prompt()) { continue; }
+            ram.record_drop();
+            return;
+        }
+    } catch (const std::bad_alloc&) { ram.record_drop(); }
+}
+
 bool ProgramImplCore::capture_cuts_at_rewrite(const SequenceState& sequence) const noexcept {
     const RewriteCheckpoint& checkpoint = sequence.rewrite_checkpoint;
     return sequence.turn_closed && checkpoint.valid &&
@@ -2071,69 +2604,71 @@ bool ProgramImplCore::capture_retained_lane(std::uint32_t lane, std::uint64_t* r
     qwen3::detail::ResidentPrefixIdentity cut_identity;
     try {
         source = ram_capture_source(sequences[lane], cut_identity, mode);
-    } catch (const std::bad_alloc&) {
-        ram_cache.record_drop();
-        return false;
-    }
-    for (;;) {
-        const auto result = ram_cache.capture(source);
-        if (result.status == qwen3::detail::RamCaptureStatus::Captured) {
+        for (;;) {
+            const auto result = ram_cache.capture(source);
+            if (result.status == qwen3::detail::RamCaptureStatus::Captured) {
+                if (kv_disk_cache_) {
+                    qwen3::detail::KVDiskCache& disk_cache = *kv_disk_cache_;
+                    disk_cache.note_ram_resident(result.entry_id, source.disk_entry_id);
+                    // Write the new entry behind on the disk worker so that a later
+                    // RAM eviction usually finds it durable instead of spilling it
+                    // synchronously on this thread. Shutdown flushes in order instead.
+                    if (!kv_tiers_shutdown_) { disk_cache.request_idle_spill(); }
+                }
+                if (ram_entry_id != nullptr) { *ram_entry_id = result.entry_id; }
+                return true;
+            }
+            if (result.status == qwen3::detail::RamCaptureStatus::Dropped) { return false; }
             if (kv_disk_cache_) {
-                qwen3::detail::KVDiskCache& disk_cache = *kv_disk_cache_;
-                disk_cache.note_ram_resident(result.entry_id, source.disk_entry_id);
-                // Write the new entry behind on the disk worker so that a later
-                // RAM eviction usually finds it durable instead of spilling it
-                // synchronously on this thread. Shutdown flushes in order instead.
-                if (!kv_tiers_shutdown_) { disk_cache.request_idle_spill(); }
+                const auto reclaimed =
+                    kv_disk_cache_->reclaim_ram_entry(may_block, attempt_ram_ids);
+                if (reclaimed == qwen3::detail::RamReclaim::Evicted ||
+                    reclaimed == qwen3::detail::RamReclaim::Retry) {
+                    continue;
+                }
+                // Not a drop: the caller retries once the disk worker's spill lands.
+                if (reclaimed == qwen3::detail::RamReclaim::Pending) {
+                    if (deferred != nullptr) { *deferred = true; }
+                    return false;
+                }
+                ram_cache.record_drop();
+                return false;
             }
-            if (ram_entry_id != nullptr) { *ram_entry_id = result.entry_id; }
-            return true;
-        }
-        if (result.status == qwen3::detail::RamCaptureStatus::Dropped) { return false; }
-        if (kv_disk_cache_) {
-            const auto reclaimed = kv_disk_cache_->reclaim_ram_entry(may_block, attempt_ram_ids);
-            if (reclaimed == qwen3::detail::RamReclaim::Evicted ||
-                reclaimed == qwen3::detail::RamReclaim::Retry) {
-                continue;
+            // Without a disk tier the oldest unclaimed entry is dropped. Retired blocks waiting
+            // only for their copy fence free before any live entry is dropped: a non-blocking
+            // caller defers, a blocking one waits for them.
+            if (ram_cache.retired_fence_pending()) {
+                if (!may_block && deferred != nullptr) {
+                    *deferred = true;
+                    return false;
+                }
+                if (may_block && ram_cache.wait_retired_copies()) { continue; }
             }
-            // Not a drop: the caller retries once the disk worker's spill lands.
-            if (reclaimed == qwen3::detail::RamReclaim::Pending) {
+            // This admission's own earlier captures are never victims: a deferral rolls them back,
+            // so the retry would recapture and target them again.
+            std::optional<std::uint64_t> victim;
+            for (const std::uint64_t id : ram_cache.unpinned_ids()) {
+                if (std::find(attempt_ram_ids.begin(), attempt_ram_ids.end(), id) ==
+                    attempt_ram_ids.end()) {
+                    victim = id;
+                    break;
+                }
+            }
+            if (!victim) {
+                ram_cache.record_drop();
+                return false;
+            }
+            if (!may_block && !ram_cache.copies_ready(*victim)) {
                 if (deferred != nullptr) { *deferred = true; }
                 return false;
             }
-            ram_cache.record_drop();
-            return false;
+            if (may_block) { ram_cache.wait_entry_copies(*victim); }
+            (void)ram_cache.evict_one_unpinned(*victim);
         }
-        // Without a disk tier the oldest unclaimed entry is dropped. Retired blocks waiting
-        // only for their copy fence free before any live entry is dropped: a non-blocking
-        // caller defers, a blocking one waits for them.
-        if (ram_cache.retired_fence_pending()) {
-            if (!may_block && deferred != nullptr) {
-                *deferred = true;
-                return false;
-            }
-            if (may_block && ram_cache.wait_retired_copies()) { continue; }
-        }
-        // This admission's own earlier captures are never victims: a deferral rolls them back,
-        // so the retry would recapture and target them again.
-        std::optional<std::uint64_t> victim;
-        for (const std::uint64_t id : ram_cache.unpinned_ids()) {
-            if (std::find(attempt_ram_ids.begin(), attempt_ram_ids.end(), id) ==
-                attempt_ram_ids.end()) {
-                victim = id;
-                break;
-            }
-        }
-        if (!victim) {
-            ram_cache.record_drop();
-            return false;
-        }
-        if (!may_block && !ram_cache.copies_ready(*victim)) {
-            if (deferred != nullptr) { *deferred = true; }
-            return false;
-        }
-        if (may_block) { ram_cache.wait_entry_copies(*victim); }
-        (void)ram_cache.evict_one_unpinned(*victim);
+    } catch (const std::bad_alloc&) {
+        // Optional capture includes the bookkeeping required to reclaim room for it.
+        ram_cache.record_drop();
+        return false;
     }
 }
 
@@ -2243,14 +2778,29 @@ void ProgramImplCore::drop_context_checkpoints_after(SequenceState& sequence,
     sequence.next_context_mark = next.value_or(0);
 }
 
+bool ProgramImplCore::select_imported_checkpoint(std::uint32_t frontier,
+                                                 qwen3::detail::ContextCheckpointKind kind,
+                                                 std::span<std::uint8_t> selected) const {
+    std::size_t index = context_marks.size();
+    if (kind == qwen3::detail::ContextCheckpointKind::Ladder) {
+        const auto upper = std::upper_bound(context_marks.begin(), context_marks.end(), frontier);
+        if (upper == context_marks.begin()) { return false; }
+        index = static_cast<std::size_t>(upper - context_marks.begin() - 1);
+    }
+    if (selected[index]) { return false; }
+    selected[index] = 1;
+    return true;
+}
+
 void ProgramImplCore::install_ram_context_checkpoints(SequenceState& sequence,
                                                       const qwen3::detail::RamRestoredHost& host,
                                                       std::uint64_t entry_id,
-                                                      std::uint32_t reuse_base) {
+                                                      std::uint32_t reuse_base, bool live_restore) {
     if (!kv_ram_cache_) { throw std::logic_error("RAM checkpoint install requires a RAM tier"); }
     qwen3::detail::KVRamCache& ram = *kv_ram_cache_;
     std::vector<ContextCheckpointHead> heads;
     heads.reserve(host.ladder_images.size());
+    std::vector<std::uint8_t> selected(context_marks.size() + 1, 0);
     std::vector<HostCopy> copies;
     copies.reserve(4 * host.ladder_images.size());
     std::vector<hipEvent_t> fences;
@@ -2259,6 +2809,10 @@ void ProgramImplCore::install_ram_context_checkpoints(SequenceState& sequence,
         for (const qwen3::detail::RamLadderImage& image : host.ladder_images) {
             // Occupy keeps only heads at or before the restored base.
             if (image.frontier > reuse_base) { continue; }
+            if (!live_restore &&
+                !select_imported_checkpoint(image.frontier, image.kind, selected)) {
+                continue;
+            }
             const auto matches = [](const void* data, std::size_t bytes, const PinnedImage& slot) {
                 return (data != nullptr ? bytes : 0) == slot.size();
             };
@@ -2798,6 +3352,7 @@ void ProgramImplCore::finish_ram_restore(std::uint64_t entry_id, runtime::CacheR
     if (!kv_ram_cache_) {
         throw std::logic_error("RAM restore completion requires an enabled RAM tier");
     }
+    if (kv_ram_cache_->is_system_prompt(entry_id)) { intent = runtime::CacheReadIntent::Fork; }
     if (intent == runtime::CacheReadIntent::Consume) {
         kv_ram_cache_->consume(entry_id);
     } else {
@@ -2939,7 +3494,9 @@ void ProgramImplCore::restore_disk_entry(std::uint32_t lane, std::uint64_t entry
         for (const qwen3::detail::RamLadderIndex& ladder : host.ladders) {
             if (ladder.frontier < request_plan.reuse_base) { wanted.push_back(ladder); }
         }
+        std::vector<std::uint8_t> selected(context_marks.size() + 1, 0);
         for (const qwen3::detail::RamLadderIndex& ladder : wanted) {
+            if (!select_imported_checkpoint(ladder.frontier, ladder.kind, selected)) { continue; }
             std::optional<ContextCheckpointHead> head = acquire_context_checkpoint_head();
             if (!head) { break; }
             head->frontier = ladder.frontier;
@@ -3128,6 +3685,11 @@ void ProgramImplCore::discard_ram_capture(std::uint64_t ram_id) {
 
 void ProgramImplCore::shutdown_kv_tiers(LoadProgress progress) {
     if (kv_tiers_shutdown_) { return; }
+    while (!suspended_requests_.empty()) {
+        const auto owner = suspended_requests_.begin()->first;
+        discard_suspended(owner);
+        release_suspension_credit(owner);
+    }
     flush_deferred_gdn_folds();
     kv_tiers_shutdown_ = true;
     auto report        = [&](std::string_view phase, std::uint64_t done, std::uint64_t total) {
@@ -3176,8 +3738,8 @@ void ProgramImplCore::shutdown_kv_tiers(LoadProgress progress) {
     }
 }
 
-void ProgramImplCore::request_idle_spill() {
-    if (kv_disk_cache_) { kv_disk_cache_->request_idle_spill(); }
+void ProgramImplCore::set_cache_idle(bool idle) {
+    if (kv_disk_cache_) { kv_disk_cache_->set_cache_idle(idle); }
 }
 
 std::optional<qwen3::detail::KvDiskSnapshot>
@@ -3336,6 +3898,8 @@ void ProgramImplCore::clear_lane(SequenceState& sequence, RequestControl& reques
     request.adaptive                = {};
     request.typical_cycle_reasoning = false;
     request.prompt_tokens           = 0;
+    request.window_output_tokens    = 0;
+    request.effective_output_tokens = 0;
 }
 
 void ProgramImplCore::flush_deferred_gdn_folds(std::span<const std::uint32_t> lanes) {
@@ -3908,13 +4472,13 @@ void ProgramImplCore::prepare_graphs() {
                     mtp_transactions.close_captured();
                     return;
                 }
-                const TokenMaskRoundGuard token_mask_round(*token_masks);
+                TokenMaskRoundGuard token_mask_round(*token_masks, device);
                 schedule::mtp_decode_batch(mtp_state, static_cast<std::int32_t>(batch_size), k,
                                            nullptr);
                 text_transactions.enqueue_resolution();
                 mtp_transactions.enqueue_resolution();
                 device.synchronize();
-                token_masks->finish_round();
+                token_mask_round.finish();
                 text_transactions.finish_resolution({text_transactions.cursor, batch_size});
                 mtp_transactions.finish_resolution({mtp_transactions.cursor, batch_size});
             };
@@ -3990,12 +4554,12 @@ void ProgramImplCore::prepare_graphs() {
                     transactions.close_captured();
                     return;
                 }
-                const TokenMaskRoundGuard token_mask_round(*token_masks);
+                TokenMaskRoundGuard token_mask_round(*token_masks, device);
                 schedule::dflash_decode_batch(dflash_state, static_cast<std::int32_t>(batch_size),
                                               fixed_k, fixed_w, envelopes, nullptr);
                 transactions.enqueue_resolution();
                 device.synchronize();
-                token_masks->finish_round();
+                token_mask_round.finish();
                 transactions.finish_resolution({transactions.cursor, batch_size});
             };
 
@@ -4028,13 +4592,15 @@ void ProgramImplCore::prepare_graphs() {
     }
 
     if (!ordinary_graphs.profiles.empty()) {
-        instantiate_graph_family(ordinary_graphs, "ordinary", device, prepare_representative);
+        instantiate_graph_family(ordinary_graphs, "ordinary", device, prepare_representative,
+                                 *token_masks);
     }
     if (speculative_backend == SpeculativeBackend::DFlash) {
-        instantiate_graph_family(dflash_graphs, "DFlash", device, prepare_representative);
+        instantiate_graph_family(dflash_graphs, "DFlash", device, prepare_representative,
+                                 *token_masks);
     }
     if (speculative_backend == SpeculativeBackend::Mtp) {
-        instantiate_graph_family(mtp_graphs, "MTP", device, prepare_representative);
+        instantiate_graph_family(mtp_graphs, "MTP", device, prepare_representative, *token_masks);
     }
 
     const std::size_t captured_definitions     = ordinary_graphs.profiles.size() +
@@ -4101,8 +4667,10 @@ void ProgramImplCore::install_sampling(SequenceState& sequence, RequestControl& 
     Tensor counts = token_counts.slice(1, static_cast<std::int32_t>(sequence.lane), 1)
                         .view({TextConfig::token_domain});
     HIP_CHECK(hipMemsetAsync(counts.data, 0, counts.bytes(), device.stream));
-    request.sampling_host     = config;
-    request.speculative_stats = SpeculativeStats{
+    request.sampling_host                  = config;
+    request.sampling_host.nonfinite_logits = static_cast<std::uint32_t*>(io.nonfinite_logits.data) +
+                                             sequence.lane * qwen3::kDFlashDecodeMaximumWidth;
+    request.speculative_stats              = SpeculativeStats{
         .backend               = speculative_backend,
         .enabled               = speculative_backend != SpeculativeBackend::None,
         .draft_window          = draft_window,
@@ -4167,6 +4735,15 @@ void ProgramImplCore::copy_prefill_logprobs() {
 
 void ProgramImplCore::mark_workspace_usage(std::size_t phase_bytes) noexcept {
     workspace_logical_peak_bytes = std::max(workspace_logical_peak_bytes, phase_bytes);
+}
+
+void ProgramImplCore::order_persistent_decode_after_transfers(
+    std::size_t batch_size, const DecodeGraphExecutable* executable) {
+    if (batch_size != 1U || executable == nullptr) { return; }
+    // A resident grid must not compete with previously submitted transfer kernels. The worker
+    // alone pumps GPU cache work: these fixed prior-work edges cannot include a future round.
+    if (kv_disk_cache_) { kv_disk_cache_->join_submitted_restore(device.copy_stream); }
+    device.order_compute_after_transfers();
 }
 
 void ProgramImplCore::enqueue_dflash_context_append(std::span<const std::uint32_t> lanes,
@@ -4244,6 +4821,31 @@ void ProgramImplCore::enqueue_dflash_context_append(std::span<const std::uint32_
                                     table_rows, {minimum_count, maximum_count});
 }
 
+void ProgramImplCore::clear_nonfinite_logits(std::uint32_t lane) {
+    Tensor status = io.nonfinite_logits.slice(1, static_cast<std::int32_t>(lane), 1);
+    HIP_CHECK(hipMemsetAsync(status.data, 0, status.bytes(), device.stream));
+}
+
+void ProgramImplCore::copy_nonfinite_logits() {
+    auto* host = static_cast<PrefillRoundHost*>(round_host.data());
+    HIP_CHECK(hipMemcpyAsync(host->nonfinite_logits.data(), io.nonfinite_logits.data,
+                             io.nonfinite_logits.bytes(), hipMemcpyDeviceToHost, device.stream));
+}
+
+void ProgramImplCore::validate_finite_logits(std::uint32_t lane, std::uint32_t columns) const {
+    if (lane >= max_concurrency || columns == 0 || columns > qwen3::kDFlashDecodeMaximumWidth) {
+        throw std::logic_error("target logit validation has an invalid live domain");
+    }
+    const auto* host   = static_cast<const PrefillRoundHost*>(round_host.data());
+    const auto* status = host->nonfinite_logits.data() + lane * qwen3::kDFlashDecodeMaximumWidth;
+    for (std::uint32_t column = 0; column < columns; ++column) {
+        if (status[column] != 0U) {
+            throw std::runtime_error(
+                "target returned nonfinite eligible logits before token publication");
+        }
+    }
+}
+
 void ProgramImplCore::validate_licensed_tokens(std::span<const TokenId> tokens) const {
     for (const TokenId token : tokens) {
         if (token < 0 || token >= TextConfig::token_domain) {
@@ -4294,12 +4896,15 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
     const runtime::BeginSummary summary{.prompt_tokens        = staged.prompt_tokens,
                                         .reused_prompt_tokens = staged.base,
                                         .prefix_reuse_path    = staged.reuse,
-                                        .prefix_reuse_source  = staged.reuse_source};
+                                        .prefix_reuse_source  = staged.reuse_source,
+                                        .system_prompt_cache_hit_tokens =
+                                            staged.system_prompt_cache_hit_tokens};
     bool host_input_consumed              = staged.host_input_consumed_pending;
     staged.host_input_consumed_pending    = false;
     std::uint32_t processed_prompt_tokens = 0;
     const auto started                    = Clock::now();
     try {
+        clear_nonfinite_logits(sequence.lane);
         schedule::PrefillContext schedule_state{
             {device, model, linear_execution.get(), work, decoder->linear_attention,
              replay_records ? &*replay_records : nullptr, io, prefill_hidden, prefill_chunk,
@@ -4382,12 +4987,14 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
             std::uint32_t step_tokens = prefill_step_tokens(decode_waiting);
             if (step_cap != 0) { step_tokens = std::min(step_tokens, step_cap); }
             const std::uint32_t remaining = staged.prompt_tokens - staged.cursor;
-            const std::uint32_t nominal =
-                mixed != nullptr ? std::min(remaining, step_cap)
-                                 : schedule::select_prefill_chunk(remaining, step_tokens);
+            std::uint32_t nominal = mixed != nullptr
+                                        ? std::min(remaining, step_cap)
+                                        : schedule::select_prefill_chunk(remaining, step_tokens);
+            if (staged.system_prompt_capture && staged.cursor < *staged.system_prompt_capture) {
+                nominal = std::min(nominal, *staged.system_prompt_capture - staged.cursor);
+            }
             const bool final_candidate = staged.cursor + nominal == staged.prompt_tokens;
-            if (final_candidate && request.output != nullptr &&
-                request.output->has_token_grammar()) {
+            if (final_candidate && request.output != nullptr && request.output->has_token_masks()) {
                 // Another prefilling request may have written the shared root row since this
                 // request's admission. A mixed round's matcher answers only after the runner
                 // publishes, so this host fill does not overlap it.
@@ -4454,6 +5061,10 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
             }
             if (speculative_backend == SpeculativeBackend::DFlash) {
                 sequence.dflash_context_frontier = staged.cursor;
+            }
+            if (staged.system_prompt_capture && staged.cursor == *staged.system_prompt_capture) {
+                capture_system_prompt(sequence, staged, result.processed_tokens);
+                staged.system_prompt_capture.reset();
             }
             maybe_freeze_context_checkpoint(sequence, request, result.processed_tokens);
             if (staged.rewrite_checkpoint_capture &&
@@ -4525,6 +5136,7 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
         }
 
         copy_round_token();
+        copy_nonfinite_logits();
         const bool token_logprobs = request.token_logprobs;
         if (token_logprobs) { copy_prefill_logprobs(); }
         std::array<TokenId, qwen3::kMtpDecodeMaximumDrafts> initial_drafts{};
@@ -4544,6 +5156,7 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
             staged.rewrite_checkpoint_capture;
         const std::uint32_t prompt_tokens = staged.prompt_tokens;
 
+        validate_finite_logits(sequence.lane, 1);
         validate_licensed_tokens(std::span<const TokenId>(host_tokens, 1));
         if (sequence.ledger.size() != prompt_tokens) {
             throw std::logic_error("candidate token ledger does not match prompt length");
@@ -4686,6 +5299,8 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
             executable = &profile.executable;
         }
 
+        HIP_CHECK(hipMemsetAsync(io.nonfinite_logits.data, 0, io.nonfinite_logits.bytes(),
+                                 device.stream));
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             SequenceState& sequence = sequences[lanes[row]];
             RequestControl& request = requests[lanes[row]];
@@ -4740,14 +5355,17 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
         roctx::ScopedRange ordinary_round_range(roctx::Name::DecodeOrdinaryRound,
                                                 roctx::Category::Decode, maximum_frontier);
         if (executable != nullptr) { text_transactions.mark_graph_replay(device.stream); }
+        order_persistent_decode_after_transfers(lanes.size(), executable);
         schedule::ordinary_decode_batch(schedule_state, static_cast<std::int32_t>(lanes.size()),
                                         executable);
         text_transactions.enqueue_resolution();
+        copy_nonfinite_logits();
         const double seconds = synchronize_round_seconds(device, start);
         std::array<std::uint32_t, kMaximumConcurrency> retained_frontiers{};
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             retained_frontiers[row] = sequences[lanes[row]].execution_frontier + 1U;
         }
+        for (const std::uint32_t lane : lanes) { validate_finite_logits(lane, 1); }
         text_transactions.finish_resolution({retained_frontiers.data(), lanes.size()});
         decision_trace::record_ordinary(
             ordinary_frame.logits, *ordinary_host_ingress, *ordinary_host_egress,
@@ -4889,6 +5507,8 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         }
 
         std::uint32_t realized_extent = 0;
+        HIP_CHECK(hipMemsetAsync(io.nonfinite_logits.data, 0, io.nonfinite_logits.bytes(),
+                                 device.stream));
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             SequenceState& sequence = sequences[lanes[row]];
             RequestControl& request = requests[lanes[row]];
@@ -4972,17 +5592,19 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
                                                  token_masks.get()};
 
         bind_token_mask_batch(lanes, mtp_host_ingress->sampling);
-        const TokenMaskRoundGuard token_mask_round(*token_masks);
+        TokenMaskRoundGuard token_mask_round(*token_masks, device);
         mark_workspace_usage(workspace_plan.mtp_round);
         const auto started = Clock::now();
         if (executable != nullptr) {
             text_transactions.mark_graph_replay(device.stream);
             mtp_transactions.mark_graph_replay(device.stream);
         }
+        order_persistent_decode_after_transfers(lanes.size(), executable);
         schedule::mtp_decode_batch(schedule_state, static_cast<std::int32_t>(lanes.size()), batch_k,
                                    executable);
         text_transactions.enqueue_resolution();
         mtp_transactions.enqueue_resolution();
+        copy_nonfinite_logits();
         const double seconds = synchronize_round_seconds(device, started);
         std::array<std::uint32_t, kMaximumConcurrency> text_retained_frontiers{};
         std::array<std::uint32_t, kMaximumConcurrency> mtp_retained_frontiers{};
@@ -4996,9 +5618,13 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
                 base + static_cast<std::uint32_t>(mtp_host_ingress->target_valid_columns[row]);
             mtp_retained_frontiers[row] = base + static_cast<std::uint32_t>(count);
         }
+        for (std::size_t row = 0; row < lanes.size(); ++row) {
+            validate_finite_logits(lanes[row], static_cast<std::uint32_t>(
+                                                   mtp_host_ingress->target_valid_columns[row]));
+        }
         text_transactions.finish_resolution({text_retained_frontiers.data(), lanes.size()});
         mtp_transactions.finish_resolution({mtp_retained_frontiers.data(), lanes.size()});
-        token_masks->finish_round();
+        token_mask_round.finish();
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it.
         if (adaptive_draft && realized_extent > 0) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,
@@ -5264,6 +5890,8 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
         const bool calibrate_p_less = calibrates_p_less_drafts() && chain_round;
         std::array<std::uint32_t, kMaximumConcurrency> text_target_columns{};
         std::uint32_t realized_extent = 0;
+        HIP_CHECK(hipMemsetAsync(io.nonfinite_logits.data, 0, io.nonfinite_logits.bytes(),
+                                 device.stream));
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             SequenceState& sequence = sequences[lanes[row]];
             RequestControl& request = requests[lanes[row]];
@@ -5357,7 +5985,7 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             calibrates_p_less_drafts()};
 
         bind_token_mask_batch(lanes, dflash_host_ingress->sampling);
-        const TokenMaskRoundGuard token_mask_round(*token_masks);
+        TokenMaskRoundGuard token_mask_round(*token_masks, device);
         mark_workspace_usage(prefill_lane ? workspace_plan.dflash_mixed
                                           : workspace_plan.dflash_round);
         const auto started = Clock::now();
@@ -5394,15 +6022,20 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             *prefill_step = advance_prefill(sequences[*prefill_lane], requests[*prefill_lane], true,
                                             &runner, forward_tokens - verify_columns);
         } else {
+            order_persistent_decode_after_transfers(lanes.size(), executable);
             schedule::dflash_decode_batch(schedule_state, static_cast<std::int32_t>(lanes.size()),
                                           batch_k, live_w, envelopes, executable);
         }
         text_transactions.enqueue_resolution();
+        copy_nonfinite_logits();
         const double seconds = synchronize_round_seconds(device, started);
         std::array<std::uint32_t, kMaximumConcurrency> retained_frontiers{};
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             retained_frontiers[row] =
                 sequences[lanes[row]].execution_frontier + text_target_columns[row];
+        }
+        for (std::size_t row = 0; row < lanes.size(); ++row) {
+            validate_finite_logits(lanes[row], text_target_columns[row]);
         }
         text_transactions.finish_resolution({retained_frontiers.data(), lanes.size()});
         decision_trace::record_dflash(
@@ -5412,8 +6045,9 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             std::span<const std::uint32_t>(text_target_columns.data(), lanes.size()),
             static_cast<std::int32_t>(lanes.size()), static_cast<std::int32_t>(width),
             static_cast<std::int32_t>(live_w), TextConfig::token_domain,
-            dflash_uses_tree_verify(batch_k, live_w));
-        token_masks->finish_round();
+            dflash_uses_tree_verify(batch_k, live_w), token_masks->published_sampling(),
+            io.dflash_decode->selector_ids, io.dflash_decode->selector_q);
+        token_mask_round.finish();
         if (calibrate_p_less) {
             const std::size_t row_values =
                 static_cast<std::size_t>(ops::kPLessProposalCalibrationTemperatureCount) * batch_k;
@@ -5846,7 +6480,13 @@ void ProgramImplCore::run_decode_score(PreparedPromptData&& prompt,
     execution.requested_output_tokens = n - prefix;
     execution.allow_prefix_reuse      = false;
     RequestBasePlan base              = plan_request_base(prompt, execution);
-    RequestPlan plan                  = plan_request_for_lane(0, prompt, base);
+    // Teacher forcing owns one idle, complete scoring reservation and has no live scheduler
+    // to grant generation windows. Keep its complete represented token extent funded.
+    base.impl_->summary.admission            = base.impl_->summary.lifetime_admission;
+    base.impl_->summary.window_output_tokens = base.impl_->summary.effective_output_tokens;
+    base.impl_->text_kv_page_entitlement     = base.impl_->summary.admission.main_kv_pages;
+    base.impl_->backend_kv_page_entitlement  = base.impl_->summary.admission.backend_kv_pages;
+    RequestPlan plan                         = plan_request_for_lane(0, prompt, base);
 
     try {
         runtime::PrefillStepResult step =

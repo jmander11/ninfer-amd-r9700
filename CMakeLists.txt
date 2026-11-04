@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-# NInfer is being rebuilt as one HIP/gfx1201 product. Set this before HIP compiler
-# discovery: accepting a generic host-selected code object would make a successful
-# configure unrelated to the only supported R9700 deployment.
+# Select gfx1201 before HIP compiler discovery; other architectures are unsupported.
 if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
   set(CMAKE_HIP_ARCHITECTURES gfx1201 CACHE STRING "HIP architectures to build")
 endif()
@@ -12,10 +10,8 @@ if(NOT CMAKE_HIP_ARCHITECTURES STREQUAL "gfx1201")
     "'${CMAKE_HIP_ARCHITECTURES}'")
 endif()
 
-# The real-model cache accuracy gate requires separately built G16 and G32 scorers. This temporary
-# configure-time qualification value is compiled through the complete runtime/Engine graph; it is
-# deliberately not a runtime, CLI, or artifact selector. Once the real PPL/exact-token gate chooses
-# one group, delete this cache variable and the losing codec branch.
+# Build separate G16/G32 scorers for cache-quality comparison. This setting applies to the
+# runtime and Engine at compile time. Remove it and the losing codec after PPL/token selection.
 set(NINFER_R9700_KV_VALUE_GROUP "16" CACHE STRING
   "R9700 FP8-K/INT4-V value group for separately built qualification binaries")
 set_property(CACHE NINFER_R9700_KV_VALUE_GROUP PROPERTY STRINGS 16 32)
@@ -56,9 +52,8 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_PREFILL_A4_FAMILIES=${NINFER_R9700_Q4_PREFILL_A4_FAMILIES})
 
-# Qualification-only matched whole-DFlash A/B selector. Zero is the ordinary WMMA control; one
-# admits only the exact small-token N34816/K5120 cells selected by the two retained direct screens.
-# This is a separately compiled candidate profile, not a runtime, CLI, or artifact selector.
+# Build-time DFlash A/B: 0 uses the WMMA control; 1 enables the small-token N34816/K5120
+# candidate cells selected by the two direct screens.
 set(NINFER_R9700_DFLASH_SMALL_T_CANDIDATE "0" CACHE STRING
   "Enable the exact qualified R9700 DFlash small-token Linear candidate")
 set_property(CACHE NINFER_R9700_DFLASH_SMALL_T_CANDIDATE PROPERTY STRINGS 0 1)
@@ -71,8 +66,7 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_SMALL_T_CANDIDATE=${NINFER_R9700_DFLASH_SMALL_T_CANDIDATE})
 
-# Qualification-selected exact DFlash MLP-down route. This compile-time selector admits only
-# N5120/K17408/T5 and is separately buildable for matched control/candidate verification.
+# Build-time DFlash MLP-down A/B for N5120/K17408/T5 only.
 set(NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE "0" CACHE STRING
   "Enable the exact qualified R9700 DFlash MLP-down T5 Linear candidate")
 set_property(CACHE NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE PROPERTY STRINGS 0 1)
@@ -232,12 +226,18 @@ option(NINFER_BUILD_APPS "Build the R9700 CLI, server, and PPL applications" ON)
 option(NINFER_BUILD_BENCHMARKS "Build the R9700 whole-Engine benchmarks" OFF)
 include(CTest)
 
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(NINFER_ZSTD REQUIRED IMPORTED_TARGET libzstd)
 include(cmake/xgrammar.cmake)
 # After the third-party xgrammar target, so its sources keep their upstream diagnostics.
 include(cmake/warnings.cmake)
+# The vendored CPU compiler/matcher participates in host lifetime qualification.
+if(NINFER_SANITIZE)
+  target_compile_options(ninfer_token_grammar PRIVATE ${ninfer_sanitizers}
+    -fno-omit-frame-pointer -fno-sanitize=vptr)
+endif()
 
 add_subdirectory(src)
 if(NINFER_BUILD_APPS)

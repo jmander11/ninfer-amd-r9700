@@ -2,6 +2,8 @@
 # Full R9700 promotion checks. This validates a committed candidate; it never merges or pushes.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/maintainer-env.sh
+source "$repo_root/scripts/maintainer-env.sh"
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
   echo 'Usage: scripts/master-gates.sh ARTIFACT.ninfer'
   echo 'Run every master gate on a clean candidate containing origin/master. See docs/maintainer/merging-to-master.md.'
@@ -24,7 +26,7 @@ python="${NINFER_PYTHON:-python3.11}"
 "$python" -c 'import sys; assert sys.version_info[:2] == (3, 11); import pytest, torch, safetensors'
 build_dir="$repo_root/build-r9700"
 asan_dir="$repo_root/build-r9700-asan"
-gpu_lock=/path/to/local/.ninfer-coordination/gpu.lock
+gpu_lock="${NINFER_GPU_LOCK:?Set NINFER_GPU_LOCK in .ninfer-local.env or the environment}"
 report_dir="$repo_root/profiles/master-gates/$candidate"
 mkdir -p "$report_dir"
 export NINFER_R9700_WEIGHTS="$artifact"
@@ -92,6 +94,10 @@ gate 05-recovery-mtp flock --exclusive "$gpu_lock" \
   "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" mtp
 gate 05-recovery-dflash flock --exclusive "$gpu_lock" \
   "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" dflash
+for backend in none mtp dflash; do
+  gate "05-graph-recovery-$backend" flock --exclusive "$gpu_lock" \
+    "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" "$backend" --device-graph
+done
 gate 06-memcheck bash scripts/gpu-check.sh memcheck
 gate 07-racecheck bash scripts/gpu-check.sh racecheck
 gate 08-initcheck bash scripts/gpu-check.sh initcheck

@@ -19,7 +19,11 @@ hipError_t owning_launch(const linear::A8Q4G64CandidateArgs& a, hipStream_t s) {
 
 constexpr std::size_t Guard = 256;
 
-std::filesystem::path pci_path() { return "/sys/bus/pci/devices/0000:13:00.0"; }
+std::filesystem::path pci_path() {
+    const char* pci = std::getenv("NINFER_R9700_PCI_BUS_ID");
+    if (pci == nullptr || pci[0] == '\0') fail("set NINFER_R9700_PCI_BUS_ID");
+    return std::filesystem::path("/sys/bus/pci/devices") / pci;
+}
 
 void power() {
     if (read_text(pci_path() / "vendor") != "0x1002" ||
@@ -911,14 +915,15 @@ int main(int argc, char** argv) {
         const std::filesystem::path output = std::string(args[1]);
         require_fresh_output(output);
         power();
-        HIP_CHECK(hipSetDevice(0));
+        int selected = -1;
+        HIP_CHECK(hipDeviceGetByPCIBusId(&selected, pci_path().filename().c_str()));
+        HIP_CHECK(hipSetDevice(selected));
         hipDeviceProp_t props{};
-        HIP_CHECK(hipGetDeviceProperties(&props, 0));
+        HIP_CHECK(hipGetDeviceProperties(&props, selected));
         char pci[32]{};
-        HIP_CHECK(hipDeviceGetPCIBusId(pci, sizeof(pci), 0));
+        HIP_CHECK(hipDeviceGetPCIBusId(pci, sizeof(pci), selected));
         if (std::string_view(props.name) != "AMD Radeon AI PRO R9700" ||
-            std::string_view(props.gcnArchName) != "gfx1201" || props.warpSize != 32 ||
-            (std::string_view(pci) != "0000:13:00.0" && std::string_view(pci) != "13:00.0"))
+            std::string_view(props.gcnArchName) != "gfx1201" || props.warpSize != 32)
             fail("wrong device");
         hipStream_t stream{};
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -926,7 +931,8 @@ int main(int argc, char** argv) {
         out << std::setprecision(17) << "{\"schema\":\""
             << "ninfer.r9700.a8q4-small-batch-projections.v3"
             << "\",\"status\":\"qualified\",\"public_dispatch_tested\":true,"
-               "\"pci\":\"0000:13:00.0\",\"power\":\"auto\",\"copies\":3,\"scope\":\""
+               "\"pci\":\""
+            << pci << "\",\"power\":\"auto\",\"copies\":3,\"scope\":\""
             << (mlp_only          ? "mlp_only"
                 : output_only     ? "output_only"
                 : draft_only      ? "draft_only"

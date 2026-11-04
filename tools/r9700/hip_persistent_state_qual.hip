@@ -120,9 +120,9 @@ int main() {
                     paged_pool.mapped_pages() == 0,
                 "typed paged allocation release leaked physical pages");
 
-        // The canonical Qwen decoder owner has only the typed three-plane cache. Its transaction
-        // binds one allocation/publication pair, launches every layer on one stream, and makes
-        // the frontier visible only after the shared device status word is read successfully.
+        // The decoder transaction uses one three-plane cache allocation/publication pair and
+        // launches every layer on one stream. It publishes the frontier only after reading a
+        // successful shared device status word.
         namespace q3 = ninfer::targets::qwen3;
         ninfer::LayoutBuilder decoder_builder;
         const q3::DecoderStateSpec decoder_spec{

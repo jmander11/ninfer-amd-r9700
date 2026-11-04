@@ -1,16 +1,12 @@
 # Artifact container
 
-`.ninfer` v2 is the sole C++ product artifact. The container owns framing, an exact JSON object
-directory, aligned payload ranges, and the `(model_id, weights_id)` identity. Target code owns the
-meaning and complete inventory of those objects.
+`.ninfer` v2 is the sole C++ product artifact. The container owns framing, an exact JSON object directory, aligned payload ranges, and the `(model_id, weights_id)` identity. Target code owns the meaning and complete inventory of those objects.
+
+Cache consumers use `Reader::tensor_content_identity` for SHA-256 over explicitly selected tensor descriptors and encoded payload ranges. Target binding owns those selections; the generic reader owns validation, range normalization and hashing for each registered storage layout. Native tiled row ranges align to N16. Resource bytes and file metadata are excluded; the digest does not identify the entire container. The reader links OpenSSL Crypto, supplied by the host or container toolchain.
 
 ## Framing
 
-The file begins with the eight bytes `NINFER\0\2`, followed by a little-endian unsigned 64-bit
-directory byte count, then UTF-8 JSON. The payload begins at the next 4096-byte boundary. Every
-object offset is relative to that payload start. Readers reject v1 magic, malformed or extra JSON
-members, duplicate names, overlapping ranges, invalid alignment, out-of-file ranges, unknown
-formats/layouts/encodings, and encoded sizes inconsistent with the descriptor.
+The file begins with the eight bytes `NINFER\0\2`, followed by a little-endian unsigned 64-bit directory byte count, then UTF-8 JSON. The payload begins at the next 4096-byte boundary. Every object offset is relative to that payload start. Readers reject v1 magic, malformed or extra JSON members, duplicate names, overlapping ranges, invalid alignment, out-of-file ranges, unknown formats/layouts/encodings, and encoded sizes inconsistent with the descriptor.
 
 The root has exactly:
 
@@ -18,74 +14,30 @@ The root has exactly:
 {"identity":{"model_id":"...","weights_id":"..."},"objects":[...]}
 ```
 
-A tensor entry has exactly `name`, `kind`, `shape`, `format`, `layout`, `offset`, and `bytes`. A
-resource entry has exactly `name`, `kind`, `encoding`, `offset`, and `bytes`. Names are nonempty and
-unique; shapes contain positive unsigned dimensions; object byte counts are positive.
+A tensor entry has exactly `name`, `kind`, `shape`, `format`, `layout`, `offset`, and `bytes`. A resource entry has exactly `name`, `kind`, `encoding`, `offset`, and `bytes`. Names are nonempty and unique; shapes contain positive unsigned dimensions; object byte counts are positive.
 
 ## Registered vocabulary
 
-- Numeric formats: `BF16`, `FP32`, `I32`, `Q4G64_F16S`, `Q5G64_F16S`, `Q6G64_F16S`,
-  `W8G32_F16S`, `F8E4M3_ROW_F32S`, and `LQ4`.
-- Tensor layouts: `contiguous-le-v1`, `row-split-k128-v1`,
-  `r9700-q4g64-n16-k16-v1`, `r9700-w8g32-n16-k16-v1`, `row-scaled-k128-v1`, and
-  `r9700-lq4-n16k64-v1`.
+- Numeric formats: `BF16`, `FP32`, `I32`, `Q4G64_F16S`, `Q5G64_F16S`, `Q6G64_F16S`, `W8G32_F16S`, `F8E4M3_ROW_F32S`, and `LQ4`.
+- Tensor layouts: `contiguous-le-v1`, `row-split-k128-v1`, `r9700-q4g64-n16-k16-v1`, `r9700-w8g32-n16-k16-v1`, `row-scaled-k128-v1`, and `r9700-lq4-n16k64-v1`.
 - Resource encoding: `raw-bytes-v1`.
 - Production identity: `qwen3.8-27b/r9700-lq4`.
-- Provisional evaluation identities: `qwen3.8-27b/r9700-int-candidate`,
-  `qwen3.8-27b/r9700-w8g32-mse-eval`,
-  `qwen3.8-27b/r9700-q4g64-n16k16-eval`, `qwen3.8-27b/r9700-q4-w8-n16k16-eval`,
-  `qwen3.8-27b/r9700-q4-w8-mse-n16k16-eval`,
-  `qwen3.8-27b/r9700-w8-bf16-embed-eval`,
-  `qwen3.8-27b/r9700-w8-bf16-attn-qk-eval`,
-  `qwen3.8-27b/r9700-w8-bf16-attn-vo-eval`, and
-  `qwen3.8-27b/r9700-w8-bf16-gdn-qk-eval`.
+- Provisional evaluation identities: `qwen3.8-27b/r9700-int-candidate`, `qwen3.8-27b/r9700-w8g32-mse-eval`, `qwen3.8-27b/r9700-q4g64-n16k16-eval`, `qwen3.8-27b/r9700-q4-w8-n16k16-eval`, `qwen3.8-27b/r9700-q4-w8-mse-n16k16-eval`, `qwen3.8-27b/r9700-w8-bf16-embed-eval`, `qwen3.8-27b/r9700-w8-bf16-attn-qk-eval`, `qwen3.8-27b/r9700-w8-bf16-attn-vo-eval`, and `qwen3.8-27b/r9700-w8-bf16-gdn-qk-eval`.
 
-There is no compatibility format registry or runtime weight repacking. The R9700 target binds
-its encoded weights directly to the HIP kernels. The production LQ4 recipe and its admission
-gates are defined in `qwen3.8-27b-artifact.md`; evaluation identities remain conversion and
-qualification artifacts.
+There is no compatibility format registry or runtime weight repacking. The R9700 target binds its encoded weights directly to the HIP kernels. The production LQ4 recipe and its admission gates are defined in `qwen3.8-27b-artifact.md`; evaluation identities remain conversion and qualification artifacts.
 
-The LQ4 naming change affects identifiers only; the numerical format, packing, and
-weight payloads are unchanged.
+The LQ4 naming change affects identifiers only; the numerical format, packing, and weight payloads are unchanged.
 
 ## Planning and materialization
 
-The binder consumes every target-owned object exactly once and produces host-resource,
-device-tensor, and mapped-host-tensor placements. Tensor placements keep their device alignment
-(256 bytes). Materialization allocates one device arena and, when any tensor is placed
-`MappedHost`, one pinned host backing whose device address must equal its host address; kernels
-read those tensors in place. It retains only requested resources on the host, coalesces aligned
-direct-I/O spans for both tensor placements, and uses pinned staging slots plus the owning HIP load
-stream (mapped-host bytes are copied from the slots by the host). It verifies that planned offsets
-and sizes equal the reader descriptors before copying and publishes completion only after the
-stream is synchronized. Statistics report H2D and mapped-host bytes separately.
+The binder consumes every target-owned object exactly once and produces host-resource, device-tensor, and mapped-host-tensor placements. Tensor placements keep their device alignment (256 bytes). Materialization allocates one device arena and, when any tensor is placed `MappedHost`, one pinned host backing whose device address must equal its host address; kernels read those tensors in place. It retains only requested resources on the host, coalesces aligned direct-I/O spans for both tensor placements, and uses pinned staging slots plus the owning HIP load stream (mapped-host bytes are copied from the slots by the host). It verifies that planned offsets and sizes equal the reader descriptors before copying and publishes completion only after the stream is synchronized. Statistics report H2D and mapped-host bytes separately.
 
-No object is implicitly converted during loading. Q4G64 Linear matrices bind only
-`r9700-q4g64-n16-k16-v1` and the Q4G64 token embedding binds only `row-split-k128-v1`; an artifact
-in another layout is rejected and may be migrated only by the offline transcoders
-(`transcode_q4_n16k16.py`, `transcode_embedding_rows.py`) before startup. A descriptor's format and layout are immutable
-persistent semantics. Exact byte layout is defined in `storage-layouts.md`; numeric reconstruction
-is defined in `tensor-formats.md`; the current target inventory and conversion gate are defined in
-`r9700-integer-artifact-candidate.md`.
+No object is implicitly converted during loading. Q4G64 Linear matrices bind only `r9700-q4g64-n16-k16-v1` and the Q4G64 token embedding binds only `row-split-k128-v1`; an artifact in another layout is rejected and may be migrated only by the offline transcoders (`transcode_q4_n16k16.py`, `transcode_embedding_rows.py`) before startup. A descriptor's format and layout are immutable persistent semantics. Exact byte layout is defined in `storage-layouts.md`; numeric reconstruction is defined in `tensor-formats.md`; the current target inventory and conversion gate are defined in `r9700-integer-artifact-candidate.md`.
 
-The streaming writer stages an incomplete artifact under an exclusive hidden name in the
-destination directory. After every planned payload is complete, it closes the staging file and
-atomically hard-links it to the requested path without replacement. A concurrent creator wins
-rather than being overwritten, and an unsuccessful writer never publishes a partial artifact at
-the requested path. Successful destination creation is the unambiguous commit point: a later
-staging-unlink fault cannot convert success into failure or cause deletion of the destination.
-Staging cleanup is best-effort; repeated `finish()` or `close()` calls retry it, but a persistent
-filesystem cleanup fault may leave a hidden hard link that can be removed separately after the
-fault clears.
+The streaming writer stages an incomplete artifact under an exclusive hidden name in the destination directory. After every planned payload is complete, it closes the staging file and atomically hard-links it to the requested path without replacement. A concurrent creator wins rather than being overwritten, and an unsuccessful writer never publishes a partial artifact at the requested path. Successful destination creation is the unambiguous commit point: a later staging-unlink fault cannot convert success into failure or cause deletion of the destination. Staging cleanup is best-effort; repeated `finish()` or `close()` calls retry it, but a persistent filesystem cleanup fault may leave a hidden hard link that can be removed separately after the fault clears.
 
-The Text/MTP cache group and plane orders describe runtime state and are not `.ninfer` identity or
-object metadata. G16/G32 qualification uses separately compiled runtime profiles and may reuse the
-same explicit weight artifact unless the weight recipe is also being compared.
+The Text/MTP cache group and plane orders describe runtime state and are not `.ninfer` identity or object metadata. G16/G32 qualification uses separately compiled runtime profiles and may reuse the same explicit weight artifact unless the weight recipe is also being compared.
 
 ## Qualification
 
-The artifact checks cover exact framing/directory parsing, direct and grouped-integer layout sizes,
-duplicate/overlap/range rejection, complete target binding, exact materialized device
-bytes, retained frontend resources, and accounting. The complete indexed 18-shard BF16 source is
-present locally; real-source conversion and final identity selection still require their explicit
-conversion and quality evidence.
+The artifact checks cover exact framing/directory parsing, direct and grouped-integer layout sizes, duplicate/overlap/range rejection, complete target binding, exact materialized device bytes, retained frontend resources, and accounting. The complete indexed 18-shard BF16 source is present locally; real-source conversion and final identity selection still require their explicit conversion and quality evidence.

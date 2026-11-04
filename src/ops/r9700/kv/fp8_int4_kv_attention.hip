@@ -294,8 +294,12 @@ pv_vector_body(const float* probabilities, const std::uint8_t* values, const std
             for (unsigned i = 0; i < kLoadAhead; ++i) {
                 int code = static_cast<int>((packed[i] >> ((feature & 1U) * 4U)) & 0x0fU);
                 code     = code >= 8 ? code - 16 : code;
+                // Masked cache slots may hold nonfinite scale bits. Zero probability must
+                // contribute zero, rather than letting fmaf(0, NaN, sum) poison the row.
                 const float value =
-                    static_cast<float>(code) * __half2float(__ushort_as_half(bits[i]));
+                    probability[i] != 0.0F
+                        ? static_cast<float>(code) * __half2float(__ushort_as_half(bits[i]))
+                        : 0.0F;
                 sum = fmaf(probability[i], value, sum);
             }
         }
@@ -307,8 +311,11 @@ pv_vector_body(const float* probabilities, const std::uint8_t* values, const std
             code                     = code >= 8 ? code - 16 : code;
             const std::uint16_t bits = scales[int4_offset<Group, VToken, SToken>(
                 physical, kvh, feature, gridDim.x / q_to_kv, physical_tokens, true)];
-            sum = fmaf(probabilities[static_cast<std::size_t>(qh) * context + base],
-                       static_cast<float>(code) * __half2float(__ushort_as_half(bits)), sum);
+            const float probability  = probabilities[static_cast<std::size_t>(qh) * context + base];
+            const float value = probability != 0.0F ? static_cast<float>(code) *
+                                                          __half2float(__ushort_as_half(bits))
+                                                    : 0.0F;
+            sum               = fmaf(probability, value, sum);
         }
     }
     output[static_cast<std::size_t>(qh) * kHeadDim + feature] = sum;
@@ -1793,7 +1800,7 @@ hipError_t fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentio
             a.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
             a.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
             a.ancestor_masks != nullptr || a.prefix_lengths != nullptr ||
-            a.active_query_rows != nullptr || a.prefix_length_stride > 1U ||
+            a.prefix_length_stride > 1U ||
             a.page_table_pages < (a.context + kPageSize - 1U) / kPageSize || a.value_group != 16U) {
             return hipErrorInvalidValue;
         }

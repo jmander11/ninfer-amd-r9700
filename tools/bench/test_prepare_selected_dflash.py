@@ -65,7 +65,14 @@ class PreparationTest(unittest.TestCase):
                 patch.object(prep, "selected_base_route", side_effect=ValueError("nonterminal")),
                 self.assertRaisesRegex(ValueError, "nonterminal"),
             ):
-                prep.prepare(Path(directory), root, bench=Path("bench"), planner=Path("planner"))
+                prep.prepare(
+                    Path(directory),
+                    root,
+                    bench=Path("bench"),
+                    planner=Path("planner"),
+                    conversion_python=Path("/fixture/python3.11"),
+                    source=Path("/fixture/dflash"),
+                )
             self.assertFalse(root.exists())
 
     def test_same_selected_base_evaluator_plan_roundtrips_and_revalidates_inputs(self):
@@ -86,7 +93,14 @@ class PreparationTest(unittest.TestCase):
                     prep, "_conversion_python_identity", return_value=fixture["conversion_python"]
                 ),
             ):
-                plan = prep.prepare(selected, root, bench=Path("bench"), planner=Path("planner"))
+                plan = prep.prepare(
+                    selected,
+                    root,
+                    bench=Path("bench"),
+                    planner=Path("planner"),
+                    conversion_python=Path("/fixture/python3.11"),
+                    source=Path("/fixture/dflash"),
+                )
                 self.assertEqual(
                     plan["build"]["benchmark"]["sha256"], plan["route"]["base_benchmark"]["sha256"]
                 )

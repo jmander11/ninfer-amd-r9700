@@ -8,6 +8,7 @@ import csv
 import hashlib
 import json
 import math
+import shlex
 import sqlite3
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
@@ -49,22 +50,57 @@ PROFILER = {
     "git_revision": "6b0e43f341195e203754e08f850e437ff2fc09f9",
     "rocm_version": "10.0.0",
 }
-PLAN_DIRECTORY = Path(
-    "/path/to/local/ninfer-amd-r9700/profiles/rocprof/"
-    "r9700-production-q4-p2048-pmc-two-pass-plan-20260905"
-)
-BENCHMARK_COMMANDS = {
-    label: (
-        "/path/to/local/ninfer-amd-r9700/build-r9700-dense-selection-g16/"
-        "bench/ninfer_bench --weights /path/to/local/ninfer-amd-r9700/out/"
-        "qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer --corpus "
-        "/path/to/local/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids "
-        "--device 0 --concurrency 1 -p 2048 --prefill-chunk 4096 --draft-tokens 0 "
-        f"--output json --output-file {PLAN_DIRECTORY}/benchmark-{report}.json "
-        "-r 1 --warmup 1 --profile-measured"
-    )
-    for label, report in (("cache_wait", "cache-wait"), ("issue_lds", "issue-lds"))
-}
+
+
+def benchmark_commands(
+    directory: Path, benchmark: Path, weights: Path, corpus: Path
+) -> dict[str, str]:
+    return {
+        label: shlex.join(
+            [
+                str(benchmark),
+                "--weights",
+                str(weights),
+                "--corpus",
+                str(corpus),
+                "--device",
+                "0",
+                "--concurrency",
+                "1",
+                "-p",
+                "2048",
+                "--prefill-chunk",
+                "4096",
+                "--draft-tokens",
+                "0",
+                "--output",
+                "json",
+                "--output-file",
+                str(directory / f"benchmark-{report}.json"),
+                "-r",
+                "1",
+                "--warmup",
+                "1",
+                "--profile-measured",
+            ]
+        )
+        for label, report in (("cache_wait", "cache-wait"), ("issue_lds", "issue-lds"))
+    }
+
+
+def validate_benchmark_commands(commands: dict[str, str]) -> None:
+    try:
+        first = shlex.split(commands["cache_wait"])
+        directory = Path(first[first.index("--output-file") + 1]).parent
+        expected = benchmark_commands(directory, Path(first[0]), Path(first[2]), Path(first[4]))
+        if set(commands) != set(expected) or any(
+            shlex.split(commands[k]) != shlex.split(v) for k, v in expected.items()
+        ):
+            raise ValueError("benchmark commands differ from the qualified P2048 workload")
+    except (KeyError, IndexError, TypeError) as error:
+        raise ValueError("invalid benchmark commands") from error
+
+
 WORKLOAD = {
     "prompt_tokens": 2048,
     "generated_tokens": 0,
@@ -504,9 +540,10 @@ def analyze(
         or plan.get("expected_total_dispatches") != 176
         or plan.get("kernel_include_regex") != KERNEL
         or plan.get("profiler") != PROFILER
-        or plan.get("benchmark_commands") != BENCHMARK_COMMANDS
     ):
         raise ValueError("plan workload, kernel, or exact shape inventory differs")
+    commands = plan.get("benchmark_commands")
+    validate_benchmark_commands(commands)
     passes = plan.get("passes")
     expected_passes = {
         "cache_wait": PASS_A_SUM_COUNTERS | PASS_A_INSTANCE_SUM_COUNTERS,
@@ -539,7 +576,7 @@ def analyze(
         regions, database_agent, process = _read_regions(database)
         if database_agent != agent or not set(dispatches).issubset(regions):
             raise ValueError("CSV/database dispatch or agent identities differ")
-        if process["command"] != BENCHMARK_COMMANDS[label]:
+        if process["command"] != commands[label]:
             raise ValueError(f"{label} database process command differs from the exact workload")
         process_by_pass[label] = process
         classified: dict[str, list[int]] = defaultdict(list)

@@ -10,9 +10,19 @@ import os
 import shlex
 import sqlite3
 import stat
+import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.r9700.host import power_profile_path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 
 REPO = Path(__file__).resolve().parents[2]
 BENCH = REPO / "build-r9700-rmsnorm-production-final-20260906/bench/ninfer_bench"
@@ -36,7 +46,7 @@ ROCPROF = Path("/opt/rocm/core-10.0/bin/rocprofv3")
 ROCPROF_AVAIL = Path("/opt/rocm/bin/rocprofv3-avail")
 STREAM_PROBE = REPO / "tools/r9700/build/hbm_bandwidth_probe"
 STREAM_PROBE_SHA256 = "060e110bb3bf69678d3e81b52f3c3c457d17770f8210e2e165f3494169ade51b"
-POWER = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
+POWER = power_profile_path()
 ANALYZER = REPO / "tools/bench/analyze_post_rmsnorm_decode_proxy.py"
 PRODUCER = Path(__file__).resolve()
 

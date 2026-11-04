@@ -21,6 +21,7 @@ inline constexpr Matrix matrices[] = {
 
 // The LQ4 Text profile has its own protection set; every other profile uses its base recipe's.
 constexpr artifact::NumericFormat matrix_format(WeightsProfile profile, std::string_view name) {
+    if (is_lq4_text_profile(profile)) profile = WeightsProfile::R9700Lq4;
     if (!is_lq4_text_profile(profile)) {
         profile = fp8_capped_base_profile(profile);
         if (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation)

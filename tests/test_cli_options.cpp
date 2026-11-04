@@ -26,6 +26,41 @@ ninfer::cli::Options parse(std::vector<std::string> arguments) {
 
 int main() {
     int failures = 0;
+    const auto capped =
+        parse({"ninfer", "model.ninfer", "--prompt", "hi", "--thinking-token-budget", "8192"});
+    failures += check(capped.thinking_token_budget == 8192, "CLI reasoning cap missing");
+    for (const char* value : {"0", "-1", "1.5", "4294967296"}) {
+        bool rejected = false;
+        try {
+            (void)parse(
+                {"ninfer", "model.ninfer", "--prompt", "hi", "--thinking-token-budget", value});
+        } catch (const std::invalid_argument&) { rejected = true; }
+        failures += check(rejected, "CLI accepted invalid reasoning cap");
+    }
+    for (const char* flag : {"--no-thinking", "--raw-output"}) {
+        bool rejected = false;
+        try {
+            (void)parse(
+                {"ninfer", "model.ninfer", "--prompt", "hi", "--thinking-token-budget", "1", flag});
+        } catch (const std::invalid_argument&) { rejected = true; }
+        failures += check(rejected, "CLI accepted contradictory reasoning cap");
+    }
+    const auto system_cache = parse({"ninfer", "model.ninfer", "--prompt", "hi",
+                                     "--kv-ram-capacity", "1024", "--kv-ram-system-prompts", "3"});
+    failures += check(system_cache.kv_ram_system_prompts == 3 &&
+                          system_cache.kv_ram_capacity_bytes == 1024ULL * 1024ULL * 1024ULL,
+                      "system prompt count did not use the RAM byte budget");
+    const auto system_off =
+        parse({"ninfer", "model.ninfer", "--prompt", "hi", "--kv-ram-system-prompts", "0"});
+    failures += check(system_off.kv_ram_system_prompts == 0, "zero did not disable system caching");
+    for (const char* count : {"1", "-1", "4294967296"}) {
+        bool rejected = false;
+        try {
+            (void)parse(
+                {"ninfer", "model.ninfer", "--prompt", "hi", "--kv-ram-system-prompts", count});
+        } catch (const std::invalid_argument&) { rejected = true; }
+        failures += check(rejected, "system prompt limit accepted missing RAM or invalid count");
+    }
     const auto constrained =
         parse({"ninfer", "model.ninfer", "--prompt", "hi", "--json-schema", "schema.json"});
     failures +=
@@ -40,6 +75,21 @@ int main() {
     } catch (const std::invalid_argument&) { conflict_rejected = true; }
     failures += check(conflict_rejected, "CLI accepted competing output constraints");
 
+
+    const auto choices =
+        parse({"ninfer", "model.ninfer", "--prompt", "hi", "--choice", "", "--choice", "a|b"});
+    failures += check(choices.output_choices == std::vector<std::string>{"", "a|b"},
+                      "CLI changed literal choices");
+    const auto regex = parse({"ninfer", "model.ninfer", "--prompt", "hi", "--regex", "[A-Z]+"});
+    failures += check(regex.output_regex == "[A-Z]+", "CLI changed regex source");
+    for (const std::string flag : {"--grammar", "--json-schema", "--regex"}) {
+        bool conflict = false;
+        try {
+            (void)parse(
+                {"ninfer", "model.ninfer", "--prompt", "hi", "--choice", "yes", flag, "value"});
+        } catch (const std::invalid_argument&) { conflict = true; }
+        failures += check(conflict, "CLI accepted conflicting choice constraint");
+    }
 
     const auto default_spec = parse({"ninfer", "model.ninfer", "--prompt", "hi"});
     failures += check(default_spec.speculative.backend == ninfer::SpeculativeBackend::DFlash &&

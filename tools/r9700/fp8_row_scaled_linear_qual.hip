@@ -1,12 +1,10 @@
-// Qualification of the row-scaled E4M3 Linear (LinearExecution): the small-T route (T <= 16,
-// verification and ordinary decode) and the prefill GEMM route (T > 16) on the real Qwen3.8
-// protected projection shapes. Evidence: the activation planes the route consumed are read back and
-// an independent FP64 product of the decoded E4M3 weight and activation codes with their FP32
-// row/token scales checks every output element (small T) or sampled tokens and rows (prefill);
-// output guards; and a nonfinite input token publishes the canonical BF16 NaN in exactly its row
-// while every other token's output is unchanged. At prefill widths the same rows also run through
-// lq4_linear (raw staging) with a split output and with residual accumulation, which must
-// equal the plain route bitwise (BF16(residual + BF16(y)) for accumulation).
+// Checks row-scaled E4M3 Linear on real Qwen3.8 protected projection shapes: small-T decode/verify
+// (T <= 16) and prefill GEMM (T > 16). Reads back the consumed activation planes and compares
+// against an independent FP64 product of decoded weight/activation codes and FP32 row/token scales.
+// Checks every small-T output, sampled prefill tokens/rows, output guards and per-token NaN
+// publication without changes to other tokens. Prefill also checks lq4_linear raw staging with
+// split output and residual accumulation: bitwise equality with the plain route, or
+// BF16(residual + BF16(y)) for accumulation.
 #include "ninfer/types.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "ops/r9700/linear/fp8_small_t_linear.h"

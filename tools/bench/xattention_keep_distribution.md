@@ -1,13 +1,8 @@
 # Real-model XAttention keep distributions
 
-This opt-in target-private diagnostic measures real-model keep distributions, not speed or
-numerical accuracy. It captures actual B64-page keep counts for every head/B128 query block
-before shared workspace reuse. One eager C1 prefill covers all 16 full-attention layers per
-selected 2048-token chunk. Existing BF16-source quality remains the numerical gate;
-uninstrumented whole runs remain the timing gate. All diagnostic outputs are timing-ineligible.
+This opt-in target-private diagnostic measures real-model keep distributions, not speed or numerical accuracy. It captures actual B64-page keep counts for every head/B128 query block before shared workspace reuse. One eager C1 prefill covers all 16 full-attention layers per selected 2048-token chunk. Existing BF16-source quality remains the numerical gate; uninstrumented whole runs remain the timing gate. All diagnostic outputs are timing-ineligible.
 
-Root may run these CPU commands after source review. Never rebuild frozen recovery or selection
-executables for this diagnostic; the builds below are separate.
+Use separate diagnostic builds after source review. Keep the frozen recovery and selection executables unchanged.
 
 ```sh
 for group in 16 32; do
@@ -24,25 +19,19 @@ for group in 16 32; do
 done
 ```
 
-Read-only preflight compares compiled arithmetic options with the panel build, rejects stale
-executables, replays selected-chunk/quality authorities, and binds exact artifacts/corpus:
+Read-only preflight compares compiled arithmetic options with the panel build, rejects stale executables, replays selected-chunk/quality authorities, and binds exact artifacts/corpus:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 /home/maintainer/.local/bin/python3.11 \
+PYTHONDONTWRITEBYTECODE=1 python3.11 \
   tools/bench/xattention_keep_distribution.py preflight
 ```
 
-After independent review, root alone launches eight serial diagnostics: all-Q4/four-role,
-sparse G16/G32, P8192/P32768. Mixed XAttention is quality-ineligible and excluded.
+After independent review, run eight diagnostics serially: all-Q4/four-role, sparse G16/G32, P8192/P32768. Mixed XAttention is excluded because it is ineligible for quality selection.
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 /home/maintainer/.local/bin/python3.11 \
+PYTHONDONTWRITEBYTECODE=1 python3.11 \
   tools/bench/xattention_keep_distribution.py run \
   --output profiles/bench/r9700-xattention-real-keep-distribution-20260921
 ```
 
-Output root and traces are create-only. Failed commands/logs/partial traces are retained, never
-resumed. `NINFER_XATTENTION_KEEP_TRACE` enables the compile-gated hook; capture rejects Device
-Graph streams. Validation requires complete dispatch coverage, causal keep-count bounds and
-nontrivial sparse selection. Counts are retained B64 pages per shared B128 query block, not
-individual query-token arithmetic or a roofline. Do not use diagnostic benchmark durations.
+Output root and traces are create-only. Failed commands/logs/partial traces are retained, never resumed. `NINFER_XATTENTION_KEEP_TRACE` enables the compile-gated hook; capture rejects Device Graph streams. Validation requires complete dispatch coverage, causal keep-count bounds and nontrivial sparse selection. Counts are retained B64 pages per shared B128 query block, not individual query-token arithmetic or a roofline. Do not use diagnostic benchmark durations.

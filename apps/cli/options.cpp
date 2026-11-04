@@ -111,7 +111,8 @@ std::string usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> (--prompt <text>|--messages <messages.json>)\n"
            "       [--max-context N] [--kv-capacity N|auto] [--kv-capacity-headroom MiB]\n"
-           "       [--kv-ram-capacity off|N] [--kv-disk-capacity off|N] [--kv-disk-location PATH]\n"
+           "       [--kv-ram-capacity off|N] [--kv-ram-system-prompts N] [--kv-disk-capacity "
+           "off|N] [--kv-disk-location PATH]\n"
            "       [--kv-disk-compress off|zstd] [--prefill-chunk N] [--max-new N]\n"
            "       [--device N]\n"
            "       [--spec none|mtp|dflash] [--draft-tokens N]\n"
@@ -122,8 +123,9 @@ std::string usage_text(const char* argv0) {
            "       [--presence-penalty F] [--frequency-penalty F] [--seed N] [--greedy]\n"
            "       [--no-p-less-sampling]\n"
            "       [--stop-token-id N]... [--stop <text>]... [--reasoning-stop <text>]...\n"
-           "       [--json-object | --json-schema FILE | --grammar FILE]\n"
-           "       [--raw-output] [--print-token-ids] [--no-thinking]\n"
+           "       [--json-object | --json-schema FILE | --grammar FILE | --regex PATTERN | "
+           "--choice TEXT ...]\n"
+           "       [--raw-output] [--print-token-ids] [--no-thinking] [--thinking-token-budget N]\n"
            "       [--reasoning-effort low|medium|xhigh] [--vision]\n"
            "       [--no-device-graph] [--capture-context-checkpoint]\n"
            "       [--context-checkpoints off|a,b,c]\n"
@@ -137,6 +139,7 @@ std::string usage_text(const char* argv0) {
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +
            "); raise it when other processes, such as a desktop, share the GPU.\n"
            "--kv-ram-capacity sets pinned host KV prefix-cache capacity in MiB (default off).\n"
+           "--kv-ram-system-prompts N retains up to N system prefixes in that budget (default 0).\n"
            "--kv-disk-capacity sets SSD KV prefix-cache unique-object capacity in MiB (default "
            "off).\n"
            "--kv-disk-location is required iff --kv-disk-capacity is enabled.\n"
@@ -183,6 +186,10 @@ Options parse_options(int argc, char** argv) {
             options.json_object = true;
         } else if (arg == "--json-schema") {
             options.json_schema_path = value(arg);
+        } else if (arg == "--regex") {
+            options.output_regex = value(arg);
+        } else if (arg == "--choice") {
+            options.output_choices.emplace_back(value(arg));
         } else if (arg == "--grammar") {
             options.grammar_path = value(arg);
         } else if (arg == "--max-new") {
@@ -196,6 +203,8 @@ Options parse_options(int argc, char** argv) {
             kv_capacity_headroom_mib = parse_u64(value(arg), "kv-capacity-headroom");
         } else if (arg == "--kv-ram-capacity") {
             options.kv_ram_capacity_bytes = parse_kv_ram_capacity_bytes(value(arg));
+        } else if (arg == "--kv-ram-system-prompts") {
+            options.kv_ram_system_prompts = parse_u32(value(arg), "kv-ram-system-prompts", true);
         } else if (arg == "--kv-disk-capacity") {
             options.kv_disk_capacity_bytes = parse_kv_disk_capacity_bytes(value(arg));
         } else if (arg == "--kv-disk-location") {
@@ -228,6 +237,8 @@ Options parse_options(int argc, char** argv) {
         } else if (arg == "--no-lm-head-draft") {
             options.speculative.proposal_head = ProposalHead::Full;
             proposal_head_explicit            = true;
+        } else if (arg == "--thinking-token-budget") {
+            options.thinking_token_budget = parse_u32(value(arg), "thinking-token-budget");
         } else if (arg == "--raw-output") {
             options.raw_output = true;
         } else if (arg == "--print-token-ids") {
@@ -305,9 +316,12 @@ Options parse_options(int argc, char** argv) {
 
     if (static_cast<int>(options.json_object) +
             static_cast<int>(!options.json_schema_path.empty()) +
-            static_cast<int>(!options.grammar_path.empty()) >
+            static_cast<int>(!options.grammar_path.empty()) +
+            static_cast<int>(options.output_regex.has_value()) +
+            static_cast<int>(!options.output_choices.empty()) >
         1) {
-        throw std::invalid_argument("select only one of --json-object, --json-schema or --grammar");
+        throw std::invalid_argument(
+            "select only one of --json-object, --json-schema, --grammar, --regex or --choice");
     }
     const bool has_prompt   = !options.prompt.empty();
     const bool has_messages = !options.messages_path.empty();
@@ -321,10 +335,14 @@ Options parse_options(int argc, char** argv) {
         options.kv_capacity.explicit_tokens < options.max_context) {
         throw std::invalid_argument("--kv-capacity must be at least --max-context");
     }
+    validate_kv_system_prompt_options(options.kv_ram_capacity_bytes, options.kv_ram_system_prompts);
     validate_kv_disk_options(options.kv_ram_capacity_bytes, options.kv_disk_capacity_bytes,
                              options.kv_disk_location);
     product::resolve_speculative_cli_options(options.speculative, draft_tokens_explicit,
                                              adaptive_draft_explicit, proposal_head_explicit);
+    if (options.thinking_token_budget && (!options.enable_thinking || options.raw_output)) {
+        throw std::invalid_argument("--thinking-token-budget requires thinking and parsed output");
+    }
     if (!options.enable_thinking && options.reasoning_effort) {
         throw std::invalid_argument("--reasoning-effort cannot be combined with --no-thinking");
     }

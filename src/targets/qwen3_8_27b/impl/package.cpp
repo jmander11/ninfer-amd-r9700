@@ -27,6 +27,12 @@ LoadPlan::LoadPlan(LoadPlan&&) noexcept            = default;
 LoadPlan& LoadPlan::operator=(LoadPlan&&) noexcept = default;
 LoadPlan::~LoadPlan()                              = default;
 
+std::string LoadPlan::cache_tensor_identity(const artifact::Reader& reader) const {
+    if (!impl_) { throw std::logic_error("target load plan is empty"); }
+    const auto selected = cache_tensor_selections(reader, impl_->plan.bindings.features);
+    return reader.tensor_content_identity(selected);
+}
+
 const artifact::MaterializationPlan& LoadPlan::materialization() const {
     if (impl_ == nullptr) { throw std::logic_error("target load plan is empty"); }
     return impl_->plan.materialization;

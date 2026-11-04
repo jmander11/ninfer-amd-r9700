@@ -47,6 +47,10 @@ __launch_bounds__(kArgmaxBlock) __global__
     std::int32_t best_index   = INT32_MAX;
     const std::int32_t column = config ? t % columns_per_config : 0;
     const auto consider       = [&](std::int32_t v, float value) {
+        if (config != nullptr && config->nonfinite_logits != nullptr && !isfinite(value) &&
+            !argmax_token_suppressed(v, config, column)) {
+            atomicOr(config->nonfinite_logits + column, 1U);
+        }
         if (argmax_better(value, v, best_value, best_index) &&
             !argmax_token_suppressed(v, config, column)) {
             best_value = value;
@@ -95,7 +99,11 @@ __launch_bounds__(kArgmaxBlock) __global__
         __syncthreads();
     }
 
-    if (threadIdx.x == 0) { out[t] = indices[0]; }
+    if (threadIdx.x == 0) {
+        // Proposal selection also feeds device embedding gathers before any host check. An
+        // all-NaN column has no ordered maximum; keep its placeholder in the token domain.
+        out[t] = indices[0] == INT32_MAX ? 0 : indices[0];
+    }
 }
 
 } // namespace ninfer::ops

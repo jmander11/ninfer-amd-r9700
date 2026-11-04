@@ -1,26 +1,21 @@
 #pragma once
 
-// Family host policy for adaptive draft length. No HIP.
+// Host policy for adaptive draft length. Chooses among captured k values: {3,4,5} for MTP,
+// {3..N} for DFlash with --draft-tokens N>=5. Changing k changes the greedy path, so samples
+// from different k values are not interchangeable.
 //
-// Objective: match the best constant-k policy in the captured set ({3,4,5} for
-// MTP, {3..N} for DFlash --draft-tokens N>=5). Mixing k forks the greedy
-// DFlash/MTP path, so this is not a mixing bandit.
+// Expected yield is Y(k) = 1 + sum_{i<k} q_i, where q_i = prod_{j<=i} r_j and
+// r_i = P(accepted > i | accepted > i-1). Each r_i uses a discounted Beta estimate, updated
+// only when the prefix reaches i. MTP excludes unseen hops from E[Y], using r=1 only in an
+// optimistic bound for eliminating dominated k. DFlash extends the deepest observed r into
+// unseen hops; otherwise a request starting at shallow k could never justify a deeper k.
 //
-// Y(k) = 1 + sum_{i<k} q_i with q_i = prod_{j<=i} r_j and
-// r_i = P(accepted > i | accepted > i-1). r_i is a discounted Beta, updated
-// only when the prefix reached i. For MTP, unseen r_i are not invented in
-// E[Y]; they appear only as r=1 in an optimistic bound used to drop dominated
-// k. DFlash continues the deepest observed r into unseen deeper hops: a request
-// that starts at a shallow k never observes deeper hops, so without that
-// continuation a deeper k could never earn credit however flat T(k) is.
+// Online least squares estimates T(k,C,L) = a_{C,k} + c_C L with a shared slope and per-k
+// intercepts. Unmeasured T(k) uses max(T(k-1), 2 T(k-1)-T(k-2)); an empty length bin alone
+// does not trigger a probe. Each k is probed at most once if the bound says it could win.
 //
-// T(k,C,L) = a_{C,k} + c_C L from online least squares (shared slope, per-k
-// intercept). Unmeasured T(k) is extrapolated as max(T(k-1), 2 T(k-1)-T(k-2))
-// and never schedules k just because a length bin is empty. k is probed at
-// most once when that bound still thinks it can win.
-//
-// Lock argmax E[Y]/T among surviving k. No Thompson, no dwell, no hop CUSUM.
-// Switching k adds 1 ms to that arm's T. Ties keep the smaller k.
+// Choose the surviving k with greatest E[Y]/T, adding 1 ms to T when switching k.
+// Ties favor smaller k. There is no Thompson sampling, dwell period or hop CUSUM.
 
 #include "ninfer/types.h"
 

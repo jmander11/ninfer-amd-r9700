@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 
@@ -43,7 +44,7 @@ constexpr std::size_t kScrubBytes         = 80U * 1024U * 1024U;
 constexpr double kRequiredSavingMs        = 0.2;
 
 std::filesystem::path power_path() {
-    return "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
+    return ninfer::r9700_qualification::configured_pci_path() / "power_dpm_force_performance_level";
 }
 
 void require_auto_power(const char* stage) {

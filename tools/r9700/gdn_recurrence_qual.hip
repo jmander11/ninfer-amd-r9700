@@ -197,7 +197,11 @@ void require_output(const std::vector<hip_bfloat16>& actual, const std::vector<d
     double error2         = 0.0;
     double oracle2        = 0.0;
     for (std::size_t index = 0; index < actual.size(); ++index) {
-        const double error = static_cast<double>(fp32(actual[index])) - expected[index];
+        const double observed = fp32(actual[index]);
+        if (!std::isfinite(observed) || !std::isfinite(expected[index])) {
+            fail(label + ": nonfinite output or oracle at index=" + std::to_string(index));
+        }
+        const double error = observed - expected[index];
         if (std::abs(error) > max_abs) {
             max_abs   = std::abs(error);
             max_index = index;
@@ -221,6 +225,9 @@ void require_state(const std::vector<float>& actual, const std::vector<double>& 
     if (actual.size() != expected.size()) { fail(label + ": size mismatch"); }
     double max_abs = 0.0;
     for (std::size_t index = 0; index < actual.size(); ++index) {
+        if (!std::isfinite(actual[index]) || !std::isfinite(expected[index])) {
+            fail(label + ": nonfinite state or oracle at index=" + std::to_string(index));
+        }
         max_abs = std::max(max_abs, std::abs(static_cast<double>(actual[index]) - expected[index]));
     }
     g_max_state_abs = std::max(g_max_state_abs, max_abs);
@@ -410,7 +417,7 @@ void qualify_selected_p2048(hipStream_t stream) {
                 const double error =
                     std::abs(static_cast<double>(fp32(actual_output[output_index])) - expected);
                 selected_max_output_abs = std::max(selected_max_output_abs, error);
-                if (error > 0.025) {
+                if (!std::isfinite(error) || error > 0.025) {
                     fail("selected P2048 sampled output exceeds FP64 criterion at token=" +
                          std::to_string(token) + " head=" + std::to_string(sample.head) +
                          " row=" + std::to_string(sample.row) + " error=" + std::to_string(error));
@@ -426,7 +433,7 @@ void qualify_selected_p2048(hipStream_t stream) {
             const double error =
                 std::abs(static_cast<double>(actual_state[base + key]) - sample.state[key]);
             selected_max_state_abs = std::max(selected_max_state_abs, error);
-            if (error > 0.003) {
+            if (!std::isfinite(error) || error > 0.003) {
                 fail("selected P2048 sampled state exceeds FP64 criterion at head=" +
                      std::to_string(sample.head) + " row=" + std::to_string(sample.row) +
                      " key=" + std::to_string(key) + " error=" + std::to_string(error));
@@ -503,6 +510,26 @@ PoolCase pool_case(int width, int batch, int salt) {
         result.valid[row]   = std::max(1, width - (row & 1));
         result.initial[row] = row * (width + 1);
         result.bases[row]   = result.initial[row] + 1;
+        // Invalid columns are outside the recurrence. Poison every represented input plane so
+        // zero-weight arithmetic cannot accidentally consume them; the oracle visits valid
+        // columns only and the checks below require an exact zero output and unchanged state.
+        constexpr std::array<std::uint32_t, 3> poison{0x7fc00000U, 0x7f800000U, 0xff800000U};
+        for (int token = result.valid[row]; token < width; ++token) {
+            const auto column = static_cast<std::size_t>(row * width + token);
+            const auto value  = [&](std::size_t i) {
+                return std::bit_cast<float>(poison[i % poison.size()]);
+            };
+            for (int index = 0; index < kQHeads * kDim; ++index) {
+                result.in.q[column * kQHeads * kDim + index] = bf16(value(index));
+                result.in.k[column * kQHeads * kDim + index] = bf16(value(index + 1));
+            }
+            for (int index = 0; index < kValueHeads * kDim; ++index)
+                result.in.v[column * kValueHeads * kDim + index] = bf16(value(index + 2));
+            for (int head = 0; head < kValueHeads; ++head) {
+                result.in.g[column * kValueHeads + head]    = value(head);
+                result.in.beta[column * kValueHeads + head] = value(head + 1);
+            }
+        }
     }
     return result;
 }

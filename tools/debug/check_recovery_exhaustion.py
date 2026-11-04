@@ -1,7 +1,7 @@
 """Probe request-local exhaustion on an isolated diagnostic server; executes no tools.
 
-The token cap deliberately targets a captured repeated-call boundary, not a
-maximum acceptable reasoning length. A normal length finish is NOT a loop failure.
+The token cap targets a captured repeated-call boundary. Reaching the cap alone
+does not indicate a loop.
 """
 
 import argparse

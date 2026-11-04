@@ -26,6 +26,11 @@ repos:
       - id: check-json
       - id: check-toml
       - id: check-yaml
+        exclude: ^compose\.local\.yaml$
+      - id: check-yaml
+        name: check Compose override YAML
+        files: ^compose\.local\.yaml$
+        args: [--unsafe]
       - id: detect-private-key
       - id: end-of-file-fixer
         exclude: &data \.patch$|(^|/)fixtures/|^examples/cli/messages/

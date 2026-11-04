@@ -5,10 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-RESOLVER = (
-    Path(__file__).resolve().parents[2]
-    / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"
-)
+RESOLVER = Path(__file__).resolve().parents[2] / "tools/bench/resolve_selected_route.py"
 SPEC = importlib.util.spec_from_file_location("post_terminal_focused_resolve", RESOLVER)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)

@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
 
@@ -54,8 +55,7 @@ constexpr float kAttentionScale = 1.0F / 16.0F;
 constexpr std::size_t kBenchmarkHotPagePeriod = 16U;
 constexpr double kOracleAbsoluteTolerance = 3.0e-4;
 constexpr double kOracleRelativeTolerance = 3.0e-4;
-constexpr std::string_view kR9700PowerProfilePath =
-    "/sys/class/drm/card2/device/power_dpm_force_performance_level";
+std::string qualification_power_path() { return (ninfer::r9700_qualification::configured_pci_path() / "power_dpm_force_performance_level").string(); }
 
 #ifndef NINFER_SOURCE_DIR
 #error "NINFER_SOURCE_DIR must bind XAttention production-scale qualification provenance"
@@ -1176,7 +1176,7 @@ void write_evidence(const std::string& path, const OracleEvidence& oracle,
         << "  \"schema_version\": " << (production == nullptr ? 5 : 6) << ",\n"
         << "  \"architecture\": \"gfx1201\",\n"
         << "  \"disposition\": \"qualification-candidate\",\n"
-        << "  \"power_profile\": {\"path\": \"" << kR9700PowerProfilePath
+        << "  \"power_profile\": {\"path\": \"" << qualification_power_path()
         << "\", \"value\": \"" << power_profile << "\", \"required\": \"auto\"},\n"
         << "  \"physical_oracle\": {\n"
         << "    \"status\": \"passed\",\n"
@@ -1341,7 +1341,7 @@ int main(int argc, char** argv) {
             fail("production-scale iterations must be in [1,20]");
         }
         const std::string power_profile = benchmark
-            ? require_auto_power_profile(kR9700PowerProfilePath) : std::string{};
+            ? require_auto_power_profile(qualification_power_path()) : std::string{};
         AdmissionIdentity identity;
         if (production_scale) {
             const std::filesystem::path output =
@@ -1382,7 +1382,7 @@ int main(int argc, char** argv) {
         const OracleEvidence oracle = qualify_route();
         qualify_rejection();
         if (production_scale &&
-            require_auto_power_profile(kR9700PowerProfilePath) != power_profile) {
+            require_auto_power_profile(qualification_power_path()) != power_profile) {
             fail("R9700 power profile changed during numerical qualification");
         }
         if (benchmark) {
@@ -1393,7 +1393,7 @@ int main(int argc, char** argv) {
             if (production_scale) {
                 production = std::make_unique<ProductionScaleEvidence>(
                     benchmark_production_scale(iterations));
-                if (require_auto_power_profile(kR9700PowerProfilePath) != power_profile) {
+                if (require_auto_power_profile(qualification_power_path()) != power_profile) {
                     fail("R9700 power profile changed during timing");
                 }
             }

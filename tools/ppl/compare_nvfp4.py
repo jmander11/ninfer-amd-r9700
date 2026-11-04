@@ -15,23 +15,27 @@ import shutil
 import statistics
 import struct
 import subprocess
+import sys
 import time
 from pathlib import Path
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.r9700.host import power_profile_path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
 ROOT = Path(__file__).resolve().parents[2]
-LOCAL = ROOT.parent
-NV_REPO = LOCAL / "ninfer-reference"
-NV_MODEL = (
-    LOCAL
-    / "models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer"
-)
 ARTIFACTS = {
     "all_q4": ROOT / "out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
     "mixed_mse": ROOT / "out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer",
     "selective": ROOT / "out/qwen3.8-27b-r9700-q4-selective-protected-n16k16-eval.ninfer",
     "four_role": ROOT / "out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
-    "selective_tiled": LOCAL
-    / "models/qwen3.8-27b-r9700-q4-selective-protected-dflash2-q4/qwen3.8-27b-r9700-q4-selective-protected-n16k16-dflash2-q4-head-n16k16-eval.ninfer",
+    "selective_tiled": ROOT
+    / "out/qwen3.8-27b-r9700-q4-selective-protected-n16k16-dflash2-q4-head-n16k16-eval.ninfer",
 }
 CONFIGS = [(r, a) for r in ("all_q4", "mixed_mse") for a in (4, 8)] + [
     ("selective", 8),
@@ -71,12 +75,12 @@ def run(command, directory):
         raise RuntimeError(f"failed cell retained: {directory}")
 
 
-def prepare(out):
+def prepare(out, *, nv_repo: Path, nv_model: Path):
     out.mkdir()
     (out / "bin").mkdir()
     # Preserve an immutable binary while the user continues development in the NVIDIA checkout.
     nv = out / "bin/nvidia-ppl"
-    shutil.copy2(NV_REPO / "build/apps/ninfer-ppl", nv)
+    shutil.copy2(nv_repo / "build/apps/ninfer-ppl", nv)
     sources = {
         "technical": ROOT / "docs/maintainer/concurrent-inference-architecture.md",
         "code": ROOT / "src/targets/qwen3/impl/runtime/program_impl.h",
@@ -87,10 +91,10 @@ def prepare(out):
         chunk=2048,
         samples={},
         nvidia_commit=subprocess.check_output(
-            ["git", "-C", str(NV_REPO), "rev-parse", "HEAD"], text=True
+            ["git", "-C", str(nv_repo), "rev-parse", "HEAD"], text=True
         ).strip(),
         nvidia_binary_sha256=digest(nv),
-        nvidia_model=str(NV_MODEL),
+        nvidia_model=str(nv_model),
         amd_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
     )
     for name in SAMPLES:
@@ -102,7 +106,7 @@ def prepare(out):
             shutil.copy2(source, out / f"{name}.txt")
             for platform, binary, model in (
                 ("amd", ROOT / "build-r9700/apps/ninfer-ppl", ARTIFACTS["all_q4"]),
-                ("nvidia", nv, NV_MODEL),
+                ("nvidia", nv, nv_model),
             ):
                 run(
                     [
@@ -151,6 +155,7 @@ def require_uniform_build(build, bits):
 
 
 def snapshot_amd(out):
+    nv_model = Path(json.loads((out / "manifest.json").read_text())["nvidia_model"])
     records = {}
     for a in (4, 8):
         build = ROOT / ("build-r9700-pareto-a4-20260922" if a == 4 else "build-r9700")
@@ -166,12 +171,13 @@ def snapshot_amd(out):
         out / "artifacts.json",
         {
             name: dict(path=str(path), bytes=path.stat().st_size, mtime_ns=path.stat().st_mtime_ns)
-            for name, path in {**ARTIFACTS, "nvfp4": NV_MODEL}.items()
+            for name, path in {**ARTIFACTS, "nvfp4": nv_model}.items()
         },
     )
 
 
 def quality(out, platform, schedule="prefill", only=None, binary_override=None, tag=None):
+    nv_model = Path(json.loads((out / "manifest.json").read_text())["nvidia_model"])
     rows = [("nvfp4", None)] if platform == "nvidia" else CONFIGS
     for recipe, a in rows:
         name = recipe if a is None else f"{recipe}_a{a}"
@@ -182,7 +188,7 @@ def quality(out, platform, schedule="prefill", only=None, binary_override=None, 
             if binary_override
             else out / ("bin/nvidia-ppl" if a is None else f"bin/amd-a{a}-ppl")
         )
-        model = NV_MODEL if a is None else ARTIFACTS[recipe]
+        model = nv_model if a is None else ARTIFACTS[recipe]
         selected = {}
         for sample in SAMPLES:
             prefix = "quality" if schedule == "prefill" else "decode-quality"
@@ -245,7 +251,7 @@ def speed(out, only=None, binary_override=None, tag=None):
                 receipt = json.loads((cell / "receipt.json").read_text())
                 assert receipt["exit_code"] == 0 and receipt["executable_sha256"] == digest(binary)
                 continue
-            power = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
+            power = power_profile_path()
             assert power.read_text().strip() == "auto"
             print(f"SPEED {name} {sample}", flush=True)
             run(
@@ -525,12 +531,22 @@ def main():
         "--ppl-bin", type=Path, help="explicit frozen PPL binary for a host-only planner correction"
     )
     parser.add_argument("--tag", help="fresh cell suffix; preserves failed or superseded evidence")
+    parser.add_argument("--nvidia-repo", type=Path, help="NVIDIA checkout, required for prepare")
+    parser.add_argument(
+        "--nvidia-model", type=Path, help="explicit NVFP4 artifact, required for prepare"
+    )
     args = parser.parse_args()
     if args.only and args.only not in {"nvfp4", *(f"{r}_a{a}" for r, a in CONFIGS)}:
         parser.error("unknown configuration: " + args.only)
     out = args.out.resolve()
     if args.action == "prepare":
-        prepare(out)
+        if args.nvidia_repo is None or args.nvidia_model is None:
+            parser.error("prepare requires --nvidia-repo and --nvidia-model")
+        prepare(
+            out,
+            nv_repo=args.nvidia_repo.resolve(strict=True),
+            nv_model=args.nvidia_model.resolve(strict=True),
+        )
     elif args.action == "snapshot-amd":
         snapshot_amd(out)
     elif args.action.startswith("quality-"):

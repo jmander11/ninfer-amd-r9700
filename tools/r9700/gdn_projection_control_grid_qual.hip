@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 #include "ops/r9700/gdn/gdn_ops.h"
@@ -9,12 +10,13 @@
 namespace {
 namespace candidate = ninfer::ops::r9700::gdn::qualification;
 constexpr int K = 5120, H = 48, Copies = 3, Trials = 24;
-constexpr std::size_t Guard     = 256;
-const std::filesystem::path Pci = "/sys/bus/pci/devices/0000:13:00.0";
+constexpr std::size_t Guard = 256;
 
 void power() {
-    if (read_text(Pci / "vendor") != "0x1002" || read_text(Pci / "device") != "0x7551" ||
-        read_text(Pci / "power_dpm_force_performance_level") != "auto")
+    if (read_text(ninfer::r9700_qualification::configured_pci_path() / "vendor") != "0x1002" ||
+        read_text(ninfer::r9700_qualification::configured_pci_path() / "device") != "0x7551" ||
+        read_text(ninfer::r9700_qualification::configured_pci_path() /
+                  "power_dpm_force_performance_level") != "auto")
         fail("physical R9700 auto power required");
 }
 
@@ -256,7 +258,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipDeviceGetPCIBusId(pci, sizeof(pci), 0));
         if (std::string_view(props.name) != "AMD Radeon AI PRO R9700" ||
             std::string_view(props.gcnArchName) != "gfx1201" || props.warpSize != 32 ||
-            (std::string_view(pci) != "0000:13:00.0" && std::string_view(pci) != "13:00.0"))
+            (std::string_view(pci) != ninfer::r9700_qualification::configured_pci_bus_id()))
             fail("wrong GPU");
         hipStream_t stream{};
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -461,7 +463,8 @@ int main(int argc, char** argv) {
             << ",\"control_beta_max_absolute_error\":" << max_beta
             << ",\"malformed_cases\":" << malformed
             << ",\"codec_exact\":true,\"incumbent_exact\":true,\"graph_poison_stale_finite\":true,"
-            << "\"guards_and_immutability\":true,\"pci\":\"0000:13:00.0\",\"power\":\"auto\","
+            << "\"guards_and_immutability\":true,\"pci\":\""
+            << ninfer::r9700_qualification::configured_pci_bus_id() << "\",\"power\":\"auto\","
             << "\"copies\":3,\"scrub_bytes\":83886080,\"calls_per_token\":48,\"samples\":[";
         for (int trial = 0; trial < Trials; ++trial) {
             const int i              = trial % Copies;

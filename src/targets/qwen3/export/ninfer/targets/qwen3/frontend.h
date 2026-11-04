@@ -2,8 +2,8 @@
 
 #include "ninfer/types.h"
 #include "runtime/contract/types.h"
+#include <ninfer/targets/qwen3/generation_recovery.h>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -48,39 +48,14 @@ private:
     friend class EncodedHistoryPrepare;
 };
 
-class PublishedOutput {
-public:
-    using iterator       = std::array<OutputDelta, 2>::iterator;
-    using const_iterator = std::array<OutputDelta, 2>::const_iterator;
+// A committed round can contain multiple tool lifecycle events as well as channel text.
+using PublishedOutput = std::vector<OutputDelta>;
 
-    PublishedOutput()                                  = default;
-    PublishedOutput(const PublishedOutput&)            = default;
-    PublishedOutput& operator=(const PublishedOutput&) = default;
-    PublishedOutput(PublishedOutput&& other) noexcept;
-    PublishedOutput& operator=(PublishedOutput&& other) noexcept;
-
-    [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
-
-    [[nodiscard]] std::size_t size() const noexcept { return size_; }
-
-    [[nodiscard]] iterator begin() noexcept { return values_.begin(); }
-
-    [[nodiscard]] const_iterator begin() const noexcept { return values_.begin(); }
-
-    [[nodiscard]] iterator end() noexcept { return values_.begin() + size_; }
-
-    [[nodiscard]] const_iterator end() const noexcept { return values_.begin() + size_; }
-
-    [[nodiscard]] OutputDelta& back() noexcept { return values_[size_ - 1]; }
-
-    [[nodiscard]] const OutputDelta& back() const noexcept { return values_[size_ - 1]; }
-
-    void clear() noexcept;
-    void push_back(OutputDelta value);
-
-private:
-    std::array<OutputDelta, 2> values_{};
-    std::size_t size_ = 0;
+struct ReasoningReplayPublication {
+    PublishedOutput output;
+    std::uint32_t discarded_content_tokens = 0;
+    std::uint32_t framing_repairs          = 0;
+    bool retry_required                    = false;
 };
 
 class OutputSession {
@@ -99,15 +74,29 @@ public:
     [[nodiscard]] runtime::OutputDecision preview_terminal(FinishReason reason);
     // The channel each token accepted by the pending preview publishes its text to, in token
     // order; nullopt for a token that publishes to neither channel (a reasoning marker, tool-call
-    // markup when tool output is enabled, a stop token, or whitespace stripped after reasoning).
+    // markup when tool output is enabled, a stop token whose text is not published, a special
+    // token decoded without its text, or whitespace stripped after reasoning).
     // The attribution is per token: text a token contributed may still be held back or later
     // trimmed by a stop string. Valid from preview() until commit_preview() or discard_preview().
     [[nodiscard]] std::span<const std::optional<OutputChannel>>
     preview_token_channels() const noexcept;
     [[nodiscard]] PublishedOutput commit_preview() noexcept;
+    // Once per committed round, after attaching logprobs. Holds only an exact initial
+    // answer replay; caller stops/cancellation flush it. Generated tokens stay committed.
+    [[nodiscard]] ReasoningReplayPublication
+    filter_reasoning_replay(PublishedOutput output, FinishReason reason, bool caller_terminated);
     void discard_preview() noexcept;
     [[nodiscard]] std::uint32_t reasoning_tokens() const noexcept;
     [[nodiscard]] bool in_reasoning() const noexcept;
+    [[nodiscard]] ReasoningLimitStats reasoning_limit_stats() const noexcept;
+    [[nodiscard]] bool reasoning_limit_retry_required() const noexcept;
+    // The next committed target token is a policy control, not model confidence.
+    [[nodiscard]] std::optional<TokenId> reasoning_limit_forced_close_token() const noexcept;
+    // Committed non-whitespace prose, excluding terminal framing and selected tools.
+    [[nodiscard]] bool has_answer_content() const noexcept;
+    // Valid during preview. False for raw/schema-constrained output or once
+    // native tool publication has selected a tool, including literal markup in arguments.
+    [[nodiscard]] bool preview_free_text_content() const noexcept;
     [[nodiscard]] bool model_stop_tokens_allowed() const noexcept;
     // Chat sessions without a grammar exclude the dedicated close token after reasoning.
     // Grammar sessions enforce framing in their matcher and retain literal argument values.
@@ -115,6 +104,10 @@ public:
     [[nodiscard]] std::optional<TokenId> suppressed_reasoning_end_token() const noexcept;
     [[nodiscard]] bool reasoning_cycle_exclusion_allowed(TokenId token) const;
     [[nodiscard]] bool has_token_grammar() const noexcept;
+    // Grammar constraints or the generated-prefix framing repair require per-hypothesis masks.
+    [[nodiscard]] bool has_token_masks() const noexcept;
+    [[nodiscard]] ConstraintStats constraint_stats() const noexcept;
+    void record_token_mask_upload(std::size_t bytes) const noexcept;
     [[nodiscard]] std::span<const ToolCall> tool_calls() const noexcept;
     [[nodiscard]] std::shared_ptr<const GenerationRecoveryContext>
     generation_recovery_context() const noexcept;
@@ -141,19 +134,25 @@ public:
     ~Frontend();
 
     [[nodiscard]] PreparedPrompt prepare(PromptInput input) const;
-    // Resident prompt prefix plus the empty-think close, the insert fragment, and a
-    // copy of the thinking prologue. Empty when that suffix does not round-trip.
-    [[nodiscard]] std::optional<PreparedPrompt>
-    splice_recovery_prompt(std::vector<TokenId> prefix, const PromptInput& source,
-                           std::span<const ChatMessage> insert,
-                           std::shared_ptr<const GenerationRecoveryContext> recovery) const;
+    // Resident prompt prefix plus its matching turn close, the insert fragment, and
+    // the selected native generation prologue. Empty if the suffix cannot round-trip.
+    [[nodiscard]] std::optional<PreparedPrompt> splice_recovery_prompt(
+        std::vector<TokenId> prefix, const PromptInput& source, std::span<const ChatMessage> insert,
+        std::shared_ptr<const GenerationRecoveryContext> recovery, bool enable_thinking) const;
+    // Absolute original prompt plus native suffix growth only. Generated IDs
+    // consume the existing output allowance and must not be charged twice.
+    [[nodiscard]] std::uint32_t recovery_prompt_token_bound(
+        const PreparedPrompt& prompt, const GenerationRecoveryContext& context,
+        std::uint32_t maximum_attempts = GenerationRecoveryContext::maximum_attempts) const;
     [[nodiscard]] std::uint32_t count_tokens(PromptInput input) const;
     [[nodiscard]] PreparedPrompt prepare_tokens(std::vector<TokenId> token_ids,
                                                 bool allow_prefix_identity = true) const;
     [[nodiscard]] PromptCapabilities prompt_capabilities() const noexcept;
-    [[nodiscard]] OutputSession make_output_session(const PreparedPrompt& prompt,
-                                                    const StopPolicy& caller_stop,
-                                                    const OutputOptions& output = {}) const;
+    [[nodiscard]] OutputSession make_output_session(
+        const PreparedPrompt& prompt, const StopPolicy& caller_stop,
+        const OutputOptions& output = {}, bool generation_recovery = false,
+        const OutputSession* recovery_source = nullptr,
+        runtime::ReasoningLimitAction action = runtime::ReasoningLimitAction::Close) const;
     [[nodiscard]] const StopPolicy& default_stop_policy() const noexcept;
     // The exact bytes of one vocabulary token, special tokens included; valid while a copy of
     // this Frontend lives. Throws std::out_of_range for an id outside the vocabulary.

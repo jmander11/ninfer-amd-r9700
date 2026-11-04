@@ -21,16 +21,20 @@ namespace ninfer::serve {
 // OpenAI and Anthropic schema layers.
 
 // Parse the OpenAI structured format envelope into one owning output constraint.
-std::optional<ninfer::OutputConstraint>
-parse_output_format(const nlohmann::json& format, bool nested_schema, std::string_view param);
+std::optional<ninfer::OutputConstraint> parse_output_format(const nlohmann::ordered_json& format,
+                                                            bool nested_schema,
+                                                            std::string_view param);
 
 // Parse a decoded JSON request; malformed or unsupported fields throw ApiException.
-GenerationRequest parse_chat_completion_request(const nlohmann::json& body,
+GenerationRequest parse_chat_completion_request(const nlohmann::ordered_json& body,
                                                 const RequestLimits& limits);
-void apply_ninfer_object(const nlohmann::json& ninfer, GenerationRequest& out);
+[[nodiscard]] std::optional<std::uint32_t>
+parse_thinking_token_budget(const nlohmann::ordered_json& value, std::string_view param);
+[[nodiscard]] nlohmann::ordered_json reasoning_limit_json(const ninfer::ReasoningLimitStats& stats);
+void apply_ninfer_object(const nlohmann::ordered_json& ninfer, GenerationRequest& out);
 
-std::optional<bool> parse_openai_preserve_thinking(const nlohmann::json& body);
-std::optional<bool> parse_openai_enable_thinking(const nlohmann::json& body);
+std::optional<bool> parse_openai_preserve_thinking(const nlohmann::ordered_json& body);
+std::optional<bool> parse_openai_enable_thinking(const nlohmann::ordered_json& body);
 
 [[nodiscard]] CompletionTimings
 make_completion_timings(int prompt_tokens, int completion_tokens, double prefill_seconds,
@@ -43,7 +47,8 @@ make_completion_timings(int prompt_tokens, int completion_tokens, double prefill
 // Responses (`output_text.logprobs`): one {token, logprob, bytes, top_logprobs} object per entry.
 // `token` is the entry's bytes as UTF-8 with each ill-formed sequence replaced by U+FFFD; `bytes`
 // is the exact byte list.
-[[nodiscard]] nlohmann::json token_logprobs_json(std::span<const TokenLogprobEntry> entries);
+[[nodiscard]] nlohmann::ordered_json
+token_logprobs_json(std::span<const TokenLogprobEntry> entries);
 
 // Non-streaming chat completion response body (JSON string). When `reasoning` is
 // non-empty it is attached as `message.reasoning_content` (the DeepSeek/vLLM-style
@@ -64,7 +69,8 @@ std::string make_chat_completion_tool_response(
     const std::string& content, const std::string& reasoning,
     const std::vector<ToolCall>& tool_calls, const CompletionUsage& usage,
     const CompletionTimings* timings               = nullptr,
-    const std::vector<TokenLogprobEntry>* logprobs = nullptr);
+    const std::vector<TokenLogprobEntry>* logprobs = nullptr,
+    const char* finish_reason                      = "tool_calls");
 
 // Streaming SSE event strings ("data: {...}\n\n"). The first chunk carries the
 // assistant role; reasoning chunks carry `reasoning_content` deltas (the <think>
@@ -87,9 +93,9 @@ std::string make_chat_chunk_content_logprobs(const std::string& id, const std::s
                                              std::int64_t created, const std::string& delta_text,
                                              std::span<const TokenLogprobEntry> logprobs,
                                              bool include_usage);
-std::string make_chat_chunk_tool_calls(const std::string& id, const std::string& model,
-                                       std::int64_t created,
-                                       const std::vector<ToolCall>& tool_calls, bool include_usage);
+std::string make_chat_chunk_tool_delta(const std::string& id, const std::string& model,
+                                       std::int64_t created, const ninfer::ToolCallDelta& delta,
+                                       bool include_usage);
 std::string make_chat_chunk_final(const std::string& id, const std::string& model,
                                   std::int64_t created, const char* finish_reason,
                                   bool include_usage, const CompletionTimings* timings = nullptr,

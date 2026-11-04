@@ -52,6 +52,7 @@ __launch_bounds__(kSamplerBlock) __global__
         for (int v = tid; v < token_domain; v += blockDim.x) {
             if (sampling_token_suppressed(v, cfg)) { continue; }
             const float x = static_cast<float>(logits[base + v]);
+            sampling_note_nonfinite_logit(x, cfg);
             if (sampling_better(x, v, bv, bi)) {
                 bv = x;
                 bi = v;
@@ -68,7 +69,11 @@ __launch_bounds__(kSamplerBlock) __global__
             }
             __syncthreads();
         }
-        if (tid == 0) { out[row] = red_idx[0]; }
+        if (tid == 0) {
+            out[row] = cfg.nonfinite_logits != nullptr
+                           ? sampling_clamp_token(red_idx[0], 0, token_domain)
+                           : red_idx[0];
+        }
         return;
     }
 
@@ -135,8 +140,9 @@ __launch_bounds__(kSamplerBlock) __global__
         const int v = tile_start + item * blockDim.x + threadIdx.x;
         if (v < token_domain && !sampling_token_suppressed(v, cfg)) {
             const float raw = static_cast<float>(logits[base + v]);
-            const float x   = greedy ? raw : sampling_adjusted_logit(raw, v, cfg);
-            keys[item]      = sampling_sort_key(x, v);
+            if (greedy) { sampling_note_nonfinite_logit(raw, cfg); }
+            const float x = greedy ? raw : sampling_adjusted_logit(raw, v, cfg);
+            keys[item]    = sampling_sort_key(x, v);
         } else {
             keys[item] = 0ull;
         }
@@ -195,10 +201,9 @@ __launch_bounds__(kSamplerGroupBlock) __global__ void sampling_group_finalize_sa
     if (group_partials > kSamplerPartialsPerGroup) { group_partials = kSamplerPartialsPerGroup; }
 
     if (sampling_p_less_active(cfg)) {
-        const float inv_temp = 1.0f / cfg.temperature;
-        const SamplingPLessMoments group_moments =
-            sampling_p_less_merge_moments(workspace, col, group_begin, group_partials, inv_temp,
-                                          p_less_red_val, p_less_red_aux, greedy_warp_keys);
+        const SamplingPLessMoments group_moments = sampling_p_less_merge_moments(
+            workspace, col, group_begin, group_partials, cfg.temperature, p_less_red_val,
+            p_less_red_aux, greedy_warp_keys);
         if (tid == 0) {
             sampling_p_less_store_moments(workspace, col, partial_blocks + group, group_moments);
             const int done = sampling_completion_add(&workspace.group_done[col], group_count);
@@ -207,9 +212,9 @@ __launch_bounds__(kSamplerGroupBlock) __global__ void sampling_group_finalize_sa
         __syncthreads();
         if (!is_last) { return; }
 
-        const SamplingPLessMoments global_moments =
-            sampling_p_less_merge_moments(workspace, col, partial_blocks, group_count, inv_temp,
-                                          p_less_red_val, p_less_red_aux, greedy_warp_keys);
+        const SamplingPLessMoments global_moments = sampling_p_less_merge_moments(
+            workspace, col, partial_blocks, group_count, cfg.temperature, p_less_red_val,
+            p_less_red_aux, greedy_warp_keys);
         if (tid == 0) {
             sampling_p_less_store_global(workspace, col, global_moments);
             workspace.group_done[col] = 0;
@@ -347,7 +352,7 @@ __launch_bounds__(kSamplerBlock) __global__ void sampling_p_less_mass_sample_ker
     __shared__ SamplingTileChoiceShared choice;
 
     const SamplingPLessMoments moments = sampling_p_less_load_global(workspace, col);
-    const SamplingPLessGate gate       = sampling_p_less_gate(moments, 1.0f / cfg.temperature);
+    const SamplingPLessGate gate       = sampling_p_less_gate(moments, cfg.temperature);
     const std::int64_t base            = static_cast<std::int64_t>(col) * physical_rows;
     for (int partial = static_cast<int>(blockIdx.x); partial < partial_blocks;
          partial += static_cast<int>(gridDim.x)) {

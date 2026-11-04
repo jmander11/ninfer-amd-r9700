@@ -1,11 +1,8 @@
-"""Exact provisional R9700 integer-candidate inventory for Qwen3.8-27B.
+"""Qwen3.8-27B R9700 integer evaluation-artifact inventory.
 
-This is a direct-BF16-source artifact inventory, not a product registration.
-Its object order and logical shapes deliberately match Qwen3.8's complete
-1118-tensor inventory. Every matrix that was quantized in the established
-storage inventory is encoded as W8G32_F16S; direct BF16, FP32, and I32 state
-objects remain direct. That one explicit candidate is useful for converter
-and kernel bring-up, but is not a selected production weight recipe.
+Matches the object order and logical shapes of Qwen3.8's 1,118 tensors. Quantized matrices use
+W8G32_F16S; BF16, FP32 and I32 state objects remain direct. This conversion
+inventory is separate from the selected production recipe and registration.
 """
 
 from __future__ import annotations

@@ -131,12 +131,14 @@ DeviceContext::DeviceContext(int device_id) : device(device_id) {
         throw std::runtime_error("NInfer requires wave32 gfx1201");
     }
 
-    hipStream_t compute = nullptr;
-    hipStream_t load    = nullptr;
-    hipStream_t copy    = nullptr;
-    hipEvent_t order    = nullptr;
-    hipEvent_t wait     = nullptr;
-    error               = hipStreamCreateWithFlags(&compute, hipStreamNonBlocking);
+    hipStream_t compute      = nullptr;
+    hipStream_t load         = nullptr;
+    hipStream_t copy         = nullptr;
+    hipEvent_t order         = nullptr;
+    hipEvent_t compute_order = nullptr;
+    hipEvent_t load_order    = nullptr;
+    hipEvent_t wait          = nullptr;
+    error                    = hipStreamCreateWithFlags(&compute, hipStreamNonBlocking);
     if (error != hipSuccess) {
         throw std::runtime_error(hip_error_message("create compute stream", error));
     }
@@ -158,27 +160,51 @@ DeviceContext::DeviceContext(int device_id) : device(device_id) {
         destroy_stream(compute);
         throw std::runtime_error(hip_error_message("create copy-order event", error));
     }
+    error = hipEventCreateWithFlags(&compute_order, hipEventDisableTiming);
+    if (error != hipSuccess) {
+        destroy_event(order);
+        destroy_stream(copy);
+        destroy_stream(load);
+        destroy_stream(compute);
+        throw std::runtime_error(hip_error_message("create compute-order event", error));
+    }
+    error = hipEventCreateWithFlags(&load_order, hipEventDisableTiming);
+    if (error != hipSuccess) {
+        destroy_event(compute_order);
+        destroy_event(order);
+        destroy_stream(copy);
+        destroy_stream(load);
+        destroy_stream(compute);
+        throw std::runtime_error(hip_error_message("create load-order event", error));
+    }
     error = hipEventCreateWithFlags(&wait, hipEventDisableTiming | hipEventBlockingSync);
     if (error != hipSuccess) {
+        destroy_event(load_order);
+        destroy_event(compute_order);
         destroy_event(order);
         destroy_stream(copy);
         destroy_stream(load);
         destroy_stream(compute);
         throw std::runtime_error(hip_error_message("create host-wait event", error));
     }
-    stream           = compute;
-    load_stream      = load;
-    copy_stream      = copy;
-    copy_order_event = order;
-    host_wait        = wait;
+    stream                   = compute;
+    load_stream              = load;
+    copy_stream              = copy;
+    copy_order_event         = order;
+    compute_copy_order_event = compute_order;
+    compute_load_order_event = load_order;
+    host_wait                = wait;
 }
 
 DeviceContext::~DeviceContext() {
     if (stream != nullptr || load_stream != nullptr || copy_stream != nullptr ||
-        copy_order_event != nullptr || host_wait != nullptr) {
+        copy_order_event != nullptr || compute_copy_order_event != nullptr ||
+        compute_load_order_event != nullptr || host_wait != nullptr) {
         log_hip_error("hipSetDevice", hipSetDevice(device));
     }
     destroy_event(host_wait);
+    destroy_event(compute_copy_order_event);
+    destroy_event(compute_load_order_event);
     destroy_event(copy_order_event);
     destroy_stream(copy_stream);
     destroy_stream(load_stream);
@@ -188,37 +214,48 @@ DeviceContext::~DeviceContext() {
 DeviceContext::DeviceContext(DeviceContext&& other) noexcept
     : device(other.device), stream(other.stream), load_stream(other.load_stream),
       copy_stream(other.copy_stream), copy_order_event(other.copy_order_event),
-      host_wait(other.host_wait), props(other.props) {
-    other.stream           = nullptr;
-    other.load_stream      = nullptr;
-    other.copy_stream      = nullptr;
-    other.copy_order_event = nullptr;
-    other.host_wait        = nullptr;
+      compute_copy_order_event(other.compute_copy_order_event),
+      compute_load_order_event(other.compute_load_order_event), host_wait(other.host_wait),
+      props(other.props) {
+    other.stream                   = nullptr;
+    other.load_stream              = nullptr;
+    other.copy_stream              = nullptr;
+    other.copy_order_event         = nullptr;
+    other.compute_copy_order_event = nullptr;
+    other.compute_load_order_event = nullptr;
+    other.host_wait                = nullptr;
 }
 
 DeviceContext& DeviceContext::operator=(DeviceContext&& other) noexcept {
     if (this == &other) { return *this; }
     if (stream != nullptr || load_stream != nullptr || copy_stream != nullptr ||
-        copy_order_event != nullptr || host_wait != nullptr) {
+        copy_order_event != nullptr || compute_copy_order_event != nullptr ||
+        compute_load_order_event != nullptr || host_wait != nullptr) {
         log_hip_error("hipSetDevice", hipSetDevice(device));
     }
     destroy_event(host_wait);
+    destroy_event(compute_copy_order_event);
+    destroy_event(compute_load_order_event);
     destroy_event(copy_order_event);
     destroy_stream(copy_stream);
     destroy_stream(load_stream);
     destroy_stream(stream);
-    device                 = other.device;
-    props                  = other.props;
-    stream                 = other.stream;
-    load_stream            = other.load_stream;
-    copy_stream            = other.copy_stream;
-    copy_order_event       = other.copy_order_event;
-    host_wait              = other.host_wait;
-    other.stream           = nullptr;
-    other.load_stream      = nullptr;
-    other.copy_stream      = nullptr;
-    other.copy_order_event = nullptr;
-    other.host_wait        = nullptr;
+    device                         = other.device;
+    props                          = other.props;
+    stream                         = other.stream;
+    load_stream                    = other.load_stream;
+    copy_stream                    = other.copy_stream;
+    copy_order_event               = other.copy_order_event;
+    compute_copy_order_event       = other.compute_copy_order_event;
+    compute_load_order_event       = other.compute_load_order_event;
+    host_wait                      = other.host_wait;
+    other.stream                   = nullptr;
+    other.load_stream              = nullptr;
+    other.copy_stream              = nullptr;
+    other.copy_order_event         = nullptr;
+    other.compute_copy_order_event = nullptr;
+    other.compute_load_order_event = nullptr;
+    other.host_wait                = nullptr;
     return *this;
 }
 
@@ -285,6 +322,13 @@ void DeviceContext::synchronize_all() const {
 void DeviceContext::order_copy_after_compute() const {
     HIP_CHECK(hipEventRecord(copy_order_event, stream));
     HIP_CHECK(hipStreamWaitEvent(copy_stream, copy_order_event, 0));
+}
+
+void DeviceContext::order_compute_after_transfers() const {
+    HIP_CHECK(hipEventRecord(compute_load_order_event, load_stream));
+    HIP_CHECK(hipStreamWaitEvent(stream, compute_load_order_event, 0));
+    HIP_CHECK(hipEventRecord(compute_copy_order_event, copy_stream));
+    HIP_CHECK(hipStreamWaitEvent(stream, compute_copy_order_event, 0));
 }
 
 DeviceEventTimer::DeviceEventTimer(const DeviceContext& context) : stream_(context.stream) {

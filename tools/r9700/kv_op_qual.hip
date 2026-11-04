@@ -770,7 +770,8 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows, 
                 expected *= static_cast<double>(kAttentionScale);
                 const float actual =
                     actual_qk[static_cast<std::size_t>(query_head) * context + logical];
-                if (std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
+                if (!std::isfinite(actual) || !std::isfinite(expected) ||
+                    std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
                     std::ostringstream os;
                     os << "A3 vector QK mismatch at head=" << query_head << " token=" << logical
                        << ": got " << actual << " expected " << expected;
@@ -874,6 +875,137 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows, 
         }
     }
 
+    // Regression: a masked position (probability exactly zero) must contribute nothing even when
+    // its stored value-scale bytes are non-finite. This is exactly the not-yet-written tail of a KV
+    // page at a decode frontier. Exercise NaN and both infinities in the staged and tail loops
+    // (context 66), as well as complete staged pages (context 512).
+    if (!timing_only && context >= 2U) {
+        const std::size_t masked_from         = context / 2U;
+        std::vector<float> masked_probability = probability_corpus;
+        for (unsigned head = 0; head < kQueryHeads; ++head) {
+            for (std::size_t logical = masked_from; logical < context; ++logical) {
+                masked_probability[static_cast<std::size_t>(head) * context + logical] = 0.0F;
+            }
+        }
+        constexpr std::array<std::uint16_t, 3> nonfinite_scales{0x7e00U, 0x7c00U, 0xfc00U};
+        std::vector<std::uint16_t> masked_scales = actual_scales;
+        for (std::size_t logical = masked_from; logical < context; ++logical) {
+            const std::size_t physical = host_physical_token(logical, pages, physical_tokens);
+            for (unsigned head = 0; head < kKvHeads; ++head) {
+                for (unsigned group = 0; group < Layout<Group, ScaleTokenFastest>::kGroups;
+                     ++group) {
+                    masked_scales[host_scale_offset<Group, ScaleTokenFastest>(physical, head, group,
+                                                                              physical_tokens)] =
+                        nonfinite_scales[(logical + head + group) % nonfinite_scales.size()];
+                }
+            }
+        }
+        DeviceBuffer<std::uint16_t> d_masked_scales(scale_size);
+        DeviceBuffer<float> d_masked_probability(static_cast<std::size_t>(kQueryHeads) * context);
+        HIP_CHECK(hipMemcpy(d_masked_scales.get(), masked_scales.data(),
+                            scale_size * sizeof(std::uint16_t), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_masked_probability.get(), masked_probability.data(),
+                            masked_probability.size() * sizeof(float), hipMemcpyHostToDevice));
+        auto masked_args             = pv_args;
+        masked_args.probabilities    = d_masked_probability.get();
+        masked_args.value_scale_bits = d_masked_scales.get();
+        HIP_CHECK(ninfer::ops::r9700::kv::int4_kv_pv_vector(masked_args, nullptr));
+        std::vector<float> masked_pv(base_query.size());
+        HIP_CHECK(hipMemcpy(masked_pv.data(), d_pv_output.get(), masked_pv.size() * sizeof(float),
+                            hipMemcpyDeviceToHost));
+        for (unsigned query_head = 0; query_head < kQueryHeads; ++query_head) {
+            const unsigned kv_head = query_head / kQueriesPerKv;
+            for (unsigned feature = 0; feature < kDimension; ++feature) {
+                double expected = 0.0;
+                for (std::size_t logical = 0; logical < masked_from; ++logical) {
+                    const std::size_t physical =
+                        host_physical_token(logical, pages, physical_tokens);
+                    const std::uint8_t packed =
+                        actual_values[host_value_offset<Group, VTokenFastest>(
+                            physical, kv_head, feature / Group, (feature % Group) / 2U,
+                            physical_tokens)];
+                    int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
+                    code     = code >= 8 ? code - 16 : code;
+                    const std::uint16_t bits =
+                        actual_scales[host_scale_offset<Group, ScaleTokenFastest>(
+                            physical, kv_head, feature / Group, physical_tokens)];
+                    _Float16 scale{};
+                    std::memcpy(&scale, &bits, sizeof(bits));
+                    expected +=
+                        static_cast<double>(
+                            masked_probability[static_cast<std::size_t>(query_head) * context +
+                                               logical]) *
+                        static_cast<double>(code) * static_cast<float>(scale);
+                }
+                const float actual = masked_pv[query_head * kDimension + feature];
+                if (!std::isfinite(actual) ||
+                    std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
+                    std::ostringstream os;
+                    os << "A3 masked-position PV regression at head=" << query_head
+                       << " feature=" << feature << ": got " << actual << " expected " << expected;
+                    fail(os.str());
+                }
+            }
+        }
+
+        // Exercise real causal masking as well as supplied zero probabilities: QK and softmax
+        // must keep the poisoned future scales out of the complete attention result.
+        const std::int32_t position = static_cast<std::int32_t>(masked_from - 1U);
+        DeviceBuffer<std::int32_t> d_masked_position(1U);
+        HIP_CHECK(
+            hipMemcpy(d_masked_position.get(), &position, sizeof(position), hipMemcpyHostToDevice));
+        const ninfer::ops::r9700::kv::Fp8Int4KvAttentionArgs masked_attention_args{
+            .query              = d_query.get(),
+            .key_codes          = d_keys.get(),
+            .value_codes        = d_values.get(),
+            .value_scale_bits   = d_masked_scales.get(),
+            .page_table         = d_pages.get(),
+            .page_table_pages   = static_cast<std::uint32_t>(pages.size()),
+            .context            = context,
+            .physical_tokens    = physical_tokens,
+            .query_heads        = kQueryHeads,
+            .kv_heads           = kKvHeads,
+            .q_to_kv            = kQueriesPerKv,
+            .value_group        = Group,
+            .query_rows         = 1U,
+            .row_positions      = d_masked_position.get(),
+            .attention_scale    = kAttentionScale,
+            .key_layout         = qk_layout,
+            .value_layout       = pv_args.value_layout,
+            .value_scale_layout = pv_args.value_scale_layout,
+            .score_workspace    = d_qk_wmma_scores.get(),
+            .output             = d_wmma_attention_output.get()};
+        const std::vector<float> first_query(query.begin(), query.begin() + base_query.size());
+        const auto expected_attention =
+            attention_oracle<Group, KTokenFastest, VTokenFastest, ScaleTokenFastest>(
+                first_query, actual_keys, actual_values, masked_scales, pages, masked_from,
+                physical_tokens);
+        for (bool wmma : {false, true}) {
+            HIP_CHECK(wmma ? ninfer::ops::r9700::kv::fp8_int4_kv_attention_wmma(
+                                 masked_attention_args, nullptr)
+                           : ninfer::ops::r9700::kv::fp8_int4_kv_attention_fused(
+                                 masked_attention_args, nullptr));
+            std::vector<float> actual_attention(base_query.size());
+            HIP_CHECK(hipMemcpy(actual_attention.data(), d_wmma_attention_output.get(),
+                                actual_attention.size() * sizeof(float), hipMemcpyDeviceToHost));
+            const double tolerance = wmma ? 5.0e-3 : 2.0e-4;
+            for (std::size_t i = 0; i < actual_attention.size(); ++i) {
+                const double absolute =
+                    std::abs(static_cast<double>(actual_attention[i]) - expected_attention[i]);
+                const double relative =
+                    absolute / std::max(std::abs(expected_attention[i]), 1.0e-6);
+                if (!std::isfinite(actual_attention[i]) ||
+                    (absolute > tolerance && relative > tolerance)) {
+                    std::ostringstream os;
+                    os << "A3 masked-position " << (wmma ? "WMMA" : "fused")
+                       << " attention regression at " << i << ": got " << actual_attention[i]
+                       << " expected " << expected_attention[i];
+                    fail(os.str());
+                }
+            }
+        }
+    }
+
     const auto launch_qk_wmma = [&] {
         const ninfer::ops::r9700::kv::Fp8KvQkArgs args{.query      = d_query.get(),
                                                        .key_codes  = d_keys.get(),
@@ -911,7 +1043,8 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows, 
                 }
                 expected *= static_cast<double>(kAttentionScale);
                 const std::size_t index = static_cast<std::size_t>(query_head) * context + logical;
-                if (std::abs(static_cast<double>(actual_qk_wmma[index]) - expected) > 2.0e-4) {
+                if (!std::isfinite(actual_qk_wmma[index]) || !std::isfinite(expected) ||
+                    std::abs(static_cast<double>(actual_qk_wmma[index]) - expected) > 2.0e-4) {
                     std::ostringstream os;
                     os << "A3 raw WMMA QK mismatch at score " << index << ": got "
                        << actual_qk_wmma[index] << " expected " << expected;
@@ -1146,7 +1279,8 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows, 
             const double relative = absolute / std::max(std::abs(expected_output[i]), 1.0e-6);
             max_absolute          = std::max(max_absolute, absolute);
             max_relative          = std::max(max_relative, relative);
-            if (absolute > 2.0e-4 && relative > 2.0e-4) {
+            if (!std::isfinite(actual_output[i]) || !std::isfinite(expected_output[i]) ||
+                (absolute > 2.0e-4 && relative > 2.0e-4)) {
                 std::ostringstream os;
                 os << "A3 output mismatch at " << i << ": got " << actual_output[i] << " expected "
                    << expected_output[i] << " abs=" << absolute << " rel=" << relative;
@@ -1166,7 +1300,8 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows, 
             // FP8 Q is a private native-WMMA profile checked directly against the represented
             // BF16-input oracle. This admission threshold is Op-local; model PPL/token gates
             // remain mandatory before it can replace the BF16-Q score-streaming baseline.
-            if (absolute > 5.0e-3 && relative > 5.0e-3) {
+            if (!std::isfinite(actual_wmma_output[i]) || !std::isfinite(expected_output[i]) ||
+                (absolute > 5.0e-3 && relative > 5.0e-3)) {
                 std::ostringstream os;
                 os << "A3 WMMA attention mismatch at " << i << ": got " << actual_wmma_output[i]
                    << " expected " << expected_output[i] << " abs=" << absolute

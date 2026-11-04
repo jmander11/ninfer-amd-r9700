@@ -41,18 +41,22 @@ std::uint64_t align_up(std::uint64_t value, std::uint64_t alignment, const char*
 
 class Slot {
 public:
-    explicit Slot(std::size_t bytes)
-        : buffer(bytes + Reader::direct_io_alignment - 1),
+    explicit Slot(std::size_t bytes, bool stage_device)
+        : buffer(stage_device
+                     ? std::make_unique<PinnedHostBuffer>(bytes + Reader::direct_io_alignment - 1)
+                     : nullptr),
           read_buffer_(static_cast<std::byte*>(std::aligned_alloc(
                            Reader::direct_io_alignment, (bytes + Reader::direct_io_alignment - 1) /
                                                             Reader::direct_io_alignment *
                                                             Reader::direct_io_alignment)),
                        std::free) {
         if (read_buffer_ == nullptr) { throw std::bad_alloc(); }
-        const auto address = reinterpret_cast<std::uintptr_t>(buffer.data());
-        const auto aligned = (address + Reader::direct_io_alignment - 1) /
-                             Reader::direct_io_alignment * Reader::direct_io_alignment;
-        data_              = static_cast<std::byte*>(buffer.data()) + (aligned - address);
+        if (buffer != nullptr) {
+            const auto address = reinterpret_cast<std::uintptr_t>(buffer->data());
+            const auto aligned = (address + Reader::direct_io_alignment - 1) /
+                                 Reader::direct_io_alignment * Reader::direct_io_alignment;
+            data_              = static_cast<std::byte*>(buffer->data()) + (aligned - address);
+        }
         HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
     }
 
@@ -74,7 +78,7 @@ public:
 
     void stage(std::size_t bytes) { std::memcpy(data_, read_buffer_.get(), bytes); }
 
-    PinnedHostBuffer buffer;
+    std::unique_ptr<PinnedHostBuffer> buffer;
     hipEvent_t event = nullptr;
     bool pending     = false;
 
@@ -172,7 +176,7 @@ struct CopyRange {
     std::uint64_t source_begin = 0;
     std::uint64_t source_end   = 0;
     std::byte* destination     = nullptr;
-    // Mapped host placements are copied from the staging slot by the host; the rest go H2D.
+    // Host placements copy from ordinary RAM; device placements use pinned H2D staging.
     bool host = false;
 };
 
@@ -185,6 +189,7 @@ struct ReadChunk {
     std::uint64_t source   = 0;
     std::size_t request    = 0;
     std::uint64_t required = 0;
+    bool stage_device      = false;
 };
 
 } // namespace
@@ -350,13 +355,34 @@ MaterializedArtifact materialize(const Reader& reader, const MaterializationPlan
             largest_request = std::max(largest_request, request);
         }
     }
+    // Classify from logical copy ranges, not aligned read spans: an aligned read may
+    // contain both placements. A ring slot needs pinned backing if any of its later
+    // chunks copies to the device, even when its first chunk is host-only.
+    std::size_t first_range = 0;
+    for (ReadChunk& chunk : chunks) {
+        const std::uint64_t end = chunk.source + chunk.required;
+        while (first_range < ranges.size() && ranges[first_range].source_end <= chunk.source) {
+            ++first_range;
+        }
+        for (std::size_t i = first_range; i < ranges.size() && ranges[i].source_begin < end; ++i) {
+            if (!ranges[i].host) {
+                chunk.stage_device = true;
+                break;
+            }
+        }
+    }
     const std::size_t slot_count = std::min(kMaximumSlotCount, chunks.size());
     std::vector<std::unique_ptr<Slot>> slots;
     slots.reserve(slot_count);
     for (std::size_t i = 0; i < slot_count; ++i) {
-        slots.push_back(std::make_unique<Slot>(largest_request));
+        bool stage_device = false;
+        for (std::size_t j = i; j < chunks.size(); j += slot_count) {
+            stage_device = stage_device || chunks[j].stage_device;
+        }
+        slots.push_back(std::make_unique<Slot>(largest_request, stage_device));
+        out.stats_.peak_staging_bytes +=
+            static_cast<std::uint64_t>(largest_request) * (stage_device ? 2U : 1U);
     }
-    out.stats_.peak_staging_bytes = 2U * static_cast<std::uint64_t>(largest_request) * slot_count;
 
     DirectReadPool read_pool(slot_count);
     std::vector<std::future<std::size_t>> reads(slot_count);
@@ -379,7 +405,7 @@ MaterializedArtifact materialize(const Reader& reader, const MaterializationPlan
         if (bytes_read < chunk.required) {
             throw ArtifactError("direct artifact read ended before the planned tensor range");
         }
-        slot.stage(bytes_read);
+        if (chunk.stage_device) { slot.stage(bytes_read); }
         out.stats_.file_bytes =
             checked_add(out.stats_.file_bytes, bytes_read, "artifact read bytes overflow u64");
         const std::uint64_t chunk_end =
@@ -397,8 +423,8 @@ MaterializedArtifact materialize(const Reader& reader, const MaterializationPlan
                 const auto amount = static_cast<std::size_t>(copy_end - copy_begin);
                 std::byte* destination =
                     range.destination + static_cast<std::size_t>(copy_begin - range.source_begin);
-                const std::byte* source =
-                    slot.data() + static_cast<std::size_t>(copy_begin - chunk.source);
+                const std::byte* source = (range.host ? slot.read_data() : slot.data()) +
+                                          static_cast<std::size_t>(copy_begin - chunk.source);
                 if (range.host) {
                     std::memcpy(destination, source, amount);
                     host_copied = checked_add(host_copied, amount,

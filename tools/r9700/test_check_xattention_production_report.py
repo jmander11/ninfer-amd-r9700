@@ -10,6 +10,7 @@ from tools.r9700.check_xattention_production_report import (
     validate_report,
     workspace_bytes,
 )
+from tools.r9700.host import power_profile_path
 
 
 def report(group: int = 16) -> dict:
@@ -40,7 +41,7 @@ def report(group: int = 16) -> dict:
         "architecture": "gfx1201",
         "disposition": "qualification-candidate",
         "power_profile": {
-            "path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+            "path": str(power_profile_path()),
             "value": "auto",
             "required": "auto",
         },

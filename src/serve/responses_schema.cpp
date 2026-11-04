@@ -22,7 +22,7 @@
 namespace ninfer::serve {
 namespace {
 
-using Json = nlohmann::json;
+using Json = nlohmann::ordered_json;
 
 [[noreturn]] void bad_request(std::string message, std::string param = {}, std::string code = {}) {
     ApiError error;
@@ -456,6 +456,8 @@ void parse_tools(const Json& body, ResponsesRequest& out) {
             bad_request("only function tools are supported", "tools", "tool_type_not_supported");
         }
         ToolDefinition tool;
+        tool.schema_pointer =
+            "/tools/" + std::to_string(out.generation.tools.size()) + "/parameters";
         tool.name = require_function_name(item, "tools");
         if (!names.insert(tool.name).second) {
             bad_request("duplicate function tool name: " + tool.name, "tools");
@@ -951,6 +953,10 @@ BuiltResponse build_response(const std::string& id, std::int64_t created_at,
              {"output_tokens", outcome.completion_tokens},
              {"output_tokens_details", Json{{"reasoning_tokens", outcome.reasoning_tokens}}},
              {"total_tokens", outcome.prompt_tokens + outcome.completion_tokens}};
+    if (outcome.metrics.reasoning_limit.budget_tokens != 0) {
+        response["usage"]["ninfer"]["reasoning_limit"] =
+            reasoning_limit_json(outcome.metrics.reasoning_limit);
+    }
     built.body = std::move(response);
     return built;
 }
@@ -1158,6 +1164,39 @@ public:
     std::string reasoning_text;
     std::string content_text;
     ItemIds ids;
+
+    struct ToolState {
+        std::string item_id;
+        int output_index;
+        std::string call_id;
+        std::string name;
+        std::string arguments;
+        bool done      = false;
+        bool completed = false;
+    };
+
+    std::vector<ToolState> tools;
+
+    std::vector<std::string> close_tool(ToolState& tool, bool accepted) {
+        if (tool.done) return {};
+        tool.done = true;
+        std::vector<std::string> events;
+        if (accepted)
+            events.push_back(sse(
+                event("response.function_call_arguments.done", {{"item_id", tool.item_id},
+                                                                {"output_index", tool.output_index},
+                                                                {"name", tool.name},
+                                                                {"arguments", tool.arguments}})));
+        const Json item = {{"id", tool.item_id},
+                           {"type", "function_call"},
+                           {"status", accepted ? "completed" : "incomplete"},
+                           {"call_id", tool.call_id},
+                           {"name", tool.name},
+                           {"arguments", tool.arguments}};
+        events.push_back(sse(event("response.output_item.done",
+                                   {{"output_index", tool.output_index}, {"item", item}})));
+        return events;
+    }
 };
 
 ResponsesEventStream::ResponsesEventStream(std::string response_id, std::int64_t created_at,
@@ -1214,11 +1253,54 @@ ResponsesEventStream::content_delta(const std::string& text,
     return events;
 }
 
+std::vector<std::string> ResponsesEventStream::tool_delta(const ninfer::ToolCallDelta& delta) {
+    if (!impl_->started || impl_->finish_built)
+        throw std::logic_error("invalid tool delta event state");
+    std::vector<std::string> events;
+    if (delta.kind == ninfer::ToolCallDeltaKind::Start) {
+        if (delta.index != impl_->tools.size())
+            throw std::logic_error("nonsequential Responses tool stream");
+        auto append = [&](std::vector<std::string> source) {
+            events.insert(events.end(), std::make_move_iterator(source.begin()),
+                          std::make_move_iterator(source.end()));
+        };
+        append(impl_->close_reasoning(impl_->reasoning_text));
+        const auto item_id = new_response_item_id("fc");
+        const int index    = impl_->next_output_index++;
+        impl_->ids.function_calls.push_back(item_id);
+        impl_->tools.push_back({item_id, index, delta.id, delta.name, {}});
+        const Json item = {{"id", item_id},           {"type", "function_call"},
+                           {"status", "in_progress"}, {"call_id", delta.id},
+                           {"name", delta.name},      {"arguments", ""}};
+        events.push_back(sse(
+            impl_->event("response.output_item.added", {{"output_index", index}, {"item", item}})));
+        return events;
+    }
+    auto& tool = impl_->tools.at(delta.index);
+    if (tool.done || tool.call_id != delta.id || tool.name != delta.name)
+        throw std::logic_error("inconsistent Responses tool lifecycle");
+    if (delta.kind == ninfer::ToolCallDeltaKind::Arguments) {
+        if (tool.completed) throw std::logic_error("arguments after syntactic tool completion");
+        tool.arguments += delta.arguments;
+        events.push_back(sse(impl_->event("response.function_call_arguments.delta",
+                                          {{"item_id", tool.item_id},
+                                           {"output_index", tool.output_index},
+                                           {"delta", delta.arguments}})));
+    } else if (delta.kind == ninfer::ToolCallDeltaKind::Completed) {
+        if (tool.completed) throw std::logic_error("duplicate syntactic tool completion");
+        // Envelope completion is provisional: later cancellation drops all tool results.
+        // Publish .done only when finish() confirms this call belongs to the accepted turn.
+        tool.completed = true;
+    } else {
+        events = impl_->close_tool(tool, false);
+    }
+    return events;
+}
+
 ResponsesStreamFinish ResponsesEventStream::finish(const GenerationOutcome& outcome) {
     if (!impl_->started || impl_->finish_built) {
         throw std::logic_error("invalid Responses stream finish state");
     }
-    impl_->finish_built = true;
     ResponsesStreamFinish finished;
     const std::string status = response_status(outcome.finish_reason);
     const char* item_status  = status == "completed" ? "completed" : "incomplete";
@@ -1262,38 +1344,65 @@ ResponsesStreamFinish ResponsesEventStream::finish(const GenerationOutcome& outc
         append(impl_->close_message(outcome.text, outcome.content_logprobs, item_status));
     }
 
-    impl_->ids.function_calls.reserve(outcome.tool_calls.size());
-    for (const ToolCall& call : outcome.tool_calls) {
-        const std::string item_id = new_response_item_id("fc");
-        impl_->ids.function_calls.push_back(item_id);
-        const int output_index = impl_->next_output_index++;
-        const Json added_item  = {{"id", item_id},           {"type", "function_call"},
-                                  {"status", "in_progress"}, {"call_id", call.id},
-                                  {"name", call.name},       {"arguments", ""}};
-        finished.events_before_terminal.push_back(
-            sse(impl_->event("response.output_item.added",
-                             Json{{"output_index", output_index}, {"item", added_item}})));
-        if (!call.arguments_json.empty()) {
-            finished.events_before_terminal.push_back(sse(impl_->event(
-                "response.function_call_arguments.delta", Json{{"item_id", item_id},
-                                                               {"output_index", output_index},
-                                                               {"delta", call.arguments_json}})));
+    for (std::size_t index = 0; index < outcome.tool_calls.size(); ++index) {
+        const auto& call = outcome.tool_calls[index];
+        if (index < impl_->tools.size()) {
+            auto& tool = impl_->tools[index];
+            if (!tool.completed || tool.call_id != call.id || tool.name != call.name ||
+                tool.arguments != call.arguments_json)
+                throw std::logic_error("terminal tool differs from streamed call");
+            append(impl_->close_tool(tool, true));
+            continue;
         }
-        finished.events_before_terminal.push_back(sse(impl_->event(
-            "response.function_call_arguments.done", Json{{"item_id", item_id},
-                                                          {"output_index", output_index},
-                                                          {"name", call.name},
-                                                          {"arguments", call.arguments_json}})));
-        const Json done_item = {{"id", item_id},         {"type", "function_call"},
-                                {"status", "completed"}, {"call_id", call.id},
-                                {"name", call.name},     {"arguments", call.arguments_json}};
-        finished.events_before_terminal.push_back(
-            sse(impl_->event("response.output_item.done",
-                             Json{{"output_index", output_index}, {"item", done_item}})));
+        append(tool_delta({ninfer::ToolCallDeltaKind::Start,
+                           static_cast<std::uint32_t>(index),
+                           call.id,
+                           call.name,
+                           {}}));
+        append(tool_delta({ninfer::ToolCallDeltaKind::Arguments, static_cast<std::uint32_t>(index),
+                           call.id, call.name, call.arguments_json}));
+        append(tool_delta({ninfer::ToolCallDeltaKind::Completed,
+                           static_cast<std::uint32_t>(index),
+                           call.id,
+                           call.name,
+                           {}}));
+        append(impl_->close_tool(impl_->tools[index], true));
+    }
+    for (std::size_t index = outcome.tool_calls.size(); index < impl_->tools.size(); ++index) {
+        const auto& tool = impl_->tools[index];
+        if (!tool.done)
+            append(tool_delta({ninfer::ToolCallDeltaKind::Incomplete,
+                               static_cast<std::uint32_t>(index),
+                               tool.call_id,
+                               tool.name,
+                               {}}));
     }
 
     finished.response = build_response(impl_->id, impl_->created_at, impl_->request, impl_->runtime,
                                        outcome, impl_->ids);
+    for (std::size_t index = outcome.tool_calls.size(); index < impl_->tools.size(); ++index) {
+        const auto& tool = impl_->tools[index];
+        finished.response.output_items.push_back({{"id", tool.item_id},
+                                                  {"type", "function_call"},
+                                                  {"status", "incomplete"},
+                                                  {"call_id", tool.call_id},
+                                                  {"name", tool.name},
+                                                  {"arguments", tool.arguments}});
+    }
+    // Terminal output preserves the indices assigned by incremental publication. Partial
+    // items stay visible as incomplete diagnostics and never enter output_history.
+    auto item_index = [&](const Json& item) {
+        const auto id = item.at("id").get<std::string>();
+        if (id == impl_->ids.reasoning) return impl_->reasoning_index;
+        if (id == impl_->ids.message) return impl_->message_index;
+        for (const auto& tool : impl_->tools)
+            if (id == tool.item_id) return tool.output_index;
+        throw std::logic_error("terminal Responses item has no streamed index");
+    };
+    std::sort(finished.response.output_items.begin(), finished.response.output_items.end(),
+              [&](const Json& a, const Json& b) { return item_index(a) < item_index(b); });
+    finished.response.body["output"] = finished.response.output_items;
+    impl_->finish_built              = true;
     return finished;
 }
 
@@ -1321,6 +1430,10 @@ std::string ResponsesEventStream::failed(const ApiError& error) {
     response["completed_at"] = completion_time_now();
     response["error"]        = Json{{"code", error.code.empty() ? Json(nullptr) : Json(error.code)},
                                     {"message", error.message}};
+    if (error.reasoning_limit.budget_tokens != 0) {
+        response["error"]["ninfer"]["reasoning_limit"] =
+            reasoning_limit_json(error.reasoning_limit);
+    }
     return sse(impl_->event("response.failed", Json{{"response", response}}));
 }
 

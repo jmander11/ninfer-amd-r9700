@@ -7,10 +7,9 @@
 
 namespace ninfer {
 
-// Physical storage for a K-FP8 / V-INT4 growing cache. K is one OCP E4M3FN byte per feature. V
-// is two signed canonical INT4 codes per byte, with one IEEE binary16 scale per V group. There is
-// intentionally no K scale, K mean, or optional fourth plane. Target code owns which model
-// geometry and codec profile may instantiate this container.
+// Growing-cache storage: one OCP E4M3FN byte per K feature, two signed INT4 V codes per byte,
+// and one IEEE binary16 scale per V group. There is no K scale, K mean or fourth plane.
+// Target code selects the model geometry and codec profile.
 enum class Fp8KInt4VPlaneLayout : std::uint8_t {
     FeatureFastestPageMajor,
     TokenFastestHeadMajor,

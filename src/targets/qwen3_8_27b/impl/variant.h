@@ -653,7 +653,7 @@ struct Variant {
     [[nodiscard]] static constexpr std::size_t
     runtime_driver_reservation_bytes(WeightsProfile profile, std::uint32_t concurrency,
                                      bool disk_cache_enabled) noexcept {
-        if (profile != WeightsProfile::R9700Lq4 || concurrency == 0U || concurrency > 8U) return 0U;
+        if (!is_lq4_text_profile(profile) || concurrency == 0U || concurrency > 8U) return 0U;
         constexpr std::array<std::size_t, 8> main_mib{6, 6, 4, 4, 2, 4, 4, 6};
         return (2U + main_mib[concurrency - 1U] + (disk_cache_enabled ? 2U : 0U)) << 20U;
     }

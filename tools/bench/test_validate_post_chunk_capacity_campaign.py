@@ -50,30 +50,6 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
             ],
         }
 
-    def test_gpu_script_is_capacity_first_and_uses_validated_pair_eligibility(self) -> None:
-        script = (
-            Path(__file__).resolve().parents[2]
-            / "profiles/bench/post-chunk-twelve-candidate-20260905/run.sh"
-        ).read_text(encoding="utf-8")
-        last_capacity = script.rindex("run_capacity 32 b128-s16-tau900")
-        validation = script.index('--executed --out "$capacity_validation"')
-        first_whole = script.index("run_whole 16 dense dense all-q4")
-        self.assertLess(last_capacity, validation)
-        self.assertLess(validation, first_whole)
-        self.assertIn('result["whole_eligible_identities"]', script)
-
-    def test_terminal_selection_consumes_receipt_bound_conditional_campaign(self) -> None:
-        script = (
-            Path(__file__).resolve().parents[2]
-            / "profiles/bench/terminal-static-selection-20260905/assemble-and-select.sh"
-        ).read_text(encoding="utf-8")
-        self.assertIn("prefill-chunk-selection-receipt-bound-n16k16-20260905.json", script)
-        self.assertIn("--post-chunk-capacity-validation", script)
-        self.assertEqual(script.count("pareto-capacity-post-promotion-"), 12)
-        self.assertEqual(script.count("$(whole_arg "), 12)
-        self.assertNotIn("-g16-n16k16-20260905", script)
-        self.assertNotIn("-g32-n16k16-20260905", script)
-
     def test_campaign_requires_exact_cartesian_set_and_twelve_roots(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             roots = [Path(f"/matrix-{index}") for index in range(12)]

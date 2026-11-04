@@ -1,11 +1,9 @@
-// Qualifies the persistent decode lowering (ops::persistent_decode_lower) on physical gfx1201:
-// each scenario captures a single-stream chain of production launches (the public Op launchers at
-// Qwen3.8-27B decode shapes, verification widths T 4..8, with their production cache-warm ranges
-// and, for the GDN front, an active deferred replay fold), lowers a clone of that graph, and runs
-// both graphs from identical device contents. The lowered graph must write exactly the bytes of
-// the captured launches in every buffer (bitwise, inputs included) and be run-to-run
-// deterministic; constant operands must stay untouched. Operands are small finite pseudo-random
-// values (valid LQ4 codes, group codes and scales), not production weights.
+// Checks ops::persistent_decode_lower on gfx1201. Each scenario captures production Op launches
+// in one stream at Qwen3.8-27B decode shapes and verification widths T 4..8, including cache-warm
+// ranges and the GDN front's deferred replay fold. It lowers a clone and runs both graphs from
+// identical device contents. Every buffer must match bitwise, including untouched inputs and
+// constant operands; repeated runs must be deterministic. Uses small finite pseudo-random values
+// with valid LQ4 codes, group codes and scales rather than production weights.
 #include "core/arena.h"
 #include "core/cache_warm.h"
 #include "core/gdn_replay_records.h"
@@ -110,7 +108,7 @@ std::vector<std::uint8_t> random_bytes(std::size_t count, Rng& rng) {
     return out;
 }
 
-// ---- Scenario buffers. Const: uploaded once, must stay untouched. Data/Output: restored from a
+// Scenario buffers. Const: uploaded once, must stay untouched. Data/Output: restored from a
 // device-resident pristine copy (stream-ordered) before every run and compared after it; an
 // Output must also differ from its initial contents after the reference run.
 enum class Role { Const, Data, Output };
@@ -262,7 +260,7 @@ private:
     std::vector<std::unique_ptr<Buffer>> buffers_;
 };
 
-// ---- Operands.
+// Operands.
 struct Lut4 {
     lin::Lq4Weight view{};
     std::size_t code_bytes  = 0;
@@ -344,7 +342,7 @@ lin::Fp8ActivationWorkspace add_image(Scenario& s, const std::string& name, unsi
     return image;
 }
 
-// ---- Graph execution.
+// Graph execution.
 struct Outcome {
     std::string name;
     std::size_t captured = 0;
@@ -459,7 +457,7 @@ Outcome qualify(Scenario& s, std::size_t launches, std::size_t expected_lowered,
     return outcome;
 }
 
-// ---- Scenarios.
+// Scenarios.
 
 // Text attention front: fused RMSNorm quantization -> row-scaled FP8 Q/K and gate/V projections
 // with the feature split -> Q/K norm + 1-D RoPE (QuantizeNormalized, Fp8SmallT<PairSplit>,

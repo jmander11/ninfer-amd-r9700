@@ -23,6 +23,7 @@ from tools.convert.qwen3_8_27b_r9700 import (
     fp8_hybrid_inventory,
     q4_inventory,
     q4_w8_mse_inventory,
+    vision_bf16_inventory,
 )
 from tools.convert.qwen3_8_27b_r9700 import (
     inventory as candidate_inventory,
@@ -445,28 +446,53 @@ _SUPPORTED_INVENTORIES = {
 }
 
 
-def _validate_inventory(artifact: Artifact) -> None:
-    inventory = _SUPPORTED_INVENTORIES.get(artifact.identity.weights_id)
-    if inventory is None or artifact.identity.model_id != MODEL_ID:
-        raise BindingError(
-            f"artifact identity is {artifact.identity!r}; expected Qwen3.8 R9700 "
-            f"candidate or terminal evaluation identity"
+def _validate_inventory(artifact: Artifact, *, vision_only: bool = False) -> None:
+    if vision_only and artifact.identity in (
+        ArtifactIdentity(MODEL_ID, "r9700-lq4"),
+        ArtifactIdentity(MODEL_ID, vision_bf16_inventory.WEIGHTS_ID),
+    ):
+        # LQ4 changes Text and carries DFlash2 objects. Validate only the selected
+        # Vision recipe and frontend; this binding neither exposes nor decodes Text.
+        expected_objects = tuple(
+            obj
+            for obj in q4_inventory.OBJECT_SPECS
+            if obj.name.startswith(("vision/", "frontend/"))
         )
-    expected_objects = inventory.OBJECT_SPECS
-    if len(expected_objects) != 1124:
-        raise RuntimeError("Qwen3.8-27B selected inventory must contain 1124 objects")
-    if len(artifact.objects) != len(expected_objects):
+        if artifact.identity.weights_id == vision_bf16_inventory.WEIGHTS_ID:
+            expected_objects = (
+                tuple(obj for obj in expected_objects if obj.name.startswith("frontend/"))
+                + vision_bf16_inventory.VISION_SPECS
+            )
+        actual_objects = tuple(
+            obj for obj in artifact.objects if obj.name.startswith(("vision/", "frontend/"))
+        )
+    else:
+        inventory = _SUPPORTED_INVENTORIES.get(artifact.identity.weights_id)
+        if inventory is None or artifact.identity.model_id != MODEL_ID:
+            raise BindingError(
+                f"artifact identity is {artifact.identity!r}; expected Qwen3.8 R9700 "
+                f"candidate or terminal evaluation identity"
+            )
+        expected_objects = inventory.OBJECT_SPECS
+        if len(expected_objects) != 1124:
+            raise RuntimeError("Qwen3.8-27B selected inventory must contain 1124 objects")
+        actual_objects = artifact.objects
+    _validate_objects(actual_objects, expected_objects)
+
+
+def _validate_objects(actual_objects, expected_objects) -> None:
+    if len(actual_objects) != len(expected_objects):
         raise BindingError(
-            f"artifact has {len(artifact.objects)} objects; expected {len(expected_objects)}"
+            f"artifact has {len(actual_objects)} objects; expected {len(expected_objects)}"
         )
     expected_by_name = {obj.name: obj for obj in expected_objects}
-    actual_names = {obj.name for obj in artifact.objects}
+    actual_names = {obj.name for obj in actual_objects}
     expected_names = frozenset(expected_by_name)
     if actual_names != expected_names:
         missing = sorted(expected_names - actual_names)
         extra = sorted(actual_names - expected_names)
         raise BindingError(f"artifact object names differ; missing={missing!r}, extra={extra!r}")
-    for actual in artifact.objects:
+    for actual in actual_objects:
         expected = expected_by_name[actual.name]
         if isinstance(expected, candidate_inventory.TensorSpec):
             signature = (
@@ -773,7 +799,7 @@ class VisionArtifactBinding:
     """Validate a selected artifact while exposing only its Vision typed view."""
 
     def __init__(self, artifact: Artifact, *, owns_artifact: bool = False):
-        _validate_inventory(artifact)
+        _validate_inventory(artifact, vision_only=True)
         self._artifact = artifact
         self._owns_artifact = owns_artifact
         resources: dict[str, BoundResource] = {}

@@ -9,20 +9,22 @@ namespace ninfer {
 void hip_check(hipError_t error, const char* expr, const char* file, int line);
 
 // Remaining driver-backed pinned-host budget on the current HIP device.
-// Allocation remains authoritative when concurrent users consume the shared GTT heap.
+// Other users may consume the shared GTT heap before allocation succeeds.
 [[nodiscard]] std::size_t available_pinned_host_memory();
 
 #define HIP_CHECK(expr) ::ninfer::hip_check((expr), #expr, __FILE__, __LINE__)
 
-// Sole device-context contract for the R9700 product. It owns ordered compute, load, and copy
-// streams plus blocking host events, and rejects every target other than wave32 gfx1201.
+// Owns ordered compute, load and copy streams plus blocking host events.
+// Only wave32 gfx1201 devices are accepted.
 struct DeviceContext {
-    int device                  = 0;
-    hipStream_t stream          = nullptr;
-    hipStream_t load_stream     = nullptr;
-    hipStream_t copy_stream     = nullptr;
-    hipEvent_t copy_order_event = nullptr;
-    hipEvent_t host_wait        = nullptr;
+    int device                          = 0;
+    hipStream_t stream                  = nullptr;
+    hipStream_t load_stream             = nullptr;
+    hipStream_t copy_stream             = nullptr;
+    hipEvent_t copy_order_event         = nullptr;
+    hipEvent_t compute_copy_order_event = nullptr;
+    hipEvent_t compute_load_order_event = nullptr;
+    hipEvent_t host_wait                = nullptr;
     hipDeviceProp_t props{};
 
     explicit DeviceContext(int device_id = 0);
@@ -42,6 +44,8 @@ struct DeviceContext {
     void synchronize() const;
     void synchronize_all() const;
     void order_copy_after_compute() const;
+    // Enqueue compute dependencies on the fixed prior load/copy frontiers, without a host wait.
+    void order_compute_after_transfers() const;
 };
 
 class DeviceEventTimer {

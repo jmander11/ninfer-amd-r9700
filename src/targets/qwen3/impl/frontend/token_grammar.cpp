@@ -1,7 +1,10 @@
 #include "targets/qwen3/impl/frontend/token_grammar.h"
+#include "text/json_input.h"
+#include "text/json_schema.h"
 #include "ninfer/targets/qwen3/frontend.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <future>
 #include <cctype>
@@ -30,7 +33,8 @@ bool annotation(std::string_view key) {
 // arguments it receives. `format` and the content keywords are annotations in JSON Schema 2020-12.
 // Assertions that only narrow the instance set are dropped, `oneOf` widens to `anyOf`, and a
 // single-branch `allOf` with annotation-only siblings is inlined. Keywords that grant instances
-// (`patternProperties`, a multi-branch `allOf`) stay and are rejected by check_schema.
+// (`patternProperties`) stay and are checked by the shared schema
+// validator.
 void relax_schema(Json& schema) {
     if (!schema.is_object()) { return; }
     // Inline first so the inlined keywords are relaxed below.
@@ -73,229 +77,12 @@ void relax_schema(Json& schema) {
     }
 }
 
-void check_schema(const Json& schema) {
-    if (schema.is_boolean()) { return; }
-    if (!schema.is_object()) {
-        throw std::invalid_argument("tool schema must be an object or boolean");
-    }
-    // XGrammar warns and ignores several JSON Schema assertions. Reject them at
-    // admission instead of claiming that a successful grammar compile enforces them.
-    static const std::set<std::string_view> supported{"type",
-                                                      "properties",
-                                                      "required",
-                                                      "additionalProperties",
-                                                      "items",
-                                                      "prefixItems",
-                                                      "minItems",
-                                                      "maxItems",
-                                                      "minProperties",
-                                                      "maxProperties",
-                                                      "minimum",
-                                                      "maximum",
-                                                      "exclusiveMinimum",
-                                                      "exclusiveMaximum",
-                                                      "minLength",
-                                                      "maxLength",
-                                                      "pattern",
-                                                      "enum",
-                                                      "const",
-                                                      "$ref",
-                                                      "$defs",
-                                                      "definitions",
-                                                      "anyOf"};
-    for (auto it = schema.begin(); it != schema.end(); ++it) {
-        if (!annotation(it.key()) && !supported.contains(it.key())) {
-            throw std::invalid_argument("unsupported tool schema assertion: " + it.key());
-        }
-    }
-    if (schema.contains("pattern") &&
-        (schema.contains("minLength") || schema.contains("maxLength"))) {
-        throw std::invalid_argument(
-            "unsupported tool schema combination: pattern with string length bounds");
-    }
-    // These converter branches take precedence over sibling assertions. Only
-    // annotations/definitions may accompany them; silently dropping siblings
-    // would accept data that the client's schema rejects.
-    for (const char* branch : {"$ref", "enum", "const", "anyOf"}) {
-        if (!schema.contains(branch)) { continue; }
-        for (auto it = schema.begin(); it != schema.end(); ++it) {
-            if (it.key() != branch && it.key() != "$defs" && it.key() != "definitions" &&
-                !annotation(it.key())) {
-                // Common typed enums are checked independently before compilation.
-                if ((std::string_view(branch) == "enum" || std::string_view(branch) == "const") &&
-                    it.key() == "type") {
-                    continue;
-                }
-                throw std::invalid_argument("unsupported tool schema assertion sibling of " +
-                                            std::string(branch) + ": " + it.key());
-            }
-        }
-    }
-    if (schema.contains("$ref") &&
-        (!schema["$ref"].is_string() || !schema["$ref"].get<std::string>().starts_with('#'))) {
-        throw std::invalid_argument("tool schema references must be local");
-    }
-    auto matches_type = [&](const Json& value) {
-        const auto& type = schema.at("type");
-        auto one         = [&](const std::string& name) {
-            return (name == "string" && value.is_string()) ||
-                   (name == "integer" &&
-                    (value.is_number_integer() ||
-                     (value.is_number_float() &&
-                      std::floor(value.get<double>()) == value.get<double>()))) ||
-                   (name == "number" && value.is_number()) ||
-                   (name == "boolean" && value.is_boolean()) ||
-                   (name == "null" && value.is_null()) || (name == "object" && value.is_object()) ||
-                   (name == "array" && value.is_array());
-        };
-        if (type.is_string()) { return one(type.get<std::string>()); }
-        if (!type.is_array()) { return false; }
-        return std::any_of(type.begin(), type.end(), [&](const Json& t) {
-            return t.is_string() && one(t.get<std::string>());
-        });
-    };
-    if (schema.contains("type")) {
-        if (schema.contains("const") && !matches_type(schema["const"])) {
-            throw std::invalid_argument("tool schema const conflicts with type");
-        }
-        if (schema.contains("enum")) {
-            if (!schema["enum"].is_array() || schema["enum"].empty()) {
-                throw std::invalid_argument("tool schema enum must be a nonempty array");
-            }
-            for (const auto& value : schema["enum"]) {
-                if (!matches_type(value)) {
-                    throw std::invalid_argument("tool schema enum conflicts with type");
-                }
-            }
-        }
-    }
-    for (const char* map : {"properties", "$defs", "definitions"}) {
-        if (!schema.contains(map)) { continue; }
-        if (!schema[map].is_object()) {
-            throw std::invalid_argument("tool schema map must be an object");
-        }
-        for (const auto& child : schema[map]) { check_schema(child); }
-    }
-    for (const char* child : {"items", "additionalProperties"}) {
-        if (schema.contains(child)) { check_schema(schema[child]); }
-    }
-    for (const char* list : {"prefixItems", "anyOf"}) {
-        if (!schema.contains(list)) { continue; }
-        if (!schema[list].is_array()) {
-            throw std::invalid_argument("tool schema list must be an array");
-        }
-        for (const auto& child : schema[list]) { check_schema(child); }
-    }
-}
-
-// The converter only evaluates type-specific assertions on an explicit/inferred type.
-// Reject untyped assertions instead of silently compiling an unrestricted JSON value.
-void check_response_schema(const Json& schema) {
-    check_schema(schema);
-    if (!schema.is_object()) { return; }
-    if (schema.contains("pattern")) {
-        throw std::invalid_argument(
-            "output schema pattern is unsupported: JSON escaping is not enforced by the converter");
-    }
-    if (schema.contains("$ref")) {
-        const auto reference = schema["$ref"].get<std::string>();
-        if (reference != "#" && !reference.starts_with("#/")) {
-            throw std::invalid_argument("output schema references must use local JSON pointers");
-        }
-    }
-    for (const char* key :
-         {"minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties"}) {
-        if (schema.contains(key) && (!schema[key].is_number_integer() || schema[key] < 0 ||
-                                     schema[key] > std::numeric_limits<int>::max())) {
-            throw std::invalid_argument(
-                std::string("output schema bound must be a nonnegative 32-bit integer: ") + key);
-        }
-    }
-    if (schema.contains("minProperties") && schema["minProperties"] > 1 &&
-        schema.value("additionalProperties", Json(true)) != Json(false)) {
-        const auto required = schema.value("required", Json::array());
-        if (!required.is_array() || required.size() < schema["minProperties"].get<std::size_t>()) {
-            throw std::invalid_argument(
-                "minProperties with additional keys requires enough distinct required properties");
-        }
-    }
-    if (schema.contains("required") && schema["required"].is_array()) {
-        std::set<std::string> required;
-        for (const auto& key : schema["required"]) {
-            if (!key.is_string() || !required.insert(key.get<std::string>()).second) {
-                throw std::invalid_argument("required must contain distinct string property names");
-            }
-        }
-    }
-    if (!schema.contains("type")) {
-        for (const char* key : {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
-                                "minLength", "maxLength", "pattern", "minItems", "maxItems",
-                                "minProperties", "maxProperties", "required"}) {
-            if (schema.contains(key)) {
-                throw std::invalid_argument(std::string("output schema assertion requires type: ") +
-                                            key);
-            }
-        }
-    }
-    for (const char* map : {"properties", "$defs", "definitions"}) {
-        if (schema.contains(map)) {
-            for (const auto& child : schema[map]) { check_response_schema(child); }
-        }
-    }
-    for (const char* child : {"items", "additionalProperties"}) {
-        if (schema.contains(child)) { check_response_schema(schema[child]); }
-    }
-    for (const char* list : {"prefixItems", "anyOf"}) {
-        if (schema.contains(list)) {
-            for (const auto& child : schema[list]) { check_response_schema(child); }
-        }
-    }
-}
-
-// A required key need not also occur in properties. Give the grammar an
-// explicit named transition for it using its additional-property schema.
-// Otherwise even an unordered converter can mistake another key for it.
-void name_required_properties(Json& schema) {
-    if (!schema.is_object()) { return; }
-    for (const char* map : {"properties", "$defs", "definitions"}) {
-        if (schema.contains(map)) {
-            for (auto& child : schema[map]) { name_required_properties(child); }
-        }
-    }
-    for (const char* child : {"items", "additionalProperties"}) {
-        if (schema.contains(child)) { name_required_properties(schema[child]); }
-    }
-    for (const char* list : {"prefixItems", "anyOf"}) {
-        if (schema.contains(list)) {
-            for (auto& child : schema[list]) { name_required_properties(child); }
-        }
-    }
-    if (!schema.contains("required")) { return; }
-    if (!schema["required"].is_array()) {
-        throw std::invalid_argument("tool schema required must be an array");
-    }
-    // Inserting properties can reallocate ordered_json's parent object. Keep
-    // the iteration independent of that object's storage.
-    const auto required = schema["required"];
-    for (const auto& value : required) {
-        if (!value.is_string()) {
-            throw std::invalid_argument("tool schema required keys must be strings");
-        }
-        const auto key = value.get<std::string>();
-        if (schema.contains("properties") && schema["properties"].contains(key)) { continue; }
-        const auto additional = schema.value("additionalProperties", Json(true));
-        if (additional == Json(false)) {
-            throw std::invalid_argument("required tool property is forbidden: " + key);
-        }
-        schema["properties"][key] = additional;
-    }
-}
 } // namespace
 
 TokenGrammarState::TokenGrammarState(std::shared_ptr<const TokenGrammarData> grammar,
                                      std::vector<TokenId> ignored_model_stops)
     : grammar_(std::move(grammar)), ignored_model_stops_(std::move(ignored_model_stops)),
-      committed_(grammar_->compiled) {}
+      committed_(grammar_->compiled), work_(grammar_->constraint) {}
 
 bool TokenGrammarState::accept(xgrammar::GrammarMatcher& matcher, TokenId token) const {
     if (std::find(ignored_model_stops_.begin(), ignored_model_stops_.end(), token) !=
@@ -309,11 +96,28 @@ bool TokenGrammarState::accept(xgrammar::GrammarMatcher& matcher, TokenId token)
     return matcher.AcceptToken(token);
 }
 
-void TokenGrammarState::preview(std::span<const TokenId> tokens) {
+void TokenGrammarState::preview(std::span<const TokenId> tokens,
+                                std::span<const std::uint8_t> ignored_framing,
+                                std::span<const std::uint8_t> reasoning_closes) {
     if (preview_) { throw std::logic_error("token grammar already has a preview"); }
+    if (!ignored_framing.empty() && ignored_framing.size() != tokens.size()) {
+        throw std::invalid_argument("token grammar framing shape mismatch");
+    }
+    if (!reasoning_closes.empty() && reasoning_closes.size() != tokens.size()) {
+        throw std::invalid_argument("token grammar reasoning-close shape mismatch");
+    }
     auto candidate = committed_.Fork();
-    for (const auto token : tokens) {
-        if (!accept(candidate, token)) {
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        if (!ignored_framing.empty() && ignored_framing[i]) { continue; }
+        if (!reasoning_closes.empty() && reasoning_closes[i]) {
+            if (!grammar_->starts_in_reasoning) {
+                throw std::logic_error("reasoning close requires an initial reasoning grammar");
+            }
+            // The already qualified any_text body may end in a byte/marker prefix.
+            // Finish that semantic phase with the actual committed close token.
+            candidate = xgrammar::GrammarMatcher(grammar_->compiled);
+        }
+        if (!accept(candidate, tokens[i])) {
             throw std::logic_error("generated token violates the declared token grammar");
         }
     }
@@ -328,13 +132,39 @@ void TokenGrammarState::commit_preview() noexcept {
 
 void TokenGrammarState::discard_preview() noexcept { preview_.reset(); }
 
+ConstraintStats TokenGrammarState::constraint_stats() const noexcept {
+    auto result       = work_;
+    result.complete   = committed_.IsCompleted();
+    result.terminated = committed_.IsTerminated();
+    return result;
+}
+
+void TokenGrammarState::record_upload(std::size_t bytes) const noexcept {
+    work_.mask_upload_bytes += bytes;
+}
+
 void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                                    std::span<const std::int32_t> parents,
-                                   std::span<std::uint32_t> words) const {
+                                   std::span<std::uint32_t> words, TokenId replay_close,
+                                   std::span<const std::uint8_t> replay_close_allowed,
+                                   std::span<const std::uint8_t> reasoning_close_allowed) const {
     if (tokens.empty() || tokens.size() != parents.size() ||
         words.size() != tokens.size() * mask_words) {
         throw std::invalid_argument("invalid token grammar verification mask shape");
     }
+    if (!replay_close_allowed.empty() &&
+        (replay_close_allowed.size() != tokens.size() || replay_close < 0 ||
+         static_cast<std::size_t>(replay_close) >= mask_words * 32)) {
+        throw std::invalid_argument("invalid replay framing mask shape");
+    }
+    if (!reasoning_close_allowed.empty() &&
+        (reasoning_close_allowed.size() != tokens.size() || replay_close < 0 ||
+         static_cast<std::size_t>(replay_close) >= mask_words * 32 ||
+         !grammar_->starts_in_reasoning)) {
+        throw std::invalid_argument("invalid semantic reasoning-close mask shape");
+    }
+    const auto started      = std::chrono::steady_clock::now();
+    std::uint64_t evaluated = 0;
     std::vector<std::optional<xgrammar::GrammarMatcher>> nodes(tokens.size());
     nodes[0].emplace(committed_.Fork());
     for (std::size_t node = 0; node < nodes.size(); ++node) {
@@ -343,15 +173,23 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
             if (parent < 0 || static_cast<std::size_t>(parent) >= node) {
                 throw std::invalid_argument("token grammar tree parent must precede child");
             }
-            if (nodes[parent]) {
-                auto child = nodes[parent]->Fork();
-                if (accept(child, tokens[node]) && !child.IsTerminated()) {
+            const auto& parent_node = nodes[static_cast<std::size_t>(parent)];
+            if (parent_node) {
+                auto child         = parent_node->Fork();
+                const bool framing = !replay_close_allowed.empty() &&
+                                     replay_close_allowed[parent] && tokens[node] == replay_close;
+                if (!reasoning_close_allowed.empty() && reasoning_close_allowed[parent] &&
+                    tokens[node] == replay_close) {
+                    child = xgrammar::GrammarMatcher(grammar_->compiled);
+                }
+                if ((framing || accept(child, tokens[node])) && !child.IsTerminated()) {
                     nodes[node].emplace(std::move(child));
                 }
             }
         }
-        auto output = words.subspan(node * mask_words, mask_words);
-        if (!nodes[node]) {
+        auto output   = words.subspan(node * mask_words, mask_words);
+        auto& matcher = nodes[node];
+        if (!matcher) {
             std::fill(output.begin(), output.end(), ~std::uint32_t{0});
             continue;
         }
@@ -363,8 +201,25 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                       .shape       = &shape,
                       .strides     = nullptr,
                       .byte_offset = 0};
-        (void)nodes[node]->FillNextTokenBitmask(&mask);
+        (void)matcher->FillNextTokenBitmask(&mask);
+        if (!reasoning_close_allowed.empty() && reasoning_close_allowed[node]) {
+            auto closed = xgrammar::GrammarMatcher(grammar_->compiled);
+            if (!closed.AcceptToken(replay_close)) {
+                throw std::logic_error("initial reasoning grammar rejects its canonical close");
+            }
+            output[static_cast<std::size_t>(replay_close) / 32] |=
+                std::uint32_t{1} << (static_cast<unsigned>(replay_close) % 32);
+        }
+        if (!replay_close_allowed.empty() && replay_close_allowed[node]) {
+            output[static_cast<std::size_t>(replay_close) / 32] |=
+                std::uint32_t{1} << (static_cast<unsigned>(replay_close) % 32);
+        }
+        ++evaluated;
     }
+    ++work_.mask_calls;
+    work_.mask_nodes += evaluated;
+    work_.mask_seconds +=
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 }
 
 TokenGrammarCompiler::TokenGrammarCompiler(std::shared_ptr<const Tokenizer> tokenizer)
@@ -385,12 +240,24 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
         throw RequestError(RequestErrorKind::InvalidOutputConstraint,
                            "output constraints cannot be combined with tools");
     }
+    const auto compile_started = std::chrono::steady_clock::now();
     std::vector<TokenGrammarData::Definition> definitions;
+    std::vector<text::PreparedJsonSchema> prepared_tools;
+    std::optional<text::PreparedJsonSchema> prepared_constraint;
     auto tags = Json::array();
     std::set<std::string> names;
-    for (const auto& text : tools) {
+    for (std::size_t tool_index = 0; tool_index < tools.size(); ++tool_index) {
+        const auto& text = tools[tool_index];
         try {
-            const auto tool      = Json::parse(text);
+            const auto parsed_tool = text::parse_json_numbers(text);
+            if (const auto location =
+                    text::inexact_schema_number(parsed_tool, "/function/parameters")) {
+                throw text::SchemaError(
+                    text::SchemaErrorKind::UnsupportedJsonSchema,
+                    "tool schema numeric value cannot be preserved at " + *location,
+                    location->substr(std::string_view("/function/parameters").size()));
+            }
+            const auto& tool     = parsed_tool.value;
             const auto& function = tool.at("function");
             const auto name      = function.at("name").get<std::string>();
             if (name.empty() || name.find_first_of("<>\r\n") != std::string::npos ||
@@ -399,8 +266,8 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
             }
             Json schema = function.value("parameters", Json{{"type", "object"}});
             relax_schema(schema);
-            check_schema(schema);
-            name_required_properties(schema);
+            prepared_tools.push_back(text::prepare_json_schema(schema.dump(), false));
+            schema = Json::parse(prepared_tools.back().json);
             definitions.push_back({name, schema, std::nullopt});
             tags.push_back(Json{{"type", "tag"},
                                 {"begin", "<tool_call>\n<function=" + name + ">\n"},
@@ -408,12 +275,17 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
                                                  {"style", "qwen_xml"},
                                                  {"any_order", true},
                                                  {"json_schema", schema}}},
-                                {"end", "\n</function>\n</tool_call>"}});
+                                {"end", "</function>\n</tool_call>"}});
+        } catch (const text::SchemaError& error) {
+            throw RequestError(RequestErrorKind::InvalidToolSchema,
+                               std::string("invalid or unsupported tool schema: ") + error.what(),
+                               {}, RequestErrorLocation{error.pointer(), tool_index});
         } catch (const Json::exception& error) {
             throw RequestError(RequestErrorKind::InvalidToolSchema,
                                std::string("invalid tool declaration: ") + error.what());
         } catch (const std::invalid_argument& error) {
-            throw RequestError(RequestErrorKind::InvalidToolSchema, error.what());
+            throw RequestError(RequestErrorKind::InvalidToolSchema,
+                               std::string("invalid or unsupported tool schema: ") + error.what());
         }
     }
     // After a complete call, triggered_tags returns to free text. Reserve
@@ -440,21 +312,50 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
     }
     if (constraint) {
         try {
-            if (constraint->kind == OutputConstraintKind::Grammar) {
+            if (constraint->kind != OutputConstraintKind::Choice && !constraint->choices.empty()) {
+                throw std::invalid_argument("literal alternatives require a choice constraint");
+            }
+            if (constraint->kind == OutputConstraintKind::Choice) {
+                if (!constraint->source.empty() || constraint->choices.empty()) {
+                    throw std::invalid_argument(
+                        "choice requires nonempty literal alternatives and no source");
+                }
+                auto alternatives = Json::array();
+                for (const auto& value : constraint->choices) {
+                    // Structural literals own escaping, including quotes and backslashes.
+                    alternatives.push_back(Json{{"type", "const_string"}, {"value", value}});
+                }
+                format = Json{{"type", "or"}, {"elements", std::move(alternatives)}};
+            } else if (constraint->kind == OutputConstraintKind::Regex) {
+                format = Json{{"type", "regex"}, {"pattern", constraint->source}};
+            } else if (constraint->kind == OutputConstraintKind::Grammar) {
                 if (constraint->source.empty()) {
                     throw std::invalid_argument("grammar must not be empty");
                 }
                 format = Json{{"type", "grammar"}, {"grammar", constraint->source}};
             } else {
-                Json schema = constraint->kind == OutputConstraintKind::JsonObject
-                                  ? Json{{"type", "object"}, {"additionalProperties", true}}
-                                  : Json::parse(constraint->source);
+                Json schema =
+                    constraint->kind == OutputConstraintKind::JsonObject
+                        ? Json{{"type", "object"}, {"additionalProperties", true}}
+                        : [&] {
+                              const auto parsed = text::parse_json_numbers(constraint->source);
+                              if (const auto location = text::inexact_schema_number(parsed)) {
+                                  throw text::SchemaError(
+                                      text::SchemaErrorKind::UnsupportedJsonSchema,
+                                      "schema numeric value cannot be preserved at " + *location,
+                                      *location);
+                              }
+                              return parsed.value;
+                          }();
                 // Response constraints enforce assertions; tool-schema relaxation does not apply.
-                check_response_schema(schema);
-                name_required_properties(schema);
+                prepared_constraint = text::prepare_json_schema(schema.dump());
+                schema              = Json::parse(prepared_constraint->json);
                 format =
                     Json{{"type", "json_schema"}, {"json_schema", schema}, {"any_order", false}};
             }
+        } catch (const text::SchemaError& error) {
+            throw RequestError(RequestErrorKind::InvalidOutputConstraint, error.what(), {},
+                               RequestErrorLocation{error.pointer(), std::nullopt});
         } catch (const Json::exception& error) {
             throw RequestError(RequestErrorKind::InvalidOutputConstraint, error.what());
         } catch (const std::invalid_argument& error) {
@@ -477,7 +378,10 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
                        {"end", "</think>"}},
                   format})}};
     }
+    const auto wait_started = std::chrono::steady_clock::now();
     std::scoped_lock lock(mutex_);
+    const double compile_wait_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - wait_started).count();
 
     // Compile temporaries are freed before this returns, including a rejected
     // schema. malloc_trim releases the free space at the top of each glibc
@@ -499,15 +403,25 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
         // The byte validators and vocabulary masks have independent compilers.
         // One joined worker overlaps their cold builds; the outer lock bounds
         // compilation to one request and protects both caches until it joins.
-        arguments =
-            std::async(std::launch::async, [this, definitions = std::move(definitions)]() mutable {
-                for (auto& definition : definitions) {
+        arguments = std::async(std::launch::async, [this, definitions = std::move(definitions),
+                                                    prepared_tools]() mutable {
+            for (std::size_t index = 0; index < definitions.size(); ++index) {
+                auto& definition = definitions[index];
+                try {
                     definition.arguments_validator = arguments_compiler_->CompileJSONSchema(
                         definition.parameters.dump(), true, std::nullopt, std::nullopt, false,
                         std::nullopt, true);
+                } catch (const xgrammar::JSONSchemaCompileError& error) {
+                    const auto pointer = prepared_tools[index].source_pointer(error.pointer);
+                    throw RequestError(RequestErrorKind::InvalidToolSchema,
+                                       "invalid schema for tool " + definition.name + ": " +
+                                           error.what() + " at " +
+                                           (pointer.empty() ? "/" : pointer),
+                                       {}, RequestErrorLocation{pointer, index});
                 }
-                return std::move(definitions);
-            });
+            }
+            return std::move(definitions);
+        });
     }
 
     if (!compiler_) {
@@ -523,27 +437,86 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
         compiler_.emplace(info, 16, true, 128 * 1024 * 1024);
     }
     try {
-        if (constraint) {
-            const auto& content = starts_in_reasoning ? format.at("elements").at(1) : format;
-            auto compiled       = constraint->kind == OutputConstraintKind::Grammar
-                                      ? compiler_->CompileGrammar(constraint->source)
-                                      : compiler_->CompileJSONSchema(
-                                            content.at("json_schema").dump(), false, std::nullopt,
-                                            std::pair<std::string, std::string>{",", ":"}, false);
-            if (starts_in_reasoning) {
-                auto reasoning = compiler_->CompileStructuralTag(Json{
-                    {"type", "structural_tag"},
-                    {"format", format.at("elements").at(0)}}.dump());
-                compiled       = compiler_->CompileGrammar(
-                    xgrammar::Grammar::Concat({reasoning.GetGrammar(), compiled.GetGrammar()}));
+        const auto structural_grammar = [](const Json& content) {
+            auto result = xgrammar::Grammar::FromStructuralTag(
+                Json{{"type", "structural_tag"}, {"format", content}}.dump());
+            if (std::holds_alternative<xgrammar::StructuralTagError>(result)) {
+                std::visit([](const auto& error) { throw std::runtime_error(error.what()); },
+                           std::get<xgrammar::StructuralTagError>(result));
             }
-            return std::make_shared<const TokenGrammarData>(
-                TokenGrammarData{{}, std::move(compiled)});
+            return std::get<xgrammar::Grammar>(std::move(result));
+        };
+        xgrammar::CompilationCacheAccess access;
+        // The complete framing, reasoning mode, schema ordering, and literal sources form the key.
+        auto compiled = compiler_->CompileCachedGrammar(
+            format.dump(),
+            [&] {
+                if (!constraint) return structural_grammar(format);
+                const auto& content = starts_in_reasoning ? format.at("elements").at(1) : format;
+                auto grammar        = [&] {
+                    if (constraint->kind == OutputConstraintKind::Grammar)
+                        return xgrammar::Grammar::FromEBNF(constraint->source);
+                    if (constraint->kind == OutputConstraintKind::Regex)
+                        return xgrammar::Grammar::FromRegex(constraint->source);
+                    if (constraint->kind == OutputConstraintKind::Choice)
+                        return structural_grammar(content);
+                    return xgrammar::Grammar::FromJSONSchema(
+                        content.at("json_schema").dump(), false, std::nullopt,
+                        std::pair<std::string, std::string>{",", ":"}, false);
+                }();
+                if (starts_in_reasoning)
+                    grammar = xgrammar::Grammar::Concat(
+                        {structural_grammar(format.at("elements").at(0)), grammar});
+                return grammar;
+            },
+            &access);
+        auto completed_definitions =
+            arguments.valid() ? arguments.get() : std::vector<TokenGrammarData::Definition>{};
+        ConstraintStats stats;
+        stats.active = true;
+        stats.branch = starts_in_reasoning
+                           ? ConstraintBranch::Reasoning
+                           : (constraint ? ConstraintBranch::Answer : ConstraintBranch::ToolCall);
+        switch (access) {
+        case xgrammar::CompilationCacheAccess::kHit:
+            stats.compile_cache = ConstraintCompileCache::Hit;
+            break;
+        case xgrammar::CompilationCacheAccess::kBuilt:
+            stats.compile_cache = ConstraintCompileCache::Built;
+            break;
+        case xgrammar::CompilationCacheAccess::kWaited:
+            stats.compile_cache = ConstraintCompileCache::Waited;
+            break;
         }
-        auto compiled = compiler_->CompileStructuralTag(
-            Json{{"type", "structural_tag"}, {"format", format}}.dump());
-        return std::make_shared<const TokenGrammarData>(
-            TokenGrammarData{arguments.get(), std::move(compiled)});
+        stats.compile_seconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - compile_started)
+                .count();
+        stats.compile_wait_seconds = compile_wait_seconds;
+        return std::make_shared<const TokenGrammarData>(TokenGrammarData{
+            std::move(completed_definitions), std::move(compiled), stats, starts_in_reasoning});
+    } catch (const xgrammar::JSONSchemaCompileError& error) {
+        if (constraint && prepared_constraint) {
+            const auto pointer = prepared_constraint->source_pointer(error.pointer);
+            throw RequestError(RequestErrorKind::InvalidOutputConstraint,
+                               std::string(error.what()) + " at " +
+                                   (pointer.empty() ? "/" : pointer),
+                               {}, RequestErrorLocation{pointer, std::nullopt});
+        }
+        for (std::size_t index = 0; index < prepared_tools.size(); ++index) {
+            // Structural conversion can reserialize the schema; compare represented DOM values.
+            if (!error.source_schema.empty() &&
+                !text::represented_json_equal(Json::parse(error.source_schema),
+                                              Json::parse(prepared_tools[index].json)))
+                continue;
+            const auto pointer = prepared_tools[index].source_pointer(error.pointer);
+            throw RequestError(RequestErrorKind::InvalidToolSchema,
+                               std::string(error.what()) + " at " +
+                                   (pointer.empty() ? "/" : pointer),
+                               {}, RequestErrorLocation{pointer, index});
+        }
+        throw RequestError(constraint ? RequestErrorKind::InvalidOutputConstraint
+                                      : RequestErrorKind::InvalidToolSchema,
+                           error.what());
     } catch (const std::runtime_error& error) {
         // This pinned compiler reports malformed patterns/references through
         // runtime_error, including its non-public LogFatalError. Translate only

@@ -259,10 +259,8 @@ W8G32LinearArgs w8_args(const hip_bfloat16* input, const std::uint8_t* payload,
 }
 
 void test_w8_converter_codec_fixture() {
-    // This is an exact published scalar-codec fixture: signed RNE-even ties
-    // in the first G32 group, then a nonzero K-padded second group. It keeps
-    // the C++ qualifier's raw payload contract tied to the converter authority
-    // without importing Python or Torch into a ROCm device test.
+    // Exact converter fixture: signed RNE-even ties in the first G32 group, then a nonzero
+    // K-padded second group. Checks the raw payload without Python or Torch dependencies.
     std::vector<hip_bfloat16> weights(33, hip_bfloat16(0.0F));
     const float first[] = {-127.0F, -126.5F, -1.5F, -0.5F, 0.5F, 1.5F, 126.5F, 127.0F};
     for (std::uint32_t column = 0; column < 8U; ++column)

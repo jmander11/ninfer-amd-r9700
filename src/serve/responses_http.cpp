@@ -1,4 +1,5 @@
 #include "serve/http_server.h"
+#include "serve/json_input.h"
 
 #include "serve/openai_schema.h"
 #include "serve/responses_schema.h"
@@ -23,7 +24,7 @@
 namespace ninfer::serve {
 namespace {
 
-using Json = nlohmann::json;
+using Json = nlohmann::ordered_json;
 
 class ClientDisconnected final : public std::exception {
 public:
@@ -66,8 +67,8 @@ ApiError response_not_found(const std::string& id) {
 
 Json parse_json_body(const httplib::Request& request) {
     try {
-        return Json::parse(request.body);
-    } catch (const std::exception&) {
+        return parse_request_body(request.body);
+    } catch (const ApiException&) { throw; } catch (const std::exception&) {
         ApiError error;
         error.status  = 400;
         error.type    = "invalid_request_error";
@@ -315,6 +316,9 @@ void HttpServer::handle_responses(const httplib::Request& req, httplib::Response
                                         std::span<const TokenLogprobEntry> logprobs) {
                     write_stream_items(sink, *stream,
                                        stream->encoder->content_delta(text, logprobs));
+                };
+                output.on_tool_call = [&](const ninfer::ToolCallDelta& delta) {
+                    write_stream_items(sink, *stream, stream->encoder->tool_delta(delta));
                 };
                 output.is_cancelled = [&] {
                     return stream->cancelled.load(std::memory_order_acquire) ||

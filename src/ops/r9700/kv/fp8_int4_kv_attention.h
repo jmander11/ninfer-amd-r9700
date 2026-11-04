@@ -35,6 +35,8 @@ struct Fp8KvQkArgs {
 // the dot product; its FP8-Q oracle is therefore distinct from the vector baseline's BF16-Q oracle.
 [[nodiscard]] hipError_t fp8_kv_qk_wmma(const Fp8KvQkArgs& a, hipStream_t stream) noexcept;
 
+// Exact-zero probabilities contribute zero regardless of the corresponding value/scale bytes;
+// masked slots in the allocated cache need not contain finite scales.
 struct Int4KvPvArgs {
     const float* probabilities              = nullptr; // [query_heads][context], FP32
     const std::uint8_t* value_codes         = nullptr;

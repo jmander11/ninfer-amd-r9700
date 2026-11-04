@@ -212,7 +212,10 @@ void mtp_single_token_fork(const char* artifact) {
 }
 
 void concurrent_original_and_fork(const char* artifact, ninfer::SpeculativeBackend backend) {
-    ninfer::Engine engine(fork_config(artifact, 2, backend));
+    auto config          = fork_config(artifact, 2, backend);
+    config.prefill_chunk = 256;
+    config.mixed_forward = 256;
+    ninfer::Engine engine(config);
     std::vector<ninfer::TokenId> original(67, 198);
     original.front() = 1000;
     const auto first = engine.generate(engine.prepare_tokens(original), request_options());
@@ -221,7 +224,7 @@ void concurrent_original_and_fork(const char* artifact, ninfer::SpeculativeBacke
     auto branch = original;
     branch.push_back(3000);
     original.push_back(4000);
-    std::vector<ninfer::TokenId> unrelated(32, 198);
+    std::vector<ninfer::TokenId> unrelated(129, 198);
     unrelated.front()                          = 2000;
     auto fork_prompt                           = engine.prepare_tokens(branch);
     auto original_prompt                       = engine.prepare_tokens(original);
@@ -230,15 +233,21 @@ void concurrent_original_and_fork(const char* artifact, ninfer::SpeculativeBacke
     ordinary.execution.requested_output_tokens = 128;
     auto disposable                            = ordinary;
     disposable.execution.cache_write           = false;
-    auto fork                                  = engine.submit(std::move(fork_prompt), disposable);
+    // Unequal budgets shrink and repack the decode batch while its surviving request keeps
+    // decoding. The queued owner then reuses the retired lane, prefills beside that survivor,
+    // and rejoins the batch before another shrink back to one row.
+    disposable.execution.requested_output_tokens = 17;
+    const auto before                            = engine.runtime_stats();
+    auto fork                            = engine.submit(std::move(fork_prompt), disposable);
     auto continued                       = engine.submit(std::move(original_prompt), ordinary);
     auto queued_options                  = request_options();
     queued_options.execution.cache_write = false;
-    auto queued                          = engine.submit(std::move(queued_prompt), queued_options);
-    const auto fork_result               = fork.wait();
-    const auto continued_result          = continued.wait();
-    const auto queued_result             = queued.wait();
-    require(fork_result.generated_token_ids.size() == 128 &&
+    queued_options.execution.requested_output_tokens = 11;
+    auto queued                 = engine.submit(std::move(queued_prompt), queued_options);
+    const auto fork_result      = fork.wait();
+    const auto continued_result = continued.wait();
+    const auto queued_result    = queued.wait();
+    require(fork_result.generated_token_ids.size() == 17 &&
                 continued_result.generated_token_ids.size() == 128 &&
                 fork_result.reused_prompt_tokens == 70 &&
                 continued_result.reused_prompt_tokens == 70 &&
@@ -246,8 +255,27 @@ void concurrent_original_and_fork(const char* artifact, ninfer::SpeculativeBacke
                 continued_result.prefix_reuse_source == ninfer::PrefixReuseSource::VramResident,
             "concurrent original continuation and fork did not own independent lanes");
     require(fork_result.captured_context_checkpoint_tokens == 0 &&
-                queued_result.generated_token_ids.size() == 4,
+                queued_result.generated_token_ids.size() == 11,
             "fork captured a checkpoint or FIFO admission stalled behind active lanes");
+    const auto after = engine.runtime_stats();
+    require(after.decode_row_rounds - before.decode_row_rounds >
+                after.decode_rounds - before.decode_rounds,
+            "lane-turnover fixture did not execute a concurrent decode batch");
+
+    // Independently recompute each request from its full prompt after the mixed/repacked run.
+    // This catches stale compact-row sampling, continuation hidden, GDN or KV lane mappings.
+    const auto require_cold_tokens = [&](const std::vector<ninfer::TokenId>& prompt,
+                                         const ninfer::GenerationResult& actual,
+                                         ninfer::RequestOptions cold) {
+        cold.execution.allow_prefix_reuse = false;
+        cold.execution.cache_write        = false;
+        const auto expected               = engine.generate(engine.prepare_tokens(prompt), cold);
+        require(actual.generated_token_ids == expected.generated_token_ids,
+                "lane-turnover continuation differs from cold greedy recomputation");
+    };
+    require_cold_tokens(branch, fork_result, disposable);
+    require_cold_tokens(original, continued_result, ordinary);
+    require_cold_tokens(unrelated, queued_result, queued_options);
 }
 
 void insufficient_pages_and_ram(const char* artifact, bool ram_fits) {

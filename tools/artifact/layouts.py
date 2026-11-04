@@ -1,8 +1,7 @@
 """Persistent tensor layouts shared by NInfer converters and reference models.
 
-This module maps already-selected numeric words to their registered byte layout.
-It deliberately does not quantize floating-point source weights or assign model
-roles to tensors.
+Maps encoded numeric words to their registered byte layouts. Quantization and
+model-specific tensor roles belong to callers.
 """
 
 from __future__ import annotations

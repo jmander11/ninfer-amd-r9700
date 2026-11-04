@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include <hip/hip_runtime.h>
 
 #include "ops/r9700/eager/eager_ops.h"
@@ -470,7 +471,7 @@ hipError_t exact_token8_packed_epilogue(const hip_bfloat16* input, const hip_bfl
 }
 
 void screen_exact_token8(const std::filesystem::path& path) {
-    const std::filesystem::path pci("/sys/bus/pci/devices/0000:13:00.0");
+    const std::filesystem::path pci(ninfer::r9700_qualification::configured_pci_path());
     const auto read = [](const auto& file) {
         std::ifstream input(file);
         std::string value;
@@ -489,7 +490,8 @@ void screen_exact_token8(const std::filesystem::path& path) {
     select_r9700();
     char bus[32]{};
     HIP_CHECK(hipDeviceGetPCIBusId(bus, sizeof(bus), 0));
-    if (std::string_view(bus) != "0000:13:00.0") fail("HIP/PCI function mismatch");
+    if (std::string_view(bus) != ninfer::r9700_qualification::configured_pci_bus_id())
+        fail("HIP/PCI function mismatch");
     hipStream_t stream{};
     HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     const auto weight = make_weight();
@@ -605,7 +607,9 @@ void screen_exact_token8(const std::filesystem::path& path) {
            "\"production_dispatch_changed\":false,\"all_outputs_bit_exact\":true,"
            "\"oracle\":\"independent full FP64 represented-BF16 RMSNorm, maximum2BF16steps\","
            "\"fixtures\":3,\"gain_modes\":2,\"epsilons\":[1e-8,1e-6,1e-4],"
-           "\"graph_replays\":2,\"power\":\"auto\",\"pci\":\"0000:13:00.0\","
+           "\"graph_replays\":2,\"power\":\"auto\",\"pci\":\""
+        << ninfer::r9700_qualification::configured_pci_bus_id()
+        << "\","
            "\"timing\":\"warm complete RMSNorm kernel, same-stream events, 256calls/sample; "
            "serial/token8/packed_epilogue then packed_epilogue/token8/serial\","
         << "\"serial_max_bf16_steps\":" << numeric.incumbent

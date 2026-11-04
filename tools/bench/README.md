@@ -1,67 +1,37 @@
 # tools/bench
 
-Offline helper for the `ninfer_bench` throughput tool. Correctness/parity tooling lives separately
-under [`tools/parity`](../parity).
+Benchmark runners, report analysis and workload preparation for `ninfer_bench` and the server. Numerical comparison tools are in [`tools/parity`](../parity).
 
 ## Reusable context speed and quality comparison
 
-`context_ladder.py` runs or collects serial C1 context ladders, retaining average and trailing
-prefill rates; it also runs matched-token PPL and compares dense with a separately compiled
-XAttention candidate. Commands, resume rules, corpus requirements and focused trace analysis
-are in `context_ladder.md`. Timing and quality are separate evidence; cyclic timing inputs do
-not establish natural long-context quality.
+`context_ladder.py` runs or collects serial C1 context ladders, retaining average and trailing prefill rates; it also runs matched-token PPL and compares dense with a separately compiled XAttention candidate. Commands, resume rules, corpus requirements and focused trace analysis are in `context_ladder.md`. Timing and quality are separate evidence; cyclic timing inputs do not establish natural long-context quality.
 
 ## README workload matrix
 
-`run_readme_workloads.py` measures C1/C6 on the committed
-`fixtures/readme_workloads.json`: English story writing, Python code, math reasoning,
-and document summaries near 8K and 32K prompt tokens. The first three use existing
-CLI example fixtures; the code case explicitly requests code in chat with no tool calls.
-Document prompts concatenate the named local documentation,
-cycle only if needed, and truncate with the local tokenizer while preserving the chat
-boundaries. Reports contain the actual prompt and output lengths, input messages,
-responses, draft acceptance, server startup metadata, and each measured rate.
+`run_readme_workloads.py` measures C1/C6/C8 on the committed `fixtures/readme_workloads.json`: English story writing, Python code, math reasoning, and document summaries near 8K and 32K prompt tokens. The first three use existing CLI example fixtures; the code case explicitly requests code in chat with no tool calls. Document prompts concatenate the named local documentation, cycle only if needed, and truncate with the local tokenizer while preserving the chat boundaries. Reports contain the actual prompt and output lengths, input messages, responses, draft acceptance, server startup metadata, and each measured rate.
 
 ```bash
-flock --exclusive /path/to/local/.ninfer-coordination/gpu.lock \
+flock --exclusive "$NINFER_GPU_LOCK" \
   env DEBUG_HIP_GRAPH_CLASSIC_PATH=0 ROC_ENABLE_LARGE_BAR=0 ROC_SKIP_KERNEL_ARG_COPY=0 \
       HSA_DISABLE_FRAGMENT_ALLOCATOR=1 DEBUG_HIP_GRAPH_BATCH_SIZE=16384 \
   /path/to/python3.11 tools/bench/run_readme_workloads.py \
     --artifact /path/to/qwen3.8-27b-r9700-lq4.ninfer \
     --tokenizer /path/to/qwen3.8-27b-bf16 \
-    --concurrency 1 6 --tokens 512 --warmup 1 --repetitions 3 \
+    --concurrency 1 6 8 --tokens 512 --warmup 1 --repetitions 3 \
     --output profiles/bench/readme-workloads
 ```
 
-The server runs adaptive DFlash up to K7, the optimized draft head, Device Graphs,
-prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5.
-The script requires a new output directory. Change `--manifest` for other workloads;
-`--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload
-shape. `--workload "Python package"` runs just that named cell at each concurrency.
-It needs the existing benchmark Python environment and a local tokenizer;
-it does not download weights or dependencies.
+The server runs adaptive DFlash up to K7, the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
 
-Each lane first runs a one-token request to seed its prompt cache. A synchronized
-wave then generates up to the output budget per lane; natural stop tokens remain
-enabled. One warmup wave precedes three measured waves per cell. Only complete
-100-ms server intervals with no prefill and exactly C active decode lanes count.
-The reported rate is total committed decode tokens divided by those intervals'
-wall time, including host scheduling between rounds. It excludes prefill, startup,
-and intervals where some lanes have finished. Missing full-batch intervals fail
-the run rather than substitute an end-to-end or per-request rate. C6 is aggregate;
-divide by six for the average rate per active request in those intervals.
+Each lane first runs a one-token request to seed its prompt cache. A synchronized wave then generates up to the output budget per lane; natural stop tokens remain enabled. One warmup wave precedes three measured waves per cell. Only complete 100-ms server intervals with no prefill and exactly C active decode lanes count. The reported rate is total committed decode tokens divided by those intervals' wall time, including host scheduling between rounds. It excludes prefill, startup, and intervals where some lanes have finished. Missing full-batch intervals fail the run rather than substitute an end-to-end or per-request rate. C6 and C8 are aggregate; divide by the concurrency for the average rate per active request in those intervals.
 
-`summary.json` and `summary.md` contain the results; per-cell JSON and server JSONL
-retain inputs and timing evidence under `--output`. Keep generated reports under
-`profiles/`; commit the runner, workload manifest, and summarized results in the
-active performance documentation.
+The published C1/C6 summary is `../../bench/results/readme-workloads-20261017.json`; the separately measured C8 summary is `../../bench/results/readme-workloads-c8-20261104.json`.
+
+`summary.json` and `summary.md` contain the results; per-cell JSON and server JSONL retain inputs and timing evidence under `--output`. Keep generated reports under `profiles/`; commit the runner, workload manifest, and summarized results in the active performance documentation.
 
 ## Corpus baker
 
-`ninfer_bench` benchmarks prefill at an exact length, cycling corpus IDs when `P` exceeds its
-length. For representative long-context or sparse-attention measurements, use real,
-in-distribution text at least as long as the largest prefill. `make_bench_corpus.py` bakes a corpus
-offline with the local Qwen3.8-27B tokenizer.
+`ninfer_bench` benchmarks prefill at an exact length, cycling corpus IDs when `P` exceeds its length. For representative long-context or sparse-attention measurements, use real, in-distribution text at least as long as the largest prefill. `make_bench_corpus.py` bakes a corpus offline with the local Qwen3.8-27B tokenizer.
 
 Outputs (committed):
 
@@ -91,8 +61,7 @@ Install the tokenizer dependencies into the active Python environment:
 pip install -r tools/bench/requirements.txt
 ```
 
-The tokenizer is loaded locally only; the tool never downloads from the network. Pass
-`--tokenizer-path` or set `NINFER_TOKENIZER_PATH`.
+The tokenizer is loaded locally only; the tool never downloads from the network. Pass `--tokenizer-path` or set `NINFER_TOKENIZER_PATH`.
 
 ## Regenerate / check
 
@@ -111,23 +80,18 @@ python3 tools/bench/make_bench_corpus.py \
 python3 tools/bench/make_bench_corpus.py --check
 ```
 
-`--tokens` is the baked corpus size; increase it (and optionally use `--source-text`) to
-benchmark longer prefills without corpus cycling, memory permitting.
+`--tokens` is the baked corpus size; increase it (and optionally use `--source-text`) to benchmark longer prefills without corpus cycling, memory permitting.
 
 ## NInfer performance matrix
 
-`run_ninfer_bench_matrix.py` runs the layered public-Engine `ninfer_bench` matrix against the native
-`.ninfer` artifact and stores its local reports under `profiles/bench/`. The exact selected artifact
-is required rather than inferred from a default path. The other defaults are:
+`run_ninfer_bench_matrix.py` runs the layered public-Engine `ninfer_bench` matrix against the native `.ninfer` artifact and stores its local reports under `profiles/bench/`. The exact selected artifact is required rather than inferred from a default path. The other defaults are:
 
 ```text
 binary:   build-r9700/bench/ninfer_bench
 corpus:   bench/fixtures/bench_corpus.ids
 ```
 
-The matrix treats MTP `k=3` with the optimized proposal head as the primary path, keeps `k=0` and
-`k=5` as controls, and sweeps `k=0..5` on representative context-decode cases. Decode-bearing cases
-cover Device Graph and eager execution; prefill-only cases vary prompt length and prefill chunk.
+The matrix treats MTP `k=3` with the optimized proposal head as the primary path, keeps `k=0` and `k=5` as controls, and sweeps `k=0..5` on representative context-decode cases. Decode-bearing cases cover Device Graph and eager execution; prefill-only cases vary prompt length and prefill chunk.
 
 ```bash
 # Configure the benchmark targets once; they are off in the default public build.
@@ -184,10 +148,9 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-capacity \
   --expected-q4-activation-bits 8 --expected-w8-activation-bits 8 \
   --expected-fp8-qk-wmma 1
 
-After chunk selection, prepare the four-role FP8 hybrid whole and capacity matrices without
-launching either benchmark. These commands inspect and hash the real artifact, its adjacent
-conversion receipt, the compile-matched benchmark executable, and the host-only runtime planner
-from the same shared-workspace build. They require one supported selected chunk and exactly C=1..4.
+```
+
+After chunk selection, prepare the four-role FP8 hybrid whole and capacity matrices without launching either benchmark. These commands inspect and hash the artifact, conversion receipt, matching benchmark executable and host-only runtime planner. They require a supported selected chunk and exactly C=1..4.
 
 ```bash
 common=(
@@ -211,13 +174,9 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-whole \
   --output-dir profiles/bench/fp8-hybrid-whole-p8192-p32768-c1-4-20260904
 ```
 
-Review each `manifest.json` and `commands.sh`. After the GPU queue is explicitly released, rerun
-the corresponding command with `--resume` in place of `--prepare-only`. Resume revalidates the
-artifact/receipt, benchmark and planner hashes, fixed C1..4 inventories, command matrix, and current
-`auto` power state before executing missing cells. `pareto-whole` contains one spec-none ordinary
-fresh-request row per concurrency and is the base-selection timing input. `pareto-capacity` is the
-model-native capacity matrix. Neither prepared manifest is performance evidence.
+Review each `manifest.json` and `commands.sh`. Once the GPU is available, rerun with `--resume` in place of `--prepare-only`. Resume checks the artifact/receipt, benchmark and planner hashes, C1..4 inventories, commands and power mode `auto` before executing missing cells. `pareto-whole` measures fresh ordinary requests at each concurrency for base selection. `pareto-capacity` measures capacity at the model's native context limit. Preparation alone supplies no performance evidence.
 
+```bash
 # Production prefill-chunk selection starts with all twelve candidates at 8K, C=1, using the
 # spec-none ordinary Text-prefill path with 3/1 timing.
 # The runner fails before creating the output directory unless the R9700 sysfs power profile is
@@ -398,15 +357,13 @@ NINFER_SELECTED_PREFILL_CHUNK=$(python3 -c \
 
 ```
 
-After the current terminal selection, use this fresh dense C1/spec-none/auto ladder at
-P128..4096 (fixed three repetitions and one warmup). The earlier dated chunk examples are not
-prerequisites to rerun; the completed shared chunk authority remains unchanged.
+After the current terminal selection, use this fresh dense C1/spec-none/auto ladder at P128..4096 (fixed three repetitions and one warmup). The earlier dated chunk examples are not prerequisites to rerun; the completed shared chunk authority remains unchanged.
 
 ```bash
 # Run from the repository root, with exclusive GPU ownership. Never resume dated outputs.
 export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH=/path/to/local/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages
-/home/maintainer/.local/bin/python3.11 - <<'PY'
+export PYTHONPATH=/path/to/reference-environment/lib/python3.11/site-packages
+python3.11 - <<'PY'
 from pathlib import Path
 import subprocess, sys
 from tools.bench.validate_low_context_prefill import resolve_selected_dense_route
@@ -437,16 +394,16 @@ PY
 
 # Below-target throughput remains diagnostic, not an admission failure; malformed evidence fails.
 export NINFER_LOW_CONTEXT_EVALUATION=profiles/bench/r9700-selected-low-context-20260921-evaluation.json
-NINFER_SELECTED_ARTIFACT=$(/home/maintainer/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["artifact"]["path"])')
-NINFER_SELECTED_WEIGHTS_ID=$(/home/maintainer/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["artifact"]["weights_id"])')
-NINFER_SELECTED_GROUP=$(/home/maintainer/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["expected_kv_value_group"])')
-NINFER_SELECTED_PREFILL_CHUNK=$(/home/maintainer/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["selected_prefill_chunk"])')
-NINFER_SELECTED_DENSE_BENCH=$(/home/maintainer/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["bench"]["path"])')
+NINFER_SELECTED_ARTIFACT=$(python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["artifact"]["path"])')
+NINFER_SELECTED_WEIGHTS_ID=$(python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["artifact"]["weights_id"])')
+NINFER_SELECTED_GROUP=$(python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["expected_kv_value_group"])')
+NINFER_SELECTED_PREFILL_CHUNK=$(python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["selected_prefill_chunk"])')
+NINFER_SELECTED_DENSE_BENCH=$(python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["bench"]["path"])')
 
 # If P2048 remains an unresolved selected-route bottleneck, prepare its one-repetition selected-
 # region trace from the exact validated ladder/evaluation/terminal-selection authorities. This
 # does not rerun the 3/1 timing authority or require that the explicit throughput gate passed.
-/home/maintainer/.local/bin/python3.11 -m tools.bench.prepare_whole_profile \
+python3.11 -m tools.bench.prepare_whole_profile \
   --low-context-manifest profiles/bench/r9700-selected-low-context-20260921/manifest.json \
   --low-context-evaluation profiles/bench/r9700-selected-low-context-20260921-evaluation.json \
   --terminal-selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
@@ -461,7 +418,7 @@ NINFER_SELECTED_DENSE_BENCH=$(/home/maintainer/.local/bin/python3.11 -c 'import 
 # plan. Replace the regex with the exact trace-observed family or bounded alternation. Its generated
 # script requires auto initially, temporarily selects profile_standard, and restores auto with an
 # EXIT trap; its duration is attribution-only.
-/home/maintainer/.local/bin/python3.11 -m tools.bench.prepare_whole_profile \
+python3.11 -m tools.bench.prepare_whole_profile \
   --low-context-manifest profiles/bench/r9700-selected-low-context-20260921/manifest.json \
   --low-context-evaluation profiles/bench/r9700-selected-low-context-20260921-evaluation.json \
   --terminal-selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
@@ -474,15 +431,7 @@ NINFER_SELECTED_DENSE_BENCH=$(/home/maintainer/.local/bin/python3.11 -c 'import 
   --out profiles/rocprof/selected-dense-p2048-pmc-20260921
 ```
 
-Both preparation modes revalidate the full five-row schema-v14 ladder, schema-v1 evaluation, and
-schema-v7 terminal selection; bind and rehash the selected executable, artifact, corpus, P2048 raw
-report, and every authority; and require the dense C1 semantic `spec=none` P2048 3/1 source row.
-Only `-r` becomes `1`, the report output moves under the fresh profile directory, and
-`--profile-measured` is appended. The original warmup remains outside the measured region. The
-generated trace script guards `auto`; the generated PMC script requires `auto`, temporarily
-selects `profile_standard`, and restores and verifies `auto` with an EXIT trap.
-Each script writes fresh `power-profile-before.txt` and `power-profile-after.txt` endpoint evidence;
-the after value is captured even when rocprof fails, while the script preserves rocprof's status.
+Both preparation modes revalidate the full five-row schema-v14 ladder, schema-v1 evaluation, and schema-v7 terminal selection; bind and rehash the selected executable, artifact, corpus, P2048 raw report, and every authority; and require the dense C1 semantic `spec=none` P2048 3/1 source row. Only `-r` becomes `1`, the report output moves under the fresh profile directory, and `--profile-measured` is appended. The original warmup remains outside the measured region. The generated trace script guards `auto`; the generated PMC script requires `auto`, temporarily selects `profile_standard`, and restores and verifies `auto` with an EXIT trap. Each script writes fresh `power-profile-before.txt` and `power-profile-after.txt` endpoint evidence; the after value is captured even when rocprof fails, while the script preserves rocprof's status.
 
 Validate the completed `auto` trace before analyzing or assigning any dispatch role:
 
@@ -499,23 +448,9 @@ python3 -m tools.bench.validate_profile_trace \
   --out profiles/rocprof/selected-dense-p2048-trace-20260921/evidence.json
 ```
 
-The schema-v1 `ninfer_r9700_selected_profile_trace` authority mirrors the PMC validator's complete
-low-context provenance checks, but requires the exact marker/kernel/memory-copy trace command and
-`auto` endpoint evidence. It reopens and rehashes the plan, timing-schema-validated capture report, database,
-terminal selection, selected artifact and executable, corpus, low-context manifest/evaluation, and
-unprofiled P2048 3/1 report. The database must contain one R9700/gfx1201 process running the exact
-planned command. Every kernel dispatch is retained without model-role inference: stable trace and
-numeric rocprof IDs, symbol, raw ROCTX region, nanosecond interval, stream, grid/workgroup geometry,
-and available VGPR/accumulator-VGPR/LDS/scratch fields. Count and independent service time must
-agree exactly with both the database and the embedded legacy analyzer; wall-union time is retained
-separately. `selected_route` exposes the exact artifact/executable/group/profile/chunk identity and
-the bound unprofiled P2048 gate result for downstream reconciliation. Trace durations remain
-attribution-only. Missing resources remain explicit null values, ambiguous ROCTX is preserved for
-the reconciler to reject, and the validator refuses overwrite and rehashes every input before
-returning.
+The schema-v1 `ninfer_r9700_selected_profile_trace` authority mirrors the PMC validator's complete low-context provenance checks, but requires the exact marker/kernel/memory-copy trace command and `auto` endpoint evidence. It reopens and rehashes the plan, timing-schema-validated capture report, database, terminal selection, selected artifact and executable, corpus, low-context manifest/evaluation, and unprofiled P2048 3/1 report. The database must contain one R9700/gfx1201 process running the exact planned command. Every kernel dispatch is retained without model-role inference: stable trace and numeric rocprof IDs, symbol, raw ROCTX region, nanosecond interval, stream, grid/workgroup geometry, and available VGPR/accumulator-VGPR/LDS/scratch fields. Count and independent service time must agree exactly with both the database and the embedded legacy analyzer; wall-union time is retained separately. `selected_route` exposes the exact artifact/executable/group/profile/chunk identity and the bound unprofiled P2048 gate result for downstream reconciliation. Trace durations remain attribution-only. Missing resources remain explicit null values, ambiguous ROCTX is preserved for the reconciler to reject, and the validator refuses overwrite and rehashes every input before returning.
 
-Validate a completed P2048 PMC capture using only explicit paths. The native counter CSV and rocpd
-database must come from that same invocation; never pair either with the separate `auto` trace:
+Validate a completed P2048 PMC capture using only explicit paths. The native counter CSV and rocpd database must come from that same invocation; never pair either with the separate `auto` trace:
 
 ```bash
 python3 -m tools.bench.validate_profile_pmc \
@@ -531,13 +466,7 @@ python3 -m tools.bench.validate_profile_pmc \
   --out profiles/rocprof/selected-dense-p2048-pmc-20260921/evidence.json
 ```
 
-The validator refuses overwrite, rehashes the complete authority/input chain, requires the exact
-R9700/gfx1201 workload and counter inventory, and compares Decimal-parsed CSV aggregates with the
-same dispatches in the database. It derives GL2 and TCP hit ratios only from positive base-event
-denominators, requires positive SQ wave activity, retains collected all-zero counters as
-`observed_zero`, and never converts missing or zero-denominator data into a cache claim. ROCTX stage
-identity is accepted only through the same database's PMC-event to kernel-event/region join. The
-profile-standard durations and endpoint-only power observations remain attribution-only.
+The validator refuses overwrite, rehashes the complete authority/input chain, requires the exact R9700/gfx1201 workload and counter inventory, and compares Decimal-parsed CSV aggregates with the same dispatches in the database. It derives GL2 and TCP hit ratios only from positive base-event denominators, requires positive SQ wave activity, retains collected all-zero counters as `observed_zero`, and never converts missing or zero-denominator data into a cache claim. ROCTX stage identity is accepted only through the same database's PMC-event to kernel-event/region join. The profile-standard durations and endpoint-only power observations remain attribution-only.
 
 ```bash
 # XAttention admission needs current dense G16/G32 controls in addition to the isolated sparse
@@ -722,12 +651,13 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # Configuration/host-planner checks do not replace actual companion loading and parity gates.
 # Conversion is explicitly CPU-only Python 3.11; provide a local dependency path if necessary.
 # Output is a new recipe-separated namespace. Preparation does not materialize or launch a GPU run.
-/home/maintainer/.local/bin/python3.11 -m tools.bench.prepare_selected_dflash prepare \
+python3.11 -m tools.bench.prepare_selected_dflash prepare \
   --selection /absolute/path/to/terminal-base.json \
   --bench /absolute/path/to/matching-phase-sum-build/bench/ninfer_bench \
   --planner /absolute/path/to/matching-phase-sum-build/src/ninfer_r9700_runtime_planner_qual \
-  --conversion-python /home/maintainer/.local/bin/python3.11 \
+  --conversion-python /absolute/path/to/python3.11 \
   --conversion-pythonpath /absolute/path/to/cpu-python311/site-packages \
+  --source /absolute/path/to/qwen3.8-27b-dflash2 \
   --out /absolute/path/to/new-dflash-campaign
 # Inspect the generated commands.sh before explicit execution. It creates canonical Q4,
 # source-MSE Q4, and source-MSE W8 companions, each preserving base payloads, optimized
@@ -751,48 +681,19 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset concurrency \
   --concurrency 5 --concurrency 6 --concurrency 7 --concurrency 8
 ```
 
-The `prefill-chunk` preset writes schema-v23 raw reports and a schema-v14 manifest, binding prompt,
-chunk, artifact, executable, corpus, cache group, and attention profile. The selection owner first
-normalizes each chunk's 8K throughput to that candidate's best result and advances the two chunks
-with the greatest minimum ratio across all twelve candidates. Every candidate measures those same
-two finalists at 32K. The final decision preserves each 8K objective's denominator from its complete
-four-chunk screen, normalizes each 32K objective against its better finalist, and maximizes the
-minimum of all twenty-four ratios. Exact ties minimize the maximum retained workspace peak, then select
-the smaller chunk. The schema-v2 record reopens every raw report and binds every source hash.
+The `prefill-chunk` preset writes schema-v23 raw reports and a schema-v14 manifest, binding prompt, chunk, artifact, executable, corpus, cache group, and attention profile. The selection owner first normalizes each chunk's 8K throughput to that candidate's best result and advances the two chunks with the greatest minimum ratio across all twelve candidates. Every candidate measures those same two finalists at 32K. The final decision preserves each 8K objective's denominator from its complete four-chunk screen, normalizes each 32K objective against its better finalist, and maximizes the minimum of all twenty-four ratios. Exact ties minimize the maximum retained workspace peak, then select the smaller chunk. The schema-v2 record reopens every raw report and binds every source hash.
 
-These prefill-only cases request exactly one output token and run the spec-none ordinary route with
-`--draft-tokens 0`. They measure Text prefill plus target sampling without MTP state/KV preparation,
-proposal-head work, drafted tokens, or decode rounds. The selector requires that exact protocol and
-records `base_chunk_profile=spec-none-ordinary`; DFlash selected-only evaluation later owns its own
-feature/state performance.
+These prefill-only cases request exactly one output token and run the spec-none ordinary route with `--draft-tokens 0`. They measure Text prefill plus target sampling without MTP state/KV preparation, proposal-head work, drafted tokens, or decode rounds. The selector requires that exact protocol and records `base_chunk_profile=spec-none-ordinary`; DFlash selected-only evaluation later owns its own feature/state performance.
 
-Supply the selected value exactly once as `--prefill-chunk N` to fresh `pareto`, `pareto-whole`,
-`pareto-feasibility`, and `pareto-capacity` runs. There is no implicit 4,096 fallback for these
-campaign presets. Never resume a retained 4096 matrix with a different chunk. The isolated
-structured-fixture operator speedup does not replace this real-model selection.
+Supply the selected value exactly once as `--prefill-chunk N` to fresh `pareto`, `pareto-whole`, `pareto-feasibility`, and `pareto-capacity` runs. There is no implicit 4,096 fallback for these campaign presets. Never resume a retained 4096 matrix with a different chunk. The isolated structured-fixture operator speedup does not replace this real-model selection.
 
-The ordinary-decode diagnostic uses the same all-Q4 G16 B128/S16/tau900 benchmark executable,
-artifact, 4,096-token chunk, graph route, 8K prompt, and 256-token output extent as the retained
-19.24 tok/s MTP3 row, changing only speculative execution. Its command explicitly uses
-`--draft-tokens 0` with no speculative backend or draft-head option, and the report must record
-`spec=none`, `draft_tokens=0`, `speculative_execution=false`, per-test
-`speculative.enabled=false`, and the ordinary `device_graph` decode path. The fixed preset runs
-only C=1 with three measured repetitions after one warmup, retains separate prefill/decode timings
-and rates, rejects reuse of an existing output directory, and binds/rechecks the exact `auto` power
-profile.
+The ordinary-decode diagnostic uses the same all-Q4 G16 B128/S16/tau900 benchmark executable, artifact, 4,096-token chunk, graph route, 8K prompt, and 256-token output extent as the retained 19.24 tok/s MTP3 row, changing only speculative execution. Its command explicitly uses `--draft-tokens 0` with no speculative backend or draft-head option, and the report must record `spec=none`, `draft_tokens=0`, `speculative_execution=false`, per-test `speculative.enabled=false`, and the ordinary `device_graph` decode path. The fixed preset runs only C=1 with three measured repetitions after one warmup, retains separate prefill/decode timings and rates, rejects reuse of an existing output directory, and binds/rechecks the exact `auto` power profile.
 
-The retained run at the path below passed the strict validator with speculative execution disabled
-in all three repetitions. It measured `239.5738442` prefill tok/s (`34.1947324 s`) and
-`8.354688852` decode output tok/s (`30.64198944 s`), with `3.963623176` whole output tok/s over
-`64.84022237 s`. Its manifest SHA-256 is
-`a2ce50522910bd1442156383c85f359315c33bc5964578ba3ca28bf9685e104a`; the raw whole-report
-SHA-256 is `049f3e4712a65ba618f28b47d830a96019cd16dea8dd70a920e1385aca4f1c96`.
-The earlier `19.24458338` decode tok/s value belongs to the MTP3 speculative comparison row and
-must not be described as ordinary decode performance.
+The retained run at the path below passed the strict validator with speculative execution disabled in all three repetitions. It measured `239.5738442` prefill tok/s (`34.1947324 s`) and `8.354688852` decode output tok/s (`30.64198944 s`), with `3.963623176` whole output tok/s over `64.84022237 s`. Its manifest SHA-256 is `a2ce50522910bd1442156383c85f359315c33bc5964578ba3ca28bf9685e104a`; the raw whole-report SHA-256 is `049f3e4712a65ba618f28b47d830a96019cd16dea8dd70a920e1385aca4f1c96`. The earlier `19.24458338` decode tok/s value belongs to the MTP3 speculative comparison row and must not be described as ordinary decode performance.
 
 ```bash
 OUT=profiles/bench/ordinary-none-xattention-s16-tau900-all-q4-g16-c1-8k-20260904
-test "$(tr -d '\n' </sys/class/drm/card2/device/power_dpm_force_performance_level)" = auto
+test "$(tr -d '\n' <"/sys/bus/pci/devices/$NINFER_R9700_PCI_BUS_ID/power_dpm_force_performance_level")" = auto
 test ! -e "$OUT"
 python3 tools/bench/run_ninfer_bench_matrix.py --preset ordinary-diagnostic \
   --bench build-r9700-xattention-model-s16-tau900/bench/ninfer_bench --no-build \
@@ -822,17 +723,9 @@ profiles/bench/ninfer-<preset>-<timestamp>/
   summary.json
 ```
 
-Use `--resume` to skip completed JSON reports in an existing `--output-dir`, and `--preset smoke`
-for a minimal script/runner check. `--no-build` uses the binary supplied by `--bench` without
-building it. The benchmark sizes its pending queue to startup concurrency, sets the Engine fallback
-timeout to `UINT32_MAX` milliseconds, and supplies an unbounded deadline on every concurrent
-submission. Long queued C>1 prefill and whole-inference requests therefore cannot inherit the
-30-second product default and expire. This is benchmark-only behavior; CLI and serving defaults
-are unchanged.
+Use `--resume` to skip completed JSON reports in an existing `--output-dir`, and `--preset smoke` for a minimal script/runner check. `--no-build` uses the binary supplied by `--bench` without building it. The benchmark sizes its pending queue to startup concurrency, sets the Engine fallback timeout to `UINT32_MAX` milliseconds, and supplies an unbounded deadline on every concurrent submission. Long queued C>1 prefill and whole-inference requests therefore cannot inherit the 30-second product default and expire. This is benchmark-only behavior; CLI and serving defaults are unchanged.
 
-Whole-inference profiling is conditional: do it only when the completed unprofiled base or DFlash
-matrix leaves a named bottleneck question that could change the implementation. Prepare exactly
-one already-measured whole point from its completed `pareto-whole` or `dflash-pareto` directory:
+Whole-inference profiling is conditional: do it only when the completed unprofiled base or DFlash matrix leaves a named bottleneck question that could change the implementation. Prepare exactly one already-measured whole point from its completed `pareto-whole` or `dflash-pareto` directory:
 
 ```bash
 python3 -m tools.bench.prepare_whole_profile \
@@ -845,29 +738,13 @@ python3 -m tools.bench.prepare_whole_profile \
   --kind trace --question "which dispatch family dominates selected C4 32K makespan?"
 ```
 
-The CPU-only preparation validates the schema-v14 matrix, absence of `failures.json`, exact
-artifact/executable bytes, timing-schema-validated source report, group, plane-layout, compile-bound XAttention
-identity, selected prefill chunk, the source timing's pre/post `auto` power state, concurrency, and
-measured geometry. It writes
-one command rather than running it. The explicit selected weights identity and cache group prevent
-a completed losing matrix from being profiled accidentally. A DFlash matrix additionally requires
-the selected `--expected-dflash-draft-tokens` and `--expected-dflash-verify-width`. The generated
-command uses rocprof selected-region collection and the
-benchmark's `ninfer_bench_measured` boundary, so artifact load, graph priming, and warmup are not
-captured. Nested runtime ranges are default-off in every product executable and are enabled only
-inside this explicit one-repetition boundary, so unprofiled matrix timing performs no label
-formatting or ROCTX push/pop calls. Trace mode records marker, kernel, and memory-copy activity and
-its generated script fails closed unless the GPU is still in `auto`. Generate a separate
-`--kind dispatch-pmc` plan only after the trace names a dispatch family, and pass that family with
-`--kernel-include-regex`. Its script requires initial `auto`, uses `profile_standard` only during
-collection, and restores and records `auto` afterward and from its EXIT trap. It
-records the dispatch-scoped nonzero GL2C hit/miss, TCP request/miss, GL2C read/write request, and
-SQ wave controls. Those counters support relative cache-hit and activity diagnosis, not absolute
-cache/HBM bandwidth. Profiler timing is attribution-only and never replaces the matrix's
-unprofiled whole-inference timing.
+The CPU-only preparation validates the schema-v14 matrix, absence of `failures.json`, exact artifact/executable bytes, timing-schema-validated source report, group, plane-layout, compile-bound XAttention identity, selected prefill chunk, the source timing's pre/post `auto` power state, concurrency, and measured geometry. It writes a command without executing it. The explicit selected weights identity and cache group prevent a completed losing matrix from being profiled accidentally. A DFlash matrix additionally requires the selected `--expected-dflash-draft-tokens` and `--expected-dflash-verify-width`.
 
-After the trace identifies a kernel family, prepare its counter capture without changing the
-matrix timing authority:
+The generated command uses rocprof selected-region collection and the benchmark's `ninfer_bench_measured` boundary, so artifact load, graph priming, and warmup are not captured. Nested runtime ranges are default-off in every product executable and are enabled only inside this explicit one-repetition boundary, so unprofiled matrix timing performs no label formatting or ROCTX push/pop calls. Trace mode records marker, kernel, and memory-copy activity and its generated script fails closed unless the GPU is still in `auto`.
+
+Generate a separate `--kind dispatch-pmc` plan only after the trace names a dispatch family, and pass that family with `--kernel-include-regex`. Its script requires initial `auto`, uses `profile_standard` only during collection, and restores and records `auto` afterward and from its EXIT trap. It records the dispatch-scoped nonzero GL2C hit/miss, TCP request/miss, GL2C read/write request, and SQ wave controls. Those counters support relative cache-hit and activity diagnosis, not absolute cache/HBM bandwidth. Profiler timing is attribution-only and never replaces the matrix's unprofiled whole-inference timing.
+
+After the trace identifies a kernel family, prepare its counter capture without changing the matrix timing authority:
 
 ```bash
 python3 -m tools.bench.prepare_whole_profile \
@@ -881,9 +758,7 @@ python3 -m tools.bench.prepare_whole_profile \
   --question "what are the selected dispatch family cache-hit ratios and wave count?"
 ```
 
-Run either generated script only while the sysfs profile is `auto`. The trace leaves it unchanged;
-the dispatch-PMC script elevates only its two sysfs writes, temporarily selects `profile_standard`,
-and restores and verifies `auto` after rocprof and from its EXIT trap.
+Run either generated script only while the sysfs profile is `auto`. The trace leaves it unchanged; the dispatch-PMC script elevates only its two sysfs writes, temporarily selects `profile_standard`, and restores and verifies `auto` after rocprof and from its EXIT trap.
 
 Analyze a completed selected-region trace using explicit paths (never a newest-file glob):
 
@@ -894,19 +769,9 @@ python3 -m tools.bench.analyze_whole_profile \
   --out-json profiles/rocprof/EXPLICIT-TRACE/prefill-attribution.json
 ```
 
-This also accepts a one-test prefill-only (`pp`) report with schema-v21 timing semantics, or an
-explicitly interpreted retained schema-v20 report. Kernel and memory-copy stage
-ownership comes from rocprof's captured ROCTX `region` association, not temporal containment in
-asynchronous host ranges. The output separates base Text, MTP, prefill orchestration, unattributed
-prefill work, and measured non-prefill work; compares marker and symbol families; and reports top
-kernels, copy calls/bytes, and the union-derived kernel-inactive share of Text-prefill wall time.
-The completeness fields make missing region associations visible. Marker/kernel/copy trace does
-not collect HIP runtime/API activity, so its kernel-inactive wall gap cannot be split exactly into
-host execution and true GPU idle; collect a new runtime/API trace only if that distinction becomes
-the named profiling question.
+This also accepts a one-test prefill-only (`pp`) report with schema-v21 timing semantics, or an explicitly interpreted retained schema-v20 report. Kernel and memory-copy stage ownership comes from rocprof's captured ROCTX `region` association, not temporal containment in asynchronous host ranges. The output separates base Text, MTP, prefill orchestration, unattributed prefill work, and measured non-prefill work; compares marker and symbol families; and reports top kernels, copy calls/bytes, and the union-derived kernel-inactive share of Text-prefill wall time. The completeness fields make missing region associations visible. Marker/kernel/copy trace does not collect HIP runtime/API activity, so its kernel-inactive wall gap cannot be split exactly into host execution and true GPU idle; collect a new runtime/API trace only if that distinction becomes the named profiling question.
 
-Build logical roofline evidence only after an exact static target schedule has been reconciled with
-the validated selected-region trace:
+Build logical roofline evidence only after an exact static target schedule has been reconciled with the validated selected-region trace:
 
 ```bash
 python3 -m tools.bench.prepare_qwen3_8_27b_dispatch_schedule \
@@ -922,73 +787,27 @@ python3 -m tools.bench.reconcile_qwen3_8_27b_dispatches \
   --out profiles/rocprof/EXPLICIT-TRACE/dispatch-reconciliation.json
 ```
 
-The static schedule is `ninfer_qwen3_8_27b_static_dispatch_schedule` schema v1. It binds the exact
-trace workload, selected artifact/executable route, and hashed target sources, declares
-`trace_start_ns_then_dispatch_id` order, and
-enumerates every dispatch with a contiguous schedule index, exact ROCTX marker, layer identity,
-symbol, grid/workgroup, and call ID/ordinal/within-call multiplicity. A modeled row additionally
-supplies role, operation, canonical format, and all shape/format parameters. An unsupported or
-unmodeled row instead supplies the explicit nonsemantic `unassigned` role,
-`unmodeled_dispatch` operation, and a nonempty reason; it remains in coverage with its exact
-duration and is never silently discarded. An unmarked dispatch is retained explicitly as
-unmodeled and cannot receive a semantic role. Ambiguous simultaneous identical marked dispatches, source drift,
-omissions, extras, reordered calls, or any launch-field mismatch fail before output.
-The one no-clobber reconciliation JSON atomically contains all traced rows, the exact
-modeled/unmodeled/unsupported count and duration partition, unprofiled P2048 performance authority,
-and embedded roofline timing/inventory objects. This explicit expanded schedule is required because
-same symbols and grids repeat across layers and cannot establish model ownership by themselves.
-The producer supports the terminal C1 P2048 route for either dense attention or the fixed
-`b128-s16-tau900` XAttention profile. It validates the source-defined 64-layer hybrid order
-independently for every selected prefill chunk, reads each modeled matrix's shape and
-Q4G64/W8G32/F8E4M3-row format from the exact selected artifact, and accepts only the matching
-integer quantizer/CTA pair or FP8 quantizer/hipBLASLt/nonfinite-poison sequence in source call
-order (the FP8 form describes retained pre-2026-09-27 evidence; FP8 projections no longer use
-hipBLASLt). The four-role profile therefore assigns FP8 only to its exact 144 projection objects. A
-sparse full-attention layer requires one exact key-pack, rank, and selected G16/G32 flash-consumer
-sequence; a dense layer requires its single group-matched dense consumer. MTP,
-orchestration, runtime copies/fills, BF16 control projections, and other kernels remain explicit
-`unmodeled` rows. The GDN input RMSNorm, four-tap SiLU convolution, ordinary FP32-state recurrence,
-gated RMSNorm, and output residual are modeled only when their unique symbol and exact source launch
-geometry occur once in the GDN layer marker. Gated RMSNorm counts represented BF16 input/gate/
-weight/output traffic, source-expression reloads, scalar sumsq/mean/SiLU/output arithmetic, and
-separate exponential/rsqrt arguments; it makes no matrix-instruction claim. Each post-mixer
-RMSNorm, strided SiLU-multiply, and residual is admitted by the same rule. GDN control remains
-unmodeled because the exact softplus branch count is data-dependent. MTP bulk and copy
-work remains unmodeled because its one chunk marker does not identify the final-chunk and
-autoregressive subcalls precisely enough to partition repeated symbols.
+The static schedule, `ninfer_qwen3_8_27b_static_dispatch_schedule` schema v1, records the exact trace workload, selected artifact/executable route, and hashed target sources, declares `trace_start_ns_then_dispatch_id` order, and enumerates every dispatch with a contiguous schedule index, exact ROCTX marker, layer identity, symbol, grid/workgroup, and call ID/ordinal/within-call multiplicity.
 
-Missing ROCTX associations are retained with null markers and exact symbol-count
-collision evidence, but never receive inferred ownership. An incomplete or reordered marked-layer
-sequence is an evidence failure; the producer does not infer ownership from symbols or timestamps.
-If those currently uncovered families become material, the minimal follow-up is a profiling-only
-leaf marker carrying fixed semantic role plus layer, chunk index, and call ordinal around GDN
-control and each MTP stem, attention, post-mixer, final-head, and AR-step call.
-It must remain disabled outside the existing explicit profiler range and needs a newly built
-profiling executable/evidence chain; frozen finalist binaries and current timing evidence are not
-retrofitted.
-The source list binds the implementation closure used by the producer: the producer and
-reconciler, artifact directory reader/layout registry, ROCTX/topology/configuration, target
-Program/variant/binder, and selected Q4/W8/dense dispatch predicates and kernels. Reconciliation
-rehashes every member before accepting the schedule.
+A modeled row additionally supplies role, operation, canonical format, and all shape/format parameters. An unsupported or unmodeled row instead supplies the explicit nonsemantic `unassigned` role, `unmodeled_dispatch` operation, and a nonempty reason; it remains in coverage with its exact duration and is never silently discarded. An unmarked dispatch is retained explicitly as unmodeled and cannot receive a semantic role. Ambiguous simultaneous identical marked dispatches, source drift, omissions, extras, reordered calls, or any launch-field mismatch fail before output.
+
+The reconciliation JSON is written atomically without overwriting an existing file. It contains all traced rows, the exact modeled/unmodeled/unsupported count and duration partition, unprofiled P2048 performance authority, and embedded roofline timing/inventory objects. Symbols and grids repeat across layers, so they cannot identify the owning model operation without this schedule.
+
+The producer supports the terminal C1 P2048 route for either dense attention or the fixed `b128-s16-tau900` XAttention profile. It validates the source-defined 64-layer hybrid order independently for every selected prefill chunk, reads each modeled matrix's shape and Q4G64/W8G32/F8E4M3-row format from the exact selected artifact, and accepts only the matching integer quantizer/CTA pair or FP8 quantizer/hipBLASLt/nonfinite-poison sequence in source call order (the FP8 form describes retained pre-2026-09-27 evidence; FP8 projections no longer use hipBLASLt). The four-role profile therefore assigns FP8 only to its exact 144 projection objects. A sparse full-attention layer requires one exact key-pack, rank, and selected G16/G32 flash-consumer sequence; a dense layer requires its single group-matched dense consumer. MTP, orchestration, runtime copies/fills, BF16 control projections, and other kernels remain explicit `unmodeled` rows.
+
+The GDN input RMSNorm, four-tap SiLU convolution, ordinary FP32-state recurrence, gated RMSNorm, and output residual are modeled only when their unique symbol and exact source launch geometry occur once in the GDN layer marker. Gated RMSNorm counts represented BF16 input/gate/ weight/output traffic, source-expression reloads, scalar sumsq/mean/SiLU/output arithmetic, and separate exponential/rsqrt arguments; it makes no matrix-instruction claim. Each post-mixer RMSNorm, strided SiLU-multiply, and residual is admitted by the same rule.
+
+GDN control remains unmodeled because the exact softplus branch count is data-dependent. MTP bulk and copy work remains unmodeled because its one chunk marker does not identify the final-chunk and autoregressive subcalls precisely enough to partition repeated symbols.
+
+Missing ROCTX associations are retained with null markers and exact symbol-count collision evidence, but never receive inferred ownership. An incomplete or reordered marked-layer sequence is an evidence failure; the producer does not infer ownership from symbols or timestamps. If those currently uncovered families become material, the minimal follow-up is a profiling-only leaf marker carrying fixed semantic role plus layer, chunk index, and call ordinal around GDN control and each MTP stem, attention, post-mixer, final-head, and AR-step call. It must remain disabled outside the existing explicit profiler range and needs a newly built profiling executable/evidence chain; frozen finalist binaries and current timing evidence are not retrofitted. The source list binds the implementation closure used by the producer: the producer and reconciler, artifact directory reader/layout registry, ROCTX/topology/configuration, target Program/variant/binder, and selected Q4/W8/dense dispatch predicates and kernels. Reconciliation rehashes every member before accepting the schedule.
 
 ### FP8 gate/up and post-gate/up role decisions (retired)
 
-The hipBLASLt-era FP8 role decisions are retained only as historical evidence. Their decision,
-comparison-report, hardware-proof, and PMC tools consumed the hipBLASLt FP8 gate/up qualifier and
-were retired with it when hipBLASLt was removed in 438f6a89; `verify_selected_hardware_use` still
-reopens the retained executed-path proofs. FP8 Linear qualification is now
-`ninfer_r9700_fp8_row_scaled_linear_qual`.
+The hipBLASLt-era FP8 role decisions are retained only as historical evidence. Their decision, comparison-report, hardware-proof, and PMC tools consumed the hipBLASLt FP8 gate/up qualifier and were retired with it when hipBLASLt was removed in 438f6a89; `verify_selected_hardware_use` still reopens the retained executed-path proofs. FP8 Linear qualification is now `ninfer_r9700_fp8_row_scaled_linear_qual`.
 
-The gate/up decision (`profiles/bench/r9700-fp8-gate-up-decision-20260904.json`) measured
-4.129716 ms FP8 versus 6.868267 ms Q4 at `[2048,34816,5120]` (1.663133x faster) and returned
-`proceed`. The post-gate/up step selected `text.attention.query_key`,
-`text.attention.gate_value`, and `text.gdn.query_key`: 1,024,065,536 additional bytes and
-87,724,946 ns of measured P2048 Q4 service. Both capacity calculations predate the current N16
-artifact, selected chunk, and exact ordinary physical-capacity contract and are not current
-capacity evidence.
+The gate/up decision (`profiles/bench/r9700-fp8-gate-up-decision-20260904.json`) measured 4.129716 ms FP8 versus 6.868267 ms Q4 at `[2048,34816,5120]` (1.663133x faster) and returned `proceed`. The post-gate/up step selected `text.attention.query_key`, `text.attention.gate_value`, and `text.gdn.query_key`: 1,024,065,536 additional bytes and 87,724,946 ns of measured P2048 Q4 service. Both capacity calculations predate the current N16 artifact, selected chunk, and exact ordinary physical-capacity contract and are not current capacity evidence.
 
-The roofline tool does not infer a model role, shape, weight format, or inner dimension from a
-kernel symbol or launch grid:
+The roofline tool does not infer a model role, shape, weight format, or inner dimension from a kernel symbol or launch grid:
 
 ```bash
 python3 -m tools.bench.model_qwen3_8_27b_roofline \
@@ -997,55 +816,15 @@ python3 -m tools.bench.model_qwen3_8_27b_roofline \
   --out-json profiles/rocprof/EXPLICIT-TRACE/logical-roofline.json
 ```
 
-The reconciliation is the only required dispatch input. The roofline consumer reopens and rehashes
-it, its validated trace, static schedule and schedule sources, and the linked low-context evaluation
-and unprofiled P2048 report. It verifies that the trace-selected artifact, executable, G16/G32
-group, dense profile, and selected prefill chunk equal the reconciled workload. Every validated
-trace dispatch must occur in the exact retained order as `modeled`, `unmodeled`, or `unsupported`;
-the latter two require a reason and remain in `uncovered_dispatches` with exact count and duration.
-The embedded timing and inventory arrays must equal precisely the modeled subset and agree with
-the trace coverage row at symbol, marker, interval, operation, role, format, and parameters. A
-missing dispatch, silent subset, invalid coverage partition, changed authority, or self-consistent
-but differently bound embedded row fails before output.
+The reconciliation is the only required dispatch input. The roofline consumer reopens and rehashes it, its validated trace, static schedule and schedule sources, and the linked low-context evaluation and unprofiled P2048 report. It verifies that the trace-selected artifact, executable, G16/G32 group, dense profile, and selected prefill chunk equal the reconciled workload. Every validated trace dispatch must occur in the exact retained order as `modeled`, `unmodeled`, or `unsupported`; the latter two require a reason and remain in `uncovered_dispatches` with exact count and duration. The embedded timing and inventory arrays must equal precisely the modeled subset and agree with the trace coverage row at symbol, marker, interval, operation, role, format, and parameters. A missing dispatch, silent subset, invalid coverage partition, changed authority, or self-consistent but differently bound embedded row fails before output.
 
-Supported operation/format pairs are `q4_linear/a8q4g64_bf16_output`,
-`w8_linear/a8w8g32_bf16_output`, `q4_quantize/bf16_to_a8g64`,
-`w8_quantize/bf16_to_a8g32`,
-`dense_attention/bf16q_fp8k_int4v_fp16scale_fp32_output`,
-`sparse_pack/fp8k_to_bf16_packed_k`, `sparse_rank/bf16q_bf16packedk_fp32_rank`,
-`sparse_consumer/bf16q_bf16packedk_int4v_fp16scale_fp32_output`,
-`gdn_recurrence/bf16_io_fp32_state`, `gdn_control/bf16_input_fp32_output`,
-`gated_rmsnorm/bf16_io`, and the other BF16-I/O GDN-convolution and elementwise operations. The
-operation-specific parameter errors name every missing dimension. GDN recurrence additionally
-records the executed row-tile multiplicity; gated RMSNorm reports countable FP32 scalar/VALU
-arithmetic and SFU arguments separately and never assigns WMMA work;
-sparse rank records its logical pair count, exact number of issued B16 WMMA tiles, tensor element
-counts, and scratch bytes rather than asking the tool to guess estimator traversal.
+Supported operation/format pairs are `q4_linear/a8q4g64_bf16_output`, `w8_linear/a8w8g32_bf16_output`, `q4_quantize/bf16_to_a8g64`, `w8_quantize/bf16_to_a8g32`, `dense_attention/bf16q_fp8k_int4v_fp16scale_fp32_output`, `sparse_pack/fp8k_to_bf16_packed_k`, `sparse_rank/bf16q_bf16packedk_fp32_rank`, `sparse_consumer/bf16q_bf16packedk_int4v_fp16scale_fp32_output`, `gdn_recurrence/bf16_io_fp32_state`, `gdn_control/bf16_input_fp32_output`, `gated_rmsnorm/bf16_io`, and the other BF16-I/O GDN-convolution and elementwise operations. The operation-specific parameter errors name every missing dimension. GDN recurrence additionally records the executed row-tile multiplicity; gated RMSNorm reports countable FP32 scalar/VALU arithmetic and SFU arguments separately and never assigns WMMA work; sparse rank records its logical pair count, exact number of issued B16 WMMA tiles, tensor element counts, and scratch bytes rather than asking the tool to guess estimator traversal.
 
-The current selected-P2048 trace/reconciliation contract is deliberately dense; a sparse consumer
-cannot be modeled without a future reconciliation schema that atomically binds its retained-key
-telemetry. The optional memory probe is
-`ninfer_r9700_memory_probe` schema v1 with positive `read_gbps`, `write_gbps`, and `copy_gbps`.
-The tool binds its exact supplied bytes but has no shared session identifier with the timing
-authority, so it labels the result as a supplied reference rather than claiming same-session
-provenance. Record and inspect acquisition provenance separately before interpreting it as a
-matched-session control.
+The current selected-P2048 trace/reconciliation contract is deliberately dense; a sparse consumer cannot be modeled without a future reconciliation schema that atomically binds its retained-key telemetry. The optional memory probe is `ninfer_r9700_memory_probe` schema v1 with positive `read_gbps`, `write_gbps`, and `copy_gbps`. The tool binds its exact supplied bytes but has no shared session identifier with the timing authority, so it labels the result as a supplied reference rather than claiming same-session provenance. Record and inspect acquisition provenance separately before interpreting it as a matched-session control.
 
-The output separates semantic logical operations, actual padded WMMA/IU4/IU8 operations,
-represented-minimum bytes, and modeled source-request bytes. Effective TOPS, logical GB/s,
-arithmetic intensity, and theoretical issued-operation peak fractions use independent device
-service time. Those are profiler attribution rates, never selection or end-to-end throughput.
-Aggregation divides summed work by summed dispatch duration; a separate interval union preserves
-overlapping-stream wall time. `unprofiled_whole_p2048` separately retains the validated low-context
-3/1 authority's P2048 prefill seconds and tok/s and cannot be derived from profiler intervals. The
-advertised 640-GB/s ratio and optional supplied
-copy-probe ratio are explicitly logical reference ratios. They are not physical HBM utilization.
-Physical HBM bytes/bandwidth/peak fraction and stall fraction remain `null`; GL2/TCP hit/activity
-evidence remains a separate profiler result.
+The output separates semantic logical operations, actual padded WMMA/IU4/IU8 operations, represented-minimum bytes, and modeled source-request bytes. Effective TOPS, logical GB/s, arithmetic intensity, and theoretical issued-operation peak fractions use independent device service time. Those are profiler attribution rates, never selection or end-to-end throughput. Aggregation divides summed work by summed dispatch duration; a separate interval union preserves overlapping-stream wall time. `unprofiled_whole_p2048` separately retains the validated low-context 3/1 authority's P2048 prefill seconds and tok/s and cannot be derived from profiler intervals. The advertised 640-GB/s ratio and optional supplied copy-probe ratio are explicitly logical reference ratios. They are not physical HBM utilization. Physical HBM bytes/bandwidth/peak fraction and stall fraction remain `null`; GL2/TCP hit/activity evidence remains a separate profiler result.
 
-After the atomic reconciliation, roofline report, and profile-standard PMC authority exist, assemble
-the selected-P2048 operation evidence with one explicit static report for every executed
-stage/symbol family:
+After the atomic reconciliation, roofline report, and profile-standard PMC authority exist, assemble the selected-P2048 operation evidence with one explicit static report for every executed stage/symbol family:
 
 ```bash
 python3 -m tools.bench.assemble_selected_p2048_evidence \
@@ -1059,20 +838,15 @@ python3 -m tools.bench.assemble_selected_p2048_evidence \
   --out profiles/rocprof/EXPLICIT-TRACE/selected-p2048-evidence.json
 ```
 
-Revalidate the retained final record with the same explicit reconciliation, roofline, PMC, and
-ordered `--static-report` arguments by replacing `--out ...` with:
+Revalidate the retained final record with the same explicit reconciliation, roofline, PMC, and ordered `--static-report` arguments by replacing `--out ...` with:
 
 ```bash
   --validate profiles/rocprof/EXPLICIT-TRACE/selected-p2048-evidence.json
 ```
 
-Validation reconstructs the entire record from the reopened inputs and requires exact structural
-equality; it does not trust copied summaries inside the final JSON.
+Validation reconstructs the entire record from the reopened inputs and requires exact structural equality; it does not trust copied summaries inside the final JSON.
 
-Each static input must be `ninfer_r9700_operation_static_evidence` schema v1. Existing checker
-console text is not this authority and is rejected. Produce each report from an explicit selected
-code object, its disassembly/metadata, and exact sources; this scalar/VALU example intentionally
-does not claim WMMA:
+Each static input must be `ninfer_r9700_operation_static_evidence` schema v1. Existing checker console text is not this authority and is rejected. Produce each report from an explicit selected code object, its disassembly/metadata, and exact sources; this scalar/VALU example intentionally does not claim WMMA:
 
 ```bash
 python3 -m tools.bench.produce_operation_static_evidence \
@@ -1096,25 +870,9 @@ python3 -m tools.bench.produce_operation_static_evidence \
   --xattention-profile dense --out profiles/rocprof/EXPLICIT-STATIC/gdn.json
 ```
 
-Repeat `--opcode NAME=COUNT` and `--source PATH` as needed. Repeat `--stage EXACT_ROCTX_MARKER`
-for every exact layer/chunk marker that executes this same dispatch display symbol and code
-specialization; the report owns only those enumerated signatures. The code object must be the exact
-nonempty gfx1201 offload object extracted from the selected executable; the producer and assembler
-both require that byte sequence to occur exactly once in the executable. Use `--unmarked` instead
-of `--stage` only for an explicitly unmodeled null-marker dispatch. `proven_dependency_safe`
-overlap is currently admitted only for the promoted Q4 CTA and requires `--overlap-evidence` to
-name the exact assembly also passed to `--assembly`; its delegated checker proves the
-successor-group request, compute window, wait, and publication ordering. Other routes remain
-`unproven` until an equally semantic checker is added. Q4/W8 promoted CTA
-reports additionally pass `--cta-recipe q4` or `--cta-recipe w8`, their exact selected mangled
-symbol/opcode count and fixed admitted LDS/VGPR ceilings. That mode delegates to
-`check_prefill_cta_static.py` in challenger mode, so the two ordered signal/wait pairs, no
-monolithic barrier, no `global_inv`, native IU4/IU8 opcode count, and zero scratch are all required.
-The retained incumbent may still be inspected with the older checker's
-`incumbent-diagnostic` mode, but it cannot produce terminal static evidence.
+Repeat `--opcode NAME=COUNT` and `--source PATH` as needed. Repeat `--stage EXACT_ROCTX_MARKER` for every exact layer/chunk marker that executes this same dispatch display symbol and code specialization; the report owns only those enumerated signatures. The code object must be the exact nonempty gfx1201 offload object extracted from the selected executable; the producer and assembler both require that byte sequence to occur exactly once in the executable. Use `--unmarked` instead of `--stage` only for an explicitly unmodeled null-marker dispatch. `proven_dependency_safe` overlap is currently admitted only for the promoted Q4 CTA and requires `--overlap-evidence` to name the exact assembly also passed to `--assembly`; its delegated checker proves the successor-group request, compute window, wait, and publication ordering. Other routes remain `unproven` until an equally semantic checker is added. Q4/W8 promoted CTA reports additionally pass `--cta-recipe q4` or `--cta-recipe w8`, their exact selected mangled symbol/opcode count and fixed admitted LDS/VGPR ceilings. That mode delegates to `check_prefill_cta_static.py` in challenger mode, so the two ordered signal/wait pairs, no monolithic barrier, no `global_inv`, native IU4/IU8 opcode count, and zero scratch are all required. The retained incumbent may still be inspected with the older checker's `incumbent-diagnostic` mode, but it cannot produce terminal static evidence.
 
-Extract the executable's embedded HIP fatbin only through the non-mutating owner before producing
-static evidence:
+Extract the executable's embedded HIP fatbin only through the non-mutating owner before producing static evidence:
 
 ```bash
 python3 -m tools.bench.extract_embedded_code_object \
@@ -1122,29 +880,15 @@ python3 -m tools.bench.extract_embedded_code_object \
   --out /absolute/new/path/selected-ninfer-bench.hip_fatbin
 ```
 
-The extractor gives `llvm-objcopy` an explicit, distinct temporary output ELF; rejects symlink or
-hard-link aliases among the input, dumped section, and discarded output; requires the extracted
-bytes to occur exactly once in the executable; and publishes the fatbin without overwriting an
-existing path. Symbol-selected extraction additionally requires one non-overlapping bundle member
-whose exact offload target token is `gfx1201`; substring targets such as `gfx12010` do not match.
-Its before/after check binds the source device, inode, mode, size, modification
-time, and SHA-256, so an identical-byte path replacement is not accepted as an unchanged input.
-Never run `llvm-objcopy --dump-section SECTION=FILE INPUT_ELF` without a distinct final ELF operand:
-with no output ELF, `llvm-objcopy` rewrites `INPUT_ELF` in place even when the apparent intent is
-only to dump a section.
+The extractor gives `llvm-objcopy` an explicit, distinct temporary output ELF; rejects symlink or hard-link aliases among the input, dumped section, and discarded output; requires the extracted bytes to occur exactly once in the executable; and publishes the fatbin without overwriting an existing path. Symbol-selected extraction additionally requires one non-overlapping bundle member whose exact offload target token is `gfx1201`; substring targets such as `gfx12010` do not match. Its before/after check binds the source device, inode, mode, size, modification time, and SHA-256, so an identical-byte path replacement is not accepted as an unchanged input. Never run `llvm-objcopy --dump-section SECTION=FILE INPUT_ELF` without a distinct final ELF operand: with no output ELF, `llvm-objcopy` rewrites `INPUT_ELF` in place even when the apparent intent is only to dump a section.
 
-MTP whole-route reports retain exact target-token parity, speculative counters, and measured
-acceptance/throughput as regression evidence. DFlash is the only speculative backend with new
-optimization and admission work; no standalone MTP shortlist-head trace or precision branch is
-scheduled or accepted as terminal evidence.
+MTP whole-route reports retain exact target-token parity, speculative counters, and measured acceptance/throughput as regression evidence. DFlash is the only speculative backend with new optimization and admission work; no standalone MTP shortlist-head trace or precision branch is scheduled or accepted as terminal evidence.
 
-For the current selected route, use fresh namespaces rather than the dated 20260905 launchers.
-After schema-v7 selection exists, the following commands prepare evidence without launching a GPU
-workload (the decode build command compiles a separate attribution-only binary):
+For the current selected route, use fresh namespaces rather than the dated 20260905 launchers. After schema-v7 selection exists, the following commands prepare evidence without launching a GPU workload (the decode build command compiles a separate attribution-only binary):
 
 ```bash
 NINFER_PROFILE_SELECTION=profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json
-NINFER_PROFILE_PYTHON=/home/maintainer/.local/bin/python3.11
+NINFER_PROFILE_PYTHON=python3.11
 "$NINFER_PROFILE_PYTHON" -m tools.bench.prepare_selected_static_audit \
   --selection "$NINFER_PROFILE_SELECTION" \
   --out profiles/bench/r9700-selected-hardware-static-20260921.json
@@ -1164,7 +908,7 @@ mkdir profiles/rocprof/r9700-selected-decode-profile-build-20260921
 Prepare the selected C1 8K/32K whole traces from their measured ordinary matrix (no GPU launch):
 
 ```bash
-/home/maintainer/.local/bin/python3.11 - <<'PY'
+python3.11 - <<'PY'
 import json
 from pathlib import Path
 from tools.bench.verify_selected_hardware_use import selected_route
@@ -1184,204 +928,66 @@ for prompt in (8192, 32768):
 PY
 ```
 
-Run each generated whole-trace `commands.sh` serially under `auto` only after preparation.
-The admitted DFlash route is profiled later from its own measured `dflash-pareto` matrix and exact
-selected K/W; these ordinary controls do not substitute for speculative-route evidence.
+Run each generated whole-trace `commands.sh` serially under `auto` only after preparation. The admitted DFlash route is profiled later from its own measured `dflash-pareto` matrix and exact selected K/W; these ordinary controls do not substitute for speculative-route evidence.
 
-The static producer safely extracts only the selected binary's gfx1201 code objects and records
-exact symbol intervals, opcodes and emitted resources. Its selected-only audit replaces the old
-twelve-candidate audit; the hardware verifier re-extracts and recomputes these proofs. Dense P2048
-uses BK32 (32 BF16 WMMA sites), not the old BK16 proof. Emitted VGPR counts are not physical
-occupancy claims. ISA presence does not prove execution, appended-panel correctness, or speed;
-the separate trace/reconciliation and retained numerical qualification supply those distinct
-claims. Pass the fresh audit to `verify_selected_hardware_use --static-audit` with the actual
-selected reconciliation and, for hybrid weights, both matching loaded-FP8 proofs.
+The static producer safely extracts only the selected binary's gfx1201 code objects and records exact symbol intervals, opcodes and emitted resources. Its selected-only audit replaces the old twelve-candidate audit; the hardware verifier re-extracts and recomputes these proofs. Dense P2048 uses BK32 (32 BF16 WMMA sites), not the old BK16 proof. Emitted VGPR counts are not physical occupancy claims. ISA presence does not prove execution, appended-panel correctness, or speed; the separate trace/reconciliation and retained numerical qualification supply those distinct claims. Pass the fresh audit to `verify_selected_hardware_use --static-audit` with the actual selected reconciliation and, for hybrid weights, both matching loaded-FP8 proofs.
 
-With exclusive GPU ownership, `bash profiles/rocprof/r9700-selected-hardware-trace-20260921/commands.sh`
-collects the auto-mode P2048 hardware trace. The decode-memory `commands.sh` is a separate C1..4
-8K+256 attribution capture: it requires `sudo -v` and explicit authorization to temporarily write
-`profile_standard` to the R9700 PCI power path, then restores and verifies `auto`. Do not execute
-that script without the required privilege/authorization. Its timings cannot admit a performance
-route; all performance authorities remain unprofiled `auto` measurements. Known-unavailable
-absolute GDDR6 bandwidth and complete stall-freedom counters remain unavailable, not zero.
+With exclusive GPU ownership, `bash profiles/rocprof/r9700-selected-hardware-trace-20260921/commands.sh` collects the auto-mode P2048 hardware trace. The decode-memory `commands.sh` is a separate C1..4 8K+256 attribution capture: it requires `sudo -v` and explicit authorization to temporarily write `profile_standard` to the R9700 PCI power path, then restores and verifies `auto`. Do not execute that script without the required privilege/authorization. Its timings cannot admit a performance route; all performance authorities remain unprofiled `auto` measurements. Known-unavailable absolute GDDR6 bandwidth and complete stall-freedom counters remain unavailable, not zero.
 
-The hardware-use evidence assembler rehashes every nested file snapshot again after all reads,
-refuses an existing or dangling output path, and assigns every reconciled dispatch to exactly one
-static report. Modeled, unmodeled, and unsupported dispatches all require intended-hardware
-ownership; extras, ambiguity, and silent subsets fail. Profile-standard PMC evidence retains each
-captured profiler display symbol and joins it through the exact same-capture ROCTX stage plus the selected trace's equal
-`{stage,symbol}` multiplicity. A kernel-regex-filtered capture attributes counters only to the
-captured operation/specialization set, not every operation sharing its stage. PMC dispatch IDs are
-intentionally not joined to the separate auto trace. The output preserves auto profiler durations and roofline rates
-as attribution-only evidence, while P2048 tok/s/seconds come only from the validated unprofiled 3/1
-authority. Physical HBM bytes/bandwidth and hardware stall fields remain null; GL2/TCP are retained
-only as relative stage ratios.
+The hardware-use evidence assembler rehashes every nested file snapshot again after all reads, refuses an existing or dangling output path, and assigns every reconciled dispatch to exactly one static report. Modeled, unmodeled, and unsupported dispatches all require intended-hardware ownership; extras, ambiguity, and silent subsets fail. Profile-standard PMC evidence retains each captured profiler display symbol and joins it through the exact same-capture ROCTX stage plus the selected trace's equal `{stage,symbol}` multiplicity. A kernel-regex-filtered capture attributes counters only to the captured operation/specialization set, not every operation sharing its stage. PMC dispatch IDs are intentionally not joined to the separate auto trace. The output preserves auto profiler durations and roofline rates as attribution-only evidence, while P2048 tok/s/seconds come only from the validated unprofiled 3/1 authority. Physical HBM bytes/bandwidth and hardware stall fields remain null; GL2/TCP are retained only as relative stage ratios.
 
-After the trace names a specific production kernel, inspect only that owner's retained ISA/resource
-target: `make -C tools/r9700 q4g64-linear-isa q4g64-linear-resources` for Q4 Linear,
-`make -C tools/r9700 isa kv-resources` for typed KV attention, `make -C tools/r9700 gdn-isa
-gdn-recurrence-resources` for GDN, or `make -C tools/r9700 sampling-isa rope-resources` for the
-named sampling/RoPE boundary. Do not run this list speculatively or use unavailable VALU/LDS/cache
-counters.
+After the trace names a specific production kernel, inspect only that owner's retained ISA/resource target: `make -C tools/r9700 q4g64-linear-isa q4g64-linear-resources` for Q4 Linear, `make -C tools/r9700 isa kv-resources` for typed KV attention, `make -C tools/r9700 gdn-isa gdn-recurrence-resources` for GDN, or `make -C tools/r9700 sampling-isa rope-resources` for the named sampling/RoPE boundary. Do not run this list speculatively or use unavailable VALU/LDS/cache counters.
 
-Current raw reports are `ninfer_bench_report` schema v23 with exact
-`phase_timing_semantics=serial-lane-service-sum_shared-decode-max_v1`: serial lane service is
-summed for prefill; shared decode uses its maximum. The reader also interprets retained schema-v20
-reports explicitly as legacy lane-max timing, never as corrected v21. Legacy C1 prefill and
-capacity evidence remain replayable; C>1 legacy prefill throughput is marked ineligible/null in
-derived rows and cannot enter terminal selection's 24 phase/whole objectives. Retained legacy
-decode/whole-wall results remain readable for diagnostics. Missing/wrong phase markers fail closed.
-Schema v23 includes `speculative.rounds_per_draft` in each repetition and test aggregate:
-index K counts request-lane speculative rounds executed at that K, summed across lanes and
-repetitions, not GPU graph launches. Fallback steps are separate. The matrix summary preserves
-the histogram as `spec_rounds_per_draft`; retained reports without it have no histogram evidence.
-This exposes adaptive K selection without changing policy or phase-timing semantics.
-The config records concurrency, the
-compiled G16/G32 KV value group, exact K/V/V-scale plane layouts, compile-selected Q4 and W8
-activation profiles, and the exact
-FP8-Q/K WMMA classifier (`T1 >= 64`, `T2 >= 320`, `T >= 3` streaming). The W8 field names the
-binary profile: an A8 profile still retains its measured represented-BF16 crossover and does not
-claim that every W8 invocation quantizes. Resume validates these fields, every expected test row,
-positive finite timings/throughput, internally coherent acceptance counters, and the complete point
-command. It also records either the strict dense identity or the private B128/S16/tau900
-XAttention identity; the validator rejects missing, stale, or mismatched sparse fields. The
-schema-v14 manifest retains artifact and benchmark-executable path, byte size, identity
-where applicable, and SHA-256; both are hashed again after the run. Flattened rows repeat the
-artifact identity and SHA-256 beside every speed cell. A report
-from another artifact, build, or matrix point cannot be silently reused;
-`--expected-kv-value-group` additionally pins the intended compiled cache group. A8 is required by
-default for Q4; `--expected-q4-activation-bits 4` is reserved for an explicit A4 evaluator binary.
-The default 8 identifies the selected adaptive A8 profile; use
-`--expected-w8-activation-bits 16` only with the represented-BF16 W8 control. The flattened summary and schema-v14 matrix
-manifest carry native names from the report: selected target,
-canonical `weights_id`, artifact,
-GPU architecture and HIP runtime/driver identity, load/read/upload/staging values, Engine memory
-arenas including request transient and Device Graph
-allowance/observed allocation, per-test planned logical and allocator-observed workspace peaks, KV capacity and
-payload plus automatic-sizing resolution/headroom and its binding constraint, configured proposal head and graph mode,
-phase timings and throughput, and speculative
-rounds/drafts/acceptance/fallbacks. The `pareto` preset is deliberately small and matched: one case
-contains 8K/32K MTP3 prefill and one contains 8K/32K MTP3 graph decode with 256 requested decode
-tokens at each context. Repeat `--concurrency` from 1 through 4 and run it separately for the
-all-Q4, mixed Q4/W8, and authority-bound four-role FP8/Q4 artifacts.
+Current raw reports are `ninfer_bench_report` schema v23 with exact `phase_timing_semantics=serial-lane-service-sum_shared-decode-max_v1`: serial lane service is summed for prefill; shared decode uses its maximum. The reader also interprets retained schema-v20 reports explicitly as legacy lane-max timing, never as corrected v21. Legacy C1 prefill and capacity evidence remain replayable; C>1 legacy prefill throughput is marked ineligible/null in derived rows and cannot enter terminal selection's 24 phase/whole objectives. Retained legacy decode/whole-wall results remain readable for diagnostics. Missing/wrong phase markers fail closed.
 
-The automatic resolver is bounded by `max_context * concurrency`. Consequently,
-`pareto-feasibility` and `dflash-feasibility` retain the resolved usable capacity for the required
-32K workload but classify it as `logical_context_ceiling`, `device_memory`, or both. The flattened
-`memory_limited_capacity_tokens` is null when spare memory could hold another KV page but the
-logical ceiling prevented allocation. Such a row proves feasibility only and is forbidden as a
-resolved effective Pareto capacity value. At C=1 the addressable curve has no adjacent page point, so the
-memory-limited capacity is also null. Do not extrapolate a reported byte stride beyond the target's
-addressable capacity curve.
+Schema v23 includes `speculative.rounds_per_draft` in each repetition and test aggregate: index K counts request-lane speculative rounds executed at that K, summed across lanes and repetitions, not GPU graph launches. Fallback steps are separate. The matrix summary preserves the histogram as `spec_rounds_per_draft`; retained reports without it have no histogram evidence. This exposes adaptive K selection without changing policy or phase-timing semantics.
 
-The corresponding `pareto-capacity` and `dflash-capacity` presets use the model-native 262,144
-logical-token ceiling. A result below `C*262144` must pass the next-page memory infeasibility check
-and is labeled `device_memory`; a result equal to the curve maximum is labeled `model_context`.
-Both are exact `resolved_effective_maximum` measurements; the flattened
-`resolved_effective_maximum_tokens` is the capacity objective accepted by the Pareto classifier.
-Every Pareto campaign requires one explicit chunk from the retained schema-v2 global selection;
-the schema-v14 manifest and each raw command bind that same value. Capacity validation also
-requires the runtime's nonzero Device Graph allowance and its measured allocation, rejects an
-observed allocation above the plan, and retains both byte values in the flattened row.
+The config records concurrency, the compiled G16/G32 KV value group, exact K/V/V-scale plane layouts, compile-selected Q4 and W8 activation profiles, and the exact FP8-Q/K WMMA classifier (`T1 >= 64`, `T2 >= 320`, `T >= 3` streaming). The W8 field names the binary profile: an A8 profile still retains its measured represented-BF16 crossover and does not claim that every W8 invocation quantizes.
 
-The `dflash-pareto` preset admits the nine registered companions (three base recipes times
-canonical Q4G64, source-MSE Q4G64, and source-MSE W8G32 append recipes), using exactly K4/W5
-or K5/W6. Artifact inspection binds the append conversion to the exact terminal base and BF16
-DFlash source; artifact identity alone does not select a production recipe. Dry runs remain
-path-only and cannot authorize a physical campaign. Capacity decisions declare the eligible C
-subset including C1; missing reports for that subset fail rather than silently reducing it.
-For each declared fixed C it retains matched 8K/32K DFlash prefill and graph-decode throughput,
-per-position acceptance, and an ordinary greedy decode control over identical prompts. It also
-retains fresh-prompt DFlash whole inference and a separate exact spec-none ordinary `--whole-pg`
-control. Both controls use `--draft-tokens 0`, with no `--spec` or draft-head flag. Whole-route
-parity retains the complete generation including its first output token; isolated decode parity
-retains all 257 post-seed outputs and inherits seed equality from the deterministic whole route.
-The two DFlash Pareto `-pg` cases alone carry `--isolate-prompt-decode`, so C1 follows the same
-one-token seed/discard protocol as C2..4; ordinary benchmark `-pg`, shortlist, and whole semantics
-are unchanged. A four-role hybrid campaign additionally queries and binds the compile-matched planner inventory for every
-actual resolved DFlash verification width: MTP-width coverage is not accepted as DFlash workspace
-evidence. The planner authority additionally binds the same build root, `CMakeCache.txt`, and
-`compile_commands.json` identities as the benchmark executable. Schema-v20
-JSON can opt into per-repetition/per-lane token IDs; the matrix rejects the campaign unless every
-ordinary and DFlash greedy output is exactly identical. Two isolated eager C=1 probes synchronize
-proposal logits and selector outcomes into raw counters for top-16/64/256, tree/head membership,
-first rejects, depth, and finite-logit health. Each also retains the ordered per-round proposal
-IDs, parent topology, and aligned licensed target tokens. The runner binds both diagnostics to the
-exact artifact bytes, benchmark executable bytes, report hash, activation/attention profile,
-K/W/head, and concurrency, then requires exact proposal traces and final target outputs across the
-two executions. `dflash-generated-quality.json` binds those diagnostics and the declared-C ordinary
-output parity artifact into one generated-behavior gate. It records target-model NLL as not
-applicable: DFlash changes proposal execution rather than the teacher-forced target distribution,
-whose BF16-source comparison remains owned by the base artifact PPL campaign. Diagnostic timing is
-explicitly ineligible for performance comparison.
+Resume validates these fields, every expected test row, positive finite timings/throughput, internally coherent acceptance counters, and the complete point command. It also records either the strict dense identity or the private B128/S16/tau900 XAttention identity; the validator rejects missing, stale, or mismatched sparse fields.
 
-The schema-v5 assembler reopens all raw reports and manifests. Inputs are keyed by recipe/K/W:
-three `--recipe RECIPE CONVERSION SHORTLIST` bindings, six `--capacity RECIPE K W DIR` bindings,
-and `--c1` / `--pareto` bindings with the same four arguments for the explicitly advanced cells.
-Capacity errors retain exact failed command/log evidence; they exclude only the affected C cell.
-The preparation stages are `advance-capacity`, `advance-c1`, and `advance-pareto`, each using
-`--plan plan.json`. The latter generates the complete assembly command. They never infer an
-eligible subset from successful measurement files. All declared phase/control/diagnostic points,
-exact ordinary-output parity, repeated proposal/licensed-target determinism and generated-quality
-evidence are mandatory. The C1 screen already measures the same complete `dflash-pareto` workload,
-so it is reused, not repeated. Followups declare only capacity-eligible C2..4 and write their own
-exact ordinary-token parity; the C1-only proposal/generated-quality proof stays in the screen.
-Schema-v5 retains both original source manifests and merges their per-C speed/objective cells
-only after replaying those gates under the same artifact, evaluator, profile, chunk and corpus.
-If capacity admits only C1, omit `--pareto`: the screen alone supplies that evaluation cell.
+The schema-v14 manifest retains artifact and benchmark-executable path, byte size, identity where applicable, and SHA-256; both are hashed again after the run. Flattened rows repeat the artifact identity and SHA-256 beside every speed cell. A report from another artifact, build, or matrix point cannot be silently reused; `--expected-kv-value-group` additionally pins the intended compiled cache group.
 
-At each C, both 8K/32K whole and isolated-decode means must exceed same-build ordinary controls
-by at least 1.02x, with a strictly positive two-standard-deviation conservative speedup.
-Missing evidence fails the campaign; slower measured C cells retain explicit exclusions without
-erasing a valid C1 result. Full followups require an observed material K4/W5 C1 route.
-The primary C1 frontier winner maximizes worst normalized whole throughput, then capacity, then
-acceptance, with canonical recipe/K/W order breaking exact ties. Per-C frontiers and the primary
-winner's unsupported/slower C cells remain visible. This is evaluation evidence, not dynamic
-recipe switching, one all-C resident artifact, or final production promotion.
-Single-resident admission is an explicit separate action, not automatic promotion of that C1
-winner. Choose one of `canonical-q4g64`, `source-mse-q4g64`, or `source-mse-w8g32` and exactly
-K4/W5 or K5/W6. The chosen companion must qualify at **all C1..4** with complete capacity,
-mandatory C1 material win, and the existing matched 8K/32K whole/decode, exact ordinary-token,
-proposal-state and generated-quality gates. Winning every per-C frontier is not required.
-Mixing per-C recipes/widths or selecting a narrower supported concurrency contract is forbidden.
+A8 is required by default for Q4; `--expected-q4-activation-bits 4` is reserved for an explicit A4 evaluator binary. The default 8 identifies the selected adaptive A8 profile; use `--expected-w8-activation-bits 16` only with the represented-BF16 W8 control.
+
+The flattened summary and schema-v14 matrix manifest carry native names from the report: selected target, canonical `weights_id`, artifact, GPU architecture and HIP runtime/driver identity, load/read/upload/staging values, Engine memory arenas including request transient and Device Graph allowance/observed allocation, per-test planned logical and allocator-observed workspace peaks, KV capacity and payload plus automatic-sizing resolution/headroom and its binding constraint, configured proposal head and graph mode, phase timings and throughput, and speculative rounds/drafts/acceptance/fallbacks.
+
+The `pareto` preset uses matched cases: one case contains 8K/32K MTP3 prefill and one contains 8K/32K MTP3 graph decode with 256 requested decode tokens at each context. Repeat `--concurrency` from 1 through 4 and run it separately for the all-Q4, mixed Q4/W8, and authority-bound four-role FP8/Q4 artifacts.
+
+The automatic resolver is bounded by `max_context * concurrency`. Consequently, `pareto-feasibility` and `dflash-feasibility` retain the resolved usable capacity for the required 32K workload but classify it as `logical_context_ceiling`, `device_memory`, or both. The flattened `memory_limited_capacity_tokens` is null when spare memory could hold another KV page but the logical ceiling prevented allocation. Such a row proves feasibility only and is forbidden as a resolved effective Pareto capacity value. At C=1 the addressable curve has no adjacent page point, so the memory-limited capacity is also null. Do not extrapolate a reported byte stride beyond the target's addressable capacity curve.
+
+The corresponding `pareto-capacity` and `dflash-capacity` presets use the model-native 262,144 logical-token ceiling. A result below `C*262144` must pass the next-page memory infeasibility check and is labeled `device_memory`; a result equal to the curve maximum is labeled `model_context`. Both are exact `resolved_effective_maximum` measurements; the flattened `resolved_effective_maximum_tokens` is the capacity objective accepted by the Pareto classifier. Every Pareto campaign requires one explicit chunk from the retained schema-v2 global selection; the schema-v14 manifest and each raw command bind that same value. Capacity validation also requires the runtime's nonzero Device Graph allowance and its measured allocation, rejects an observed allocation above the plan, and retains both byte values in the flattened row.
+
+The `dflash-pareto` preset admits the nine registered companions (three base recipes times canonical Q4G64, source-MSE Q4G64, and source-MSE W8G32 append recipes), using exactly K4/W5 or K5/W6. Artifact inspection binds the append conversion to the exact terminal base and BF16 DFlash source; artifact identity alone does not select a production recipe. Dry runs remain path-only and cannot authorize a physical campaign. Capacity decisions declare the eligible C subset including C1; missing reports for that subset fail rather than silently reducing it.
+
+For each declared fixed C it retains matched 8K/32K DFlash prefill and graph-decode throughput, per-position acceptance, and an ordinary greedy decode control over identical prompts. It also retains fresh-prompt DFlash whole inference and a separate exact spec-none ordinary `--whole-pg` control. Both controls use `--draft-tokens 0`, with no `--spec` or draft-head flag. Whole-route parity retains the complete generation including its first output token; isolated decode parity retains all 257 post-seed outputs and inherits seed equality from the deterministic whole route. The two DFlash Pareto `-pg` cases alone carry `--isolate-prompt-decode`, so C1 follows the same one-token seed/discard protocol as C2..4; ordinary benchmark `-pg`, shortlist, and whole semantics are unchanged.
+
+A four-role hybrid campaign additionally queries and binds the compile-matched planner inventory for every actual resolved DFlash verification width: MTP-width coverage is not accepted as DFlash workspace evidence. The planner authority additionally binds the same build root, `CMakeCache.txt`, and `compile_commands.json` identities as the benchmark executable. Schema-v20 JSON can opt into per-repetition/per-lane token IDs; the matrix rejects the campaign unless every ordinary and DFlash greedy output is exactly identical.
+
+Two isolated eager C=1 probes synchronize proposal logits and selector outcomes into raw counters for top-16/64/256, tree/head membership, first rejects, depth, and finite-logit health. Each also retains the ordered per-round proposal IDs, parent topology, and aligned licensed target tokens. The runner binds both diagnostics to the exact artifact bytes, benchmark executable bytes, report hash, activation/attention profile, K/W/head, and concurrency, then requires exact proposal traces and final target outputs across the two executions.
+
+`dflash-generated-quality.json` binds those diagnostics and the declared-C ordinary output parity artifact into one generated-behavior gate. It records target-model NLL as not applicable: DFlash changes proposal execution rather than the teacher-forced target distribution, whose BF16-source comparison remains owned by the base artifact PPL campaign. Diagnostic timing is explicitly ineligible for performance comparison.
+
+The schema-v5 assembler reopens all raw reports and manifests. Inputs are keyed by recipe/K/W: three `--recipe RECIPE CONVERSION SHORTLIST` bindings, six `--capacity RECIPE K W DIR` bindings, and `--c1` / `--pareto` bindings with the same four arguments for the explicitly advanced cells. Capacity errors retain exact failed command/log evidence; they exclude only the affected C cell. The preparation stages are `advance-capacity`, `advance-c1`, and `advance-pareto`, each using `--plan plan.json`. The latter generates the complete assembly command. They never infer an eligible subset from successful measurement files. All declared phase/control/diagnostic points, exact ordinary-output parity, repeated proposal/licensed-target determinism and generated-quality evidence are mandatory. The C1 screen already measures the same complete `dflash-pareto` workload, so it is reused, not repeated. Followups declare only capacity-eligible C2..4 and write their own exact ordinary-token parity; the C1-only proposal/generated-quality proof stays in the screen. Schema-v5 retains both original source manifests and merges their per-C speed/objective cells only after replaying those gates under the same artifact, evaluator, profile, chunk and corpus. If capacity admits only C1, omit `--pareto`: the screen alone supplies that evaluation cell.
+
+At each C, both 8K/32K whole and isolated-decode means must exceed same-build ordinary controls by at least 1.02x, with a strictly positive two-standard-deviation conservative speedup. Missing evidence fails the campaign; slower measured C cells retain explicit exclusions without erasing a valid C1 result. Full followups require an observed material K4/W5 C1 route. The primary C1 frontier winner maximizes worst normalized whole throughput, then capacity, then acceptance, with canonical recipe/K/W order breaking exact ties. Per-C frontiers and the primary winner's unsupported/slower C cells remain visible. This is evaluation evidence, not dynamic recipe switching, one all-C resident artifact, or final production promotion. Single-resident admission is an explicit separate action, not automatic promotion of that C1 winner. Choose one of `canonical-q4g64`, `source-mse-q4g64`, or `source-mse-w8g32` and exactly K4/W5 or K5/W6. The chosen companion must qualify at **all C1..4** with complete capacity, mandatory C1 material win, and the existing matched 8K/32K whole/decode, exact ordinary-token, proposal-state and generated-quality gates. Winning every per-C frontier is not required. Mixing per-C recipes/widths or selecting a narrower supported concurrency contract is forbidden.
 
 ```sh
-/home/maintainer/.local/bin/python3.11 -m tools.bench.assemble_dflash_selection admit \
+python3.11 -m tools.bench.assemble_dflash_selection admit \
   --evaluation /absolute/path/to/schema-v5-dflash-evaluation.json \
   --recipe source-mse-w8g32 --draft-tokens 4 --verify-width 5 \
   --out /absolute/path/to/single-resident-admission.json
-/home/maintainer/.local/bin/python3.11 -m tools.bench.assemble_dflash_selection validate-admission \
+python3.11 -m tools.bench.assemble_dflash_selection validate-admission \
   --admission /absolute/path/to/single-resident-admission.json
 ```
 
-The recipe above is illustrative, not a selected winner. Admission reopens the complete evaluation
-and reconstructs its original bound inputs and raw gates; it writes a distinct schema-v1
-`ninfer_r9700_dflash_single_resident_admission` authority exclusively. The validation action is
-read-only and repeats that evidence replay. Pass this admission path as the final-cutover plan's
-`dflash` input. The consumer recomputes it and binds the exact terminal base/artifact, cache group,
-attention profile and chunk. Historical evaluations and bare evaluation-only schema-v5 records remain
-rejected. This authorizes one resident companion profile, not final artifact publication by itself.
+The recipe above is illustrative, not a selected winner. Admission reopens the complete evaluation and reconstructs its original bound inputs and raw gates; it writes a distinct schema-v1 `ninfer_r9700_dflash_single_resident_admission` authority exclusively. The validation action is read-only and repeats that evidence replay. Pass this admission path as the final-cutover plan's `dflash` input. The consumer recomputes it and binds the exact terminal base/artifact, cache group, attention profile and chunk. Historical evaluations and bare evaluation-only schema-v5 records remain rejected. This authorizes one resident companion profile, not final artifact publication by itself.
 
-The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its
-prefill cases submit `C` Engine requests concurrently. Pure and context decode cases exclude their
-seed prefills and report aggregate batched-decode throughput. Use the serving benchmark below for
-the end-to-end request makespan and request throughput claim.
+The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its prefill cases submit `C` Engine requests concurrently. Pure and context decode cases exclude their seed prefills and report aggregate batched-decode throughput. Use the serving benchmark below for the end-to-end request makespan and request throughput claim.
 
-`run_serve_corpus.py` runs the selected target and published MTP0/MTP3 suites. Pass the sole
-Qwen3.8 R9700 `--artifact` and `--mode mtp0` or
-`--mode mtp3` to run only that suite. The existing `--mode dflash7` is retained historical
-regression support and is not an active production-selection command; the replacement DFlash
-campaign uses K4/W5 and K5/W6. Add
-`--sampling greedy` to force exact argmax while retaining the same fixtures and repetition count.
-Its schema-v6 result and flattened summaries retain the canonical `weights_id` received from the
-schema-v20 serving startup record. The stochastic route pins its complete
-temperature/top-p/top-k/min-p/presence/frequency profile explicitly, so model-default changes do
-not alter the measurement method.
+`run_serve_corpus.py` runs the selected target and published MTP0/MTP3 suites. Pass the sole Qwen3.8 R9700 `--artifact` and `--mode mtp0` or `--mode mtp3` to run only that suite. The existing `--mode dflash7` is retained historical regression support and is not an active production-selection command; the replacement DFlash campaign uses K4/W5 and K5/W6. Add `--sampling greedy` to force exact argmax while retaining the same fixtures and repetition count. Its schema-v6 result and flattened summaries retain the canonical `weights_id` received from the schema-v20 serving startup record. The stochastic route pins its complete temperature/top-p/top-k/min-p/presence/frequency profile explicitly, so model-default changes do not alter the measurement method.
 
-The serving-corpus runner has no chunk default: pass the value from the validated schema-v2
-selection explicitly. Schema-v6 request records retain it, and resume rejects records produced
-with another chunk. This corpus-quality workflow explicitly launches and validates
-`--max-concurrency 1`; concurrency evidence belongs to the separate C=1..4 runner below.
+The serving-corpus runner has no chunk default: pass the value from the validated schema-v2 selection explicitly. Schema-v6 request records retain it, and resume rejects records produced with another chunk. This corpus-quality workflow explicitly launches and validates `--max-concurrency 1`; concurrency evidence belongs to the separate C=1..4 runner below.
 
 ```bash
 NINFER_SELECTED_BUILD=/path/to/selected-build
@@ -1400,8 +1006,7 @@ python3 tools/bench/run_serve_corpus.py \
 
 ## Concurrent serving benchmark
 
-`run_serve_concurrency.py` measures two separate concurrency properties through real loopback
-Chat Completions requests:
+`run_serve_concurrency.py` measures two separate concurrency properties through real loopback Chat Completions requests:
 
 - `decode-saturation` submits one long-decode wave and uses only complete one-second intervals in
   which every decode round has exactly the configured batch size. Ramp-up, prefill, and drain
@@ -1412,11 +1017,7 @@ Chat Completions requests:
   been read. Request bodies are sent in shuffled-order sequence while response waits remain fully
   concurrent, removing client-thread arrival races without serializing inference.
 
-Each concurrency point starts a fresh server because its execution graphs and memory plan are
-startup-fixed. Prefix reuse is disabled, startup and warmup are outside both measurements, and the
-runner writes per-point JSON, raw serving JSONL, and combined JSON/CSV/Markdown summaries.
-The point report records the shuffle seed, dispatch method, shuffled position, and canonical corpus
-position for every request.
+Each concurrency point starts a fresh server because its execution graphs and memory plan are startup-fixed. Prefix reuse is disabled, startup and warmup are outside both measurements, and the runner writes per-point JSON, raw serving JSONL, and combined JSON/CSV/Markdown summaries. The point report records the shuffle seed, dispatch method, shuffled position, and canonical corpus position for every request.
 
 ```bash
 NINFER_SELECTED_PREFILL_CHUNK=1024 # replace with the validated selected value
@@ -1442,31 +1043,13 @@ python3 tools/bench/run_serve_concurrency.py \
   --output profiles/bench/concurrent-corpus
 ```
 
-Dry runs accept a future explicit artifact path and print every server command without opening the
-artifact or starting a process. Use `--kv-capacity auto` when the fixed corpus needs more shared KV than the default 262,144-token
-pool. A point is intentionally not resumable: combining fragments from separate server processes
-would not preserve either a steady interval or one continuous makespan.
-For post-selection evidence, derive `NINFER_SELECTED_PREFILL_CHUNK` from the retained schema-v7
-selection as in the NIAH workflow below; do not rely on this generic runner's 4096 default.
+Dry runs accept a future explicit artifact path and print every server command without opening the artifact or starting a process. Use `--kv-capacity auto` when the fixed corpus needs more shared KV than the default 262,144-token pool. A point is intentionally not resumable: combining fragments from separate server processes would not preserve either a steady interval or one continuous makespan. For post-selection evidence, derive `NINFER_SELECTED_PREFILL_CHUNK` from the retained schema-v7 selection as in the NIAH workflow below; do not rely on this generic runner's 4096 default.
 
 ## Speed suite (live-serve scenario matrix)
 
-`run_speed_suite.py` is the **fast-iteration** tool: it hits the *already-running* serve
-(default `http://127.0.0.1:8081`) — no engine spawn, restart, or reconfiguration — and reports,
-per scenario, prefill tok/s, decode tok/s, time-to-first-token, end-to-end wall, MTP draft
-accept, and an output hash. Unlike the offline `ninfer_bench` matrix above, it measures the
-production serve path and is the right instrument for watching a branch while you edit kernels.
+`run_speed_suite.py` is the **fast-iteration** tool: it hits the *already-running* serve (default `http://127.0.0.1:8081`) — no engine spawn, restart, or reconfiguration — and reports, per scenario, prefill tok/s, decode tok/s, time-to-first-token, end-to-end wall, MTP draft accept, and an output hash. Unlike the offline `ninfer_bench` matrix above, it measures the production serve path and is the right instrument for watching a branch while you edit kernels.
 
-Scenario matrix lives in [`speed_suite_cases.json`](speed_suite_cases.json); fixtures resolve
-relative to the repo root (NIAH / chat-history from `examples/cli/messages/`, the OWUI capture and
-room-puzzle prompt from `tools/bench/fixtures/`). Add your own realistic prompts there as inline
-`prompt` text or committed JSON/`prompt_file` fixtures. Prefill is reported two ways:
-`prefill_tok_s` (overall average: tokens / wall prefill time) and `prefill_tail_tok_s`
-(steady-state rate over the trailing ≤1 s of prefill — the number your kernel work moves; for
-long-context prefill the tail is slower than the average because attention cost grows with
-depth). Both come from the server's `usage.prompt_tokens_details` block; the tail requires the
-current engine build. Prefill rates there cover the computed (non-reused) suffix only — a cached
-prefix is reported as `cached_tokens`, not counted into the rate.
+Scenario matrix lives in [`speed_suite_cases.json`](speed_suite_cases.json); fixtures resolve relative to the repo root (NIAH / chat-history from `examples/cli/messages/`, the OWUI capture and room-puzzle prompt from `tools/bench/fixtures/`). Add your own realistic prompts there as inline `prompt` text or committed JSON/`prompt_file` fixtures. Prefill is reported two ways: `prefill_tok_s` (overall average: tokens / wall prefill time) and `prefill_tail_tok_s` (steady-state rate over the trailing ≤1 s of prefill — the number your kernel work moves; for long-context prefill the tail is slower than the average because attention cost grows with depth). Both come from the server's `usage.prompt_tokens_details` block; the tail requires the current engine build. Prefill rates there cover the computed (non-reused) suffix only — a cached prefix is reported as `cached_tokens`, not counted into the rate.
 
 ```bash
 # Full base set (small ± thinking, multi-turn, tools, 8k/64k NIAH, decode). ~2 min.
@@ -1478,29 +1061,15 @@ python3 tools/bench/run_speed_suite.py --label LABEL --runs 2 --warmup 1
 # Server-side TTFT only:        --no-stream
 ```
 
-Outputs land under `profiles/bench/speed-suite/` (gitignored): a per-run JSON
-(`speed-suite-LABEL.json`, per-case aggregates) and a publishable one-row-per-case CSV
-(`speed-suite-LABEL.csv`) for the progress doc / cross-branch diff. Metrics read the server's
-`usage.prompt_tokens_details` block, so no extra instrumentation is needed.
+Outputs land under `profiles/bench/speed-suite/` (gitignored): a per-run JSON (`speed-suite-LABEL.json`, per-case aggregates) and a publishable one-row-per-case CSV (`speed-suite-LABEL.csv`) for the progress doc / cross-branch diff. Metrics read the server's `usage.prompt_tokens_details` block, so no extra instrumentation is needed.
 
-**Trials:** `--runs N` repeats each case N times *in one session* (mean/median/min/max reported).
-For *independent* trials — cold vs warm start, thermal drift, minutes apart, or a different
-branch/build — run the script N times with N `--label`s and aggregate the per-label JSONs; the
-two are different claims, so keep them separate.
+**Trials:** `--runs N` repeats each case N times *in one session* (mean/median/min/max reported). For *independent* trials — cold vs warm start, thermal drift, minutes apart, or a different branch/build — run the script N times with N `--label`s and aggregate the per-label JSONs; the two are different claims, so keep them separate.
 
-No cross-hardware baseline is admitted for the R9700 product. The 64k NIAH case remains in the base
-set because long-context prefill behavior can be invisible at 8k; publish only results from the
-selected R9700 artifact and current fixed cache profile.
+No cross-hardware baseline is admitted for the R9700 product. The 64k NIAH case remains in the base set because long-context prefill behavior can be invisible at 8k; publish only results from the selected R9700 artifact and current fixed cache profile.
 
 ### NIAH: position matrix (lengths x positions)
 
-The NIAH (needle-in-a-haystack) fixtures form a **position matrix**: 6 lengths x 5 needle
-positions = 30 cells, deterministic and pure, generated by
-[`make_niah_positions.py`](make_niah_positions.py). A cell is a pure function of
-`(length, position)` (re-running reproduces the identical fixture byte-for-byte, so committed
-fixtures are reproducible). Every length is a prefix slice of one shared **master stream** —
-the needle-free 256k master document (one continuous essay, no per-cell content drift) — with
-a single `OFFICIAL RECORD` line spliced in as a standalone line at the requested depth.
+The NIAH (needle-in-a-haystack) fixtures form a **position matrix**: 6 lengths x 5 needle positions = 30 cells, deterministic and pure, generated by [`make_niah_positions.py`](make_niah_positions.py). A cell is a pure function of `(length, position)` (re-running reproduces the identical fixture byte-for-byte, so committed fixtures are reproducible). Every length is a prefix slice of one shared **master stream** — the needle-free 256k master document (one continuous essay, no per-cell content drift) — with a single `OFFICIAL RECORD` line spliced in as a standalone line at the requested depth.
 
 - **Lengths**: 8k / 64k / 100k / 128k / 150k / 200k. **200k (≈200k tokens) is the new long
   end** — it fits the 262k context, unlike 256k (≈277k tokens) which overflows it. So **256k is
@@ -1521,16 +1090,7 @@ python3 tools/bench/make_niah_positions.py --length 8k --position all
 python3 tools/bench/run_niah_check.py --lengths 8k,64k,200k --positions start,q25,mid,q75,end
 ```
 
-Durable evidence binds the completed schema-v7 terminal artifact/cache/execution selection, exact schema-v20
-server-start record, artifact bytes, and server executable bytes. Run this gate only after
-capacity/whole evidence has selected the fixed cache and execution profile; NIAH is a
-post-selection admission gate, not an input to that selection. Build `ninfer-serve` in the winning
-candidate's exact matrix build and use a group/profile-qualified output directory. The binder
-rejects a server whose compiled G16/G32 value group or dense/B128-S16-tau900 attention profile
-differs from the selected candidate. It also rejects any server-start record other than the exact
-262,144-token context, explicit 262,144-token KV capacity, one-request concurrency, the
-schema-v7-selected prefill chunk, and disabled-prefix-reuse envelope below. Disabling reuse ensures shared document
-prefixes cannot turn later cells into suffix prefills.
+Durable evidence binds the completed schema-v7 terminal artifact/cache/execution selection, exact schema-v20 server-start record, artifact bytes, and server executable bytes. Run this gate only after capacity/whole evidence has selected the fixed cache and execution profile; NIAH is a post-selection admission gate, not an input to that selection. Build `ninfer-serve` in the winning candidate's exact matrix build and use a group/profile-qualified output directory. The binder rejects a server whose compiled G16/G32 value group or dense/B128-S16-tau900 attention profile differs from the selected candidate. It also rejects any server-start record other than the exact 262,144-token context, explicit 262,144-token KV capacity, one-request concurrency, the schema-v7-selected prefill chunk, and disabled-prefix-reuse envelope below. Disabling reuse ensures shared document prefixes cannot turn later cells into suffix prefills.
 
 ```bash
 # Prerequisite: the winner's exact build already contains apps/ninfer-serve.
@@ -1538,8 +1098,8 @@ prefixes cannot turn later cells into suffix prefills.
 # If Ninja would do so, stop and establish a separately bound selected-build successor first.
 # Preparation requires the terminal schema-v7 authority and a fresh output directory.
 PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=/path/to/local/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages \
-/home/maintainer/.local/bin/python3.11 -m tools.bench.prepare_selected_niah \
+PYTHONPATH=/path/to/reference-environment/lib/python3.11/site-packages \
+python3.11 -m tools.bench.prepare_selected_niah \
   --selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --out profiles/bench/r9700-selected-niah-20260921
 
@@ -1547,24 +1107,10 @@ PYTHONPATH=/path/to/local/ninfer/out/numerical-reference-venv/lib/python3.11/sit
 bash profiles/bench/r9700-selected-niah-20260921/commands.sh
 ```
 
-The preparer resolves the terminal winner rather than mapping filenames: it reopens both selected
-schema-v14 matrices and binds their artifact, benchmark/build, cache group, attention profile,
-selected chunk, and hybrid width planner when applicable. The generated command retains the
-explicit preparation interpreter, uses the already-built server and one request lane, and publishes a separate admission
-record only after all five responses and their fresh-prefill request-log records validate.
+The preparer resolves the terminal winner rather than mapping filenames: it reopens both selected schema-v14 matrices and binds their artifact, benchmark/build, cache group, attention profile, selected chunk, and hybrid width planner when applicable. The generated command retains the explicit preparation interpreter, uses the already-built server and one request lane, and publishes a separate admission record only after all five responses and their fresh-prefill request-log records validate.
 
-**Gate semantics (read before interpreting matrix results).** The default check is the
-*exact-format* needle `ORCHID=493817; COLOR=COBALT` — it passes only if the model both
-retrieves the needle AND emits the exact answer form. Two levers: `run_niah_check.py
---needle 493817` is a *recall-only* gate (the value must appear in the answer, format
-ignored — the pure recall signal), and `--runs N` repeats each cell for a per-cell pass
-rate (e.g. 5/5). The console prints a `[FAIL] <case>: n/N runs failed to retrieve the
-needle` line per failing case plus a total failure count on the final verdict; per-cell
-retrieved/total and answer snippets are also in the JSON record. The default gate is the
-light **mid-spine** (8k + 64k, fast); the matrix runs on demand.
+**Gate semantics (read before interpreting matrix results).** The default check is the *exact-format* needle `ORCHID=493817; COLOR=COBALT` — it passes only if the model both retrieves the needle AND emits the exact answer form. Two levers: `run_niah_check.py --needle 493817` is a *recall-only* gate (the value must appear in the answer, format ignored — the pure recall signal), and `--runs N` repeats each cell for a per-cell pass rate (e.g. 5/5). The console prints a `[FAIL] <case>: n/N runs failed to retrieve the needle` line per failing case plus a total failure count on the final verdict; per-cell retrieved/total and answer snippets are also in the JSON record. The default gate is the light **mid-spine** (8k + 64k, fast); the matrix runs on demand.
 
-The checked NIAH cases are behavioral gates, not numerical attention oracles. The 8k and 200k
-ladders and the complete 6-length x 5-position matrix are optional broader coverage for the current
-XAttention admission. Run the full matrix as a post-change regression after a production attention
-change and preserve the per-cell outputs with the corresponding hardware, artifact, and
-server-build provenance.
+The checked NIAH cases are behavioral gates, not numerical attention oracles. The 8k and 200k ladders and the complete 6-length x 5-position matrix are optional broader coverage for the current XAttention admission. Run the full matrix as a post-change regression after a production attention change and preserve the per-cell outputs with the corresponding hardware, artifact, and server-build provenance.
+
+Benchmark HTTP credentials come only from explicit CLI options or the documented `NINFER_API_KEY` / `LLAMA_CPP_LOCAL_API_KEY` environment variables. The runners do not search personal Docker directories or parent-directory `.env` files.

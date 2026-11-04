@@ -7,12 +7,18 @@ import argparse
 import hashlib
 import json
 import math
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.r9700.host import power_profile_path
+
 SCHEMA = "ninfer_r9700_split512_attention_qualification"
-POWER_PATH = "/sys/class/drm/card2/device/power_dpm_force_performance_level"
+POWER_PATH = str(power_profile_path())
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_PATHS = {
     "qualifier": "tools/r9700/split512_attention_qual.hip",

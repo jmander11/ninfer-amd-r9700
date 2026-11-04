@@ -11,13 +11,10 @@ import tempfile
 from pathlib import Path
 
 from tools.bench.prepare_selected_vision_diagnostic import (
-    FRONTEND_PYTHON,
-    GPU_PYTHON,
     MEDIA,
     MESSAGES,
     REFERENCE_AUTHORITIES,
     REPO,
-    SOURCE,
     file_identity,
     inspect_python,
     resolve_route,
@@ -68,11 +65,10 @@ def validate_closure(root: Path, plan_path: Path) -> dict[Path, str]:
     return entries
 
 
-def _expected_source() -> dict[str, object]:
-    identity = validate_source_receipt()
+def _expected_source(identity: dict[str, object]) -> dict[str, object]:
     receipt = json.loads(Path(identity["receipt"]["path"]).read_text(encoding="utf-8"))
     return {
-        "path": str(SOURCE.resolve()),
+        "path": identity["source"],
         "config_sha256": receipt["metadata"]["config"]["sha256"],
         "index_sha256": receipt["metadata"]["index"]["sha256"],
         "indexed_tensor_count": receipt["metadata"]["indexed_tensor_count"],
@@ -98,13 +94,17 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     recomputed = route_resolver(Path(route["terminal_selection"]["path"]))
     if recomputed != route:
         raise ValueError("Vision route differs from current schema-v7 winner")
-    source_identity = validate_source_receipt()
+    source_plan = plan.get("source_checkpoint", {})
+    source_identity = validate_source_receipt(
+        Path(source_plan["source"]), Path(source_plan["receipt"]["path"])
+    )
     if plan.get("source_checkpoint") != source_identity:
         raise ValueError("Vision plan BF16 source receipt changed")
     if plan.get("frontend_python") != inspect_python(
-        FRONTEND_PYTHON, ("torch", "safetensors", "transformers", "torchvision", "PIL")
+        Path(plan["frontend_python"]["launcher"]["path"]),
+        ("torch", "safetensors", "transformers", "torchvision", "PIL"),
     ) or plan.get("gpu_python") != inspect_python(
-        GPU_PYTHON, ("torch", "safetensors", "transformers")
+        Path(plan["gpu_python"]["launcher"]["path"]), ("torch", "safetensors", "transformers")
     ):
         raise ValueError("Vision Python execution environment changed")
     fixture = plan.get("fixture", {})
@@ -180,7 +180,7 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     raw_bytes = raw_path.read_bytes()
     raw = json.loads(raw_bytes)
     artifact = raw.get("artifact", {})
-    expected_source = _expected_source()
+    expected_source = _expected_source(source_identity)
     tracer = plan.get("trace_executable", {})
     tracer_path = Path(tracer.get("path", ""))
     if (
@@ -228,7 +228,7 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     for section in (
         "production_vs_artifact_reference",
         "production_local_op_oracles",
-        "artifact_vs_source_bf16",
+        "production_vs_source_bf16",
     ):
         report = raw.get(section, {})
         rows = report.get("comparisons")
@@ -257,7 +257,7 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
         profile = {
             "production_vs_artifact_reference": "production",
             "production_local_op_oracles": "local",
-            "artifact_vs_source_bf16": "source",
+            "production_vs_source_bf16": "source",
         }[section]
         try:
             evaluated = summarize(rows, profile=profile)

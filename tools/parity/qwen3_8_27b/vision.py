@@ -15,7 +15,7 @@ from pathlib import Path
 import torch
 from safetensors import safe_open
 
-from tools.artifact import dequantize_row_split
+from tools.artifact import dequantize_q4_n16k16, dequantize_row_split
 from tools.artifact.numeric import QUANT_FORMATS
 from tools.parity.qwen3_8_27b.vision_contract import (
     CRITERIA,
@@ -47,6 +47,7 @@ from tools.reference.qwen3.common.vision_ops import (
     interpolate_position_embedding,
     layer_norm,
     vision_attention,
+    vision_attention_oracle,
     vision_cu_seqlens,
     vision_position_ids,
 )
@@ -281,10 +282,14 @@ def _vision_weight_report(binding: VisionArtifactBinding, model) -> dict[str, ob
     )
     try:
         for block, source in _vision_weight_pairs(binding, model):
-            actual = (
-                store.tensor(block).cpu()
-                if block.layout == "contiguous-le-v1"
-                else dequantize_row_split(
+            if block.layout == "contiguous-le-v1":
+                actual = store.tensor(block).cpu()
+            elif block.layout == "r9700-q4g64-n16-k16-v1":
+                actual = dequantize_q4_n16k16(
+                    binding.payload(block), block.shape, device="cpu", dtype=torch.float32
+                )
+            else:
+                actual = dequantize_row_split(
                     binding.payload(block),
                     block.format,
                     block.shape,
@@ -292,7 +297,6 @@ def _vision_weight_report(binding: VisionArtifactBinding, model) -> dict[str, ob
                     dtype=torch.float32,
                     compiled=False,
                 )
-            )
             expected = source.detach().cpu().reshape(actual.shape)
             name = block.descriptor.name
             if block.layout == "contiguous-le-v1":
@@ -535,17 +539,6 @@ def _read_tensor(root: Path, record: dict[str, object]) -> torch.Tensor:
     return value.reshape(record["shape"]).clone()
 
 
-def _write_bf16(path: Path, value: torch.Tensor) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = value.detach().to(device="cpu", dtype=torch.bfloat16).contiguous()
-    path.write_bytes(data.view(torch.uint16).numpy().tobytes())
-
-
-def _read_bf16(path: Path, shape: torch.Size) -> torch.Tensor:
-    value = torch.frombuffer(bytearray(path.read_bytes()), dtype=torch.bfloat16)
-    return value.reshape(shape).clone()
-
-
 def _source_forward(
     model,
     pixels: torch.Tensor,
@@ -623,6 +616,28 @@ def _source_forward(
     return x
 
 
+def linear_oracle(binding, x: torch.Tensor, block) -> torch.Tensor:
+    """Complete FP64 dot product from public BF16 inputs and exact stored weights.
+
+    No production activation codec, staging cast or reduction tree is reproduced.
+    The output remains FP64: BF16 output rounding is part of the implementation error.
+    """
+    payload = binding.payload(block)
+    if block.layout == "contiguous-le-v1" and block.format == "BF16":
+        weight = (
+            torch.frombuffer(bytearray(payload), dtype=torch.bfloat16).reshape(block.shape).double()
+        )
+    elif block.layout == "r9700-q4g64-n16-k16-v1":
+        weight = dequantize_q4_n16k16(payload, block.shape, device="cpu", dtype=torch.float64)
+    elif block.layout == "row-split-k128-v1":
+        weight = dequantize_row_split(
+            payload, block.format, block.shape, device="cpu", dtype=torch.float64, compiled=False
+        )
+    else:
+        raise ValueError(f"unsupported Vision Linear oracle layout: {block.layout}")
+    return x.cpu().to(torch.float64) @ weight.t()
+
+
 def _artifact_local_oracles(
     encoder: VisionEncoder,
     trace_root: Path,
@@ -633,9 +648,8 @@ def _artifact_local_oracles(
 ) -> list[dict[str, object]]:
     """Check each production boundary from its captured production inputs.
 
-    This deliberately does not carry the Python result into the next operation. Each logical Op
-    receives the C++ tensor from the immediately preceding boundary, so a discrepancy is charged
-    to the Op that creates it instead of being amplified through the remaining tower.
+    Each Op receives the captured C++ output of the preceding Op. This isolates its
+    numerical discrepancy instead of accumulating errors down the tower.
     """
 
     comparisons: list[dict[str, object]] = []
@@ -652,7 +666,7 @@ def _artifact_local_oracles(
     vision = encoder.binding.vision
     actual_pixels = check("input/patch_f32", pixels.to(device=device, dtype=torch.float32))
     x = check("input/patch_bf16", actual_pixels.to(torch.bfloat16))
-    x = check("patch/linear", linear(x, encoder._weight(vision.patch_embedding)))
+    x = check("patch/linear", linear_oracle(encoder.binding, x, vision.patch_embedding))
     x = check("patch/bias", add_bias(x, encoder._weight(vision.patch_embedding_bias)))
     patch_count = pixels.shape[0]
     position_indices = torch.tensor(
@@ -684,7 +698,7 @@ def _artifact_local_oracles(
                 encoder._weight(layer.norm1_bias),
             ),
         )
-        qkv = check(prefix + "qkv_linear", linear(h, encoder._weight(layer.attention_qkv)))
+        qkv = check(prefix + "qkv_linear", linear_oracle(encoder.binding, h, layer.attention_qkv))
         qkv = check(
             prefix + "qkv_bias",
             add_bias(qkv, encoder._weight(layer.attention_qkv_bias)),
@@ -697,11 +711,11 @@ def _artifact_local_oracles(
         v = check(prefix + "value", v_input)
         attended = check(
             prefix + "attention",
-            vision_attention(q, k, v, cu_seqlens).reshape(-1, VISION_CFG.hidden),
+            vision_attention_oracle(q, k, v, cu_seqlens).reshape(-1, VISION_CFG.hidden),
         )
         projected = check(
             prefix + "projection_linear",
-            linear(attended, encoder._weight(layer.attention_output)),
+            linear_oracle(encoder.binding, attended, layer.attention_output),
         )
         projected = check(
             prefix + "projection_bias",
@@ -716,10 +730,10 @@ def _artifact_local_oracles(
                 encoder._weight(layer.norm2_bias),
             ),
         )
-        h = check(prefix + "fc1_linear", linear(h, encoder._weight(layer.mlp_fc1)))
+        h = check(prefix + "fc1_linear", linear_oracle(encoder.binding, h, layer.mlp_fc1))
         h = check(prefix + "fc1_bias", add_bias(h, encoder._weight(layer.mlp_fc1_bias)))
         h = check(prefix + "gelu", gelu(h, approximate=True))
-        h = check(prefix + "fc2_linear", linear(h, encoder._weight(layer.mlp_fc2)))
+        h = check(prefix + "fc2_linear", linear_oracle(encoder.binding, h, layer.mlp_fc2))
         h = check(prefix + "fc2_bias", add_bias(h, encoder._weight(layer.mlp_fc2_bias)))
         x = check(prefix + "mlp_residual", residual_add(x, h))
 
@@ -733,10 +747,10 @@ def _artifact_local_oracles(
         ),
     )
     x = check("merger/grouped", x.reshape(-1, VISION_CFG.merger_hidden))
-    x = check("merger/fc1_linear", linear(x, encoder._weight(merger.fc1)))
+    x = check("merger/fc1_linear", linear_oracle(encoder.binding, x, merger.fc1))
     x = check("merger/fc1_bias", add_bias(x, encoder._weight(merger.fc1_bias)))
     x = check("merger/gelu", gelu(x, approximate=False))
-    x = check("merger/fc2_linear", linear(x, encoder._weight(merger.fc2)))
+    x = check("merger/fc2_linear", linear_oracle(encoder.binding, x, merger.fc2))
     check("merger/fc2_bias", add_bias(x, encoder._weight(merger.fc2_bias)))
     actual_names = tuple(value["name"] for value in comparisons)
     if actual_names != EXPECTED_TRACE_NAMES:
@@ -968,8 +982,7 @@ def run_campaign(args: argparse.Namespace, trace_root: Path) -> dict[str, object
         )
         production_comparisons: list[dict[str, object]] = []
         local_oracle_comparisons: list[dict[str, object]] = []
-        with tempfile.TemporaryDirectory(prefix="ninfer-vision-artifact-") as artifact_tmp:
-            artifact_root = Path(artifact_tmp)
+        with torch.inference_mode():
             with (
                 VisionEncoder(binding, args.device, compile_codec=True) as encoder,
                 torch.inference_mode(),
@@ -986,7 +999,6 @@ def run_campaign(args: argparse.Namespace, trace_root: Path) -> dict[str, object
                         production_comparisons.append(
                             {"item": item, "name": name, **metrics(cpp, value)}
                         )
-                        _write_bf16(artifact_root / f"item_{item:02d}" / (name + ".bf16"), value)
 
                     encoder.encode(
                         pixels if modality == "image" else None,
@@ -1022,11 +1034,9 @@ def run_campaign(args: argparse.Namespace, trace_root: Path) -> dict[str, object
                         name: str, value: torch.Tensor, *, item=item, names=source_names
                     ) -> None:
                         _record_ordered_tap(names, name, item=item, label="source schedule")
-                        artifact = _read_bf16(
-                            artifact_root / f"item_{item:02d}" / (name + ".bf16"), value.shape
-                        )
+                        native = _read_tensor(trace_root, records[(item, name)])
                         source_comparisons.append(
-                            {"item": item, "name": name, **metrics(artifact, value)}
+                            {"item": item, "name": name, **metrics(native, value)}
                         )
 
                     manual = _source_forward(source, pixels, grid.to(args.device), source_tap)
@@ -1087,7 +1097,7 @@ def run_campaign(args: argparse.Namespace, trace_root: Path) -> dict[str, object
         "artifact_weights_vs_source_bf16": weight_report,
         "production_vs_artifact_reference": production,
         "production_local_op_oracles": local_oracles,
-        "artifact_vs_source_bf16": source_drift,
+        "production_vs_source_bf16": source_drift,
         "source_manual_vs_hf_final": {
             "passed": source_hf_passed,
             "comparisons": source_hf_final,

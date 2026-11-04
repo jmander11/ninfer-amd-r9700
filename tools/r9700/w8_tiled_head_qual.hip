@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include "ops/r9700/linear/w8_tiled_head.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
 #include "ninfer/ops/linear.h"
@@ -36,7 +37,7 @@ std::string read(const std::filesystem::path& path) {
     return value;
 }
 
-std::filesystem::path pci_path() { return "/sys/bus/pci/devices/0000:13:00.0"; }
+std::filesystem::path pci_path() { return ninfer::r9700_qualification::configured_pci_path(); }
 
 void power() {
     require(read(pci_path() / "power_dpm_force_performance_level") == "auto",
@@ -443,8 +444,8 @@ int main(int argc, char** argv) {
         check(hipGetDeviceProperties(&props, 0));
         char pci[32]{};
         check(hipDeviceGetPCIBusId(pci, sizeof(pci), 0));
-        require(std::string(pci) == "0000:13:00.0" && std::string(props.gcnArchName) == "gfx1201" &&
-                    props.warpSize == 32,
+        require(std::string(pci) == ninfer::r9700_qualification::configured_pci_bus_id() &&
+                    std::string(props.gcnArchName) == "gfx1201" && props.warpSize == 32,
                 "HIP device mismatch");
         hipStream_t stream{};
         check(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -462,7 +463,8 @@ int main(int argc, char** argv) {
                    << "\"relative_rms_limit\":0.02,\"gross_rms_limit\":0.10,"
                    << "\"exact_bf16_pointwise_criterion\":\"abs_error <= 1e-5 + 0.0079 * "
                       "abs(reference)\","
-                   << "\"pci\":\"0000:13:00.0\",\"target\":\"gfx1201\",\"power\":\"auto\","
+                   << "\"pci\":\"" << ninfer::r9700_qualification::configured_pci_bus_id()
+                   << "\",\"target\":\"gfx1201\",\"power\":\"auto\","
                    << "\"scrub_bytes\":83886080,\"timing\":\"complete public Linear graph, "
                       "same-stream events, milliseconds per call; ordinary-only eight balanced "
                       "pairs, default T1..6 seven alternating pairs, T17/129 three short pairs; "

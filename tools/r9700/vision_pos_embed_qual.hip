@@ -108,7 +108,8 @@ void run_case(const std::vector<hip_bfloat16>& table, int patches, hipStream_t s
         squared_error += error * error;
         squared_oracle += oracle[index] * oracle[index];
         max_abs = std::max(max_abs, std::abs(error));
-        if (std::abs(error) > 1.0e-5 + 3.95e-3 * std::abs(oracle[index])) {
+        if (!std::isfinite(actual) || !std::isfinite(oracle[index]) ||
+            std::abs(error) > 1.0e-5 + 3.95e-3 * std::abs(oracle[index])) {
             fail("vision_pos_embed pointwise FP64-oracle criterion failed at P=" +
                  std::to_string(patches) + " index=" + std::to_string(index));
         }

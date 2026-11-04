@@ -1,3 +1,4 @@
+#include "targets/qwen3_8_27b/impl/config.h"
 #include "targets/qwen3_8_27b/impl/load/bindings.h"
 
 #include "artifact/typed_binding.h"
@@ -57,6 +58,7 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
     case WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation:
         return source_q4 ? NumericFormat::Q4G64_F16S : NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700Lq4:
+    case WeightsProfile::R9700Lq4VisionBf16:
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) case WeightsProfile::symbol:
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
@@ -317,11 +319,46 @@ NumericFormat token_embedding_format(WeightsProfile profile) {
     return base_token_embedding_format(profile);
 }
 
+std::vector<artifact::TensorContentSelection>
+cache_tensor_selections(const artifact::Reader& reader, qwen3::StartupFeatures features) {
+    std::vector<artifact::TensorContentSelection> selections;
+    for (const auto& object : reader.objects()) {
+        const auto* tensor = std::get_if<artifact::TensorDescriptor>(&object);
+        if (tensor == nullptr) { continue; }
+        const std::string_view name = tensor->name;
+        const auto whole            = [&] { selections.push_back({name, std::nullopt}); };
+        const auto rows             = [&](std::uint64_t first, std::uint64_t count) {
+            selections.push_back({name, artifact::TensorRowRange{first, count}});
+        };
+        if (name.starts_with("text/")) {
+            if (name != "text/output_head" && name != "text/draft_head" &&
+                name != "text/draft_head_token_ids") {
+                whole();
+            }
+        } else if (name.starts_with("vision/") || (features.mtp() && name.starts_with("mtp/"))) {
+            // A directory can retain media entries across Vision on/off reopens. Native MTP
+            // autoregressive hidden states feed later K/V, so its complete block produces state.
+            whole();
+        } else if (features.dflash() && name.starts_with("dflash/")) {
+            if (name == "dflash/feature_projection" || name == "dflash/context_norm" ||
+                name.ends_with("/attention/key_norm")) {
+                whole();
+            } else if (name.ends_with("/attention/query_key_value")) {
+                // Context append projects the same target features independently at each
+                // layer. Query, selector, output, and MLP paths produce proposals only.
+                rows(DFlashConfig::query_size, 2 * DFlashConfig::kv_size);
+            }
+        }
+    }
+    return selections;
+}
+
 ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_profile,
                                qwen3::StartupFeatures features) {
     // An LQ4 Text profile binds exactly its base recipe except for the Text-layer matrices
     // outside its own FP8 protection set and the output head.
     const WeightsProfile text_profile = weights_profile;
+    const bool vision_bf16            = weights_profile == WeightsProfile::R9700Lq4VisionBf16;
     const bool lq4_text               = is_lq4_text_profile(weights_profile);
     if (lq4_text) weights_profile = fp8_capped_base_profile(weights_profile);
     (void)matrix_format(weights_profile, false);
@@ -410,9 +447,9 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     const artifact::TensorPlacement vision_placement =
         features.vision ? artifact::TensorPlacement::Device
                         : artifact::TensorPlacement::ValidateOnly;
-    const qwen3::VisionMatrixFormats vision_formats{.source_q4 =
-                                                        matrix_format(weights_profile, true),
-                                                    .other = matrix_format(weights_profile, false)};
+    const qwen3::VisionMatrixFormats vision_formats{
+        .source_q4 = vision_bf16 ? NumericFormat::BF16 : matrix_format(weights_profile, true),
+        .other     = vision_bf16 ? NumericFormat::BF16 : matrix_format(weights_profile, false)};
     out.vision_backbone = qwen3::bind_vision_backbone(binder, vision_formats, vision_placement);
     out.vision_merger_input =
         qwen3::bind_vision_merger_input(binder, vision_formats, vision_placement);

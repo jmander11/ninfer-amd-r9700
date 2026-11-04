@@ -20,9 +20,10 @@ if str(ROOT) not in sys.path:
 
 from tools.bench.analyze_whole_profile import analyze  # noqa: E402  sys.path bootstrap
 from tools.bench.validate_profile_trace import _parse_database  # noqa: E402  sys.path bootstrap
+from tools.r9700.host import power_profile_path  # noqa: E402
 
 ROCPROFV3 = Path("/opt/rocm/bin/rocprofv3")
-POWER_PROFILE = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
+POWER_PROFILE = power_profile_path()
 WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 OUTPUT_STEM = "post_mlp_fusion_hybrid_p2048"
 STAGES = ("post_mixer", "attention", "gdn")

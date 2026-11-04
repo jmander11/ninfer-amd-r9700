@@ -84,11 +84,6 @@ class PublishLowContextPrefillTest(unittest.TestCase):
             check=False,
         )
         self.assertEqual(command.returncode, 0, command.stderr)
-        script = (
-            REPO / "profiles/bench/low-context-selected-ladder-20260905/run-and-publish.sh"
-        ).read_text(encoding="utf-8")
-        self.assertIn("python3 -m tools.bench.publish_low_context_prefill", script)
-        self.assertNotIn('python3 "$publisher"', script)
 
 
 if __name__ == "__main__":

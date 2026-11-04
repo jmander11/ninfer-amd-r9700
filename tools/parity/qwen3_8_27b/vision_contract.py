@@ -1,6 +1,6 @@
 """Host-only report inventory for the fixed Qwen3.8 Vision diagnostic."""
 
-REPORT_FORMAT = "ninfer_vision_intermediate_validation_v2"
+REPORT_FORMAT = "ninfer_vision_intermediate_validation_v3"
 GATE = "all 471 boundaries, exact metadata, finite metrics and explicit numerical criteria"
 
 
@@ -63,12 +63,14 @@ PREPROCESSING_ABSOLUTE_LIMIT = 7.844e-3
 PREPROCESSING_RELATIVE_RMSE_LIMIT = 1.0e-4
 POSITION_WEIGHT_ABSOLUTE_LIMIT = 6.0e-6
 # Q4/Q5 matrices appear twice per residual block. A root-sum-square accumulation of a 5% Q4
-# weight profile across 54 branches is about 37%. The final merger is materially tighter because
-# LayerNorm bounds its input and both merger matrices are W8.
+# weight profile across 54 branches is about 37%. This intermediate guard detects gross drift;
+# the final embedding has a separate, tighter engineering admission goal.
 SOURCE_RELATIVE_RMSE_LIMIT = 3.8e-1
 SOURCE_COSINE_MINIMUM = 0.93
-SOURCE_FINAL_RELATIVE_RMSE_LIMIT = 2.5e-1
-SOURCE_FINAL_COSINE_MINIMUM = 0.97
+# Native final embeddings versus the original BF16 source. This engineering gate is
+# supplemented by per-Op oracles and visual task checks; it is not a task-accuracy guarantee.
+SOURCE_FINAL_RELATIVE_RMSE_LIMIT = 5.0e-2
+SOURCE_FINAL_COSINE_MINIMUM = 0.999
 GROUP_ACTIVITY_FLOOR = 5.0e-2
 
 CRITERIA = {

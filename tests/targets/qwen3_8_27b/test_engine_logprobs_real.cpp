@@ -1,12 +1,8 @@
-// Real-artifact qualification of token logprobs through the public Engine: every decode route
-// that can produce a token (prefill sample, ordinary decode, DFlash chain verify,
-// MTP, adaptive and eager rounds, concurrent rows) must report that token's log-probability under
-// the target model.
+// Checks target-model token log-probabilities through the public Engine for prefill sampling,
+// ordinary decode, DFlash chain verification, MTP, adaptive/eager rounds and concurrent rows.
 //
-// Two independent references are used. Greedy decoding emits the argmax of the same logits the
-// record ranks, so the emitted token must be rank 0 exactly; a record scored at the wrong
-// verification column or row fails this. Teacher-forced Engine::score on a non-speculative
-// Engine recomputes each token's NLL along the ordinary route.
+// Greedy tokens must have rank 0 in their recorded logits, catching wrong verify columns or rows.
+// A non-speculative Engine::score independently recomputes each token's teacher-forced NLL.
 
 #include "ninfer/engine.h"
 
@@ -30,10 +26,9 @@ constexpr std::uint32_t kOutputs = 48;
 // Same-route agreement: the scoring Engine replays the ordinary decode that produced the record,
 // so only the two FP32 log-sum-exp reductions differ.
 constexpr double kSameRouteNllTolerance = 1.0e-4;
-// A speculative verify evaluates the target model on its own activation profile (packed widths,
-// quantized verify activations), a deliberately different numeric route from ordinary decode, so
-// agreement is behavioral. A record scored at the wrong column or row is off by whole nats on
-// most tokens, which the mean bounds; the per-token cap bounds isolated corruption.
+// Speculative verification uses packed widths and quantized activations, so its NLL can differ
+// from ordinary decode. The mean bound catches wrong columns or rows (usually off by whole nats);
+// the per-token cap catches isolated corruption.
 constexpr double kCrossRouteMeanNllTolerance = 0.15;
 constexpr double kCrossRouteMaxNllTolerance  = 1.0;
 

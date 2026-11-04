@@ -120,6 +120,9 @@ RoundStateLayout begin_round_state_layout(LayoutBuilder& builder, const RoundSta
     layout.text_kv_table_row    = add_tensor(builder, DType::I32, {1}, "step Text KV table row");
     layout.backend_kv_table_row = add_tensor(builder, DType::I32, {1}, "step backend KV table row");
     const auto batch = checked_i32(spec.batch_capacity, "RoundState batch capacity exceeds int32");
+    layout.nonfinite_logits = add_tensor(
+        builder, DType::I32, {static_cast<std::int32_t>(kDFlashDecodeMaximumWidth), batch},
+        "eligible nonfinite target logits");
     layout.text_kv_status = add_tensor(builder, DType::I32, {batch}, "Text KV transaction status");
     layout.text_kv_cursor = add_tensor(builder, DType::I32, {batch}, "Text KV segmented cursor");
     layout.backend_kv_status =
@@ -462,6 +465,7 @@ RoundState::RoundState(DeviceSpan backing, const RoundStateLayout& layout) {
     logits               = layout.logits.bind(backing);
     text_kv_table_row    = layout.text_kv_table_row.bind(backing);
     backend_kv_table_row = layout.backend_kv_table_row.bind(backing);
+    nonfinite_logits     = layout.nonfinite_logits.bind(backing);
     text_kv_status       = layout.text_kv_status.bind(backing);
     text_kv_cursor       = layout.text_kv_cursor.bind(backing);
     backend_kv_status    = layout.backend_kv_status.bind(backing);

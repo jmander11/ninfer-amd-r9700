@@ -14,10 +14,20 @@ import math
 import statistics
 import struct
 import subprocess
+import sys
 from pathlib import Path
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.r9700.host import power_profile_path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
 ROOT = Path(__file__).resolve().parents[2]
-POWER = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
+POWER = power_profile_path()
 PRECISION = (
     "q4_activation_bits",
     "q4_activation_profile",

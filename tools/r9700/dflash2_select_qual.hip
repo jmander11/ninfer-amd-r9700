@@ -597,6 +597,84 @@ void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
     }
 }
 
+// Legal positive temperatures can have an infinite FP32 reciprocal. The complete selector
+// must still publish the normalized FP64 softmax law, including equal maxima and represented
+// BF16 subnormal score differences. Zero Markov inputs isolate the temperature boundary.
+void run_tiny_temperature(ninfer::DeviceContext& device, const ProjectionFixture& projection) {
+    constexpr int tokens = 2, batch = 2, vocab = kTop;
+    constexpr float temperature = 1.0e-40F;
+    const float subnormal       = std::bit_cast<float>(0x00010000U); // smallest BF16 subnormal
+    std::vector<hip_bfloat16> logits(vocab * tokens * batch, hip_bfloat16(-1.0F));
+    for (int b = 0; b < batch; ++b)
+        for (int t = 0; t < tokens; ++t) {
+            const auto column      = static_cast<std::size_t>(b * tokens + t);
+            logits[column * vocab] = logits[column * vocab + 1U] = hip_bfloat16(0.0F);
+            // Row one also gives a third candidate non-negligible probability at this T.
+            if (b == 1) logits[column * vocab + 2U] = hip_bfloat16(-subnormal);
+        }
+    auto d_logits    = upload(logits);
+    auto d_hidden    = upload(std::vector<hip_bfloat16>(kH * tokens * batch, hip_bfloat16(0.0F)));
+    auto d_codebook  = upload(std::vector<hip_bfloat16>(kR * vocab, hip_bfloat16(0.0F)));
+    auto d_anchors   = upload(std::vector<std::int32_t>(batch, 0));
+    auto d_positions = upload(std::vector<std::int32_t>(batch, 17));
+    ninfer::DeviceBuffer d_path(tokens * batch * sizeof(std::int32_t));
+    ninfer::DeviceBuffer d_ids(vocab * tokens * batch * sizeof(std::int32_t));
+    ninfer::DeviceBuffer d_q(vocab * tokens * batch * sizeof(float));
+    ninfer::Tensor logit_tensor(d_logits.data(), ninfer::DType::BF16, {vocab, tokens, batch});
+    ninfer::Tensor hidden(d_hidden.data(), ninfer::DType::BF16, {kH, tokens, batch});
+    ninfer::Tensor codebook(d_codebook.data(), ninfer::DType::BF16, {kR, vocab});
+    ninfer::Tensor anchors(d_anchors.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor positions(d_positions.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor path(d_path.data(), ninfer::DType::I32, {tokens, batch});
+    ninfer::Tensor ids(d_ids.data(), ninfer::DType::I32, {vocab, tokens, batch});
+    ninfer::Tensor proposal(d_q.data(), ninfer::DType::FP32, {vocab, tokens, batch});
+    ninfer::WorkspaceArena workspace(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
+        projection.bf16_view.qtype, tokens, tokens, batch));
+    for (bool p_less : {false, true}) {
+        std::vector<ninfer::ops::SamplingConfig> configs(batch);
+        for (int b = 0; b < batch; ++b) {
+            configs[b].temperature       = p_less ? 2.0F : temperature;
+            configs[b].p_less            = p_less ? 1 : 0;
+            configs[b].draft_temperature = temperature;
+            configs[b].seed              = 31 + b;
+        }
+        auto d_configs = upload(configs);
+        ninfer::ops::dflash2_path_select(
+            logit_tensor, hidden, projection.bf16_view, codebook, codebook, anchors, positions,
+            static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()), path, workspace,
+            device.stream, nullptr, &ids, &proposal);
+        device.synchronize();
+        const auto actual_ids = download<std::int32_t>(d_ids, vocab * tokens * batch);
+        const auto actual_q   = download<float>(d_q, vocab * tokens * batch);
+        const auto picks      = download<std::int32_t>(d_path, tokens * batch);
+        for (int column = 0; column < tokens * batch; ++column) {
+            std::array<double, vocab> law{};
+            double denominator = 0.0;
+            for (int candidate = 0; candidate < vocab; ++candidate) {
+                law[candidate] = std::exp(bf16_value(logits[column * vocab + candidate]) /
+                                          static_cast<double>(temperature));
+                denominator += law[candidate];
+            }
+            double sum             = 0.0;
+            bool picked_in_support = false;
+            for (int candidate = 0; candidate < vocab; ++candidate) {
+                const auto index = column * vocab + candidate;
+                const int id     = actual_ids[index];
+                const float q    = actual_q[index];
+                if (id < 0 || id >= vocab || !std::isfinite(q) || q < 0.0F ||
+                    std::abs(static_cast<double>(q) - law[id] / denominator) > 2.0e-5) {
+                    fail("tiny-temperature selector q differs from the finite FP64 law");
+                }
+                sum += q;
+                picked_in_support |= picks[column] == id && q > 0.0F;
+            }
+            if (std::abs(sum - 1.0) > 2.0e-5 || !picked_in_support)
+                fail("tiny-temperature selector proposal is not a normalized sampling law");
+        }
+    }
+    std::cout << "dflash2-tiny-temperature: PASS ordinary+p-less ties/subnormal-delta FP64-q\n";
+}
+
 // P-less rows draw each hop from the 16-candidate softmax at their draft temperature and record
 // that law as q. Following the kernel's own picks, q must equal the FP64 softmax of the Markov
 // scores, every pick must lie in the support, and over independent seeds the first hop's picks
@@ -967,6 +1045,7 @@ int main(int argc, char** argv) {
         run_chain(device, corpus, projection, data, ProjectionKind::Q4, false);
         run_chain(device, corpus, projection, data, ProjectionKind::Q4, true);
         run_chain(device, corpus, projection, data, ProjectionKind::Q4, true, true, true);
+        run_tiny_temperature(device, projection);
         run_sampled_chain(device, corpus, projection, data);
         run_tree(device, corpus, projection, data, ProjectionKind::W8);
         run_tree(device, corpus, projection, data, ProjectionKind::Q4);

@@ -14,11 +14,9 @@
 
 namespace ninfer::ops::r9700::gdn {
 
-// Correctness-first HIP contracts for the Qwen Gated DeltaNet semantic boundary. Every pointer
-// is device-resident, feature-fastest, and every nonempty launch has an explicit HIP stream.
-// The direct routes deliberately retain represented BF16 projections and FP32 persistent state;
-// they do not depend on a retired backend's Tensor/Core abstractions or a separate projection
-// implementation.
+// Qwen Gated DeltaNet HIP operations. Pointers are device-resident with feature-fastest storage;
+// every nonempty launch takes an explicit stream. Projections are BF16 and persistent state is
+// FP32.
 
 // Depthwise causal width-four convolution followed by SiLU. `input`/`output` are BF16
 // [tokens, channels], `weight` is BF16 [channels, 4], and history is BF16 [channels, 3] ordered

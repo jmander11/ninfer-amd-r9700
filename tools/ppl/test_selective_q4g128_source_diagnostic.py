@@ -81,9 +81,9 @@ class SelectiveQ4G128SourceDiagnosticTest(unittest.TestCase):
         self.assertIn("against_bf16", gate)
 
     def test_current_retained_bf16_authority_reopens(self) -> None:
-        bf16 = Path(
-            "profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/"
-            "8192.prefill.bf16-reference.json"
+        bf16 = (
+            Path(__file__).resolve().parent
+            / "fixtures/bf16-source-8k/8192.prefill.bf16-reference.json"
         )
         report = json.loads(bf16.read_text())
         source = {

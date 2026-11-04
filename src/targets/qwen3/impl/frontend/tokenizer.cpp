@@ -675,18 +675,42 @@ bool is_stop_token_id(std::span<const int> stop_token_ids, int id) {
     return std::find(stop_token_ids.begin(), stop_token_ids.end(), id) != stop_token_ids.end();
 }
 
-void append_bpe_word(std::vector<int>& ids, std::string_view word, const BpePairTable& pair_table,
-                     const std::array<int, 256>& byte_to_intern_id,
-                     const std::vector<std::vector<int>>& intern_emit_ids) {
-    if (word.empty()) { return; }
-
+// Per-encode scratch keeps concurrent calls independent and amortizes word allocations.
+struct BpeScratch {
     struct Node {
-        int intern_id = -1;
-        int prev      = -1;
-        int next      = -1;
+        int intern_id          = -1;
+        int prev               = -1;
+        int next               = -1;
+        std::size_t generation = 0;
+    };
+
+    struct Candidate {
+        int rank;
+        int left;
+        int right;
+        int result;
+        std::size_t left_generation;
+        std::size_t right_generation;
+    };
+
+    struct Later {
+        bool operator()(const Candidate& a, const Candidate& b) const noexcept {
+            return a.rank > b.rank || (a.rank == b.rank && a.left > b.left);
+        }
     };
 
     std::vector<Node> nodes;
+    std::vector<Candidate> candidates;
+};
+
+void append_bpe_word(std::vector<int>& ids, std::string_view word, const BpePairTable& pair_table,
+                     const std::array<int, 256>& byte_to_intern_id,
+                     const std::vector<std::vector<int>>& intern_emit_ids, BpeScratch& scratch) {
+    if (word.empty()) return;
+    auto& nodes      = scratch.nodes;
+    auto& candidates = scratch.candidates;
+    nodes.clear();
+    candidates.clear();
     nodes.reserve(word.size());
     for (const unsigned char byte : word) {
         const int intern_id = byte_to_intern_id[byte];
@@ -694,33 +718,73 @@ void append_bpe_word(std::vector<int>& ids, std::string_view word, const BpePair
             throw std::invalid_argument("Tokenizer::encode produced byte outside vocabulary");
         }
         const int index = static_cast<int>(nodes.size());
-        nodes.push_back(Node{intern_id, index - 1, -1});
-        if (index > 0) { nodes[static_cast<std::size_t>(index - 1)].next = index; }
+        nodes.push_back({intern_id, index - 1, -1, 0});
+        if (index > 0) nodes[static_cast<std::size_t>(index - 1)].next = index;
     }
-    int live = static_cast<int>(nodes.size());
-    while (live > 1) {
-        int best_rank   = std::numeric_limits<int>::max();
-        int best_left   = -1;
-        int best_result = -1;
-        for (int index = 0; index >= 0; index = nodes[static_cast<std::size_t>(index)].next) {
-            const int right = nodes[static_cast<std::size_t>(index)].next;
-            if (right < 0) { break; }
-            const BpePairSlot* found =
-                find_bpe_pair(pair_table, nodes[static_cast<std::size_t>(index)].intern_id,
-                              nodes[static_cast<std::size_t>(right)].intern_id);
-            if (found != nullptr && found->rank < best_rank) {
-                best_rank   = found->rank;
-                best_left   = index;
-                best_result = found->result;
+    // Short words fit in cache; a linear rank scan avoids heap bookkeeping. Long
+    // words use a heap so merge selection cannot become quadratic in prompt length.
+    if (word.size() <= 64U) {
+        for (;;) {
+            int best_left           = -1;
+            int best_rank           = std::numeric_limits<int>::max();
+            const BpePairSlot* best = nullptr;
+            for (int index = 0; index >= 0; index = nodes[static_cast<std::size_t>(index)].next) {
+                const auto& left = nodes[static_cast<std::size_t>(index)];
+                if (left.next < 0) break;
+                const auto* pair =
+                    find_bpe_pair(pair_table, left.intern_id,
+                                  nodes[static_cast<std::size_t>(left.next)].intern_id);
+                if (pair != nullptr && pair->rank < best_rank) {
+                    best_rank = pair->rank;
+                    best      = pair;
+                    best_left = index;
+                }
             }
+            if (best == nullptr) break;
+            auto& left     = nodes[static_cast<std::size_t>(best_left)];
+            left.intern_id = best->result;
+            left.next      = nodes[static_cast<std::size_t>(left.next)].next;
+            if (left.next >= 0) nodes[static_cast<std::size_t>(left.next)].prev = best_left;
         }
-        if (best_left < 0) { break; }
-        Node& left      = nodes[static_cast<std::size_t>(best_left)];
-        const int right = left.next;
-        left.intern_id  = best_result;
-        left.next       = nodes[static_cast<std::size_t>(right)].next;
-        if (left.next >= 0) { nodes[static_cast<std::size_t>(left.next)].prev = best_left; }
-        --live;
+    } else {
+        candidates.reserve(word.size());
+        const auto candidate = [&](int left) {
+            if (left < 0) return;
+            const auto& a   = nodes[static_cast<std::size_t>(left)];
+            const int right = a.next;
+            if (right < 0) return;
+            const auto& b = nodes[static_cast<std::size_t>(right)];
+            if (const auto* pair = find_bpe_pair(pair_table, a.intern_id, b.intern_id)) {
+                candidates.push_back(
+                    {pair->rank, left, right, pair->result, a.generation, b.generation});
+            }
+        };
+        for (std::size_t index = 0; index + 1 < nodes.size(); ++index)
+            candidate(static_cast<int>(index));
+        std::make_heap(candidates.begin(), candidates.end(), BpeScratch::Later{});
+        while (!candidates.empty()) {
+            std::pop_heap(candidates.begin(), candidates.end(), BpeScratch::Later{});
+            const auto merge = candidates.back();
+            candidates.pop_back();
+            auto& left  = nodes[static_cast<std::size_t>(merge.left)];
+            auto& right = nodes[static_cast<std::size_t>(merge.right)];
+            if (left.next != merge.right || left.generation != merge.left_generation ||
+                right.generation != merge.right_generation)
+                continue;
+            left.intern_id = merge.result;
+            left.next      = right.next;
+            ++left.generation;
+            ++right.generation;
+            if (left.next >= 0) nodes[static_cast<std::size_t>(left.next)].prev = merge.left;
+            const auto append = [&](int index) {
+                const auto before = candidates.size();
+                candidate(index);
+                if (candidates.size() != before)
+                    std::push_heap(candidates.begin(), candidates.end(), BpeScratch::Later{});
+            };
+            append(left.prev);
+            append(merge.left);
+        }
     }
     for (int index = 0; index >= 0; index = nodes[static_cast<std::size_t>(index)].next) {
         const int intern_id = nodes[static_cast<std::size_t>(index)].intern_id;
@@ -728,14 +792,14 @@ void append_bpe_word(std::vector<int>& ids, std::string_view word, const BpePair
             intern_emit_ids[static_cast<std::size_t>(intern_id)].empty()) {
             throw std::invalid_argument("Tokenizer::encode produced a symbol outside vocabulary");
         }
-        const std::vector<int>& emitted = intern_emit_ids[static_cast<std::size_t>(intern_id)];
+        const auto& emitted = intern_emit_ids[static_cast<std::size_t>(intern_id)];
         ids.insert(ids.end(), emitted.begin(), emitted.end());
     }
 }
 
 void append_bpe_ids(std::vector<int>& ids, std::string_view text, bool has_bpe_merges,
                     const BpePairTable& pair_table, const std::array<int, 256>& byte_to_intern_id,
-                    const std::vector<std::vector<int>>& intern_emit_ids) {
+                    const std::vector<std::vector<int>>& intern_emit_ids, BpeScratch& scratch) {
     if (text.empty()) { return; }
     if (!has_bpe_merges) {
         throw std::invalid_argument(
@@ -749,7 +813,7 @@ void append_bpe_ids(std::vector<int>& ids, std::string_view text, bool has_bpe_m
         normalized         = normalized_storage;
     }
     for_each_qwen_word(normalized, [&](std::string_view word) {
-        append_bpe_word(ids, word, pair_table, byte_to_intern_id, intern_emit_ids);
+        append_bpe_word(ids, word, pair_table, byte_to_intern_id, intern_emit_ids, scratch);
     });
 }
 
@@ -990,6 +1054,7 @@ EncodedText Tokenizer::encode(std::string_view text, std::optional<std::size_t> 
                               std::span<const ByteSpan> literal_spans) const {
     EncodedText encoded;
     if (text.empty()) { return encoded; }
+    BpeScratch scratch;
     auto mark_prefix = [&](std::size_t byte_pos) {
         if (prefix_byte_end && !encoded.prefix_tokens && byte_pos == *prefix_byte_end) {
             encoded.prefix_tokens = static_cast<std::uint32_t>(encoded.ids.size());
@@ -998,7 +1063,7 @@ EncodedText Tokenizer::encode(std::string_view text, std::optional<std::size_t> 
     mark_prefix(0);
     if (!options.parse_added_tokens) {
         append_bpe_ids(encoded.ids, text, has_bpe_merges_, bpe_pair_table_, byte_to_intern_id_,
-                       intern_emit_ids_);
+                       intern_emit_ids_, scratch);
         mark_prefix(text.size());
         return encoded;
     }
@@ -1009,7 +1074,7 @@ EncodedText Tokenizer::encode(std::string_view text, std::optional<std::size_t> 
         const auto match = find_leftmost_added(text, pos, literal_spans);
         if (!match) {
             append_bpe_ids(encoded.ids, text.substr(pos), has_bpe_merges_, bpe_pair_table_,
-                           byte_to_intern_id_, intern_emit_ids_);
+                           byte_to_intern_id_, intern_emit_ids_, scratch);
             mark_prefix(text.size());
             break;
         }
@@ -1018,7 +1083,7 @@ EncodedText Tokenizer::encode(std::string_view text, std::optional<std::size_t> 
         const AddedToken& match_token = added_tokens_[static_cast<std::size_t>(match_index)];
         if (match_pos > pos) {
             append_bpe_ids(encoded.ids, text.substr(pos, match_pos - pos), has_bpe_merges_,
-                           bpe_pair_table_, byte_to_intern_id_, intern_emit_ids_);
+                           bpe_pair_table_, byte_to_intern_id_, intern_emit_ids_, scratch);
             mark_prefix(match_pos);
         }
 

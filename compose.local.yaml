@@ -1,0 +1,11 @@
+# Localhost deployment; requires Docker Compose 2.24.4 or newer.
+# docker compose -f compose.yaml -f compose.local.yaml up -d --wait
+services:
+  server:
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: !override
+      - default
+
+networks:
+  default: {}

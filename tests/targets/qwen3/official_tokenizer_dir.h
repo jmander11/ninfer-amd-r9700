@@ -10,13 +10,8 @@
 // fixture. Tests that need them skip; synthetic tokenizer coverage still runs.
 inline const std::optional<std::string>& official_tokenizer_dir() {
     static const std::optional<std::string> dir = []() -> std::optional<std::string> {
-        const char* env          = std::getenv("NINFER_OFFICIAL_TOKENIZER_DIR");
-        const char* candidates[] = {
-            env,
-            "/path/to/local/models/qwen3.8-27b-bf16",
-        };
-        for (const char* path : candidates) {
-            if (path == nullptr || path[0] == '\0') { continue; }
+        const char* path = std::getenv("NINFER_OFFICIAL_TOKENIZER_DIR");
+        if (path != nullptr && path[0] != '\0') {
             std::ifstream stream(std::string(path) + "/tokenizer.json", std::ios::binary);
             if (stream) { return std::string(path); }
         }

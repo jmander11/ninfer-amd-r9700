@@ -12,8 +12,7 @@ from .config import CFG
 class KVCache:
     """PyTorch implementation profile of the FP8-K/INT4-V-G16 cache codec.
 
-    Tensor casts and rounding here deliberately exercise the library path; they
-    are not the independent scalar oracle for the production codec.
+    Uses library casts and rounding. The production codec has a separate scalar oracle.
     """
 
     VALUE_GROUP = 16

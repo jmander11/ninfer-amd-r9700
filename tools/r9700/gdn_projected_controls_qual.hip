@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include "ninfer/ops/gdn_gating.h"
 #include <hip/hip_runtime.h>
 #include <hip/hip_bfloat16.h>
@@ -339,7 +340,7 @@ int main(int argc, char** argv) {
         check(hipDeviceGetPCIBusId(pci, sizeof(pci), 0));
         require(std::string(props.name) == "AMD Radeon AI PRO R9700" &&
                     std::string(props.gcnArchName) == "gfx1201" && props.warpSize == 32 &&
-                    (std::string(pci) == "0000:13:00.0" || std::string(pci) == "13:00.0"),
+                    (std::string(pci) == ninfer::r9700_qualification::configured_pci_bus_id()),
                 "wrong device");
         hipStream_t s{};
         check(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
@@ -347,7 +348,9 @@ int main(int argc, char** argv) {
         out << std::setprecision(17);
         out << "{\"schema\":\"ninfer.r9700.gdn-projected-controls.v1\",\"public_op_tested\":true,"
                "\"target\":\"gfx1201\","
-               "\"pci\":\"0000:13:00.0\",\"oracle\":\"original BF16 dots FP64, independent BF16 "
+               "\"pci\":\""
+            << ninfer::r9700_qualification::configured_pci_bus_id()
+            << "\",\"oracle\":\"original BF16 dots FP64, independent BF16 "
                "RNE seams (plus the neighbour when an FP32 accumulation bound straddles a "
                "boundary), FP64 gates every output\","
                "\"criterion\":\"g abs<=0.0625 OR rel<=0.001; beta abs<=0.0003 OR "

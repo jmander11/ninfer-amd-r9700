@@ -85,6 +85,17 @@ __global__ void bf16_scatter_kernel(const hip_bfloat16* source, const std::int32
     destination[static_cast<std::size_t>(indices[column]) * features + feature] = source[index];
 }
 
+// Eight adjacent represented BF16 features per lane; columns remain independently indexed.
+__global__ void bf16_scatter_vector8_kernel(const uint4* source, const std::int32_t* indices,
+                                            uint4* destination, std::uint32_t count) {
+    constexpr std::uint32_t vectors_per_column = 5120U / 8U;
+    const std::size_t index = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (index >= static_cast<std::size_t>(count) * vectors_per_column) return;
+    const auto column                       = index / vectors_per_column;
+    destination[static_cast<std::size_t>(indices[column]) * vectors_per_column +
+                index % vectors_per_column] = source[index];
+}
+
 __global__ void bf16_gather_kernel(const hip_bfloat16* source, const std::int32_t* indices,
                                    hip_bfloat16* destination, std::uint32_t features,
                                    std::uint32_t count) {
@@ -446,15 +457,52 @@ __global__ void layernorm_kernel(const hip_bfloat16* input, const hip_bfloat16* 
     for (std::uint32_t feature = lane; feature < features; feature += 32U) {
         sum += static_cast<float>(input[base + feature]);
     }
-    const float mean = wave_sum(sum) / static_cast<float>(features);
-    float variance   = 0.0F;
+    float mean     = wave_sum(sum) / static_cast<float>(features);
+    float variance = 0.0F;
     for (std::uint32_t feature = lane; feature < features; feature += 32U) {
         const float centered = static_cast<float>(input[base + feature]) - mean;
         variance             = fmaf(centered, centered, variance);
     }
-    const float inverse = rsqrtf(wave_sum(variance) / static_cast<float>(features) + eps);
+    variance = wave_sum(variance) / static_cast<float>(features);
+    if (isfinite(mean) && isfinite(variance + eps)) {
+        const float inverse = rsqrtf(variance + eps);
+        for (std::uint32_t feature = lane; feature < features; feature += 32U) {
+            const float normalized = (static_cast<float>(input[base + feature]) - mean) * inverse;
+            output[base + feature] = hip_bfloat16(normalized * static_cast<float>(weight[feature]) +
+                                                  static_cast<float>(bias[feature]));
+        }
+        return;
+    }
+    // Finite BF16 inputs can overflow either raw FP32 reduction. Normalize their
+    // exponent before centering; the scale is a normal power of two, including
+    // at BF16's largest exponent. This keeps both centered values and squares
+    // bounded without imposing a different arithmetic path on ordinary rows.
+    float maximum = 0.0F;
     for (std::uint32_t feature = lane; feature < features; feature += 32U) {
-        const float normalized = (static_cast<float>(input[base + feature]) - mean) * inverse;
+        maximum = fmaxf(maximum, fabsf(static_cast<float>(input[base + feature])));
+    }
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        maximum = fmaxf(maximum, __shfl_xor(maximum, offset, 32));
+    }
+    const float scale  = ldexpf(1.0F, -min(126, max(0, ilogbf(maximum))));
+    const float anchor = static_cast<float>(input[base]) * scale;
+    sum                = 0.0F;
+    for (std::uint32_t feature = lane; feature < features; feature += 32U) {
+        sum += static_cast<float>(input[base + feature]) * scale - anchor;
+    }
+    mean     = wave_sum(sum) / static_cast<float>(features);
+    variance = 0.0F;
+    for (std::uint32_t feature = lane; feature < features; feature += 32U) {
+        const float centered = static_cast<float>(input[base + feature]) * scale - anchor - mean;
+        variance             = fmaf(centered, centered, variance);
+    }
+    variance            = wave_sum(variance) / static_cast<float>(features);
+    const float inverse = rsqrtf(variance + (eps * scale) * scale);
+    for (std::uint32_t feature = lane; feature < features; feature += 32U) {
+        const float centered = static_cast<float>(input[base + feature]) * scale - anchor - mean;
+        // Scaling may underflow eps for a large constant row; its normalized value
+        // is exactly zero regardless of the positive original eps.
+        const float normalized = centered == 0.0F ? 0.0F : centered * inverse;
         output[base + feature] = hip_bfloat16(normalized * static_cast<float>(weight[feature]) +
                                               static_cast<float>(bias[feature]));
     }
@@ -828,7 +876,9 @@ __global__ void argmax_bf16_kernel(const hip_bfloat16* logits, std::int32_t* out
         }
         __syncthreads();
     }
-    if (threadIdx.x == 0) { output[column] = indices[0]; }
+    // MTP proposals feed device embedding gathers before a host can inspect target status.
+    // An all-NaN column has no ordered maximum; token zero keeps that failed proposal in bounds.
+    if (threadIdx.x == 0) { output[column] = indices[0] == INT_MAX ? 0 : indices[0]; }
 }
 
 template <typename Launch>
@@ -951,14 +1001,21 @@ hipError_t bf16_scatter_columns(const hip_bfloat16* source, const std::int32_t* 
                                 std::uint32_t count, std::uint32_t destination_columns,
                                 hipStream_t stream) noexcept {
     const std::size_t elements = static_cast<std::size_t>(feature_count) * count;
-    return checked_launch(source != nullptr && indices != nullptr && destination != nullptr &&
-                              feature_count != 0 && count != 0 && destination_columns != 0 &&
-                              valid_linear_count(elements) && valid_stream(stream),
-                          [&] {
-                              hipLaunchKernelGGL(bf16_scatter_kernel, linear_grid(elements),
-                                                 dim3(kBlock), 0, stream, source, indices,
-                                                 destination, feature_count, count);
-                          });
+    return checked_launch(
+        source != nullptr && indices != nullptr && destination != nullptr && feature_count != 0 &&
+            count != 0 && destination_columns != 0 && valid_linear_count(elements) &&
+            valid_stream(stream),
+        [&] {
+            if (feature_count == 5120U && count >= 128U && aligned16(source) &&
+                aligned16(destination)) {
+                hipLaunchKernelGGL(bf16_scatter_vector8_kernel, linear_grid(elements / 8U),
+                                   dim3(kBlock), 0, stream, reinterpret_cast<const uint4*>(source),
+                                   indices, reinterpret_cast<uint4*>(destination), count);
+            } else {
+                hipLaunchKernelGGL(bf16_scatter_kernel, linear_grid(elements), dim3(kBlock), 0,
+                                   stream, source, indices, destination, feature_count, count);
+            }
+        });
 }
 
 hipError_t bf16_gather_columns(const hip_bfloat16* source, const std::int32_t* indices,

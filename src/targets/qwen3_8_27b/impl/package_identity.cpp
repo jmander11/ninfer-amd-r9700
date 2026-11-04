@@ -35,6 +35,10 @@ ModelSamplingDefaults Package::sampling_defaults(std::string_view model) {
 }
 
 Package::WeightsProfile Package::resolve_weights(const artifact::ArtifactIdentity& identity) {
+    if (identity.model_id == model_id && identity.weights_id == "r9700-lq4-vision-bf16") {
+        return WeightsProfile::R9700Lq4VisionBf16;
+    }
+
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head)                                  \
     if (identity.model_id == model_id && identity.weights_id == (id)) return WeightsProfile::symbol;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"

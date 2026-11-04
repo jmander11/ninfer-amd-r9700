@@ -1111,6 +1111,11 @@ private:
                  << ",\"active_query_rows_present\":false},\n"
                  << "  \"visibility\": {\"row_position\":129,\"ancestor_masks\":";
         manifest << "null,\"prefix_lengths\":null,\"prefix_length_stride\":1},\n";
+        int trace_device = -1;
+        char trace_pci[32]{};
+        if (hipGetDevice(&trace_device) != hipSuccess ||
+            hipDeviceGetPCIBusId(trace_pci, sizeof(trace_pci), trace_device) != hipSuccess)
+            throw std::runtime_error("cannot read diagnostic trace PCI identity");
         manifest << "  \"provenance\": {"
                  << "\"source_commit\":\""
                  << required_provenance("NINFER_QWEN3_LAYER3_TRACE_SOURCE_COMMIT")
@@ -1125,7 +1130,7 @@ private:
                  << "\",\"corpus_sha256\":\""
                  << required_provenance("NINFER_QWEN3_LAYER3_TRACE_CORPUS_SHA256")
                  << "\",\"device_index\":0,\"device_name\":\"AMD Radeon AI PRO R9700\","
-                 << "\"architecture\":\"gfx1201\",\"wave_size\":32,\"pci\":\"0000:13:00.0\","
+                 << "\"architecture\":\"gfx1201\",\"wave_size\":32,\"pci\":\"" << trace_pci << "\","
                  << "\"power_profile_source\":\""
                  << required_provenance("NINFER_QWEN3_LAYER3_TRACE_POWER_SOURCE")
                  << "\",\"power_profile_value\":\"auto\"},\n"

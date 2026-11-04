@@ -205,7 +205,10 @@ void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_q
     double max_reference     = 0.0;
     for (std::size_t index = 0; index < actual.size(); ++index) {
         if (!checked_query(static_cast<int>(index / (kHeads * kDim)), cumulative)) { continue; }
-        const double got   = represented(actual[index]);
+        const double got = represented(actual[index]);
+        if (!std::isfinite(got) || !std::isfinite(expected[index])) {
+            fail("vision_attention nonfinite oracle/output at " + std::to_string(index));
+        }
         const double error = got - expected[index];
         squared_error += error * error;
         squared_reference += expected[index] * expected[index];
@@ -247,8 +250,11 @@ void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_q
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        const bool short_uniform_only = argc == 2 && std::string(argv[1]) == "--short-uniform";
+        if (argc != 1 && !short_uniform_only)
+            fail("usage: vision_attention_qual [--short-uniform]");
         ninfer::DeviceContext device;
         if (!device.is_gfx1201() || device.props.warpSize != 32) {
             fail("vision_attention qualifier requires wave32 gfx1201");
@@ -263,17 +269,33 @@ int main() {
             fail("vision_attention accepted an envelope without a legal segment pair");
             // NOLINTNEXTLINE(bugprone-empty-catch): expected rejection is the pass path
         } catch (const std::invalid_argument&) {}
-        run_case({4}, false, false, false, 1, device.stream);
-        run_case({4, 7}, false, true, true, 7, device.stream);
-        run_case({64, 65, 65}, false, true, false, 31, device.stream);
-        run_case({68, 68}, true, true, false, 101, device.stream);
-        // Real extents: one 768x512 image, one 1920x1080 image, and three images in one call,
-        // in the production interleaved QKV layout; the sharp case drives logits to ~40.
-        run_case({1536}, false, true, false, 13, device.stream);
-        run_case({1536}, false, true, false, 17, device.stream, 8.0F);
-        run_case({8256}, false, true, false, 19, device.stream);
-        run_case({1540, 2052, 1604}, false, true, false, 23, device.stream);
-        run_case({1536, 1536}, true, true, false, 29, device.stream, 8.0F);
+        if (!short_uniform_only) {
+            run_case({4}, false, false, false, 1, device.stream);
+            run_case({4, 7}, false, true, true, 7, device.stream);
+            run_case({64, 65, 65}, false, true, false, 31, device.stream);
+            run_case({68, 68}, true, true, false, 101, device.stream);
+        }
+        // Uniform short segments select64 queries only with multiple segments. Cover both
+        // dispatch bounds, partial32-key tiles, singleton fallback and cross-segment isolation
+        // in the production interleaved QKV layout, including sharp represented logits.
+        for (int length : {3, 4, 17, 32, 63, 64, 65}) {
+            for (int segments : {1, 2, 4, 8, 16}) {
+                run_case(std::vector<int>(segments, length), true, true, false,
+                         137 + length + segments, device.stream, 8.0F);
+            }
+        }
+        run_case({4, 4, 4, 4}, true, false, true, 179, device.stream);
+        run_case({4, 17, 63, 64}, false, true, true, 181, device.stream);
+        run_case({4, 17, 63, 64}, false, true, false, 183, device.stream, 8.0F);
+        if (!short_uniform_only) {
+            // Real extents: one 768x512 image, one 1920x1080 image, and three images in one call,
+            // in the production interleaved QKV layout; the sharp case drives logits to ~40.
+            run_case({1536}, false, true, false, 13, device.stream);
+            run_case({1536}, false, true, false, 17, device.stream, 8.0F);
+            run_case({8256}, false, true, false, 19, device.stream);
+            run_case({1540, 2052, 1604}, false, true, false, 23, device.stream);
+            run_case({1536, 1536}, true, true, false, 29, device.stream, 8.0F);
+        }
         std::cout << "vision_attention: PASS\n";
         return 0;
     } catch (const std::exception& exception) {

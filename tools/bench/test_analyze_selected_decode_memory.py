@@ -37,20 +37,6 @@ from tools.bench.run_ninfer_bench_matrix import (
 class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
     def test_prepared_module_entry_points_import_from_repo(self) -> None:
         repo = Path(__file__).resolve().parents[2]
-        prepare_script = (
-            repo / "profiles/rocprof/selected-ordinary-decode-memory-prepare-20260905/prepare.sh"
-        ).read_text(encoding="utf-8")
-        build_script = (
-            repo / "profiles/rocprof/selected-ordinary-decode-profile-build-20260905/build.sh"
-        ).read_text(encoding="utf-8")
-        producer = (repo / "tools/bench/prepare_selected_decode_memory_profile.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn(
-            "python3 -m tools.bench.prepare_selected_decode_memory_profile", prepare_script
-        )
-        self.assertIn("python3 -m tools.bench.build_selected_decode_profile", build_script)
-        self.assertIn("python3 -m tools.bench.analyze_selected_decode_memory", producer)
         for module in (
             "tools.bench.prepare_selected_decode_memory_profile",
             "tools.bench.analyze_selected_decode_memory",

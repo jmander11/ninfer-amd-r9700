@@ -1,4 +1,5 @@
 #include "serve/openai_schema.h"
+#include "serve/constraint_stats.h"
 
 #include <array>
 #include <algorithm>
@@ -15,7 +16,7 @@
 namespace ninfer::serve {
 namespace {
 
-using Json = nlohmann::json;
+using Json = nlohmann::ordered_json;
 
 [[noreturn]] void bad_request(std::string message, std::string param = {}, std::string code = {}) {
     ApiError error;
@@ -319,7 +320,8 @@ void parse_tools(const Json& body, GenerationRequest& out) {
         Json normalized = item;
         Json& fn        = normalized["function"];
         ToolDefinition tool;
-        tool.name = require_function_name(fn, "tools");
+        tool.schema_pointer = "/tools/" + std::to_string(i) + "/function/parameters";
+        tool.name           = require_function_name(fn, "tools");
         if (fn.contains("description") && !fn.at("description").is_null()) {
             if (!fn.at("description").is_string()) {
                 bad_request("function description must be a string", "tools");
@@ -531,14 +533,13 @@ Json base_chunk(const std::string& id, const std::string& model, std::int64_t cr
         {"id", id}, {"object", "chat.completion.chunk"}, {"created", created}, {"model", model}};
 }
 
-Json tool_calls_json(const std::vector<ToolCall>& tool_calls, bool include_index) {
+Json tool_calls_json(const std::vector<ToolCall>& tool_calls) {
     Json out = Json::array();
     for (std::size_t i = 0; i < tool_calls.size(); ++i) {
         const ToolCall& call = tool_calls[i];
         Json item = {{"id", call.id},
                      {"type", "function"},
                      {"function", Json{{"name", call.name}, {"arguments", call.arguments_json}}}};
-        if (include_index) { item["index"] = static_cast<int>(i); }
         out.push_back(std::move(item));
     }
     return out;
@@ -642,6 +643,9 @@ Json usage_to_json(const CompletionUsage& usage, const CompletionTimings* timing
     Json out = {{"prompt_tokens", usage.prompt_tokens},
                 {"completion_tokens", usage.completion_tokens},
                 {"total_tokens", usage.prompt_tokens + usage.completion_tokens}};
+    if (usage.reasoning_limit.budget_tokens != 0) {
+        out["ninfer"]["reasoning_limit"] = reasoning_limit_json(usage.reasoning_limit);
+    }
     if (timings == nullptr) { return out; }
 
     // Downstream proxies normalize OpenAI usage (e.g. LiteLLM drops unknown top-level
@@ -673,11 +677,14 @@ Json usage_to_json(const CompletionUsage& usage, const CompletionTimings* timing
           {"tok_s", json_decimal3(timings->predicted_per_second)},
           {"ms_per_token", json_decimal3(timings->predicted_per_token_ms)}}}};
     if (timings->recovery.discarded_tool_calls != 0 ||
-        timings->recovery.discarded_reasoning_tokens != 0) {
+        timings->recovery.discarded_reasoning_tokens != 0 ||
+        timings->recovery.discarded_content_tokens != 0 || timings->recovery.framing_repairs != 0) {
         const auto& recovery = timings->recovery;
         ninfer["recovery"]   = {{"attempts", recovery.attempts},
                                 {"discarded_tool_calls", recovery.discarded_tool_calls},
                                 {"discarded_reasoning_tokens", recovery.discarded_reasoning_tokens},
+                                {"framing_repairs", recovery.framing_repairs},
+                                {"discarded_content_tokens", recovery.discarded_content_tokens},
                                 {"prefill_tokens", recovery.prefill_tokens},
                                 {"prefill_samples", recovery.prefill_samples},
                                 {"prepare_ms", json_decimal3(recovery.prepare_seconds * 1000.0)},
@@ -694,6 +701,9 @@ Json usage_to_json(const CompletionUsage& usage, const CompletionTimings* timing
         ninfer["kv_disk"] = {{"save_ms", json_decimal3(timings->kv_disk_save_ms)},
                              {"load_ms", json_decimal3(timings->kv_disk_load_ms)},
                              {"h2d_ms", json_decimal3(timings->kv_disk_h2d_ms)}};
+    }
+    if (timings->constraint.active) {
+        ninfer["constraint"] = constraint_stats_json(timings->constraint);
     }
     ptd["ninfer"]                = std::move(ninfer);
     out["prompt_tokens_details"] = std::move(ptd);
@@ -881,10 +891,44 @@ void parse_openai_reasoning_effort(const Json& body, GenerationRequest& out) {
     out.reasoning_effort_param = "reasoning_effort";
 }
 
+std::optional<std::uint32_t> parse_thinking_token_budget(const Json& value,
+                                                         std::string_view param) {
+    if (value.is_null()) { return std::nullopt; }
+    if (!value.is_number_integer() ||
+        (value.is_number_unsigned() ? value.get<std::uint64_t>() == 0
+                                    : value.get<std::int64_t>() <= 0)) {
+        bad_request("thinking token budget must be a positive integer or null", std::string(param));
+    }
+    const auto budget = value.get<std::uint64_t>();
+    if (budget > std::numeric_limits<std::uint32_t>::max()) {
+        bad_request("thinking token budget exceeds uint32 range", std::string(param));
+    }
+    return static_cast<std::uint32_t>(budget);
+}
+
+Json reasoning_limit_json(const ninfer::ReasoningLimitStats& stats) {
+    Json forced = Json::array();
+    for (const auto& token : stats.forced_tokens) {
+        forced.push_back({{"generated_token_index", token.generated_token_index},
+                          {"token", token.token},
+                          {"policy_forced", true},
+                          {"target_logprob",
+                           token.target_logprob ? Json(*token.target_logprob) : Json(nullptr)}});
+    }
+    return Json{
+        {"budget_tokens", stats.budget_tokens == 0 ? Json(nullptr) : Json(stats.budget_tokens)},
+        {"used_tokens", stats.used_tokens},
+        {"forced_closes", stats.forced_closes},
+        {"budget_retries", stats.retries},
+        {"limit_reached", stats.limit_reached},
+        {"forced_tokens", std::move(forced)}};
+}
+
 void apply_ninfer_object(const Json& ninfer, GenerationRequest& out) {
     if (!ninfer.is_object()) { bad_request("ninfer must be an object", "ninfer"); }
     for (auto it = ninfer.begin(); it != ninfer.end(); ++it) {
-        if (it.key() != "capture_context_checkpoint" && it.key() != "cache_write") {
+        if (it.key() != "capture_context_checkpoint" && it.key() != "cache_write" &&
+            it.key() != "thinking_token_budget") {
             bad_request("ninfer." + it.key() + " is not supported", "ninfer",
                         "ninfer_option_not_supported");
         }
@@ -893,6 +937,12 @@ void apply_ninfer_object(const Json& ninfer, GenerationRequest& out) {
         if (ninfer.contains(key) && !ninfer.at(key).is_boolean()) {
             bad_request(std::string("ninfer.") + key + " must be a boolean", "ninfer");
         }
+    }
+    if (ninfer.contains("thinking_token_budget")) {
+        out.thinking_token_budget_specified = true;
+        out.thinking_token_budget_param     = "ninfer.thinking_token_budget";
+        out.thinking_token_budget = parse_thinking_token_budget(ninfer.at("thinking_token_budget"),
+                                                                out.thinking_token_budget_param);
     }
     out.cache_write                = ninfer.value("cache_write", true);
     out.capture_context_checkpoint = ninfer.value("capture_context_checkpoint", false);
@@ -926,14 +976,32 @@ GenerationRequest parse_chat_completion_request(const Json& body, const RequestL
             bad_request("structured_outputs conflicts with response_format", "structured_outputs",
                         "invalid_output_constraint");
         }
-        if (!structured.is_object() || structured.size() != 1 || !structured.contains("grammar") ||
-            !structured.at("grammar").is_string() ||
-            structured.at("grammar").get<std::string>().empty()) {
-            bad_request("structured_outputs requires one nonempty EBNF grammar string",
+        if (!structured.is_object() || structured.size() != 1) {
+            bad_request("structured_outputs requires exactly one of grammar, regex or choice",
                         "structured_outputs", "invalid_output_constraint");
         }
-        out.output_constraint = ninfer::OutputConstraint{
-            ninfer::OutputConstraintKind::Grammar, structured.at("grammar").get<std::string>()};
+        if (structured.contains("choice")) {
+            const auto& values = structured.at("choice");
+            if (!values.is_array() || values.empty() ||
+                !std::all_of(values.begin(), values.end(),
+                             [](const Json& value) { return value.is_string(); })) {
+                bad_request("choice requires a nonempty array of literal strings",
+                            "structured_outputs.choice", "invalid_output_constraint");
+            }
+            out.output_constraint = ninfer::OutputConstraint{
+                ninfer::OutputConstraintKind::Choice, {}, values.get<std::vector<std::string>>()};
+        } else {
+            const bool regex = structured.contains("regex");
+            const char* key  = regex ? "regex" : "grammar";
+            if (!structured.contains(key) || !structured.at(key).is_string() ||
+                (!regex && structured.at(key).get<std::string>().empty())) {
+                bad_request("structured_outputs requires a grammar or regex string",
+                            "structured_outputs", "invalid_output_constraint");
+            }
+            out.output_constraint = ninfer::OutputConstraint{
+                regex ? ninfer::OutputConstraintKind::Regex : ninfer::OutputConstraintKind::Grammar,
+                structured.at(key).get<std::string>()};
+        }
         out.output_constraint_param = "structured_outputs";
     }
     if (out.output_constraint && !out.tools.empty()) {
@@ -951,9 +1019,20 @@ GenerationRequest parse_chat_completion_request(const Json& body, const RequestL
     if (const std::optional<bool> enable_thinking = parse_openai_enable_thinking(body)) {
         out.enable_thinking = enable_thinking;
     }
+    if (body.contains("thinking_token_budget")) {
+        out.thinking_token_budget_specified = true;
+        out.thinking_token_budget =
+            parse_thinking_token_budget(body.at("thinking_token_budget"), "thinking_token_budget");
+    }
     parse_openai_reasoning_effort(body, out);
     out.preserve_thinking = parse_openai_preserve_thinking(body);
-    if (body.contains("ninfer")) { apply_ninfer_object(body.at("ninfer"), out); }
+    if (body.contains("ninfer")) {
+        if (body.at("ninfer").is_object() && body.at("ninfer").contains("thinking_token_budget")) {
+            bad_request("Chat uses top-level thinking_token_budget",
+                        "ninfer.thinking_token_budget");
+        }
+        apply_ninfer_object(body.at("ninfer"), out);
+    }
 
     std::optional<int> max_tokens = get_int(body, "max_completion_tokens");
     if (!max_tokens) { max_tokens = get_int(body, "max_tokens"); }
@@ -1010,12 +1089,13 @@ std::string make_chat_completion_tool_response(const std::string& id, const std:
                                                const std::vector<ToolCall>& tool_calls,
                                                const CompletionUsage& usage,
                                                const CompletionTimings* timings,
-                                               const std::vector<TokenLogprobEntry>* logprobs) {
+                                               const std::vector<TokenLogprobEntry>* logprobs,
+                                               const char* finish_reason) {
     Json message = {{"role", "assistant"},
                     {"content", content.empty() ? Json(nullptr) : Json(content)},
-                    {"tool_calls", tool_calls_json(tool_calls, false)}};
+                    {"tool_calls", tool_calls_json(tool_calls)}};
     if (!reasoning.empty()) { message["reasoning_content"] = reasoning; }
-    Json choice = {{"index", 0}, {"message", std::move(message)}, {"finish_reason", "tool_calls"}};
+    Json choice = {{"index", 0}, {"message", std::move(message)}, {"finish_reason", finish_reason}};
     if (logprobs != nullptr) { choice["logprobs"] = choice_logprobs_json(*logprobs); }
     Json payload = {{"id", id},
                     {"object", "chat.completion"},
@@ -1061,16 +1141,24 @@ std::string make_chat_chunk_content_logprobs(const std::string& id, const std::s
     return sse_event(payload);
 }
 
-std::string make_chat_chunk_tool_calls(const std::string& id, const std::string& model,
-                                       std::int64_t created,
-                                       const std::vector<ToolCall>& tool_calls,
+std::string make_chat_chunk_tool_delta(const std::string& id, const std::string& model,
+                                       std::int64_t created, const ninfer::ToolCallDelta& delta,
                                        bool include_usage) {
-    Json payload = base_chunk(id, model, created);
-    payload["choices"] =
-        Json::array({Json{{"index", 0},
-                          {"delta", Json{{"tool_calls", tool_calls_json(tool_calls, true)}}},
-                          {"finish_reason", nullptr}}});
-    if (include_usage) { payload["usage"] = nullptr; }
+    if (delta.kind != ninfer::ToolCallDeltaKind::Start &&
+        delta.kind != ninfer::ToolCallDeltaKind::Arguments)
+        return {};
+    Json call = {{"index", delta.index}};
+    if (delta.kind == ninfer::ToolCallDeltaKind::Start) {
+        call["id"]       = delta.id;
+        call["type"]     = "function";
+        call["function"] = {{"name", delta.name}, {"arguments", ""}};
+    } else
+        call["function"] = {{"arguments", delta.arguments}};
+    Json payload       = base_chunk(id, model, created);
+    payload["choices"] = Json::array({Json{{"index", 0},
+                                           {"delta", Json{{"tool_calls", Json::array({call})}}},
+                                           {"finish_reason", nullptr}}});
+    if (include_usage) payload["usage"] = nullptr;
     return sse_event(payload);
 }
 
@@ -1122,6 +1210,9 @@ std::string make_error_body(const ApiError& error) {
     Json err     = {{"message", error.message}, {"type", error.type}};
     err["param"] = error.param.empty() ? Json(nullptr) : Json(error.param);
     err["code"]  = error.code.empty() ? Json(nullptr) : Json(error.code);
+    if (error.reasoning_limit.budget_tokens != 0) {
+        err["ninfer"]["reasoning_limit"] = reasoning_limit_json(error.reasoning_limit);
+    }
     return Json{{"error", err}}.dump();
 }
 

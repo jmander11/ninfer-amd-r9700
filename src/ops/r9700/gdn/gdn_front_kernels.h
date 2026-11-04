@@ -209,7 +209,7 @@ conv_record_token(Represented&& represented_at, const ConvChannel& conv,
                               channel);
 }
 
-// ---- LQ4 GDN pair projection with the recorded convolution (one sequence, T 4..8 columns):
+// LQ4 GDN pair projection with the recorded convolution (one sequence, T 4..8 columns):
 // CTAs [0, 256) own the query-key row blocks of one per-token E4M3 image, the rest the value-z
 // row blocks; each block's BF16 outputs (canonical NaN for a flagged token) are staged, then one
 // thread per (row, token) runs that token of the recorded convolution of the row's channel
@@ -306,7 +306,7 @@ __global__ __launch_bounds__(32U * kLq4PairSplit) void gdn_lq4_pair_conv_record_
 #endif
 }
 
-// ---- Verification-width GDN front: one CTA per control head, eight tokens per pass. Every CTA
+// Verification-width GDN front: one CTA per control head, eight tokens per pass. Every CTA
 // normalizes each token row with the K5120 row-CTA RMSNorm arithmetic (per-vector eight-term FMA
 // chain, wave32 xor tree, wave partials summed in wave order, BF16 seam) and runs the
 // per-(head, token) control arithmetic of control_t1_output on the seam (thread j sums token j's

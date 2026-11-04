@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -35,8 +36,7 @@ namespace linear = ninfer::ops::r9700::linear;
 
 constexpr std::uint32_t kGroup = 64;
 constexpr std::size_t kTrials = 7;
-constexpr const char* kPowerProfilePath =
-    "/sys/class/drm/card2/device/power_dpm_force_performance_level";
+std::string qualification_power_path() { return (ninfer::r9700_qualification::configured_pci_path() / "power_dpm_force_performance_level").string(); }
 constexpr double kMaximumPerTupleRatio = 1.01;
 constexpr std::uint32_t kMaxTokens = 128;
 constexpr std::array<std::uint32_t, 10> kTokens{1, 2, 3, 4, 5, 6, 7, 8, 32, 128};
@@ -1336,7 +1336,7 @@ struct SourceIdentity {
            "\"independent_oracle\": \"FP64 represented quantized formula at sampled coordinates\", "
            "\"maximum_bf16_steps_allowed\": 2, "
            "\"tail_status_and_alignment_gate\": \"passed\"},\n"
-        << "  \"power_profile\": {\"path\": \"" << kPowerProfilePath
+        << "  \"power_profile\": {\"path\": \"" << qualification_power_path()
         << "\", \"required\": \"auto\", \"before\": \"auto\", \"after\": \"auto\"},\n"
         << "  \"hardware\": {\"device\": \"" << json_escape(device.name)
         << "\", \"architecture\": \"" << json_escape(device.gcnArchName)
@@ -1629,7 +1629,7 @@ int main(int argc, char** argv) {
         if (decode_dot8_regression || decode_dot8_cold_block_sweep ||
             lds_scope_benchmark || n128_benchmark ||
             m128n128_benchmark || pingpong_benchmark) {
-            if (read_text(kPowerProfilePath) != "auto") {
+            if (read_text(qualification_power_path()) != "auto") {
                 fail("physical Linear A/B requires auto power before device construction");
             }
         }
@@ -1680,7 +1680,7 @@ int main(int argc, char** argv) {
             if (!std::all_of(results.begin(), results.end(), [](const DecodeDot8Result& result) {
                     return result.maximum_bf16_steps <= 2U;
                 })) fail("decode dot8 represented-formula regression differs");
-            if (read_text(kPowerProfilePath) != "auto") {
+            if (read_text(qualification_power_path()) != "auto") {
                 fail("decode dot8 physical A/B did not retain auto power");
             }
             if (decode_dot8_cold_block_sweep) {
@@ -1813,7 +1813,7 @@ int main(int argc, char** argv) {
                                            n128_benchmark, m128n128_benchmark,
                                            pingpong_benchmark);
                 }
-                if (read_text(kPowerProfilePath) != "auto") {
+                if (read_text(qualification_power_path()) != "auto") {
                     fail("LDS-scope physical A/B did not retain auto power");
                 }
                 if (sha256_file(executable) != executable_sha256) {

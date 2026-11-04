@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -144,7 +145,7 @@ struct PhaseStreams {
     std::uint32_t reserved;
 };
 
-// ---- Entries.
+// Entries.
 // Row block c of an LQ4 weight: its contiguous N16 code tiles and group codes.
 inline PhaseStreams lq4_streams(const linear::Lq4Weight& first, const linear::Lq4Weight& second) {
     const auto part = [](const linear::Lq4Weight& weight) {
@@ -471,7 +472,7 @@ constexpr std::size_t max_lds(std::index_sequence<I...>) {
 constexpr std::size_t kLdsBytes = max_lds(std::make_index_sequence<kEntryCount>{});
 static_assert(kLdsBytes <= kLdsBudget);
 
-// ---- Device program.
+// Device program.
 struct Phase {
     std::uint32_t entry;
     std::uint32_t grid_x;
@@ -736,7 +737,7 @@ __global__ __launch_bounds__(kBlockThreads) __attribute__((
     }
 }
 
-// ---- Host lowering.
+// Host lowering.
 struct HostEntry {
     const void* kernel                              = nullptr;
     std::uint32_t launch_threads                    = 0;
@@ -793,6 +794,45 @@ const std::array<HostEntry, kEntryCount>& entries() {
     static const auto table = host_entries(std::make_index_sequence<kEntryCount>{});
     return table;
 }
+
+// A grid barrier requires a cooperative dispatch, not just an occupancy-sized ordinary grid.
+// Capture the cooperative API: this ROCm runtime's graph-node cooperative attribute does not
+// select its cooperative dispatch queue. Reuse one construction-only stream per lowering.
+struct CooperativeCapture {
+    hipStream_t stream = nullptr;
+
+    CooperativeCapture() { HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking)); }
+
+    ~CooperativeCapture() { (void)hipStreamDestroy(stream); }
+
+    CooperativeCapture(const CooperativeCapture&)            = delete;
+    CooperativeCapture& operator=(const CooperativeCapture&) = delete;
+
+    hipGraphNode_t add(hipGraph_t graph, std::span<const hipGraphNode_t> predecessors,
+                       const hipKernelNodeParams& params) const {
+        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+        const hipError_t launch =
+            hipLaunchCooperativeKernel(params.func, params.gridDim, params.blockDim,
+                                       params.kernelParams, params.sharedMemBytes, stream);
+        hipGraph_t captured  = nullptr;
+        const hipError_t end = hipStreamEndCapture(stream, &captured);
+        // AddChildGraphNode clones the cooperative command, including its dispatch mode. The
+        // temporary graph owns capture failures; an invalidated capture cannot delete graph.
+        hipGraphNode_t node = nullptr;
+        try {
+            HIP_CHECK(launch);
+            HIP_CHECK(end);
+            HIP_CHECK(hipGraphAddChildGraphNode(
+                &node, graph, predecessors.empty() ? nullptr : predecessors.data(),
+                predecessors.size(), captured));
+        } catch (...) {
+            if (captured != nullptr) (void)hipGraphDestroy(captured);
+            throw;
+        }
+        HIP_CHECK(hipGraphDestroy(captured));
+        return node;
+    }
+};
 
 std::vector<hipGraphNode_t> chain_nodes(hipGraph_t graph) {
     std::size_t roots = 0;
@@ -968,6 +1008,7 @@ PersistentDecodeImageOwners persistent_decode_lower(hipGraph_t graph,
                                std::to_string(kBlocksPerWgp));
 
     PersistentDecodeImageOwners owners;
+    const CooperativeCapture cooperative;
     std::size_t first_phase = 0;
     for (const Run& run : runs) {
         std::vector<std::uint8_t> run_image(kPhaseOffset + run.count * sizeof(PhaseSlot), 0U);
@@ -1001,9 +1042,7 @@ PersistentDecodeImageOwners persistent_decode_lower(hipGraph_t graph,
                 hipGraphNodeGetDependencies(chain[run.first], predecessors.data(), &dependencies));
         const std::size_t last   = run.first + run.count - 1U;
         hipGraphNode_t successor = last + 1U < chain.size() ? chain[last + 1U] : nullptr;
-        hipGraphNode_t node      = nullptr;
-        HIP_CHECK(
-            hipGraphAddKernelNode(&node, graph, predecessors.data(), predecessors.size(), &params));
+        hipGraphNode_t node      = cooperative.add(graph, predecessors, params);
         for (std::size_t index = run.first; index <= last; ++index)
             HIP_CHECK(hipGraphDestroyNode(chain[index]));
         if (successor != nullptr) HIP_CHECK(hipGraphAddDependencies(graph, &node, &successor, 1U));

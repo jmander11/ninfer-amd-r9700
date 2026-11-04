@@ -17,6 +17,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     R9700_KV_PLANE_LAYOUTS,
     REPORT_SCHEMA_VERSION,
 )
+from tools.r9700.host import power_profile_path
 
 
 class PrepareWholeProfileTest(unittest.TestCase):
@@ -95,7 +96,7 @@ class PrepareWholeProfileTest(unittest.TestCase):
                 "required": "auto",
                 "observed": "auto",
                 "rechecked_after": "auto",
-                "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+                "sysfs_path": str(power_profile_path()),
             },
             "commands": [
                 {
@@ -193,7 +194,7 @@ class PrepareWholeProfileTest(unittest.TestCase):
                 "required": "auto",
                 "observed": "auto",
                 "rechecked_after": "auto",
-                "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+                "sysfs_path": str(power_profile_path()),
             },
             "commands": [
                 {
@@ -294,7 +295,7 @@ class PrepareWholeProfileTest(unittest.TestCase):
             script = root / "plan" / "commands.sh"
             script.write_text(
                 commands.replace(
-                    "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+                    str(power_profile_path()),
                     str(fake_profile),
                 ).replace("/opt/rocm/bin/rocprofv3", "/bin/false"),
                 encoding="utf-8",

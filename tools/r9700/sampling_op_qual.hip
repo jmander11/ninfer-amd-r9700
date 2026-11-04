@@ -474,6 +474,184 @@ void qualify_p_less(ninfer::DeviceContext& device) {
     }
 }
 
+void qualify_nonfinite_status(ninfer::DeviceContext& device) {
+    constexpr int rows = 8, physical_padding = 3;
+    for (const int tokens : {127, kTokenDomain}) {
+        const int physical = tokens + physical_padding, words = (tokens + 31) / 32;
+        std::vector<hip_bfloat16> finite(static_cast<std::size_t>(physical) * rows, bf16(NAN));
+        std::vector<std::uint32_t> masks(static_cast<std::size_t>(words) * rows, 0U);
+        for (int row = 0; row < rows; ++row) {
+            masks[row * words]         = 1U | (1U << 3) | (1U << 7);
+            finite[row * physical + 3] = bf16(0.0F);
+            finite[row * physical + 7] = bf16(1.0F);
+        }
+        ninfer::DeviceBuffer dl(finite.size() * sizeof(finite[0]));
+        ninfer::DeviceBuffer dm(masks.size() * sizeof(masks[0]));
+        ninfer::DeviceBuffer ds(rows * sizeof(std::uint32_t));
+        ninfer::DeviceBuffer dc(rows * sizeof(ninfer::ops::SamplingConfig));
+        ninfer::DeviceBuffer da((rows / 2) * sizeof(ninfer::ops::SamplingConfig));
+        ninfer::DeviceBuffer dp(rows * sizeof(int)), dout(rows * sizeof(int));
+        dm.copy_from_host(masks.data(), dm.size());
+        std::vector<int> positions(rows, 17);
+        dp.copy_from_host(positions.data(), dp.size());
+        std::vector<ninfer::ops::SamplingConfig> configs(rows), argmax_configs(rows / 2);
+        for (int row = 0; row < rows; ++row) {
+            auto& cfg                  = configs[row];
+            cfg.temperature            = row % 3 == 0 ? 0.0F : 1.0F;
+            cfg.p_less                 = row % 3 == 2;
+            cfg.top_k                  = 2;
+            cfg.suppressed_token_count = 1;
+            cfg.suppressed_tokens[0]   = 0;
+            cfg.allowed_token_words    = static_cast<std::uint32_t*>(dm.data()) + row * words;
+            cfg.nonfinite_logits       = static_cast<std::uint32_t*>(ds.data()) + row;
+            if (row % 2 == 0) {
+                argmax_configs[row / 2]                             = cfg;
+                argmax_configs[row / 2].allowed_token_column_stride = words;
+            }
+        }
+        dc.copy_from_host(configs.data(), dc.size());
+        da.copy_from_host(argmax_configs.data(), da.size());
+        ninfer::Tensor input(dl.data(), ninfer::DType::BF16, {physical, rows});
+        ninfer::Tensor output(dout.data(), ninfer::DType::I32, {rows});
+        ninfer::Tensor position(dp.data(), ninfer::DType::I32, {rows});
+        ninfer::DeviceArena workspace(std::max<std::size_t>(
+            1, ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows)));
+        const auto sample = [&] {
+            ninfer::ops::sample(
+                input, output, tokens, static_cast<const ninfer::ops::SamplingConfig*>(dc.data()),
+                position, ninfer::ops::kSamplePurposeDecode, workspace, device.stream);
+        };
+        hipGraph_t graph          = nullptr;
+        hipGraphExec_t executable = nullptr;
+        HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
+        sample();
+        HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        const auto check = [&](bool dirty) {
+            device.synchronize();
+            std::vector<std::uint32_t> actual(rows);
+            ds.copy_to_host(actual.data(), ds.size());
+            for (int row = 0; row < rows; ++row)
+                if (actual[row] != (dirty ? (row < 6 ? 3U : 2U) : 0U))
+                    fail("nonfinite status or configured-column offset mismatch at V=" +
+                         std::to_string(tokens) + " row=" + std::to_string(row));
+            std::vector<int> ids(rows);
+            dout.copy_to_host(ids.data(), dout.size());
+            for (const int id : ids)
+                if (id < 0 || id >= tokens) fail("reported nonfinite logits yielded unsafe id");
+        };
+        for (const float poison : {NAN, INFINITY, -INFINITY}) {
+            for (const bool all : {false, true}) {
+                auto dirty = finite;
+                for (int row = 0; row < 6; ++row) {
+                    dirty[row * physical + 3] = bf16(poison);
+                    if (all) dirty[row * physical + 7] = bf16(poison);
+                }
+                dl.copy_from_host(dirty.data(), dl.size());
+                const std::vector<std::uint32_t> initial(rows, 2U);
+                ds.copy_from_host(initial.data(), ds.size());
+                HIP_CHECK(hipGraphLaunch(executable, device.stream));
+                check(true); // status is sticky OR: preserve an unrelated caller-owned bit.
+                ds.copy_from_host(initial.data(), ds.size());
+                ninfer::ops::argmax(input, output, tokens,
+                                    static_cast<const ninfer::ops::SamplingConfig*>(da.data()), 2,
+                                    device.stream);
+                check(true);
+                // Unconfigured MTP proposal argmax also feeds an embedding gather before the
+                // host can observe target failure. Its all-NaN fallback must remain in bounds.
+                ninfer::ops::argmax(input, output, tokens, device.stream);
+                device.synchronize();
+                std::vector<int> proposal_ids(rows);
+                dout.copy_to_host(proposal_ids.data(), dout.size());
+                for (const int id : proposal_ids)
+                    if (id < 0 || id >= tokens) fail("nonfinite proposal argmax yielded unsafe id");
+                dl.copy_from_host(finite.data(), dl.size());
+                HIP_CHECK(hipMemsetAsync(ds.data(), 0, ds.size(), device.stream));
+                HIP_CHECK(hipGraphLaunch(executable, device.stream));
+                check(false); // masked NaNs, physical padding, and prior failure stay inert.
+            }
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(graph));
+    }
+    std::cout << "nonfinite-logit status: modes/column-offsets/masked-padding/replay PASS\n";
+}
+
+void qualify_low_positive_temperature(ninfer::DeviceContext& device) {
+    // The public temperature interval includes subnormal positive FP32 values. Check the
+    // distribution, rather than a private inverse-CDF traversal, with NaNs outside eligibility.
+    constexpr int rows = 6, draws = 256;
+    for (const int tokens : {127, kTokenDomain}) {
+        const int words = (tokens + 31) / 32;
+        std::vector<hip_bfloat16> logits(static_cast<std::size_t>(tokens) * rows, bf16(NAN));
+        std::vector<std::uint32_t> masks(static_cast<std::size_t>(words) * rows, 0U);
+        std::vector<ninfer::ops::SamplingConfig> configs(rows);
+        std::vector<sampling_reference::Distribution> references;
+        for (int row = 0; row < rows; ++row) {
+            auto& cfg               = configs[row];
+            cfg.temperature         = row < 2 ? 1.0e-38F : 1.0e-40F;
+            cfg.p_less              = row % 2;
+            cfg.top_k               = 2;
+            cfg.seed                = 0x517cc1b727220a95ULL + row;
+            cfg.allowed_token_words = masks.data() + row * words;
+            const int low = 3, high = tokens - 4;
+            masks[row * words + low / 32] |= 1U << (low % 32);
+            masks[row * words + high / 32] |= 1U << (high % 32);
+            auto* column = logits.data() + static_cast<std::size_t>(row) * tokens;
+            column[low]  = bf16(row < 4 ? 8.0F : 0.0F);
+            column[high] = column[low];
+            // One BF16 subnormal step is comparable to T: replacing an overflowing reciprocal
+            // with infinity and special-casing ties would still destroy this nonzero ratio.
+            if (row >= 4) column[high].data = 1U;
+            std::vector<double> represented(tokens);
+            for (int token = 0; token < tokens; ++token)
+                represented[token] = bf16_to_float(column[token]);
+            // Both fixtures retain both atoms, so the independent full-softmax oracle also
+            // describes the unfiltered top-k=2 distribution.
+            references.push_back(sampling_reference::p_less(represented, cfg));
+            if (references.back().ids.size() != 2U) fail("low-temperature oracle lost an atom");
+        }
+        ninfer::DeviceBuffer dl(logits.size() * sizeof(logits[0]));
+        ninfer::DeviceBuffer dm(masks.size() * sizeof(masks[0]));
+        ninfer::DeviceBuffer dc(configs.size() * sizeof(configs[0]));
+        ninfer::DeviceBuffer dp(rows * sizeof(int)), dout(rows * sizeof(int));
+        dl.copy_from_host(logits.data(), logits.size() * sizeof(logits[0]));
+        dm.copy_from_host(masks.data(), masks.size() * sizeof(masks[0]));
+        for (int row = 0; row < rows; ++row)
+            configs[row].allowed_token_words = static_cast<std::uint32_t*>(dm.data()) + row * words;
+        dc.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
+        ninfer::Tensor input(dl.data(), ninfer::DType::BF16, {tokens, rows});
+        ninfer::Tensor output(dout.data(), ninfer::DType::I32, {rows});
+        ninfer::Tensor position(dp.data(), ninfer::DType::I32, {rows});
+        ninfer::DeviceArena workspace(std::max<std::size_t>(
+            1, ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows)));
+        std::vector<int> positions(rows), actual(rows), first_count(rows);
+        for (int draw = 0; draw < draws; ++draw) {
+            for (int row = 0; row < rows; ++row) positions[row] = 1009 * draw + row;
+            dp.copy_from_host(positions.data(), positions.size() * sizeof(int));
+            ninfer::ops::sample(
+                input, output, tokens, static_cast<const ninfer::ops::SamplingConfig*>(dc.data()),
+                position, ninfer::ops::kSamplePurposeDecode, workspace, device.stream);
+            device.synchronize();
+            dout.copy_to_host(actual.data(), actual.size() * sizeof(int));
+            for (int row = 0; row < rows; ++row) {
+                const auto& reference = references[row];
+                if (actual[row] != reference.ids[0] && actual[row] != reference.ids[1])
+                    fail("low-temperature sample escaped eligible support");
+                first_count[row] += actual[row] == reference.ids[0];
+            }
+        }
+        for (int row = 0; row < rows; ++row) {
+            const double p         = references[row].probabilities[0];
+            const double tolerance = 7.0 * std::sqrt(draws * p * (1.0 - p)) + 2.0;
+            if (std::abs(first_count[row] - draws * p) > tolerance)
+                fail("low-temperature frequencies disagree with FP64 oracle: V=" +
+                     std::to_string(tokens) + " row=" + std::to_string(row));
+        }
+    }
+    std::cout << "low-positive-temperature: finite/subnormal logits and masked NaNs PASS\n";
+}
+
 void qualify_eligibility_and_positions(ninfer::DeviceContext& device) {
     constexpr int tokens = 67, columns = 8, rows = 4, per_row = 2;
     std::vector<hip_bfloat16> logits(tokens * columns, bf16(-1));
@@ -590,6 +768,169 @@ void qualify_validation(ninfer::DeviceContext& device) {
     } catch (const std::invalid_argument&) {}
 }
 
+// Public greedy selection at ragged cross-tile domains. Logical maxima are
+// checked independently; failed rows only promise a sticky status and safe id.
+void qualify_greedy_replay(ninfer::DeviceContext& device) {
+    for (const int tokens : {257, 12801, 248077}) {
+        const int physical = tokens + 3, words = (tokens + 31) / 32;
+        for (int rows = 1; rows <= 8; ++rows) {
+            const std::size_t elements = static_cast<std::size_t>(physical) * rows;
+            std::vector<hip_bfloat16> logits(elements, bf16(NAN));
+            std::vector<std::uint32_t> masks(static_cast<std::size_t>(words) * rows, 0U);
+            std::vector<int> counts(static_cast<std::size_t>(tokens) * rows, 3);
+            std::vector<int> positions(rows, 811);
+            std::vector<ninfer::ops::SamplingConfig> configs(rows);
+            ninfer::DeviceBuffer dl(elements * sizeof(logits[0]));
+            ninfer::DeviceBuffer dm(masks.size() * sizeof(masks[0]));
+            ninfer::DeviceBuffer dh(counts.size() * sizeof(counts[0]));
+            ninfer::DeviceBuffer ds(rows * sizeof(std::uint32_t));
+            ninfer::DeviceBuffer dc(rows * sizeof(configs[0]));
+            ninfer::DeviceBuffer dp(rows * sizeof(int)), dout(rows * sizeof(int));
+            const auto bytes = ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows);
+            ninfer::DeviceBuffer workspace(bytes);
+            ninfer::DeviceArena arena(ninfer::DeviceSpan{workspace.data(), bytes});
+            for (int row = 0; row < rows; ++row) {
+                masks[row * words] = 1U | (1U << 7);
+                masks[row * words + (tokens - 1) / 32] |= 1U << ((tokens - 1) % 32);
+                auto& cfg                  = configs[row];
+                cfg.temperature            = 0.0F;
+                cfg.p_less                 = 1; // Positive-temperature gate must keep this greedy.
+                cfg.presence_penalty       = 7.0F;
+                cfg.frequency_penalty      = 9.0F;
+                cfg.seed                   = 0x901324ULL + row;
+                cfg.token_counts           = static_cast<int*>(dh.data()) + row * tokens;
+                cfg.suppressed_token_count = 1;
+                cfg.suppressed_tokens[0]   = 0;
+                cfg.allowed_token_words    = static_cast<std::uint32_t*>(dm.data()) + row * words;
+                cfg.nonfinite_logits       = static_cast<std::uint32_t*>(ds.data()) + row;
+            }
+            dm.copy_from_host(masks.data(), dm.size());
+            dh.copy_from_host(counts.data(), dh.size());
+            dc.copy_from_host(configs.data(), dc.size());
+            dp.copy_from_host(positions.data(), dp.size());
+            ninfer::Tensor input(dl.data(), ninfer::DType::BF16, {physical, rows});
+            ninfer::Tensor output(dout.data(), ninfer::DType::I32, {rows});
+            ninfer::Tensor position(dp.data(), ninfer::DType::I32, {rows});
+            {
+                const auto launch = [&] {
+                    ninfer::ops::sample(input, output, tokens,
+                                        static_cast<const ninfer::ops::SamplingConfig*>(dc.data()),
+                                        position, ninfer::ops::kSamplePurposeDecode, arena,
+                                        device.stream);
+                };
+                hipGraph_t graph          = nullptr;
+                hipGraphExec_t executable = nullptr;
+                HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
+                launch();
+                HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+                HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+                // Include cross-tile ties and signed zero, isolated/all-eligible
+                // NaN/Inf, and recovery with dirty workspace after every failure.
+                for (int scenario = 0; scenario < 8; ++scenario) {
+                    const bool dirty = scenario >= 1 && scenario <= 6;
+                    for (int row = 0; row < rows; ++row) {
+                        const float value                   = row % 2 == 0 ? 0.0F : 5.0F;
+                        logits[row * physical]              = bf16(NAN); // Explicitly suppressed.
+                        logits[row * physical + 7]          = bf16(value);
+                        logits[row * physical + tokens - 1] = bf16(row % 2 == 0 ? -0.0F : value);
+                        if (dirty) {
+                            const float poison         = scenario <= 2   ? NAN
+                                                         : scenario <= 4 ? INFINITY
+                                                                         : -INFINITY;
+                            logits[row * physical + 7] = bf16(poison);
+                            if (scenario % 2 == 0)
+                                logits[row * physical + tokens - 1] = bf16(poison);
+                        }
+                    }
+                    dl.copy_from_host(logits.data(), dl.size());
+                    // Unrelated status bits remain caller-owned; workspaces do
+                    // not depend on a prior invocation or graph capture writes.
+                    const std::vector<std::uint32_t> initial(rows, 2U);
+                    for (int replay = 0; replay < 2; ++replay) {
+                        ds.copy_from_host(initial.data(), ds.size());
+                        workspace.fill(0xa5);
+                        dout.fill(0xff);
+                        if (replay == 0)
+                            launch();
+                        else
+                            HIP_CHECK(hipGraphLaunch(executable, device.stream));
+                        device.synchronize();
+                        std::vector<int> actual(rows), observed_counts(counts.size());
+                        std::vector<std::uint32_t> status(rows);
+                        dout.copy_to_host(actual.data(), dout.size());
+                        ds.copy_to_host(status.data(), ds.size());
+                        dh.copy_to_host(observed_counts.data(), dh.size());
+                        for (int row = 0; row < rows; ++row) {
+                            if (status[row] != (dirty ? 3U : 2U)) fail("greedy status isolation");
+                            if (actual[row] < 0 || actual[row] >= tokens) fail("greedy unsafe id");
+                            if (!dirty && actual[row] != 7) fail("greedy exact lower-id tie");
+                        }
+                        if (observed_counts != counts) fail("greedy unexpectedly updated counts");
+                    }
+                }
+                HIP_CHECK(hipGraphExecDestroy(executable));
+                HIP_CHECK(hipGraphDestroy(graph));
+            }
+            // Supplement the independent greedy checks with fixed-input mixed
+            // replay parity. Both positive-temperature paths must keep their RNG
+            // draws and exactly-once count transitions when greedy rows coexist.
+            for (int row = 0; row < rows; ++row) {
+                configs[row].temperature = row % 3 == 0 ? 0.0F : 0.8F;
+                configs[row].p_less      = row % 3 == 2;
+                configs[row].top_k       = 2;
+            }
+            dc.copy_from_host(configs.data(), dc.size());
+            std::vector<int> control;
+            {
+                hipGraph_t graph          = nullptr;
+                hipGraphExec_t executable = nullptr;
+                const auto launch         = [&] {
+                    ninfer::ops::sample(input, output, tokens,
+                                        static_cast<const ninfer::ops::SamplingConfig*>(dc.data()),
+                                        position, ninfer::ops::kSamplePurposeDecode, arena,
+                                        device.stream);
+                };
+                HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
+                launch();
+                HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+                HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+                for (int replay = 0; replay < 2; ++replay) {
+                    dh.copy_from_host(counts.data(), dh.size());
+                    ds.fill();
+                    workspace.fill(0xa5);
+                    if (replay == 0)
+                        launch();
+                    else
+                        HIP_CHECK(hipGraphLaunch(executable, device.stream));
+                    device.synchronize();
+                    std::vector<int> actual(rows), observed_counts(counts.size());
+                    std::vector<std::uint32_t> status(rows);
+                    dout.copy_to_host(actual.data(), dout.size());
+                    dh.copy_to_host(observed_counts.data(), dh.size());
+                    ds.copy_to_host(status.data(), ds.size());
+                    if (control.empty()) control = actual;
+                    if (actual != control) fail("mixed-row greedy RNG replay mismatch");
+                    auto expected_counts = counts;
+                    for (int row = 0; row < rows; ++row) {
+                        if (status[row] != 0U) fail("mixed-row greedy false nonfinite");
+                        if (actual[row] != 7 && actual[row] != tokens - 1)
+                            fail("mixed-row greedy eligibility mismatch");
+                        if (row % 3 == 0 && actual[row] != 7)
+                            fail("mixed-row greedy exact tie mismatch");
+                        if (row % 3 != 0) ++expected_counts[row * tokens + actual[row]];
+                    }
+                    if (observed_counts != expected_counts)
+                        fail("mixed-row greedy count publication mismatch");
+                }
+                HIP_CHECK(hipGraphExecDestroy(executable));
+                HIP_CHECK(hipGraphDestroy(graph));
+            }
+        }
+    }
+    std::cout << "greedy final reduction: "
+                 "B1..8/ragged/ties/masks/nonfinite/counts/dirty-workspace/eager+graph PASS\n";
+}
+
 void benchmark(ninfer::DeviceContext& device) {
     constexpr int rows               = static_cast<int>(ninfer::kMaximumConcurrency);
     std::vector<hip_bfloat16> logits = make_logits(rows, kPhysicalVocabulary);
@@ -652,6 +993,9 @@ int main() {
                   << " wave=" << device.props.warpSize
                   << " vram_mib=" << device.props.totalGlobalMem / (1024U * 1024U) << '\n';
         qualify_validation(device);
+        qualify_greedy_replay(device);
+        qualify_nonfinite_status(device);
+        qualify_low_positive_temperature(device);
         qualify_rng_and_small_route(device);
         qualify_batches(device);
         qualify_p_less(device);

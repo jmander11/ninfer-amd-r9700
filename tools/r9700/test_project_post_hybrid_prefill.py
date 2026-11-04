@@ -17,19 +17,17 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class PostHybridPrefillProjectionTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.trace = ROOT / (
-            "profiles/rocprof/diagnostic-p2048-current-production-selected-region-20260904/"
-            "measured-selected-region-attribution.json"
-        )
-        self.baseline = ROOT / "profiles/bench/r9700-dense-bk-crossover-p2048-c1-20260904.json"
-        self.hybrid = ROOT / (
-            "profiles/bench/r9700-fp8-four-role-pre-shared-workspace-p2048-c1-20260904.json"
-        )
+        fixtures = ROOT / "tools/r9700/fixtures/post-hybrid-prefill"
+        self.trace = fixtures / "measured-selected-region-attribution.json"
+        self.baseline = fixtures / "r9700-dense-bk-crossover-p2048-c1-20260904.json"
+        self.hybrid = fixtures / "r9700-fp8-four-role-pre-shared-workspace-p2048-c1-20260904.json"
         self.roles = [
-            ROOT / "profiles/bench/r9700-fp8-vs-a8q4-gate-up-linear-execution-20260904.json",
-            ROOT
-            / "profiles/bench/r9700-fp8-vs-a8q4-attention-qk-gate-value-linear-execution-20260904.json",
-            ROOT / "profiles/bench/r9700-fp8-vs-a8q4-gdn-query-key-linear-execution-20260904.json",
+            fixtures / name
+            for name in (
+                "r9700-fp8-vs-a8q4-gate-up-linear-execution-20260904.json",
+                "r9700-fp8-vs-a8q4-attention-qk-gate-value-linear-execution-20260904.json",
+                "r9700-fp8-vs-a8q4-gdn-query-key-linear-execution-20260904.json",
+            )
         ]
 
     def test_retained_inputs_produce_the_bounded_inventory(self) -> None:

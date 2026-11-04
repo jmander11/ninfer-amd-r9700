@@ -9,8 +9,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <vector>
 #include <stdexcept>
+#include <string>
 
 namespace {
 
@@ -66,6 +71,61 @@ ninfer::test::artifact_fixture::TemporaryArtifact write_fixture() {
                         })},
         },
         "materialization");
+}
+
+constexpr std::size_t kLargeHostBytes = 9ULL * 64ULL * 1024ULL * 1024ULL + 512;
+constexpr std::size_t kBoundaryBytes  = 256;
+constexpr std::size_t kMarkerPage     = 4096;
+
+std::byte host_marker(std::size_t offset) {
+    return std::byte{static_cast<unsigned char>((offset / kMarkerPage) % 251)};
+}
+
+ninfer::test::artifact_fixture::TemporaryArtifact write_ring_fixture() {
+    using namespace ninfer::test::artifact_fixture;
+    const auto tensor = [](const char* name, std::size_t offset, std::size_t bytes) {
+        return Json{{"name", name},
+                    {"kind", "tensor"},
+                    {"shape", {bytes / 2}},
+                    {"format", "BF16"},
+                    {"layout", "contiguous-le-v1"},
+                    {"offset", offset},
+                    {"bytes", bytes}};
+    };
+    const Json directory = {
+        {"identity", {{"model_id", "fixture-model"}, {"weights_id", "fixture-weights"}}},
+        {"objects",
+         Json::array({tensor("weights/before", 0, kBoundaryBytes),
+                      tensor("weights/mapped", kBoundaryBytes, kLargeHostBytes),
+                      tensor("weights/after", kBoundaryBytes + kLargeHostBytes, kBoundaryBytes)})}};
+    const std::string metadata = directory.dump();
+    std::vector<std::byte> header(align_up(16 + metadata.size(), 4096), std::byte{0});
+    std::copy(kMagic.begin(), kMagic.end(), reinterpret_cast<std::uint8_t*>(header.data()));
+    write_u64_le(header.data() + 8, metadata.size());
+    std::memcpy(header.data() + 16, metadata.data(), metadata.size());
+    TemporaryArtifact fixture{std::filesystem::temp_directory_path() /
+                              "ninfer_artifact_materialization_ring.ninfer"};
+    std::ofstream output(fixture.path, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(header.data()),
+                 static_cast<std::streamsize>(header.size()));
+    std::array<std::byte, kBoundaryBytes> boundary;
+    boundary.fill(std::byte{0xd3});
+    output.write(reinterpret_cast<const char*>(boundary.data()), boundary.size());
+    // Keep fixture construction bounded: no second complete embedding-sized host vector.
+    std::vector<std::byte> block(1024 * 1024);
+    for (std::size_t offset = 0; offset < kLargeHostBytes; offset += block.size()) {
+        const std::size_t bytes = std::min(block.size(), kLargeHostBytes - offset);
+        for (std::size_t page = 0; page < bytes; page += kMarkerPage) {
+            std::fill_n(block.data() + page, std::min(kMarkerPage, bytes - page),
+                        host_marker(offset + page));
+        }
+        output.write(reinterpret_cast<const char*>(block.data()),
+                     static_cast<std::streamsize>(bytes));
+    }
+    boundary.fill(std::byte{0x7e});
+    output.write(reinterpret_cast<const char*>(boundary.data()), boundary.size());
+    if (!output) { throw std::runtime_error("failed to write materialization ring fixture"); }
+    return fixture;
 }
 
 void require(bool condition, const char* message) {
@@ -216,6 +276,48 @@ int main() {
                     mapped_stats.mapped_host_bytes == kTensor.size() &&
                     mapped_stats.h2d_bytes == kSecondTensor.size(),
                 "mapped host materialization statistics are incomplete");
+        // More than eight 64-MiB reads: the first ring slot changes from mixed to
+        // host-only, while a slot initially used for host-only data later uploads a
+        // device boundary. Both copies must survive wraparound and asynchronous H2D.
+        auto ring_fixture = write_ring_fixture();
+        ninfer::artifact::Reader ring_reader(ring_fixture.path);
+        ninfer::artifact::Binder ring_binder(ring_reader);
+        const auto bind_ring = [&](const char* name, std::uint64_t bytes) {
+            const std::array<std::uint64_t, 1> shape = {bytes / 2};
+            return ring_binder.require_tensor(name, ninfer::artifact::NumericFormat::BF16,
+                                              ninfer::artifact::StorageLayout::ContiguousLeV1,
+                                              shape);
+        };
+        const auto before     = bind_ring("weights/before", kBoundaryBytes);
+        const auto large_host = bind_ring("weights/mapped", kLargeHostBytes);
+        const auto after      = bind_ring("weights/after", kBoundaryBytes);
+        ring_binder.materialize_on_device(after);
+        ring_binder.materialize_on_mapped_host(large_host);
+        ring_binder.materialize_on_device(before);
+        auto ring_materialized =
+            ninfer::artifact::materialize(ring_reader, ring_binder.finish(), device);
+        const auto* host = static_cast<const std::byte*>(ring_materialized.device_data(large_host));
+        for (std::size_t offset = 0; offset < kLargeHostBytes; offset += kMarkerPage) {
+            const std::size_t bytes = std::min(kMarkerPage, kLargeHostBytes - offset);
+            const std::byte marker  = host_marker(offset);
+            require(std::all_of(host + offset, host + offset + bytes,
+                                [marker](std::byte value) { return value == marker; }),
+                    "mapped host payload changed across a materialization ring wrap");
+        }
+        std::array<std::byte, kBoundaryBytes> boundary;
+        HIP_CHECK(hipMemcpy(boundary.data(), ring_materialized.device_data(before), boundary.size(),
+                            hipMemcpyDeviceToHost));
+        require(std::all_of(boundary.begin(), boundary.end(),
+                            [](std::byte value) { return value == std::byte{0xd3}; }),
+                "device payload before mapped host tensor differs");
+        HIP_CHECK(hipMemcpy(boundary.data(), ring_materialized.device_data(after), boundary.size(),
+                            hipMemcpyDeviceToHost));
+        require(std::all_of(boundary.begin(), boundary.end(),
+                            [](std::byte value) { return value == std::byte{0x7e}; }),
+                "device payload after mapped host tensor differs");
+        require(ring_materialized.stats().mapped_host_bytes == kLargeHostBytes &&
+                    ring_materialized.stats().h2d_bytes == 2 * kBoundaryBytes,
+                "ring materialization byte accounting differs");
         std::cout << "artifact_materialization: PASS h2d_bytes=" << stats.h2d_bytes
                   << " staging_bytes=" << stats.peak_staging_bytes << '\n';
         return 0;

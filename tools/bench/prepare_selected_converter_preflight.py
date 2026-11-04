@@ -27,7 +27,7 @@ from tools.convert.qwen3_8_27b_r9700 import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
-RESOLVER = REPO / "profiles/bench/post-terminal-focused-verification-20260905/resolve.py"
+RESOLVER = REPO / "tools/bench/resolve_selected_route.py"
 RECIPES = {
     "r9700-q4g64-n16k16-eval": (convert_q4, q4_inventory, "all_q4"),
     "r9700-q4-w8-mse-n16k16-eval": (convert_q4_w8_mse, q4_w8_mse_inventory, "mixed_source_mse"),

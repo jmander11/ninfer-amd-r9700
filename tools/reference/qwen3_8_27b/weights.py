@@ -183,7 +183,11 @@ class WeightStore:
             if representation == "decoded":
                 used += size
 
-        quantized = [block for block in blocks if block.layout == "row-split-k128-v1"]
+        quantized = [
+            block
+            for block in blocks
+            if block.layout in ("row-split-k128-v1", "r9700-q4g64-n16-k16-v1")
+        ]
         for block in sorted(quantized, key=lambda item: item.payload_bytes, reverse=True):
             if block.component == "vision":
                 self._representation[block.tensor_id] = "stream"

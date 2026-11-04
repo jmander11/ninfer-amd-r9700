@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include "core/arena.h"
 #include "core/decode_graph.h"
 #include "core/device.h"
@@ -46,8 +47,7 @@ constexpr std::size_t kMappedPages = (kLargestContext + kPageSize - 1U) / kPageS
 constexpr std::size_t kPhysicalPages = kMappedPages + 3U;
 constexpr std::size_t kPhysicalTokens = kPhysicalPages * kPageSize;
 constexpr float kAttentionScale = 1.0F / 16.0F;
-constexpr std::string_view kR9700PowerProfilePath =
-    "/sys/class/drm/card2/device/power_dpm_force_performance_level";
+std::string qualification_power_path() { return (ninfer::r9700_qualification::configured_pci_path() / "power_dpm_force_performance_level").string(); }
 
 #ifndef NINFER_SOURCE_DIR
 #error "NINFER_SOURCE_DIR must bind split-512 qualification provenance"
@@ -63,8 +63,8 @@ std::string trim(const std::string& value) {
 }
 
 std::string require_auto_power_profile() {
-    std::ifstream input{std::string(kR9700PowerProfilePath)};
-    if (!input) fail("cannot read R9700 power profile: " + std::string(kR9700PowerProfilePath));
+    std::ifstream input{std::string(qualification_power_path())};
+    if (!input) fail("cannot read R9700 power profile: " + std::string(qualification_power_path()));
     std::string value;
     std::getline(input, value);
     value = trim(value);
@@ -1141,7 +1141,7 @@ void write_benchmark_report(const std::filesystem::path& output,
         << "  \"disposition\": \"unpromoted-qualification-candidate\",\n"
         << "  \"physical_qualification\": {\"status\": \"passed\", "
            "\"scope\": \"full-numerical-rejection-device-graph\"},\n"
-        << "  \"power_profile\": {\"path\": \"" << json_escape(kR9700PowerProfilePath)
+        << "  \"power_profile\": {\"path\": \"" << json_escape(qualification_power_path())
         << "\", \"value\": \"" << json_escape(power_profile)
         << "\", \"required\": \"auto\"},\n"
         << "  \"device\": {\"name\": \"" << json_escape(device_name)

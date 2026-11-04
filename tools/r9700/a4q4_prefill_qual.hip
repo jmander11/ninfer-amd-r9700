@@ -1,12 +1,12 @@
+#include "qualification_device_guard.h"
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 
 namespace {
 
-constexpr const char* kGateUpPci = "/sys/bus/pci/devices/0000:13:00.0";
 
 void gate_up_auto() {
-    const std::filesystem::path pci(kGateUpPci);
+    const std::filesystem::path pci(ninfer::r9700_qualification::configured_pci_path());
     if (read_text(pci / "vendor") != "0x1002" || read_text(pci / "device") != "0x7551" ||
         read_text(pci / "power_dpm_force_performance_level") != "auto")
         fail("gate/up timing requires the physical R9700 in auto power mode");

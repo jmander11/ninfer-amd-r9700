@@ -1,0 +1,53 @@
+{
+  "filename": "qwen3.8-27b-r9700-lq4.ninfer",
+  "identity": "qwen3.8-27b/r9700-lq4",
+  "bytes": 16752796160,
+  "sha256": "71bedebab37643bc7324f373e65c781ac5e0ace9c034732234f3b475726236f9",
+  "public_download_available": false,
+  "target": "Qwen3.8-27B",
+  "hardware": "AMD Radeon AI PRO R9700 (gfx1201)",
+  "recipe": "r9700-lq4",
+  "calibration": {
+    "sha256": "c613cf8e5b6edeebc4a00b8a3e75fd79a4d15687a059307f759ca6832bcf79ba",
+    "tokens": 262144,
+    "rounding": "gptq-block128",
+    "damping": {
+      "mlp/down": 0.3,
+      "default": 0.1,
+      "output_head": 0.1
+    },
+    "independent_roles": [
+      "attention/query_key"
+    ]
+  },
+  "fp8_protections": [
+    "text/layers/11/attention/gate_value",
+    "text/layers/11/attention/query_key",
+    "text/layers/15/attention/gate_value",
+    "text/layers/15/attention/query_key",
+    "text/layers/19/attention/gate_value",
+    "text/layers/19/attention/query_key",
+    "text/layers/23/attention/gate_value",
+    "text/layers/23/attention/query_key",
+    "text/layers/27/attention/gate_value",
+    "text/layers/27/attention/query_key",
+    "text/layers/3/attention/gate_value",
+    "text/layers/3/attention/output",
+    "text/layers/3/attention/query_key",
+    "text/layers/31/attention/gate_value",
+    "text/layers/31/attention/query_key",
+    "text/layers/4/gdn/output",
+    "text/layers/51/attention/gate_value",
+    "text/layers/51/attention/query_key",
+    "text/layers/7/attention/gate_value",
+    "text/layers/7/attention/output",
+    "text/layers/7/attention/query_key"
+  ],
+  "description": "GPTQ-rounded 4-bit codebook Text projections and output head decoded to FP8 for computation; 21 sensitive projections retained in row-scaled FP8. Includes DFlash2 companion and resources.",
+  "conversion_reference": "maintainer/qwen3.8-27b-artifact.md",
+  "credits_reference": "acknowledgements.md",
+  "notes": [
+    "Checksum identifies the complete converted file, not its BF16 source checkpoint.",
+    "File size is disk usage, not total GPU memory usage."
+  ]
+}

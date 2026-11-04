@@ -90,7 +90,6 @@ std::size_t granularity(const hipMemAllocationProp& prop) {
     return g;
 }
 
-// ---------------------------------------------------------------------------------------------
 // memcheck: guarded allocations
 
 struct Guarded {
@@ -163,7 +162,6 @@ bool guarded_free(void* ptr, hipError_t* result) {
     return true;
 }
 
-// ---------------------------------------------------------------------------------------------
 // racecheck: shadow mapping and the exit report
 
 std::uint32_t env_u32(const char* name, std::uint32_t fallback) {

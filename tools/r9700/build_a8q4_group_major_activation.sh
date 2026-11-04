@@ -3,7 +3,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$repo"
 make -s -C tools/r9700 build/a8q4_group_major_activation_qual.s
-PYTHON=/path/to/local/.venv-ninfer-r9700/bin/python
+PYTHON="${NINFER_PYTHON:-python3.11}"
 "$PYTHON" -m tools.r9700.check_a8q4_group_major_activation_static \
   --source tools/r9700/a8q4_group_major_activation_qual.hip \
   --assembly tools/r9700/build/a8q4_group_major_activation_qual.s

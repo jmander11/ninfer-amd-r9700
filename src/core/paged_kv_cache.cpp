@@ -522,6 +522,67 @@ std::size_t plane_page_bytes(const Tensor& plane, PagedKVPlaneOrder order) {
     return static_cast<std::size_t>(plane.ne[3]) * static_cast<std::size_t>(plane.nb[2]);
 }
 
+void pack_head_major_pages(unsigned char* out, const Tensor& plane, std::size_t bpp,
+                           std::span<const std::int32_t> pages, hipStream_t stream) {
+    const auto* base      = static_cast<const unsigned char*>(plane.data);
+    const auto row_bytes  = static_cast<std::size_t>(plane.nb[2]);
+    const auto head_pitch = static_cast<std::size_t>(plane.nb[3]);
+    const auto heads      = static_cast<std::size_t>(plane.ne[3]);
+    for (std::size_t first = 0; first < pages.size();) {
+        std::size_t end = first + 1;
+        while (end < pages.size() && pages[end] == pages[end - 1] + 1) ++end;
+        const auto count = end - first;
+        if (count > heads) {
+            // Host stays [logical page][head]. For a long physical run, one pitched copy
+            // per head replaces one per page. Since the run exceeds heads, bpp is smaller
+            // than the device head pitch already required by the page-oriented route.
+            for (std::size_t head = 0; head < heads; ++head) {
+                HIP_CHECK(hipMemcpy2DAsync(
+                    out + first * bpp + head * row_bytes, bpp,
+                    base + head * head_pitch + static_cast<std::size_t>(pages[first]) * row_bytes,
+                    row_bytes, row_bytes, count, hipMemcpyDeviceToHost, stream));
+            }
+        } else {
+            // Preserve the original operation order for short and fragmented runs.
+            for (std::size_t page = first; page < end; ++page) {
+                HIP_CHECK(hipMemcpy2DAsync(out + page * bpp, row_bytes,
+                                           base + static_cast<std::size_t>(pages[page]) * row_bytes,
+                                           head_pitch, row_bytes, heads, hipMemcpyDeviceToHost,
+                                           stream));
+            }
+        }
+        first = end;
+    }
+}
+
+void unpack_head_major_pages(const Tensor& plane, std::size_t bpp, const unsigned char* in,
+                             std::span<const std::int32_t> pages, hipStream_t stream) {
+    auto* base            = static_cast<unsigned char*>(plane.data);
+    const auto row_bytes  = static_cast<std::size_t>(plane.nb[2]);
+    const auto head_pitch = static_cast<std::size_t>(plane.nb[3]);
+    const auto heads      = static_cast<std::size_t>(plane.ne[3]);
+    for (std::size_t first = 0; first < pages.size();) {
+        std::size_t end = first + 1;
+        while (end < pages.size() && pages[end] == pages[end - 1] + 1) ++end;
+        const auto count = end - first;
+        if (count > heads) {
+            for (std::size_t head = 0; head < heads; ++head) {
+                HIP_CHECK(hipMemcpy2DAsync(base + head * head_pitch +
+                                               static_cast<std::size_t>(pages[first]) * row_bytes,
+                                           row_bytes, in + first * bpp + head * row_bytes, bpp,
+                                           row_bytes, count, hipMemcpyHostToDevice, stream));
+            }
+        } else {
+            for (std::size_t page = first; page < end; ++page) {
+                HIP_CHECK(hipMemcpy2DAsync(base + static_cast<std::size_t>(pages[page]) * row_bytes,
+                                           head_pitch, in + page * bpp, row_bytes, row_bytes, heads,
+                                           hipMemcpyHostToDevice, stream));
+            }
+        }
+        first = end;
+    }
+}
+
 void pack_page_major_pages(unsigned char* out, unsigned char* base, std::int64_t page_stride,
                            std::size_t bpp, std::span<const std::int32_t> pages,
                            hipStream_t stream) {
@@ -640,13 +701,7 @@ void pack_paged_kv_allocation_to_host(const PagedKVAllocation& allocation, const
         if (order == PagedKVPlaneOrder::PageMajor) {
             pack_page_major_pages(out, base, plane.nb[3], bpp, pages, stream);
         } else {
-            for (std::size_t i = 0; i < pages.size(); ++i) {
-                HIP_CHECK(hipMemcpy2DAsync(
-                    out + i * bpp, static_cast<std::size_t>(plane.nb[2]),
-                    base + static_cast<std::int64_t>(pages[i]) * plane.nb[2],
-                    static_cast<std::size_t>(plane.nb[3]), static_cast<std::size_t>(plane.nb[2]),
-                    static_cast<std::size_t>(plane.ne[3]), hipMemcpyDeviceToHost, stream));
-            }
+            pack_head_major_pages(out, plane, bpp, pages, stream);
         }
         out += pages.size() * bpp;
     }
@@ -677,13 +732,7 @@ void unpack_paged_kv_allocation_from_host(PagedKVAllocation& allocation, const P
         if (order == PagedKVPlaneOrder::PageMajor) {
             unpack_page_major_pages(base, plane.nb[3], bpp, in, pages, dst_extent, stream);
         } else {
-            for (std::uint32_t i = 0; i < dst_extent; ++i) {
-                HIP_CHECK(hipMemcpy2DAsync(
-                    base + static_cast<std::int64_t>(pages[i]) * plane.nb[2],
-                    static_cast<std::size_t>(plane.nb[3]), in + static_cast<std::size_t>(i) * bpp,
-                    static_cast<std::size_t>(plane.nb[2]), static_cast<std::size_t>(plane.nb[2]),
-                    static_cast<std::size_t>(plane.ne[3]), hipMemcpyHostToDevice, stream));
-            }
+            unpack_head_major_pages(plane, bpp, in, pages.first(dst_extent), stream);
         }
         in += static_cast<std::size_t>(src_page_count) * bpp;
     }

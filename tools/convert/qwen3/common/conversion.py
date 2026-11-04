@@ -1,8 +1,7 @@
 """Mechanical artifact-writing helpers for the Qwen3 converter.
 
-This module deliberately knows neither target identity nor checkpoint geometry.
-Target packages own their config validation, complete object inventory, source
-recipe, shortlist provenance, and conversion entry point.
+Target packages supply checkpoint geometry, config validation, object inventories,
+source recipes, shortlist provenance and conversion entry points.
 """
 
 from __future__ import annotations

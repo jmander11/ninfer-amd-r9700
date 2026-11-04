@@ -68,6 +68,7 @@ from tools.ppl import run as ppl_run  # noqa: E402  sys.path bootstrap
 from tools.ppl.validate_fp8_hybrid_execution_gate import (  # noqa: E402  sys.path bootstrap
     query_widths,
 )
+from tools.r9700.host import power_profile_path  # noqa: E402
 
 DEFAULT_BENCH = REPO_ROOT / "build-r9700/bench/ninfer_bench"
 DEFAULT_CORPUS = REPO_ROOT / "bench/fixtures/bench_corpus.ids"
@@ -77,7 +78,7 @@ PREFILL_LENGTHS_FULL_EXTRA = (32768, 65536)
 PREFILL_CHUNKS = (128, 256, 512, 1024, 2048, 4096)
 PRODUCTION_PREFILL_PROMPTS = (8192, 32768)
 LOW_CONTEXT_PREFILL_PROMPTS = (128, 512, 1024, 2048, 4096)
-R9700_POWER_PROFILE = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
+R9700_POWER_PROFILE = power_profile_path()
 PURE_DECODE_GENS = (16, 64, 128, 512, 2048)
 CONTEXT_CORE = ((512, 512), (2048, 512), (8192, 512))
 CONTEXT_FULL_EXTRA = ((32768, 256), (65536, 128))

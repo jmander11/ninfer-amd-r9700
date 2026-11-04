@@ -2,6 +2,7 @@
 #include <hip/hip_runtime.h>
 
 #include "core/device.h"
+#include "core/decode_graph.h"
 #include "core/tensor.h"
 #include "ninfer/ops/rope.h"
 
@@ -154,6 +155,8 @@ Result check_tensor(const Case& c, const std::vector<std::int32_t>& positions,
                      {std::pair{static_cast<double>(fp32(output[base + pair])), expected_first},
                       std::pair{static_cast<double>(fp32(output[base + pair + half])),
                                 expected_second}}) {
+                    if (!std::isfinite(got) || !std::isfinite(expected))
+                        fail(c.name + ": nonfinite rotated value");
                     const double error = got - expected;
                     result.max_abs     = std::max(result.max_abs, std::abs(error));
                     result.squared_error += error * error;
@@ -260,8 +263,9 @@ void check_rejection(hipStream_t stream) {
                    "overlapping q/k");
 }
 
-Result check_interleaved_vision(hipStream_t stream) {
-    const Case c{"vision-interleaved-qkv", 72, 72, 16, 16, 2, 5, 0, 10'000.0F};
+Result check_interleaved_vision(hipStream_t stream, int tokens, int prefix = 0,
+                                bool captured = false) {
+    const Case c{"vision-interleaved-qkv", 72, 72, 16, 16, 2, tokens, 0, 10'000.0F};
     const int plane    = c.d * c.q_heads;
     const auto q_input = fixture(c.d, c.q_heads, c.tokens, plane, 5);
     const auto k_input = fixture(c.d, c.k_heads, c.tokens, plane, 41);
@@ -273,27 +277,45 @@ Result check_interleaved_vision(hipStream_t stream) {
         std::copy_n(q_input.data() + t * plane, plane, packed.data() + t * 3 * plane);
         std::copy_n(k_input.data() + t * plane, plane, packed.data() + (t * 3 + 1) * plane);
     }
-    DeviceBuffer<hip_bfloat16> storage(packed.size());
+    std::vector<hip_bfloat16> backing(packed.size() + static_cast<std::size_t>(prefix),
+                                      bf16(-11.0F));
+    std::copy(packed.begin(), packed.end(), backing.begin() + prefix);
+    DeviceBuffer<hip_bfloat16> storage(backing.size());
     DeviceBuffer<std::int32_t> position_storage(positions.size());
-    HIP_CHECK(hipMemcpy(storage.get(), packed.data(), storage.bytes(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(storage.get(), backing.data(), storage.bytes(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(position_storage.get(), positions.data(), position_storage.bytes(),
                         hipMemcpyHostToDevice));
     ninfer::Tensor p(position_storage.get(), ninfer::DType::I32, {c.tokens, 2});
-    ninfer::Tensor q(storage.get(), ninfer::DType::BF16, {c.d, c.q_heads, c.tokens});
-    ninfer::Tensor k(storage.get() + plane, ninfer::DType::BF16, {c.d, c.k_heads, c.tokens});
+    ninfer::Tensor q(storage.get() + prefix, ninfer::DType::BF16, {c.d, c.q_heads, c.tokens});
+    ninfer::Tensor k(storage.get() + prefix + plane, ninfer::DType::BF16,
+                     {c.d, c.k_heads, c.tokens});
     q.nb[2] = k.nb[2] = 3 * plane * sizeof(hip_bfloat16);
     auto alias        = k;
-    alias.data        = storage.get() + 3 * plane; // aliases Q's next token, not its first
+    alias.data        = storage.get() + prefix + 3 * plane; // aliases Q's next token, not its first
     expect_invalid([&] { ninfer::ops::rope(p, c.r, c.theta, q, alias, stream); },
                    "cross-token overlapping interleaved q/k");
-    ninfer::ops::rope(p, c.r, c.theta, q, k, stream);
-    HIP_CHECK(hipStreamSynchronize(stream));
-    std::vector<hip_bfloat16> output(packed.size()), q_output(q_input.size()),
+    if (captured) {
+        ninfer::DecodeGraphDefinition definition;
+        definition.capture(stream, [&] { ninfer::ops::rope(p, c.r, c.theta, q, k, stream); });
+        ninfer::DecodeGraphExecutable executable;
+        executable.instantiate(definition);
+        executable.upload(stream);
+        executable.launch(stream);
+        HIP_CHECK(hipStreamSynchronize(stream));
+    } else {
+        ninfer::ops::rope(p, c.r, c.theta, q, k, stream);
+        HIP_CHECK(hipStreamSynchronize(stream));
+    }
+    std::vector<hip_bfloat16> copied(backing.size()), q_output(q_input.size()),
         k_output(k_input.size());
-    HIP_CHECK(hipMemcpy(output.data(), storage.get(), storage.bytes(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(copied.data(), storage.get(), storage.bytes(), hipMemcpyDeviceToHost));
+    for (int i = 0; i < prefix; ++i)
+        if (copied[static_cast<std::size_t>(i)].data != backing[static_cast<std::size_t>(i)].data)
+            fail("interleaved RoPE changed prefix canary");
+    const auto* output = copied.data() + prefix;
     for (int t = 0; t < c.tokens; ++t) {
-        std::copy_n(output.data() + t * 3 * plane, plane, q_output.data() + t * plane);
-        std::copy_n(output.data() + (t * 3 + 1) * plane, plane, k_output.data() + t * plane);
+        std::copy_n(output + t * 3 * plane, plane, q_output.data() + t * plane);
+        std::copy_n(output + (t * 3 + 1) * plane, plane, k_output.data() + t * plane);
         for (int i = 0; i < plane; ++i) {
             if (output[(t * 3 + 2) * plane + i].data != packed[(t * 3 + 2) * plane + i].data)
                 fail("interleaved RoPE changed the value plane");
@@ -305,7 +327,7 @@ Result check_interleaved_vision(hipStream_t stream) {
 }
 
 float time_decode(hipStream_t stream, int tokens) {
-    constexpr int iterations = 1000;
+    constexpr int iterations = 100;
     const Case c{"text-1d-decode", 256, 64, 24, 4, 1, 1, 0, 1.0e7F};
     DeviceBuffer<std::int32_t> positions(tokens);
     DeviceBuffer<hip_bfloat16> q(static_cast<std::size_t>(tokens) * 256 * 24);
@@ -313,17 +335,36 @@ float time_decode(hipStream_t stream, int tokens) {
     ninfer::Tensor p(positions.get(), ninfer::DType::I32, {tokens});
     ninfer::Tensor qt(q.get(), ninfer::DType::BF16, {256, 24, tokens});
     ninfer::Tensor kt(k.get(), ninfer::DType::BF16, {256, 4, tokens});
-    for (int i = 0; i < 20; ++i) { ninfer::ops::rope(p, c.r, c.theta, qt, kt, stream); }
+    std::vector<std::int32_t> host_positions(static_cast<std::size_t>(tokens));
+    for (int t = 0; t < tokens; ++t) host_positions[static_cast<std::size_t>(t)] = t + 1;
+    const auto host_q = fixture(256, 24, tokens, 256 * 24, 5);
+    const auto host_k = fixture(256, 4, tokens, 256 * 4, 41);
+    HIP_CHECK(hipMemcpy(positions.get(), host_positions.data(), positions.bytes(),
+                        hipMemcpyHostToDevice));
+    const auto reset = [&] {
+        HIP_CHECK(hipMemcpyAsync(q.get(), host_q.data(), q.bytes(), hipMemcpyHostToDevice, stream));
+        HIP_CHECK(hipMemcpyAsync(k.get(), host_k.data(), k.bytes(), hipMemcpyHostToDevice, stream));
+    };
+    for (int i = 0; i < 20; ++i) {
+        reset();
+        ninfer::ops::rope(p, c.r, c.theta, qt, kt, stream);
+    }
+    HIP_CHECK(hipStreamSynchronize(stream));
     hipEvent_t start = nullptr;
     hipEvent_t stop  = nullptr;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
-    HIP_CHECK(hipEventRecord(start, stream));
-    for (int i = 0; i < iterations; ++i) { ninfer::ops::rope(p, c.r, c.theta, qt, kt, stream); }
-    HIP_CHECK(hipEventRecord(stop, stream));
-    HIP_CHECK(hipEventSynchronize(stop));
     float elapsed = 0.0F;
-    HIP_CHECK(hipEventElapsedTime(&elapsed, start, stop));
+    for (int i = 0; i < iterations; ++i) {
+        reset();
+        HIP_CHECK(hipEventRecord(start, stream));
+        ninfer::ops::rope(p, c.r, c.theta, qt, kt, stream);
+        HIP_CHECK(hipEventRecord(stop, stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+        float sample = 0.0F;
+        HIP_CHECK(hipEventElapsedTime(&sample, start, stop));
+        elapsed += sample;
+    }
     HIP_CHECK(hipEventDestroy(stop));
     HIP_CHECK(hipEventDestroy(start));
     return elapsed * 1000.0F / iterations;
@@ -455,7 +496,12 @@ int main() {
             for (const int axes : {1, 3}) check_qk_norm_rope(device.stream, tokens, axes, fused);
         std::cout << "qk-norm-rope FP64 seam criterion PASS checked=" << fused.checked
                   << " rel_l2=" << std::sqrt(fused.squared_error / fused.squared_oracle) << '\n';
-        merge(total, check_interleaved_vision(device.stream));
+        for (int tokens : {5, 255, 256, 257, 1536, 8256})
+            merge(total, check_interleaved_vision(device.stream, tokens));
+        merge(total, check_interleaved_vision(device.stream, 256, 1));
+        merge(total, check_interleaved_vision(device.stream, 1536, 0, true));
+        merge(total, run_pair({"vision-strided-fallback", 72, 72, 16, 16, 2, 257, 4, 10'000.0F},
+                              device.stream));
         const double rel_l2 = std::sqrt(total.squared_error / total.squared_oracle);
         if (total.max_abs > 0.008 || rel_l2 > 0.006) {
             fail("RoPE numerical criterion failed: max_abs=" + std::to_string(total.max_abs) +

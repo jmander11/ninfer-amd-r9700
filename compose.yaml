@@ -35,7 +35,7 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: ${NINFER_DISK_CACHE_DIR:-/path/to/local/cache_r9700}
+        source: ${NINFER_DISK_CACHE_DIR:-./.cache/ninfer}
         target: /cache
         bind:
           create_host_path: false
@@ -65,7 +65,9 @@ services:
       - --kv-capacity
       - auto
       - --kv-ram-capacity
-      - "${NINFER_RAM_CACHE_MIB:-8192}"
+      - "${NINFER_RAM_CACHE_MIB:-12288}"
+      - --kv-ram-system-prompts
+      - "${NINFER_SYSTEM_PROMPTS:-0}"
       - --kv-disk-capacity
       - "${NINFER_DISK_CACHE_MIB:-25600}"
       - --kv-disk-location
@@ -76,9 +78,12 @@ services:
       - "${NINFER_DRAFT_TOKENS:-7}"
       - --adaptive-draft
       - --lm-head-draft
-      - --preserve-thinking
       - --pending-timeout-ms
       - "900000"
+      - --default-reasoning-effort
+      - "${NINFER_DEFAULT_REASONING_EFFORT:-low}"
+      - --default-thinking-token-budget
+      - "${NINFER_DEFAULT_THINKING_TOKEN_BUDGET:-off}"
       - --default-max-tokens
       - "32768"
     healthcheck:

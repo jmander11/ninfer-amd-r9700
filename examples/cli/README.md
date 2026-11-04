@@ -1,17 +1,13 @@
 # Stable CLI examples
 
-This directory contains committed, offline `--messages` inputs for exercising the product CLI from
-the repository root. It covers short text, chat history, images, video, mixed multimodal history,
-hard thinking problems, long decode, and four long-context capacities. This is an operator-facing
-example set, not a second correctness framework.
+Offline `--messages` examples for short text, chat history, images, video, mixed media, reasoning, long answers and four context capacities. Run them from the repository root.
 
-[`manifest.json`](manifest.json) lists each case, its intended observation, recommended runtime
-budget, and its prepared-prompt token count when that value has been requalified. A null count is
-an explicit external recount gate rather than a copied value from a superseded fixture.
+[`manifest.json`](manifest.json) lists each case, its intended observation, recommended runtime budget, and its prepared-prompt token count when that value has been requalified. A null count is a token count that still needs to be remeasured.
 
 ## Quick start
 
-Run from the repository root because media paths in the JSON files are repository-relative:
+The commands below use repository-relative messages paths. Media paths inside each JSON file
+are relative to that file, so an absolute messages path also works from another directory:
 
 ```bash
 CLI=./build-r9700/apps/ninfer
@@ -22,9 +18,7 @@ $CLI "$MODEL" \
   --no-thinking --greedy --max-new 8
 ```
 
-Expected stdout is exactly `42`. `--no-thinking --greedy` is the normal comparison mode for simple
-cases. Reasoning, progress, timings, memory, and MTP statistics are written to stderr; answer content
-is written to stdout.
+Expected stdout is exactly `42`. `--no-thinking --greedy` is the normal comparison mode for simple cases. Reasoning, progress, timings, memory, and MTP statistics are written to stderr; answer content is written to stdout.
 
 ## Text and multimodal cases
 
@@ -65,8 +59,7 @@ $CLI "$MODEL" --messages examples/cli/messages/text_smoke_zh.json \
 
 ## Thinking cases
 
-Do not pass `--no-thinking` for these inputs. Give reasoning enough room to complete and transition
-to answer content; the model is free to stop before the requested maximum.
+Do not pass `--no-thinking` for these inputs. Give reasoning enough room to complete and transition to answer content; the model is free to stop before the requested maximum.
 
 ```bash
 $CLI "$MODEL" --messages examples/cli/messages/thinking_logic_grid.json \
@@ -76,13 +69,11 @@ $CLI "$MODEL" --messages examples/cli/messages/thinking_multimodal_checksum.json
   --greedy --max-context 8192 --max-new 4096 --vision
 ```
 
-The logic grid has one solution and must end with `CHECK=4606`. The multimodal case reads independent
-facts from two images and one video, then must end with `CHECKSUM=2238`.
+The logic grid has one solution and must end with `CHECK=4606`. The multimodal case reads independent facts from two images and one video, then must end with `CHECKSUM=2238`.
 
 ## Long decode
 
-This case deliberately gets a generous budget. It is meant to run until the model's stop token, not
-to discover the smallest `max-new` value that happens to fit one output.
+This case deliberately gets a generous budget. It is meant to run until the model's stop token, not to discover the smallest `max-new` value that happens to fit one output.
 
 ```bash
 $CLI "$MODEL" --messages examples/cli/messages/long_decode_aime26_15.json \
@@ -93,8 +84,7 @@ The mathematical answer is the integer `83`; reasoning text is not required to b
 
 ## Long context
 
-These prompt lengths include the chat template with thinking disabled. Each input uses a frozen
-document with one record placed near the middle of the packet.
+These prompt lengths include the chat template with thinking disabled. Each input uses a frozen document with one record placed near the middle of the packet.
 
 ```bash
 $CLI "$MODEL" --messages examples/cli/messages/long_niah_8k.json \
@@ -124,11 +114,9 @@ The committed prompt token counts were validated against the sole Qwen3.8-27B fr
 
 ## Fixture construction
 
-All PNG and MP4 media are project-authored deterministic scenes. The video is five seconds at 8 FPS
-with forty H.264 frames. Runtime tests never depend on a network URL or mutable external content.
+All PNG and MP4 media are project-authored deterministic scenes. The video is five seconds at 8 FPS with forty H.264 frames. Runtime tests never depend on a network URL or mutable external content.
 
-The committed generated files are the actual inputs. To intentionally rebuild an NIAH length and
-its position variants from the current deterministic source:
+The committed generated files are the actual inputs. To intentionally rebuild an NIAH length and its position variants from the current deterministic source:
 
 ```bash
 python3 tools/bench/make_niah_positions.py --length 8k --position all

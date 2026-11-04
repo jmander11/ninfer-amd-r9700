@@ -99,7 +99,7 @@ class Layer3AttentionTraceTest(unittest.TestCase):
                         "device_name": "AMD Radeon AI PRO R9700",
                         "architecture": "gfx1201",
                         "wave_size": 32,
-                        "pci": "0000:13:00.0",
+                        "pci": "0000:01:00.0",
                         "power_profile_source": "/sys/power",
                         "power_profile_value": "auto",
                     },

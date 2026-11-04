@@ -70,6 +70,10 @@ ninfer_add_r9700_test(ninfer_artifact_reader_test
 ninfer_add_r9700_test(ninfer_tensor_test
   SOURCES test_tensor.cpp
   LIBRARIES ninfer_r9700_core)
+ninfer_add_r9700_test(ninfer_cache_tensor_identity_test
+  SOURCES test_cache_tensor_identity.cpp
+  LIBRARIES ninfer_engine ninfer_artifact)
+set_tests_properties(ninfer_cache_tensor_identity_test PROPERTIES LABELS "host")
 # Exact oracle for host staging of prompt embedding rows.
 ninfer_add_r9700_test(ninfer_embedding_staging_test
   SOURCES ops/test_embedding_staging.cpp
@@ -83,6 +87,9 @@ set_tests_properties(ninfer_pinned_arena_recovery_test PROPERTIES
 ninfer_add_r9700_test(ninfer_admission_policy_test
   SOURCES test_admission_policy.cpp
   LIBRARIES ninfer_engine ninfer_r9700_core)
+ninfer_add_r9700_test(ninfer_kv_pressure_policy_test
+  SOURCES test_kv_pressure_policy.cpp)
+set_tests_properties(ninfer_kv_pressure_policy_test PROPERTIES LABELS "host")
 ninfer_add_r9700_test(ninfer_sampling_defaults_test
   SOURCES test_sampling_defaults.cpp
   LIBRARIES ninfer_engine)
@@ -104,6 +111,13 @@ ninfer_add_r9700_test(ninfer_r9700_fp8_execution_state_contract_test
   LIBRARIES ninfer_r9700_target_bindings ninfer_r9700_core)
 
 # Family CPU behavior retained by the sole Qwen3.8-27B target.
+ninfer_add_r9700_test(ninfer_schema_composition_test
+  SOURCES test_schema_composition.cpp
+  LIBRARIES ninfer_r9700_text ninfer_token_grammar)
+target_compile_definitions(ninfer_schema_composition_test PRIVATE NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+ninfer_add_r9700_test(ninfer_json_input_test
+  SOURCES test_json_input.cpp
+  LIBRARIES ninfer_r9700_text)
 ninfer_add_r9700_test(ninfer_typical_cycle_test
   SOURCES test_typical_cycle.cpp)
 ninfer_add_r9700_test(ninfer_generation_recovery_test
@@ -114,6 +128,9 @@ ninfer_add_r9700_test(ninfer_qwen3_recovery_executor_test
   LIBRARIES ninfer_engine)
 target_compile_definitions(ninfer_qwen3_recovery_executor_test PRIVATE
   NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+ninfer_add_r9700_test(ninfer_counted_grammar_test
+  SOURCES targets/qwen3/test_counted_grammar.cpp
+  LIBRARIES ninfer_token_grammar)
 ninfer_add_r9700_test(ninfer_schema_grammar_test
   SOURCES targets/qwen3/test_schema_grammar.cpp
   LIBRARIES ninfer_token_grammar)
@@ -123,6 +140,11 @@ ninfer_add_r9700_test(ninfer_grammar_tokenizer_test
 ninfer_add_r9700_test(ninfer_token_grammar_test
   SOURCES targets/qwen3/test_token_grammar.cpp
   LIBRARIES ninfer_engine)
+ninfer_add_r9700_test(ninfer_token_mask_exchange_test
+  SOURCES targets/qwen3/test_token_mask_exchange.cpp
+  LIBRARIES ninfer_engine ninfer_r9700_core)
+set_tests_properties(ninfer_token_mask_exchange_test PROPERTIES
+  LABELS "r9700" TIMEOUT 30 RESOURCE_LOCK r9700_device)
 ninfer_add_r9700_test(ninfer_frontend_test
   SOURCES targets/qwen3/test_frontend.cpp
   LIBRARIES ninfer_engine)
@@ -143,6 +165,12 @@ ninfer_add_r9700_test(ninfer_qwen3_score_index_test
 
 # Product CLI and external serving contracts.
 if(TARGET ninfer_serve)
+  ninfer_add_r9700_test(ninfer_startup_watchdog_test
+    SOURCES test_startup_watchdog.cpp
+    LIBRARIES ninfer_serve)
+  ninfer_add_r9700_test(ninfer_schema_number_input_test
+    SOURCES test_schema_number_input.cpp
+    LIBRARIES ninfer_serve)
   foreach(contract IN ITEMS
       openai_schema
       responses_schema
@@ -168,6 +196,9 @@ if(TARGET ninfer_serve)
 endif()
 
 if(TARGET ninfer)
+  ninfer_add_r9700_test(ninfer_prompt_input_test
+    SOURCES test_prompt_input.cpp
+    LIBRARIES ninfer_product_prompt_input)
   ninfer_add_r9700_test(ninfer_cli_options_test
     SOURCES test_cli_options.cpp ${PROJECT_SOURCE_DIR}/apps/cli/options.cpp
     LIBRARIES ninfer_engine)
@@ -326,6 +357,7 @@ set(ninfer_r9700_qualifiers
   ninfer_r9700_instruction_qual
   ninfer_r9700_kv_qual
   ninfer_r9700_linear_qual
+  ninfer_r9700_vision_bf16_linear_qual
   ninfer_r9700_state_qual
   ninfer_r9700_dflash_state_qual
   ninfer_r9700_dflash2_select_qual
@@ -400,4 +432,8 @@ ninfer_add_r9700_test(ninfer_r9700_engine_cache_write_real_test
   SOURCES targets/qwen3_8_27b/test_engine_cache_write_real.cpp
   LIBRARIES ninfer_engine)
 set_tests_properties(ninfer_r9700_engine_cache_write_real_test PROPERTIES
+  LABELS "r9700;real" SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK r9700_device)
+
+add_test(NAME ninfer_r9700_nonfinite_batch_qual COMMAND ninfer_r9700_nonfinite_batch_qual)
+set_tests_properties(ninfer_r9700_nonfinite_batch_qual PROPERTIES
   LABELS "r9700;real" SKIP_RETURN_CODE 77 TIMEOUT 600 RESOURCE_LOCK r9700_device)

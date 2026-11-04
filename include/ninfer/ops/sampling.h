@@ -81,6 +81,15 @@ struct SamplingConfig {
     // token. Storage stays live through the complete sampling/accept invocation.
     const std::uint32_t* allowed_token_words = nullptr;
     std::int32_t allowed_token_column_stride = 0;
+    // Optional caller-owned status words, one per verification column (sample uses column zero).
+    // Any eligible logical logit that is NaN or infinite atomically sets bit zero. The caller
+    // clears the words before execution and checks them before publishing selected tokens.
+    // Suppressed tokens and physical padding do not participate. Status storage stays live
+    // through the complete selection invocation; speculative column selection advances this
+    // pointer by the column index independently of the eligibility-mask stride.
+    // When status is reported, selected ids are unspecified but remain in the token domain
+    // so downstream device consumers are safe before the caller rejects the failed round.
+    std::uint32_t* nonfinite_logits = nullptr;
 };
 
 // Caller-owned transient capacity for every parallel sampling-lane count in the inclusive
@@ -145,7 +154,8 @@ struct SamplingConfig {
  * configs[b].token_counts when it is non-null. Non-null token-count arrays belonging to distinct
  * active requests must not alias. `out` must not overlap logits, configs, logical_positions, or any
  * token-count array. The Op writes all of out, uses caller-owned transient storage reported by
- * sampling_workspace_capacity_bytes(), and has no other persistent-state side effect.
+ * sampling_workspace_capacity_bytes(), and sets the optional nonfinite-logit status words as
+ * described in SamplingConfig. It has no other persistent-state side effect.
  */
 void sample(const Tensor& logits, Tensor& out, std::int32_t token_domain,
             const SamplingConfig* configs, const Tensor& logical_positions, std::int32_t purpose,

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -136,6 +137,18 @@ struct ArtifactIdentity {
     bool operator==(const ArtifactIdentity&) const = default;
 };
 
+struct TensorRowRange {
+    std::uint64_t first_row;
+    std::uint64_t rows;
+};
+
+// The name borrows from the Reader's inventory. An absent row range selects the whole tensor;
+// row ranges select a rank-two matrix, including its corresponding codes, scales, and divisor.
+struct TensorContentSelection {
+    std::string_view name;
+    std::optional<TensorRowRange> rows;
+};
+
 class Reader {
 public:
     static constexpr std::size_t direct_io_alignment = 4096;
@@ -153,7 +166,10 @@ public:
     const ObjectDescriptor* find(std::string_view name) const noexcept;
 
     std::uint64_t file_bytes() const noexcept;
-    std::string file_identity() const;
+    // Stable digest of selected tensor descriptors and encoded bytes. Native tiled row ranges
+    // align to N16; file metadata, resources and unselected bytes are excluded.
+    [[nodiscard]] std::string
+    tensor_content_identity(std::span<const TensorContentSelection> selections) const;
     std::uint64_t payload_offset() const noexcept;
     PayloadSpan payload(const ObjectDescriptor& object) const;
     PayloadSpan payload(std::string_view name) const;

@@ -1,6 +1,10 @@
 #include "serve/generation_service.h"
 #include "serve/http_server.h"
 #include "serve/metrics.h"
+#include "serve/openai_schema.h"
+#include "serve/anthropic_schema.h"
+#include "serve/responses_schema.h"
+#include "serve/translate.h"
 
 #include <nlohmann/json.hpp>
 
@@ -22,6 +26,16 @@ int check(bool condition, const char* message) {
 
 int main() {
     int failures = 0;
+    for (const bool available : {false, true}) {
+        httplib::Response response;
+        ninfer::serve::handle_health(available, response);
+        failures += check(response.status == (available ? 200 : 503) &&
+                              Json::parse(response.body) ==
+                                  Json{{"status", available ? "ok" : "unavailable"}} &&
+                              response.get_header_value("Content-Type") == "application/json",
+                          "health did not reflect inference availability");
+    }
+
     failures += check(ninfer::serve::is_unauthenticated_path("/health") &&
                           ninfer::serve::is_unauthenticated_path("/metrics") &&
                           ninfer::serve::is_unauthenticated_path("/metrics.json") &&
@@ -45,6 +59,70 @@ int main() {
                   tool_schema.code == "invalid_tool_schema" && tool_schema.param == "tools" &&
                   tool_schema.message == "unsupported tool schema assertion: not",
               "tool schema rejection lost its HTTP classification or diagnostic");
+
+    {
+        using namespace ninfer::serve;
+        const Json schema{{"type", "object"}, {"properties", Json::object()}};
+        const auto chat_tool = [&](const char* name) {
+            return Json{{"type", "function"},
+                        {"function", Json{{"name", name}, {"parameters", schema}}}};
+        };
+        const auto response_tool = [&](const char* name) {
+            return Json{{"type", "function"}, {"name", name}, {"parameters", schema}};
+        };
+        const auto anthropic_tool = [&](const char* name) {
+            return Json{{"name", name}, {"input_schema", schema}};
+        };
+        Json base{{"model", "test"},
+                  {"messages", Json::array({Json{{"role", "user"}, {"content", "hi"}}})}};
+        auto chat_body     = base;
+        chat_body["tools"] = Json::array({chat_tool("first"), chat_tool("selected")});
+        chat_body["tool_choice"] =
+            Json{{"type", "function"}, {"function", Json{{"name", "selected"}}}};
+        auto chat                    = parse_chat_completion_request(chat_body, RequestLimits{});
+        auto anthropic_body          = base;
+        anthropic_body["max_tokens"] = 16;
+        anthropic_body["tools"] =
+            Json::array({anthropic_tool("first"), anthropic_tool("selected")});
+        anthropic_body["tool_choice"] = Json{{"type", "tool"}, {"name", "selected"}};
+        auto anthropic                = parse_messages_request(anthropic_body, RequestLimits{});
+        auto responses =
+            parse_responses_request(
+                Json{{"model", "test"},
+                     {"input", "hi"},
+                     {"tools", Json::array({response_tool("first"), response_tool("selected")})},
+                     {"tool_choice", Json{{"type", "function"}, {"name", "selected"}}}},
+                RequestLimits{})
+                .generation;
+        for (const auto& [request, expected] :
+             {std::pair{chat, "/tools/1/function/parameters/$defs/range"},
+              std::pair{anthropic, "/tools/1/input_schema/$defs/range"},
+              std::pair{responses, "/tools/1/parameters/$defs/range"}}) {
+            const auto error = request_error_to_api_error(
+                ninfer::RequestError(ninfer::RequestErrorKind::InvalidToolSchema,
+                                     "unsupported numeric range", {},
+                                     ninfer::RequestErrorLocation{"/$defs/range", 0}),
+                &request);
+            failures += check(
+                error.param == expected && error.message.find("selected") != std::string::npos,
+                "named tool selection lost the original wire index, schema field, or name");
+            failures += check(to_prompt_input(request, ResolvedRequestSemantics{}, {})
+                                      .options.tool_jsons.size() == 1,
+                              "named tool diagnostic fixture did not select one Engine tool");
+        }
+        chat.output_constraint =
+            ninfer::OutputConstraint{ninfer::OutputConstraintKind::JsonSchema, "{}"};
+        const auto response_error = ninfer::RequestError(
+            ninfer::RequestErrorKind::InvalidOutputConstraint, "unsupported numeric range", {},
+            ninfer::RequestErrorLocation{"/properties/value", std::nullopt});
+        failures += check(request_error_to_api_error(response_error, &chat).param ==
+                              "/response_format/json_schema/schema/properties/value",
+                          "Chat schema source pointer changed");
+        responses.output_constraint = chat.output_constraint;
+        failures += check(request_error_to_api_error(response_error, &responses).param ==
+                              "/text/format/schema/properties/value",
+                          "Responses schema source pointer changed");
+    }
 
     const ninfer::serve::ApiError media_budget = ninfer::serve::request_error_to_api_error(
         ninfer::RequestError(ninfer::RequestErrorKind::MediaBudgetExceeded,

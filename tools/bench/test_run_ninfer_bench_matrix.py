@@ -21,6 +21,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     POWER_BOUND_PRESETS,
     POWER_RECHECK_PRESETS,
     R9700_KV_PLANE_LAYOUTS,
+    R9700_POWER_PROFILE,
     REPORT_SCHEMA_VERSION,
     BenchCase,
     _validate_speculative,
@@ -1069,9 +1070,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 manifest["power_profile"],
                 {
                     "required": "auto",
-                    "sysfs_path": (
-                        "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level"
-                    ),
+                    "sysfs_path": (str(R9700_POWER_PROFILE)),
                     "observed": "not-checked-dry-run",
                     "rechecked_after": None,
                 },
@@ -1079,10 +1078,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(
                 manifest["corpus_sha256"], file_sha256(Path("bench/fixtures/bench_corpus.ids"))
             )
-            power_guard = (
-                'test "$(cat /sys/bus/pci/devices/0000:13:00.0/'
-                'power_dpm_force_performance_level)" = auto'
-            )
+            power_guard = f'test "$(cat {R9700_POWER_PROFILE})" = auto'
             commands_script = (output / "commands.sh").read_text(encoding="utf-8")
             self.assertEqual(commands_script.count(power_guard), 2)
             self.assertTrue(commands_script.rstrip().endswith(power_guard))
@@ -1175,10 +1171,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(manifest["concurrency"], [1])
             self.assertEqual(manifest["expected_xattention_profile"], "dense")
             self.assertEqual(len({record["report"] for record in manifest["commands"]}), 5)
-            power_guard = (
-                'test "$(cat /sys/bus/pci/devices/0000:13:00.0/'
-                'power_dpm_force_performance_level)" = auto'
-            )
+            power_guard = f'test "$(cat {R9700_POWER_PROFILE})" = auto'
             script = (output / "commands.sh").read_text(encoding="utf-8")
             self.assertEqual(script.count(power_guard), 2)
             self.assertTrue(script.rstrip().endswith(power_guard))
@@ -1245,7 +1238,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 manifest["power_profile"],
                 {
                     "required": "auto",
-                    "sysfs_path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
+                    "sysfs_path": str(R9700_POWER_PROFILE),
                     "observed": "not-checked-dry-run",
                     "rechecked_after": None,
                 },
@@ -1272,8 +1265,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 )
             )
             self.assertIn(
-                'test "$(cat /sys/bus/pci/devices/0000:13:00.0/'
-                'power_dpm_force_performance_level)" = auto',
+                f'test "$(cat {R9700_POWER_PROFILE})" = auto',
                 (output / "commands.sh").read_text(encoding="utf-8"),
             )
 
@@ -1431,7 +1423,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 manifest["power_profile"],
                 {
                     "required": "auto",
-                    "sysfs_path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
+                    "sysfs_path": str(R9700_POWER_PROFILE),
                     "observed": "not-checked-dry-run",
                     "rechecked_after": None,
                 },
@@ -1441,8 +1433,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(command[command.index("--concurrency") + 1], "1")
             self.assertIn("--whole-pg", command)
             self.assertIn(
-                'test "$(cat /sys/bus/pci/devices/0000:13:00.0/'
-                'power_dpm_force_performance_level)" = auto',
+                f'test "$(cat {R9700_POWER_PROFILE})" = auto',
                 (output / "commands.sh").read_text(encoding="utf-8"),
             )
 
@@ -1496,7 +1487,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             run.return_value = SimpleNamespace(returncode=0, stdout="0000:7c:00.0\n", stderr="")
             with self.assertRaisesRegex(ValueError, "does not bind R9700 PCI"):
                 require_hip_pci_device(0)
-            run.return_value.stdout = "0000:13:00.0\n"
+            run.return_value.stdout = R9700_POWER_PROFILE.parent.name + "\n"
             require_hip_pci_device(0)
 
     def test_dry_run_manifest_binds_xattention_profile(self) -> None:

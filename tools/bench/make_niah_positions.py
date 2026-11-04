@@ -1,51 +1,26 @@
 #!/usr/bin/env python3
-"""Deterministic NIAH (needle-in-a-haystack) position-fixture generator.
+"""Generate deterministic NIAH (needle-in-a-haystack) position fixtures.
 
-The single source of truth for the NIAH (needle-in-a-haystack) position
-fixtures. A fixture is a pure, deterministic function of two coordinates:
+Each fixture takes a document-length preset and a needle position. Shorter
+lengths use prefixes of the needle-free master document, read from
+examples/cli/messages/long_niah_256k.json by default. An OFFICIAL RECORD line
+is inserted at the requested fractional depth. The question gives the answer
+format (ORCHID=<code>; COLOR=<color>) without revealing either value.
 
-    length   -> target document length in characters (~4.1 chars/token)
-  (length, position) -> a fixture with the needle spliced at that position
+Presets use approximately 4.26 characters per Qwen3.8 token. The 260k preset
+uses the full 1,108,548-character master stream: about 260.1k prompt tokens,
+roughly 2k below the 262,144-token context limit. Positions are start (0),
+q25 (0.25), mid (0.5, default), q75 (0.75) and end (1).
 
-Content comes from the clean "master stream" -- the needle-free master document
-(the longest committed fixture, default examples/cli/messages/long_niah_256k.json).
-Every shorter length is a prefix slice of that one continuous essay, so all cells
-share one master (no per-cell content drift). The needle is a single distinctive
-"OFFICIAL RECORD" line, spliced in as a standalone line at the requested
-fractional depth of the document.
-
-The question is NON-LEAKING by design: it states the answer FORM
-(ORCHID=<code>; COLOR=<color>) but NOT the values, so a correct answer requires
-actually retrieving the needle from the document (a non-vacuous gate). The old
-question echoed the exact answer, which made every NIAH gate vacuous; this is the
-defect fix.
-
-Deterministic and pure: stdlib only, no randomness, no network. Re-running with
-the same arguments reproduces the identical fixture byte-for-byte, so committed
-fixtures are reproducible. The master stream is read from a committed fixture,
-never regenerated from scratch.
-
-Length presets map to target document character counts (~4.26 chars/token with the
-Qwen3.8 tokenizer). 260k is the whole master stream (1,108,548 chars, ~260.1k prompt
-tokens): the long end of the ladder, ~2k tokens under the 262,144 context.
-
-Position fractions (where the needle sits within the document):
-    start  0.00  needle is the first thing in the document
-      q25  0.25
-     mid   0.50  (the default; matches the committed mid fixtures)
-     q75  0.75
-     end   1.00  needle is the last thing in the document
+Uses only the standard library, with no randomness or network access. The
+same arguments and master fixture produce identical bytes.
 
 Usage:
-  # one cell (defaults: 200k length, needle at mid -> examples/cli/messages/long_niah_200k.json)
-     python3 tools/bench/make_niah_positions.py --length 200k
-  # a specific position (needle at the start of the 8k document)
-    python3 tools/bench/make_niah_positions.py --length 8k --position start
-  # the whole position ladder for one length (5 cells)
-    python3 tools/bench/make_niah_positions.py --length 8k --position all
-  # regenerate a committed fixture at an explicit path
-    python3 tools/bench/make_niah_positions.py --length 8k --position mid \
-        --out examples/cli/messages/long_niah_8k.json
+  python3 tools/bench/make_niah_positions.py --length 200k
+  python3 tools/bench/make_niah_positions.py --length 8k --position start
+  python3 tools/bench/make_niah_positions.py --length 8k --position all
+  python3 tools/bench/make_niah_positions.py --length 8k --position mid \
+      --out examples/cli/messages/long_niah_8k.json
 """
 
 from __future__ import annotations
@@ -55,7 +30,7 @@ import json
 import re
 from pathlib import Path
 
-# --- Fixture content (single source of truth) --------------------------------
+# Fixture content
 
 SYSTEM = "Answer retrieval questions using only the supplied document. Be exact and concise."
 PREFIX = (
@@ -182,7 +157,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-# --- Master stream -----------------------------------------------------------
+# Master stream
 
 
 def extract_master(master_path: Path) -> str:
@@ -197,7 +172,7 @@ def extract_master(master_path: Path) -> str:
     return re.sub(r"\n{3,}", "\n\n", NEEDLE_LINE_RE.sub("", doc))
 
 
-# --- Fixture construction ----------------------------------------------------
+# Fixture construction
 
 
 def _line_boundary(text: str, pos: int) -> int:

@@ -127,7 +127,13 @@ __device__ __forceinline__ SamplingConfig sampling_column_config(SamplingConfig 
     if (cfg.allowed_token_words) {
         cfg.allowed_token_words += static_cast<std::int64_t>(col) * cfg.allowed_token_column_stride;
     }
+    if (cfg.nonfinite_logits) { cfg.nonfinite_logits += col; }
     return cfg;
+}
+
+__device__ __forceinline__ void sampling_note_nonfinite_logit(float value,
+                                                              const SamplingConfig& cfg) {
+    if (cfg.nonfinite_logits != nullptr && !isfinite(value)) { atomicOr(cfg.nonfinite_logits, 1U); }
 }
 
 __device__ __forceinline__ bool sampling_p_less_in_domain(int v, std::int32_t vocab,
@@ -372,6 +378,16 @@ __device__ inline void sampling_block_inclusive_scan(float* shared) {
     }
 }
 
+// Shift before temperature scaling so finite logits cannot produce Inf - Inf. A positive
+// subnormal temperature can have an infinite FP32 reciprocal; divide by the represented
+// temperature in that case, preserving meaningful ratios between subnormal BF16 logits.
+__device__ __forceinline__ float sampling_shifted_exp(float value, float maximum, float temperature,
+                                                      float inv_temp) {
+    const float difference = value - maximum;
+    if (isfinite(inv_temp)) { return __expf(difference * inv_temp); }
+    return __expf(difference / temperature);
+}
+
 // Full-vocabulary p-less moments from represented BF16 logits. All threads of
 // the block must call. Penalties are not applied. red_idx[0] remains the min
 // argmax; red_val[0] is sum_exp and red_aux[0] is sum_exp2.
@@ -391,16 +407,19 @@ struct SamplingPLessMoments {
 // z >= m + T log(sum_exp2_cut/sum_exp). z < logit_cut cannot pass, including
 // when the floor excludes the mode. The 1/M floor is not relaxed by ε.
 struct SamplingPLessGate {
-    float m         = 0.0f;
-    float sum_exp   = 0.0f;
-    float sum_exp2  = 0.0f;
-    float inv_temp  = 0.0f;
-    float logit_cut = 1.0e30f;
+    float m           = 0.0f;
+    float sum_exp     = 0.0f;
+    float sum_exp2    = 0.0f;
+    float inv_temp    = 0.0f;
+    float temperature = 0.0f;
+    float logit_cut   = 1.0e30f;
 };
 
 __device__ __forceinline__ SamplingPLessGate sampling_p_less_gate(const SamplingPLessMoments& st,
-                                                                  float inv_temp) {
+                                                                  float temperature) {
+    const float inv_temp = 1.0f / temperature;
     SamplingPLessGate g;
+    g.temperature              = temperature;
     g.m                        = st.m;
     g.sum_exp                  = st.sum_exp;
     g.inv_temp                 = inv_temp;
@@ -410,7 +429,8 @@ __device__ __forceinline__ SamplingPLessGate sampling_p_less_gate(const Sampling
     g.sum_exp2 = fmaxf(st.sum_exp2 * inv_scale,
                        st.sum_exp * st.sum_exp / static_cast<float>(kPLessMaxEffectiveSupport));
     if (st.sum_exp > 0.0f && g.sum_exp2 > 0.0f) {
-        g.logit_cut = st.m + logf(g.sum_exp2 / st.sum_exp) / inv_temp;
+        const float log_ratio = logf(g.sum_exp2 / st.sum_exp);
+        g.logit_cut = st.m + (isfinite(inv_temp) ? log_ratio / inv_temp : log_ratio * temperature);
     }
     return g;
 }
@@ -422,7 +442,7 @@ __device__ __forceinline__ bool sampling_p_less_weight_admitted(float e,
 
 __device__ __forceinline__ float sampling_p_less_survivor_exp(float z, const SamplingPLessGate& g) {
     if (!(z >= g.logit_cut)) { return 0.0f; }
-    const float e = __expf((z - g.m) * g.inv_temp);
+    const float e = sampling_shifted_exp(z, g.m, g.temperature, g.inv_temp);
     return sampling_p_less_weight_admitted(e, g) ? e : 0.0f;
 }
 
@@ -449,6 +469,7 @@ sampling_p_less_moments(const hip_bfloat16* logits, std::int64_t base, std::int3
     for (int v = tid; v < vocab; v += blockDim.x) {
         if (!sampling_p_less_in_domain(v, vocab, cfg)) { continue; }
         const float x = static_cast<float>(logits[base + v]);
+        sampling_note_nonfinite_logit(x, cfg);
         if (sampling_better(x, v, bv, bi)) {
             bv = x;
             bi = v;
@@ -498,7 +519,8 @@ sampling_p_less_moments(const hip_bfloat16* logits, std::int64_t base, std::int3
     float local_q = 0.0f;
     for (int v = tid; v < vocab; v += blockDim.x) {
         if (!sampling_p_less_in_domain(v, vocab, cfg)) { continue; }
-        const float e = __expf((static_cast<float>(logits[base + v]) - out.m) * inv_temp);
+        const float e = sampling_shifted_exp(static_cast<float>(logits[base + v]), out.m,
+                                             cfg.temperature, inv_temp);
         local_s += e;
         local_q += e * e;
     }
@@ -587,7 +609,7 @@ __device__ inline int sampling_p_less_draw(const hip_bfloat16* logits, std::int6
     const SamplingPLessMoments st =
         sampling_p_less_moments(logits, base, vocab, cfg, inv_temp, red_val, red_idx, red_aux);
     if (!(st.sum_exp > 0.0f)) { return st.argmax; }
-    const SamplingPLessGate gate = sampling_p_less_gate(st, inv_temp);
+    const SamplingPLessGate gate = sampling_p_less_gate(st, cfg.temperature);
     const float u                = sampling_uniform(cfg.seed, position, purpose, 0u);
     return sampling_p_less_inverse_cdf(logits, base, vocab, cfg, gate, u,
                                        sampling_p_less_support_fallback(st, cfg), red_val, red_idx);
@@ -691,9 +713,10 @@ sampling_p_less_tile_moments(const hip_bfloat16* logits, std::int64_t base, std:
     unsigned long long second = 0ull;
 #pragma unroll
     for (int item = 0; item < kSamplerItemsPerThread; ++item) {
-        const int v                  = tile_start + item * blockDim.x + threadIdx.x;
-        const bool keep              = sampling_p_less_in_domain(v, vocab, cfg);
-        values[item]                 = keep ? static_cast<float>(logits[base + v]) : -INFINITY;
+        const int v     = tile_start + item * blockDim.x + threadIdx.x;
+        const bool keep = sampling_p_less_in_domain(v, vocab, cfg);
+        values[item]    = keep ? static_cast<float>(logits[base + v]) : -INFINITY;
+        if (keep) { sampling_note_nonfinite_logit(values[item], cfg); }
         const unsigned long long key = keep ? sampling_sort_key(values[item], v) : 0ull;
         if (key > best) {
             second = best;
@@ -713,7 +736,7 @@ sampling_p_less_tile_moments(const hip_bfloat16* logits, std::int64_t base, std:
     for (int item = 0; item < kSamplerItemsPerThread; ++item) {
         const int v = tile_start + item * blockDim.x + threadIdx.x;
         if (!sampling_p_less_in_domain(v, vocab, cfg)) { continue; }
-        const float e = __expf((values[item] - m) * inv_temp);
+        const float e = sampling_shifted_exp(values[item], m, cfg.temperature, inv_temp);
         local_s += e;
         local_q += e * e;
     }
@@ -730,8 +753,9 @@ sampling_p_less_tile_moments(const hip_bfloat16* logits, std::int64_t base, std:
 
 __device__ inline SamplingPLessMoments
 sampling_p_less_merge_moments(const SamplingWorkspace& workspace, int col, int partial_begin,
-                              int partial_count, float inv_temp, float* red_val, float* red_aux,
+                              int partial_count, float temperature, float* red_val, float* red_aux,
                               unsigned long long* warp_keys) {
+    const float inv_temp      = 1.0f / temperature;
     unsigned long long key    = 0ull;
     unsigned long long second = 0ull;
     SamplingFloatPair sums{};
@@ -754,7 +778,7 @@ sampling_p_less_merge_moments(const SamplingWorkspace& workspace, int col, int p
     // An entirely masked tile has no maximum (key == 0) and contributes zero
     // mass. Do not decode its sentinel as a float and form 0 * exp(NaN).
     if (static_cast<int>(threadIdx.x) < partial_count && key != 0ull) {
-        const float scale = __expf((sampling_key_float(key) - m) * inv_temp);
+        const float scale = sampling_shifted_exp(sampling_key_float(key), m, temperature, inv_temp);
         local_s           = sums.first * scale;
         local_q           = sums.second * scale * scale;
     }
@@ -834,7 +858,8 @@ __device__ inline float sampling_p_less_tile_admitted_mass(
     int tile_start, const SamplingPLessGate& gate, float tile_max, float* warp_sums) {
     float local_z = 0.0f;
     if (tile_max >= gate.logit_cut) {
-        const float e_peak = __expf((tile_max - gate.m) * gate.inv_temp);
+        const float e_peak =
+            sampling_shifted_exp(tile_max, gate.m, gate.temperature, gate.inv_temp);
         if (sampling_p_less_weight_admitted(e_peak, gate)) {
 #pragma unroll
             for (int item = 0; item < kSamplerItemsPerThread; ++item) {
@@ -914,6 +939,7 @@ __device__ inline int sampling_p_less_pick_from_tile(
 __device__ __forceinline__ float sampling_adjusted_logit(float raw, int v, const SamplingConfig& c,
                                                          const std::int32_t* overlay = nullptr,
                                                          int overlay_len             = 0) {
+    sampling_note_nonfinite_logit(raw, c);
     float x = raw;
     if (c.presence_penalty == 0.0f && c.frequency_penalty == 0.0f) { return x; }
     int cnt = c.token_counts != nullptr ? c.token_counts[v] : 0;
@@ -971,10 +997,10 @@ __device__ inline void sampling_normalize_support(const SamplingConfig& cfg, flo
     if (tid == 0) {
         while (n > 0 && cand_idx[n - 1] == INT_MAX) { --n; }
         const float inv_temp = 1.0f / cfg.temperature;
-        const float m        = cand_val[0] * inv_temp;
+        const float m        = cand_val[0];
         float sum            = 0.0f;
         for (int j = 0; j < n; ++j) {
-            const float e = __expf(cand_val[j] * inv_temp - m);
+            const float e = sampling_shifted_exp(cand_val[j], m, cfg.temperature, inv_temp);
             prob[j]       = e;
             sum += e;
         }
@@ -1155,10 +1181,14 @@ __device__ __forceinline__ float sampling_p_less_q_at(int v, int draft_id, const
     return sampling_selector_q(q_ids, q_vals, q_n, v);
 }
 
-__device__ __forceinline__ float
-sampling_p_less_prob(const hip_bfloat16* logits, std::int64_t base, int token, std::int32_t vocab,
-                     const SamplingConfig& cfg, const SamplingPLessGate& gate, float admitted) {
-    if (!(admitted > 0.0f) || !sampling_p_less_in_domain(token, vocab, cfg)) { return 0.0f; }
+__device__ __forceinline__ float sampling_p_less_prob(const hip_bfloat16* logits, std::int64_t base,
+                                                      int token, std::int32_t vocab,
+                                                      const SamplingConfig& cfg,
+                                                      const SamplingPLessGate& gate, float admitted,
+                                                      int fallback) {
+    if (!sampling_p_less_in_domain(token, vocab, cfg)) { return 0.0f; }
+    // Empty support is the sampler's Dirac fallback law, not a zero measure.
+    if (!(admitted > 0.0f)) { return token == fallback ? 1.0f : 0.0f; }
     const float e =
         sampling_p_less_draw_exp(token, static_cast<float>(logits[base + token]), gate, cfg);
     return e > 0.0f ? e / admitted : 0.0f;

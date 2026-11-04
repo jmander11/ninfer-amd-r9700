@@ -227,6 +227,8 @@ struct RoundStateLayout {
     TensorRegion backend_kv_table_row;
     // One device status word per startup-fixed request row. Text/MTP cache transactions span all
     // full-attention layers, so these words must outlive scratch-arena scopes and graph launches.
+    // Stable lane-major sampling status; columns outside the live verifier domain are ignored.
+    TensorRegion nonfinite_logits;
     TensorRegion text_kv_status;
     TensorRegion text_kv_cursor;
     TensorRegion backend_kv_status;
@@ -381,6 +383,7 @@ struct RoundState {
     Tensor logits;
     Tensor text_kv_table_row;
     Tensor backend_kv_table_row;
+    Tensor nonfinite_logits;
     Tensor text_kv_status;
     Tensor text_kv_cursor;
     Tensor backend_kv_status;

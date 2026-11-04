@@ -16,6 +16,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.r9700.host import power_profile_path
+
 ROOT = Path(__file__).resolve().parents[2]
 BINARY = ROOT / "tools/r9700/build/a8q4_group_major_activation_harness"
 ASM = ROOT / "tools/r9700/build/a8q4_group_major_activation_qual.s"
@@ -44,7 +49,7 @@ SHAPES = {
     ("gdn_attention_output", 5120, 6144, 64),
     ("mlp_down", 5120, 17408, 64),
 }
-POWER = Path("/sys/class/drm/card2/device/power_dpm_force_performance_level")
+POWER = power_profile_path()
 OUTPUT = ROOT / "profiles/bench/r9700-a8q4-group-major-activation-p2048-ab-20260905.json"
 
 

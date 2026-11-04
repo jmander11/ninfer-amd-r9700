@@ -1,13 +1,8 @@
 # Capability Evaluation
 
-`eval/` contains the repository-local capability evaluation coordinator. It can evaluate this
-project's server, another local OpenAI-compatible service, or a remote online model. The inference
-engine is only one possible target. R9700 campaigns use one resident Engine at startup-fixed
-`max_concurrency: 1..4`; the evaluation coordinator itself is target-independent.
+`eval/` contains the repository-local capability evaluation coordinator. It can evaluate this project's server, another local OpenAI-compatible service, or a remote online model. The inference engine is only one possible target. R9700 campaigns use one resident Engine at startup-fixed `max_concurrency: 1..4`; the evaluation coordinator itself is target-independent.
 
-EvalScope is the first real evaluation backend. The coordinator, configuration, logging, progress,
-resume, and result contracts do not import or depend on EvalScope. The deterministic `mock` backend
-can exercise those contracts without a model service or network access.
+EvalScope is the first real evaluation backend. The coordinator, configuration, logging, progress, resume, and result contracts do not import or depend on EvalScope. The deterministic `mock` backend can exercise those contracts without a model service or network access.
 
 ## Environment
 
@@ -18,17 +13,11 @@ python3 -m venv eval/.venv
 eval/.venv/bin/python -m pip install -r eval/requirements.txt
 ```
 
-The pinned initial stack is EvalScope 1.9.0, `bfcl-eval==2025.10.27.1`, and the BFCL runtime
-dependency `soundfile==0.14.0`. Dataset and model caches remain owned by their upstream libraries.
-Installing dependencies does not download the Qwen model or create a `.ninfer` artifact.
+The pinned initial stack is EvalScope 1.9.0, `bfcl-eval==2025.10.27.1`, and the BFCL runtime dependency `soundfile==0.14.0`. Dataset and model caches remain owned by their upstream libraries. Installing dependencies does not download the Qwen model or create a `.ninfer` artifact.
 
 ## Configuration
 
-See [`configs/capability-suite.yaml`](configs/capability-suite.yaml) for the initial AIME25,
-AIME26, GPQA-Diamond, and BFCL-v4 suites, and [`configs/mock-suite.yaml`](configs/mock-suite.yaml)
-for a network-free example.
-`configs/qwen3_8_27b_reasoning.yaml` is the Qwen3.8-27B AIME25, AIME26, and GPQA-Diamond
-reasoning suite.
+See [`configs/capability-suite.yaml`](configs/capability-suite.yaml) for the initial AIME25, AIME26, GPQA-Diamond, and BFCL-v4 suites, and [`configs/mock-suite.yaml`](configs/mock-suite.yaml) for a network-free example. `configs/qwen3_8_27b_reasoning.yaml` is the Qwen3.8-27B AIME25, AIME26, and GPQA-Diamond reasoning suite.
 
 A target defines the model service:
 
@@ -45,8 +34,7 @@ targets:
       retries: 2
 ```
 
-API keys must come from environment variables. Literal `api_key`, `Authorization`, and
-`x-api-key` configuration is rejected so secrets cannot enter saved effective configurations.
+API keys must come from environment variables. Literal `api_key`, `Authorization`, and `x-api-key` configuration is rejected so secrets cannot enter saved effective configurations.
 
 Concurrency has two levels:
 
@@ -54,12 +42,9 @@ Concurrency has two levels:
 - target `max_concurrency` caps aggregate requests to that endpoint;
 - optional job `max_concurrency` caps how many target slots one job may reserve.
 
-For EvalScope, the granted job slots become `eval_batch_size`. Multiple jobs sharing a target can
-never reserve more slots than the target capacity. Set the local `ninfer-serve` target to one; set a
-larger explicit value for an online service that supports it.
+For EvalScope, the granted job slots become `eval_batch_size`. Multiple jobs sharing a target can never reserve more slots than the target capacity. Set the local `ninfer-serve` target to one; set a larger explicit value for an online service that supports it.
 
-Portable generation settings live under `generation`. Evaluator-specific controls live under
-`backend_args`; unknown fields are rejected rather than silently ignored.
+Portable generation settings live under `generation`. Evaluator-specific controls live under `backend_args`; unknown fields are rejected rather than silently ignored.
 
 ## Commands
 
@@ -83,8 +68,7 @@ eval/.venv/bin/python -m ninfer_eval plan \
   --config eval/configs/capability-suite.yaml --suite reasoning
 ```
 
-Add `--check-runtime` to resolve configured secret environment variables and check pinned backend
-packages.
+Add `--check-runtime` to resolve configured secret environment variables and check pinned backend packages.
 
 Run the network-free coordinator check:
 
@@ -110,9 +94,7 @@ SERPAPI_API_KEY=... eval/.venv/bin/python -m ninfer_eval run \
   --config eval/configs/capability-suite.yaml --suite bfcl_full
 ```
 
-BFCL-v4 full evaluation contains 5,106 samples. Multi-turn samples can make more than one model
-request. Its Web Search subsets require `SERPAPI_API_KEY`; `memory_vector` may download an upstream
-model, which the example explicitly acknowledges with `allow_network_downloads: true`.
+BFCL-v4 full evaluation contains 5,106 samples. Multi-turn samples can make more than one model request. Its Web Search subsets require `SERPAPI_API_KEY`; `memory_vector` may download an upstream model, which the example explicitly acknowledges with `allow_network_downloads: true`.
 
 Inspect and resume a run:
 
@@ -122,14 +104,11 @@ eval/.venv/bin/python -m ninfer_eval resume --run eval/runs/<run-id>
 eval/.venv/bin/python -m ninfer_eval summarize --run eval/runs/<run-id>
 ```
 
-Resume rejects a changed effective configuration or backend version. Completed jobs are skipped;
-an incomplete EvalScope job reuses its own prediction cache when available.
+Resume rejects a changed effective configuration or backend version. Completed jobs are skipped; an incomplete EvalScope job reuses its own prediction cache when available.
 
 ## Progress And Logs
 
-TTY runs use a live display with dataset phase, completed/total units, elapsed time, rate, and ETA.
-Non-TTY runs print periodic heartbeats without ANSI cursor control. Unknown totals remain `?`; the
-framework does not invent a percentage or ETA.
+TTY runs use a live display with dataset phase, completed/total units, elapsed time, rate, and ETA. Non-TTY runs print periodic heartbeats without ANSI cursor control. Unknown totals remain `?`; the framework does not invent a percentage or ETA.
 
 Every run is stored below `eval/runs/<timestamp>-<config-hash>/`:
 
@@ -144,28 +123,22 @@ Every run is stored below `eval/runs/<timestamp>-<config-hash>/`:
 | `summary.json` | versioned normalized result contract |
 | `summary.md` | compact human-readable score table |
 
-The sample-retention policy is recorded in the manifest. API keys and known secret values are
-redacted from coordinator events and task snapshots.
+The sample-retention policy is recorded in the manifest. API keys and known secret values are redacted from coordinator events and task snapshots.
 
 ## Scores
 
-Each benchmark remains independently reportable. The framework does not average AIME, GPQA, and
-BFCL into an invented cross-benchmark score.
+Each benchmark remains independently reportable. The framework does not average AIME, GPQA, and BFCL into an invented cross-benchmark score.
 
 - AIME25 and AIME26 report rule-scored accuracy over 30 samples each.
 - GPQA-Diamond reports accuracy over 198 samples.
 - BFCL-v4 reports its official `agentic`, `multi_turn`, `live`, `non_live`, `hallucination`, and
   `overall` values when the full score-bearing suite is complete.
 
-A partial or failed job makes the run `partial` or `failed`; an incomplete BFCL run is never labeled
-as the official full BFCL score.
+A partial or failed job makes the run `partial` or `failed`; an incomplete BFCL run is never labeled as the official full BFCL score.
 
 ## P-less comparison
 
-`configs/qwen3_8_27b_p_less_aime_temp.yaml` compares AIME25/AIME26 at temperatures
-0.6, 1.0, 1.5, and 2.0. The runner starts sequential opt-out and default-p-less
-servers at C=1, retaining the same client fields. It uses the fixed R9700 cache
-and MTP3; these results do not qualify DFlash.
+`configs/qwen3_8_27b_p_less_aime_temp.yaml` compares AIME25/AIME26 at temperatures 0.6, 1.0, 1.5, and 2.0. The runner starts sequential opt-out and default-p-less servers at C=1, retaining the same client fields. It uses the fixed R9700 cache and MTP3; these results do not qualify DFlash.
 
 Run with explicit local prerequisites (no model download or capacity guessing):
 
@@ -175,12 +148,7 @@ NINFER_P_LESS_AIME_MAX_CONTEXT=32768 \
 bash eval/run_qwen3_8_27b_p_less_aime_temp.sh
 ```
 
-Choose the context capacity qualified for that artifact. The runner requires the
-existing evaluation environment in `eval/.venv`; `NINFER_SERVE_BIN` selects a local
-server when not running in the builder. Use `--plan` to inspect the evaluation plan.
-No quality improvement is assumed: compare accuracy, completion length, and end-to-end rate.
-`python3.11 eval/compare_viewer.py --open` provides live paired transcript comparison
-from the retained evaluation JSONL.
+Choose the context capacity qualified for that artifact. The runner requires the existing evaluation environment in `eval/.venv`; `NINFER_SERVE_BIN` selects a local server when not running in the builder. Use `--plan` to inspect the evaluation plan. No quality improvement is assumed: compare accuracy, completion length, and end-to-end rate. `python3.11 eval/compare_viewer.py --open` provides live paired transcript comparison from the retained evaluation JSONL.
 
 ## Adding Evaluations
 
@@ -197,10 +165,7 @@ An ordinary EvalScope dataset needs only another configured job:
     subset_list: [subset_name]
 ```
 
-An evaluator that does not use EvalScope implements the four-method backend protocol in
-`ninfer_eval/backends/base.py`, registers one stable name in `backends/registry.py`, retains its raw
-artifacts, and returns the normalized `DatasetResult`. The coordinator and summary writer do not
-need benchmark-specific changes.
+An evaluator that does not use EvalScope implements the four-method backend protocol in `ninfer_eval/backends/base.py`, registers one stable name in `backends/registry.py`, retains its raw artifacts, and returns the normalized `DatasetResult`. The coordinator and summary writer do not need benchmark-specific changes.
 
 ## Exit Status
 

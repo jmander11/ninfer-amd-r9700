@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Run ROCm's clang-tidy over NInfer's C++ and HIP translation units.
 
-The analyzer is the clang-tidy shipped with the selected ROCm toolchain (/opt/rocm/lib/llvm), the
-same LLVM that compiles the gfx1201 HIP code, so HIP compile commands from the CMake tree's
-compile_commands.json are analyzed as they are; host C++ commands come from GCC and only gain
--Wno-unknown-warning-option. Diagnostics from headers are reported once, not once per including
-TU. Configuration: .clang-tidy; policy: docs/maintainer/code-quality.md.
+Uses the selected ROCm LLVM (/opt/rocm/lib/llvm) and the CMake tree's
+compile_commands.json. HIP commands run unchanged; GCC host commands gain
+-Wno-unknown-warning-option. Header diagnostics are reported once.
+Configuration: .clang-tidy. Policy: docs/maintainer/code-quality.md.
 
 Usage:
-  ./scripts/run-clang-tidy.py                    # every project TU
-  ./scripts/run-clang-tidy.py --changed          # diagnostics on lines changed vs. origin/HEAD
-  ./scripts/run-clang-tidy.py --changed HEAD~3   # diagnostics on lines changed since a ref
-  ./scripts/run-clang-tidy.py src/serve/foo.cpp  # named TUs (headers select their includers)
+  ./scripts/run-clang-tidy.py                    # all project translation units
+  ./scripts/run-clang-tidy.py --changed          # changed lines vs. origin/HEAD
+  ./scripts/run-clang-tidy.py --changed HEAD~3   # changed lines since a ref
+  ./scripts/run-clang-tidy.py src/serve/foo.cpp  # named files; headers select includers
 
---changed analyzes every TU that is or includes a changed file and reports only diagnostics on
-changed lines. Exit status is 1 when any diagnostic is reported.
+--changed analyzes every changed translation unit and those that include a
+changed file, reporting only diagnostics on changed lines. Any diagnostic
+causes exit status 1.
 """
 
 from __future__ import annotations

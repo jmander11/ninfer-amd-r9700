@@ -16,7 +16,7 @@ from tools.bench.validate_selected_niah import validate
 
 class SelectedNiahValidatorTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory(dir=REPO / "profiles/bench")
+        self.temp = tempfile.TemporaryDirectory(dir=REPO)
         self.root = Path(self.temp.name)
         self.server = self.root / "apps/ninfer-serve"
         self.server.parent.mkdir()

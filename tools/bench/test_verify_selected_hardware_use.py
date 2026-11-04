@@ -24,18 +24,6 @@ FP8_ATTN = "Cijk_fp8_attention"
 class SelectedHardwareUseTest(unittest.TestCase):
     def test_prepared_verifier_module_imports_from_repo(self) -> None:
         repo = Path(__file__).resolve().parents[2]
-        script = (
-            repo / "profiles/bench/post-terminal-selected-hardware-use-20260905/verify.sh"
-        ).read_text(encoding="utf-8")
-        self.assertIn("python3 -m tools.bench.verify_selected_hardware_use", script)
-        plan = json.loads(
-            (
-                repo / "profiles/bench/post-terminal-selected-hardware-use-20260905/plan.json"
-            ).read_text(encoding="utf-8")
-        )
-        self.assertNotIn("--mtp-proof", script)
-        self.assertNotIn("mixed_mtp_bulk_preparation", plan)
-        self.assertNotIn("mixed_mtp_bulk_execution", plan)
         result = subprocess.run(
             [sys.executable, "-m", "tools.bench.verify_selected_hardware_use", "--help"],
             cwd=repo,

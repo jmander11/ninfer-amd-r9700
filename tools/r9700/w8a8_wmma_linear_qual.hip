@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -36,8 +37,7 @@ constexpr std::uint32_t kGroup = 32;
 constexpr std::uint32_t kKAlignment = 128;
 constexpr int kTimingRounds = 5;
 constexpr int kLdsScopeTrials = 7;
-constexpr const char* kPowerProfilePath =
-    "/sys/class/drm/card2/device/power_dpm_force_performance_level";
+std::string qualification_power_path() { return (ninfer::r9700_qualification::configured_pci_path() / "power_dpm_force_performance_level").string(); }
 constexpr double kMaximumPerTupleRatio = 1.01;
 struct Shape {
     std::uint32_t rows;
@@ -935,7 +935,7 @@ void write_lds_scope_report(
            "\"independent_oracle\": \"FP64 complete represented quantized formula\", "
            "\"maximum_bf16_steps_allowed\": 2, "
            "\"tail_status_and_alignment_gate\": \"passed\"},\n"
-        << "  \"power_profile\": {\"path\": \"" << kPowerProfilePath
+        << "  \"power_profile\": {\"path\": \"" << qualification_power_path()
         << "\", \"required\": \"auto\", \"before\": \"auto\", \"after\": \"auto\"},\n"
         << "  \"hardware\": {\"device\": \"" << json_escape(device.name)
         << "\", \"architecture\": \"" << json_escape(device.gcnArchName)
@@ -1130,7 +1130,7 @@ void write_mtp_bulk_json(
         << "{\n  \"artifact_type\": \"ninfer_r9700_mtp_bulk_w8_operator_qualification\",\n"
         << "  \"schema_version\": 1,\n  \"status\": \"passed\",\n"
         << "  \"tokens\": " << tokens << ",\n  \"concurrency\": 1,\n"
-        << "  \"power_profile\": {\"path\": \"" << kPowerProfilePath
+        << "  \"power_profile\": {\"path\": \"" << qualification_power_path()
         << "\", \"value\": \"auto\"},\n"
         << "  \"timing\": {\"method\": \"alternating HIP events\", "
            "\"rounds_per_route\": 5, \"scope\": \"post-quantization linear leaf\"},\n"
@@ -1201,11 +1201,10 @@ void write_mtp_bulk_json(
 // there is no second implementation or incumbent branch in production code.
 void qualify_packed_loads(const std::filesystem::path& directory) {
     if (!std::filesystem::create_directory(directory)) fail("packed-load output directory exists");
-    constexpr const char* power =
-        "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
-    if (read_text("/sys/bus/pci/devices/0000:13:00.0/vendor") != "0x1002" ||
-        read_text("/sys/bus/pci/devices/0000:13:00.0/device") != "0x7551")
-        fail("packed-load qualification requires AMD R9700 at 0000:13:00.0");
+    const auto power = ninfer::r9700_qualification::configured_pci_path() / "power_dpm_force_performance_level";
+    if (read_text(ninfer::r9700_qualification::configured_pci_path() / "vendor") != "0x1002" ||
+        read_text(ninfer::r9700_qualification::configured_pci_path() / "device") != "0x7551")
+        fail("packed-load qualification requires the configured AMD R9700 PCI device");
     if (read_text(power) != "auto") fail("packed-load qualification requires auto power");
     const auto device = select_r9700();
     (void)device;
@@ -1213,7 +1212,7 @@ void qualify_packed_loads(const std::filesystem::path& directory) {
     char pci[32]{};
     HIP_CHECK(hipGetDevice(&ordinal));
     HIP_CHECK(hipDeviceGetPCIBusId(pci, sizeof(pci), ordinal));
-    if (std::string_view(pci) != "0000:13:00.0") fail("HIP device differs from checked R9700 PCI function");
+    if (std::string_view(pci) != ninfer::r9700_qualification::configured_pci_bus_id()) fail("HIP device differs from checked R9700 PCI function");
     hipStream_t stream{};
     HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     std::ofstream report(directory / "report.json");
@@ -1472,7 +1471,7 @@ int main(int argc, char** argv) {
         if (lds_scope_benchmark || mtp_bulk) {
             output_path = argv[3];
             require_fresh_output(output_path);
-            if (read_text(kPowerProfilePath) != "auto") {
+            if (read_text(qualification_power_path()) != "auto") {
                 fail("LDS-scope physical A/B requires auto power before device construction");
             }
             executable = std::filesystem::canonical("/proc/self/exe");
@@ -1499,7 +1498,7 @@ int main(int argc, char** argv) {
                 (parsed & (parsed - 1UL)) != 0UL) {
                 fail("selected MTP-bulk chunk must be one of 1024, 2048, 4096, or 8192");
             }
-            if (read_text(kPowerProfilePath) != "auto") {
+            if (read_text(qualification_power_path()) != "auto") {
                 fail("MTP-bulk physical qualification requires auto power");
             }
             const std::uint32_t tokens = static_cast<std::uint32_t>(parsed);
@@ -1522,7 +1521,7 @@ int main(int argc, char** argv) {
                 evidence[index].maximum_bf16_steps = numerical.maximum_bf16_steps;
                 evidence[index].oracle_sample_count = numerical.oracle_sample_count;
             }
-            if (read_text(kPowerProfilePath) != "auto") {
+            if (read_text(qualification_power_path()) != "auto") {
                 fail("MTP-bulk physical qualification did not retain auto power");
             }
             if (sha256_file(executable) != executable_sha256) {
@@ -1583,7 +1582,7 @@ int main(int argc, char** argv) {
                     (void)qualify_prefill_width(row.numerical.shape, row.numerical.tokens,
                                                 false, true, true, &row.timing);
                 }
-                if (read_text(kPowerProfilePath) != "auto") {
+                if (read_text(qualification_power_path()) != "auto") {
                     fail("LDS-scope physical A/B did not retain auto power");
                 }
                 if (sha256_file(executable) != executable_sha256) {
