@@ -495,7 +495,10 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
             "capture allocation failure changed resident continuation or retained RAM sources");
     // The pressure fixture leaves identical prefixes indexed. Remove those copies so the
     // restore below must select the fresh entry whose identity and full state we verify.
-    for (const auto id : program.kv_ram_cache_->fifo_ids()) { program.kv_ram_cache_->discard(id); }
+    auto& ram_cache = program.kv_ram_cache_;
+    if (!ram_cache) { throw std::runtime_error("RAM capture fixture has no cache"); }
+    auto& cache = *ram_cache;
+    for (const auto id : cache.fifo_ids()) { cache.discard(id); }
     require(program.kv_ram_snapshot().entry_count == 0,
             "capture-allocation fixture left an indexed RAM prefix");
     std::uint64_t entry_id = 0;
