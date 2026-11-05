@@ -140,6 +140,11 @@ int main() {
               "recovery exhaustion lost its explicit request-local error");
     failures += check(exhausted.recovery.attempts == 2 && exhausted.recovery.cycle_exclusions == 5,
                       "Engine recovery totals did not reach the API error");
+    const auto cancelled = ninfer::serve::request_error_to_api_error(
+        ninfer::RequestError(ninfer::RequestErrorKind::Cancelled, "score batch cancelled"));
+    failures += check(cancelled.status == 499 && cancelled.type == "request_cancelled" &&
+                          cancelled.code == "client_disconnected" && cancelled.param.empty(),
+                      "Engine cancellation did not map to the client disconnect status");
     const ninfer::serve::ApiError context_limit = ninfer::serve::request_error_to_api_error(
         ninfer::RequestError(ninfer::RequestErrorKind::ContextLengthExceeded,
                              "prepared prompt has 200 tokens, exceeding Engine max_context 128"));

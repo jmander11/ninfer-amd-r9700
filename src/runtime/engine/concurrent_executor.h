@@ -328,7 +328,9 @@ public:
         std::vector<ScoreResult> results;
         results.reserve(prompts.size());
         for (std::size_t index = 0; index < prompts.size(); ++index) {
-            if (cancellation.requested()) { throw std::runtime_error("score batch cancelled"); }
+            if (cancellation.requested()) {
+                throw RequestError(RequestErrorKind::Cancelled, "score batch cancelled");
+            }
             auto& prompt = prompts[index];
             ResolvedExecutionOptions execution;
             execution.sampling.temperature    = 0.0F;
