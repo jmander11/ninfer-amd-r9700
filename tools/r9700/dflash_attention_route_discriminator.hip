@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <limits>
 #include <memory>
 #include <random>
@@ -400,8 +401,9 @@ double median(std::array<double, kTrials> values) {
 // cache planes. The pool is shared as in production: disjoint shuffled physical pages per sequence,
 // either selected through device table rows of one pool-wide table or passed as direct page tables.
 Json sequence_batch_qualification(ninfer::DeviceContext& device) {
-    constexpr std::array<std::size_t, 8> kContexts{37U,  600U,  4100U, 33000U,
-                                                   129U, 2050U, 8200U, 1000U};
+    constexpr std::array<std::size_t, 16> kContexts{37U,   600U,  4100U, 33000U, 129U, 2050U,
+                                                    8200U, 1000U, 9U,    65U,    320U, 16385U,
+                                                    257U,  3071U, 64U,   70000U};
     static_assert(kContexts.size() == kv::kPackedDecodeMaximumSequences &&
                   kContexts.size() == kv::kAppendMaximumSequences);
     constexpr std::size_t kSparePages  = 7U;
@@ -419,7 +421,7 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     for (std::size_t page = 0; page < pool_pages; ++page)
         physical[page] = static_cast<std::uint32_t>(page);
     std::shuffle(physical.begin(), physical.end(), random);
-    // Pool-wide table [8][stride]; rows beyond a sequence's pages hold an out-of-pool page.
+    // Pool-wide table [16][stride]; rows beyond a sequence's pages hold an out-of-pool page.
     std::vector<std::uint32_t> tables(kContexts.size() * table_stride,
                                       static_cast<std::uint32_t>(pool_pages));
     std::size_t next_page = 0U;
@@ -454,7 +456,9 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     upload(d_scales, scales);
     upload(d_tables, tables);
     upload(d_queries, queries);
-    upload(d_table_rows, std::vector<std::int32_t>{0, 1, 2, 3, 4, 5, 6, 7});
+    std::vector<std::int32_t> table_rows(kContexts.size());
+    std::iota(table_rows.begin(), table_rows.end(), 0);
+    upload(d_table_rows, table_rows);
 
     struct Case {
         const char* name;
@@ -477,6 +481,18 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
         {"b8_mixed_rows_direct_tables",
          {6U, 3U, 0U, 7U, 2U, 5U, 1U, 4U},
          {8U, 5U, 1U, 7U, 4U, 8U, 2U, 6U},
+         false},
+        {"b12_w1_table_rows",
+         {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U},
+         std::vector<std::uint32_t>(12U, 1U),
+         true},
+        {"b16_w6_table_rows",
+         {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U},
+         std::vector<std::uint32_t>(16U, 6U),
+         true},
+        {"b16_mixed_rows_direct_tables",
+         {14U, 6U, 3U, 9U, 0U, 15U, 7U, 12U, 2U, 5U, 11U, 1U, 8U, 13U, 4U, 10U},
+         {8U, 5U, 1U, 7U, 4U, 8U, 2U, 6U, 1U, 3U, 6U, 8U, 2U, 1U, 5U, 4U},
          false},
     };
     Json attention_cells = Json::array();
@@ -608,7 +624,7 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
                                    {"batched_median_ms", median(batched_ms)}});
     }
 
-    // Append: eight sequences write disjoint suffixes into one poisoned pool; one uses a device
+    // Append: all sequences write disjoint suffixes into one poisoned pool; one uses a device
     // token count, one a device table row, and one a gapped position panel (InvalidPosition).
     constexpr std::size_t kAppendRows = 8U;
     std::vector<float> source_values(kContexts.size() * kAppendRows * kKvHeads * kHeadDim);
@@ -672,8 +688,9 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     const auto reference_values = download(d_values);
     const auto reference_scales = download(d_scales);
     const auto reference_status = download(d_status);
-    if (reference_status !=
-        std::vector<std::uint32_t>{0U, 0U, kv::Fp8Int4KvAppendInvalidPosition, 0U, 0U, 0U, 0U, 0U})
+    std::vector<std::uint32_t> expected_status(kContexts.size(), 0U);
+    expected_status[2] = kv::Fp8Int4KvAppendInvalidPosition;
+    if (reference_status != expected_status)
         fail("per-sequence append status is not the fixture's expected isolation");
     if (reference_keys == keys || reference_values == values || reference_scales == scales)
         fail("per-sequence append wrote no cache bytes");
@@ -685,12 +702,14 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     if (download(d_keys) != reference_keys || download(d_values) != reference_values ||
         download(d_scales) != reference_scales || download(d_status) != reference_status)
         fail("batched append bytes or status differ from per-sequence launches");
+    std::vector<std::uint32_t> append_rows(kContexts.size(), kAppendRows);
+    append_rows[0] = 3U;
     return {{"attention", attention_cells},
             {"attention_criterion", "per-sequence output bytes and output/workspace canaries "
                                     "equal to one-sequence launches, eager and graph replay"},
             {"append",
              {{"sequences", kContexts.size()},
-              {"rows", {3, 8, 8, 8, 8, 8, 8, 8}},
+              {"rows", append_rows},
               {"device_token_count_sequence", 1},
               {"device_table_row_sequences", {3, 6}},
               {"invalid_position_sequence", 2},

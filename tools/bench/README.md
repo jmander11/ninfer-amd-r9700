@@ -8,7 +8,7 @@ Benchmark runners, report analysis and workload preparation for `ninfer_bench` a
 
 ## README workload matrix
 
-`run_readme_workloads.py` measures C1/C6/C8 on the committed `fixtures/readme_workloads.json`: English story writing, Python code, math reasoning, and document summaries near 8K and 32K prompt tokens. The first three use existing CLI example fixtures; the code case explicitly requests code in chat with no tool calls. Document prompts concatenate the named local documentation, cycle only if needed, and truncate with the local tokenizer while preserving the chat boundaries. Reports contain the actual prompt and output lengths, input messages, responses, draft acceptance, server startup metadata, and each measured rate.
+`run_readme_workloads.py` measures the selected concurrency levels on the committed `fixtures/readme_workloads.json`: English story writing, Python code, math reasoning, and document summaries near 8K and 32K prompt tokens. The first three use existing CLI example fixtures; the code case appends its code-only, no-tools instruction to the user request. Document prompts concatenate the named local documentation, cycle only if needed, and truncate with the local tokenizer while preserving the chat boundaries. Reports contain the actual prompt and output lengths, input messages, responses, draft acceptance, server startup metadata, and each measured rate.
 
 ```bash
 flock --exclusive "$NINFER_GPU_LOCK" \
@@ -21,11 +21,13 @@ flock --exclusive "$NINFER_GPU_LOCK" \
     --output profiles/bench/readme-workloads
 ```
 
-The server runs adaptive DFlash up to K7, the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
+The server defaults to adaptive DFlash up to K7. Select `--spec mtp` for adaptive MTP up to K3; `--draft-tokens N` changes the adaptive maximum (MTP: 1–5, DFlash: 1–7). DFlash accepts C1..8; MTP accepts C1..16. For the MTP matrix use `--spec mtp --concurrency 1 6 8 12 16` and a separate output directory. Both backends use the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
 
-Each lane first runs a one-token request to seed its prompt cache. A synchronized wave then generates up to the output budget per lane; natural stop tokens remain enabled. One warmup wave precedes three measured waves per cell. Only complete 100-ms server intervals with no prefill and exactly C active decode lanes count. The reported rate is total committed decode tokens divided by those intervals' wall time, including host scheduling between rounds. It excludes prefill, startup, and intervals where some lanes have finished. Missing full-batch intervals fail the run rather than substitute an end-to-end or per-request rate. C6 and C8 are aggregate; divide by the concurrency for the average rate per active request in those intervals.
+Each lane first runs a one-token request to seed its prompt cache. A synchronized wave then generates up to the output budget per lane; natural stop tokens remain enabled. One warmup wave precedes three measured waves per cell. Only complete 100-ms server intervals with no prefill and exactly C active decode lanes count. The reported rate is total committed decode tokens divided by those intervals' wall time, including host scheduling between rounds. It excludes prefill, startup, and intervals where some lanes have finished. Missing full-batch intervals fail the run rather than substitute an end-to-end or per-request rate. C>1 is aggregate; divide by the concurrency for the average rate per active request in those intervals.
 
 The published C1/C6 summary is `../../bench/results/readme-workloads-20261017.json`; the separately measured C8 summary is `../../bench/results/readme-workloads-c8-20261104.json`.
+
+The MTP C1/C6/C8/C12/C16 summary is `../../bench/results/readme-workloads-mtp-20261104.json`.
 
 `summary.json` and `summary.md` contain the results; per-cell JSON and server JSONL retain inputs and timing evidence under `--output`. Keep generated reports under `profiles/`; commit the runner, workload manifest, and summarized results in the active performance documentation.
 

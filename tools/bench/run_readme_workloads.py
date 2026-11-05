@@ -53,8 +53,6 @@ def prepare_workloads(manifest: Path, tokenizer_path: Path, concurrency: int) ->
                 "role": "system",
                 "content": f"Benchmark lane {lane}. Follow the user request.",
             }
-            if item.get("instruction"):
-                system["content"] += " " + item["instruction"]
             if "fixture" in item:
                 fixture = fixtures[item["fixture"]]
                 messages = [system, *copy.deepcopy(fixture.messages)]
@@ -97,6 +95,8 @@ def prepare_workloads(manifest: Path, tokenizer_path: Path, concurrency: int) ->
                     raise ValueError(
                         f"could not construct a prompt near {target} tokens (got {actual})"
                     )
+            if item.get("instruction"):
+                messages[-1]["content"] += "\n\n" + item["instruction"]
             lanes.append({"messages": messages, "enable_thinking": thinking})
         workloads.append({"name": item["name"], "definition": item, "lanes": lanes})
     return workloads
@@ -137,13 +137,14 @@ def run_wave(port: int, log: Path, workload: dict, output_tokens: int, seed: int
     done = [event for event in events if event.get("event") == "request_done"]
     if len(done) != len(payloads):
         raise RuntimeError(f"expected {len(payloads)} request completions, got {len(done)}")
-    for response in responses:
+    errors = []
+    for lane, response in enumerate(responses):
         if workload["definition"].get("forbid_tool_calls") and "<tool_call>" in response["choices"][
             0
         ]["message"].get("content", ""):
-            raise RuntimeError("code workload requested a tool instead of writing code")
+            errors.append(f"lane {lane}: code workload requested a tool instead of writing code")
         if response["usage"]["prompt_tokens_details"]["cached_tokens"] <= 0:
-            raise RuntimeError("prompt seeding did not retain a reusable prefix")
+            errors.append(f"lane {lane}: prompt seeding did not retain a reusable prefix")
     steady = concurrency_bench.steady_metrics(
         [event for event in events if event.get("event") == "throughput"], len(payloads)
     )
@@ -157,6 +158,7 @@ def run_wave(port: int, log: Path, workload: dict, output_tokens: int, seed: int
         "acceptance": accepted / drafted if drafted else 0,
         "prompt_tokens": [response["usage"]["prompt_tokens"] for response in responses],
         "completion_tokens": [response["usage"]["completion_tokens"] for response in responses],
+        "errors": errors,
     }
 
 
@@ -170,6 +172,8 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--concurrency", type=int, nargs="+", default=[1, 6])
+    parser.add_argument("--spec", choices=["dflash", "mtp"], default="dflash")
+    parser.add_argument("--draft-tokens", type=int, help="adaptive maximum (DFlash: 7; MTP: 3)")
     parser.add_argument(
         "--workload", action="append", help="workload name to run; repeat to select several"
     )
@@ -178,14 +182,21 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--port", type=int, default=18082)
     args = parser.parse_args()
+    maximum_concurrency = 8 if args.spec == "dflash" else 16
+    maximum_drafts = 7 if args.spec == "dflash" else 5
+    if args.draft_tokens is None:
+        args.draft_tokens = 7 if args.spec == "dflash" else 3
+    if not 1 <= args.draft_tokens <= maximum_drafts:
+        parser.error(f"{args.spec} requires --draft-tokens in [1,{maximum_drafts}]")
     if (
-        any(not 1 <= c <= 8 for c in args.concurrency)
+        any(not 1 <= c <= maximum_concurrency for c in args.concurrency)
         or args.tokens < 128
         or args.repetitions < 1
         or args.warmup < 0
     ):
         parser.error(
-            "require C=1..8, at least 128 output tokens, positive repetitions and nonnegative warmup"
+            f"require C=1..{maximum_concurrency}, at least 128 output tokens, "
+            "positive repetitions and nonnegative warmup"
         )
     args.output.mkdir(parents=True, exist_ok=False)
     provenance = {
@@ -226,9 +237,9 @@ def main() -> None:
             "--kv-capacity",
             "auto",
             "--spec",
-            "dflash",
+            args.spec,
             "--draft-tokens",
-            "7",
+            str(args.draft_tokens),
             "--adaptive-draft",
             "--lm-head-draft",
             "--prefill-chunk",
@@ -254,6 +265,8 @@ def main() -> None:
                     path.write_text(
                         json.dumps({"workload": workload, "runs": raw}, indent=2) + "\n"
                     )
+                    if result["errors"]:
+                        raise RuntimeError(f"{path}: {'; '.join(result['errors'])}")
                     print(
                         f"C{c} {workload['name']} rep{rep}: {result['steady']['decode_tokens_per_second']:.1f} tok/s",
                         flush=True,
