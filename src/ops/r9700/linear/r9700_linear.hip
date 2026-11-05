@@ -6,6 +6,7 @@
 
 #include <hip/hip_fp16.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
@@ -125,6 +126,22 @@ bool valid_q4_workspace(const Q4G64ActivationWorkspace& workspace) noexcept {
     return !ranges_overlap(workspace.codes, code_bytes, workspace.scales, scale_bytes) &&
            !ranges_overlap(workspace.codes, code_bytes, workspace.status, sizeof(std::uint32_t)) &&
            !ranges_overlap(workspace.scales, scale_bytes, workspace.status, sizeof(std::uint32_t));
+}
+
+constexpr std::uint32_t kMaximumGridY = 65535;
+
+// Row-parallel kernels stride the token axis over at most kMaximumGridY CTAs.
+dim3 row_token_grid(std::uint32_t rows, std::uint32_t tokens) noexcept {
+    return dim3(rows, std::min(tokens, kMaximumGridY));
+}
+
+// One CTA per (token, group) with groups fastest; false when the count exceeds the x extent.
+bool token_group_grid(std::uint32_t tokens, std::uint32_t groups, dim3* grid) noexcept {
+    const std::uint64_t ctas = std::uint64_t{tokens} * groups;
+    if (ctas == 0U || ctas > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()))
+        return false;
+    *grid = dim3(static_cast<std::uint32_t>(ctas));
+    return true;
 }
 
 bool valid_q4_linear_args(const Q4G64LinearArgs& args) noexcept {
@@ -361,68 +378,74 @@ bool valid_a8w8_linear_args(const A8W8G32LinearArgs& args) noexcept {
 }
 
 __global__ void bf16_linear_kernel(const hip_bfloat16* input, const hip_bfloat16* weights,
-                                   hip_bfloat16* output, std::uint32_t columns,
-                                   std::uint32_t rows) {
+                                   hip_bfloat16* output, std::uint32_t columns, std::uint32_t rows,
+                                   std::uint32_t tokens) {
     const std::uint32_t column = blockIdx.x;
-    const std::uint32_t token  = blockIdx.y;
     if (column >= rows) return;
-    float partial            = 0.0F;
-    const std::size_t x_base = static_cast<std::size_t>(token) * columns;
     const std::size_t w_base = static_cast<std::size_t>(column) * columns;
-    for (std::uint32_t k = threadIdx.x; k < columns; k += blockDim.x) {
-        partial = fmaf(static_cast<float>(input[x_base + k]),
-                       static_cast<float>(weights[w_base + k]), partial);
-    }
     __shared__ float reductions[kThreads];
-    reductions[threadIdx.x] = partial;
-    __syncthreads();
-    for (std::uint32_t width = blockDim.x / 2U; width != 0U; width >>= 1U) {
-        if (threadIdx.x < width) reductions[threadIdx.x] += reductions[threadIdx.x + width];
+    for (std::uint32_t token = blockIdx.y; token < tokens; token += gridDim.y) {
+        float partial            = 0.0F;
+        const std::size_t x_base = static_cast<std::size_t>(token) * columns;
+        for (std::uint32_t k = threadIdx.x; k < columns; k += blockDim.x) {
+            partial = fmaf(static_cast<float>(input[x_base + k]),
+                           static_cast<float>(weights[w_base + k]), partial);
+        }
+        reductions[threadIdx.x] = partial;
         __syncthreads();
-    }
-    if (threadIdx.x == 0U) {
-        output[static_cast<std::size_t>(token) * rows + column] =
-            static_cast<hip_bfloat16>(reductions[0]);
+        for (std::uint32_t width = blockDim.x / 2U; width != 0U; width >>= 1U) {
+            if (threadIdx.x < width) reductions[threadIdx.x] += reductions[threadIdx.x + width];
+            __syncthreads();
+        }
+        if (threadIdx.x == 0U) {
+            output[static_cast<std::size_t>(token) * rows + column] =
+                static_cast<hip_bfloat16>(reductions[0]);
+        }
+        __syncthreads();
     }
 }
 
 __global__ void w8g32_linear_kernel(const hip_bfloat16* input, const std::int8_t* codes,
                                     const std::uint16_t* scale_words, hip_bfloat16* output,
                                     std::uint32_t columns, std::uint32_t rows,
-                                    std::size_t padded_columns) {
+                                    std::size_t padded_columns, std::uint32_t tokens) {
     const std::uint32_t column = blockIdx.x;
-    const std::uint32_t token  = blockIdx.y;
     if (column >= rows) return;
-    float partial                    = 0.0F;
-    const std::size_t x_base         = static_cast<std::size_t>(token) * columns;
     const std::size_t w_base         = static_cast<std::size_t>(column) * padded_columns;
     const std::size_t groups_per_row = padded_columns / kW8Group;
-    for (std::uint32_t k = threadIdx.x; k < columns; k += blockDim.x) {
-        // NOLINTNEXTLINE(bugprone-signed-char-misuse): sign-extends the signed W8 code
-        const std::int32_t code = codes[w_base + k];
-        const std::uint16_t scale_bits =
-            scale_words[static_cast<std::size_t>(column) * groups_per_row + k / kW8Group];
-        const float weight = static_cast<float>(code) * __half2float(__ushort_as_half(scale_bits));
-        partial            = fmaf(static_cast<float>(input[x_base + k]), weight, partial);
-    }
     __shared__ float reductions[kThreads];
-    reductions[threadIdx.x] = partial;
-    __syncthreads();
-    for (std::uint32_t width = blockDim.x / 2U; width != 0U; width >>= 1U) {
-        if (threadIdx.x < width) reductions[threadIdx.x] += reductions[threadIdx.x + width];
+    for (std::uint32_t token = blockIdx.y; token < tokens; token += gridDim.y) {
+        float partial            = 0.0F;
+        const std::size_t x_base = static_cast<std::size_t>(token) * columns;
+        for (std::uint32_t k = threadIdx.x; k < columns; k += blockDim.x) {
+            // NOLINTNEXTLINE(bugprone-signed-char-misuse): sign-extends the signed W8 code
+            const std::int32_t code = codes[w_base + k];
+            const std::uint16_t scale_bits =
+                scale_words[static_cast<std::size_t>(column) * groups_per_row + k / kW8Group];
+            const float weight =
+                static_cast<float>(code) * __half2float(__ushort_as_half(scale_bits));
+            partial = fmaf(static_cast<float>(input[x_base + k]), weight, partial);
+        }
+        reductions[threadIdx.x] = partial;
         __syncthreads();
-    }
-    if (threadIdx.x == 0U) {
-        output[static_cast<std::size_t>(token) * rows + column] =
-            static_cast<hip_bfloat16>(reductions[0]);
+        for (std::uint32_t width = blockDim.x / 2U; width != 0U; width >>= 1U) {
+            if (threadIdx.x < width) reductions[threadIdx.x] += reductions[threadIdx.x + width];
+            __syncthreads();
+        }
+        if (threadIdx.x == 0U) {
+            output[static_cast<std::size_t>(token) * rows + column] =
+                static_cast<hip_bfloat16>(reductions[0]);
+        }
+        __syncthreads();
     }
 }
 
 __global__ __launch_bounds__(64) void q4g64_quantize_activation_kernel(
     const hip_bfloat16* input, std::uint8_t* codes, std::uint16_t* scale_words,
     std::uint32_t* status, std::uint32_t columns, std::uint32_t padded_columns) {
-    const std::uint32_t group  = blockIdx.x;
-    const std::uint32_t token  = blockIdx.y;
+    const std::uint32_t groups = padded_columns / kQ4Group;
+    const std::uint32_t group  = blockIdx.x % groups;
+    const std::uint32_t token  = blockIdx.x / groups;
     const std::uint32_t lane   = threadIdx.x;
     const std::uint32_t column = group * kQ4Group + lane;
     float value                = 0.0F;
@@ -479,8 +502,9 @@ __global__ __launch_bounds__(kWaveSize) void a8g64_quantize_activation_kernel(
     const hip_bfloat16* input, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status, std::uint32_t columns,
     std::uint32_t padded_columns) {
-    const std::uint32_t group   = blockIdx.x;
-    const std::uint32_t token   = blockIdx.y;
+    const std::uint32_t groups  = padded_columns / kQ4Group;
+    const std::uint32_t group   = blockIdx.x % groups;
+    const std::uint32_t token   = blockIdx.x / groups;
     const std::uint32_t lane    = threadIdx.x;
     const std::uint32_t column0 = group * kQ4Group + lane * 2U;
     const std::uint32_t column1 = column0 + 1U;
@@ -1112,8 +1136,9 @@ __global__ __launch_bounds__(kSmallQuantizeThreads) void fused_silu_a8g64_quanti
 __global__ __launch_bounds__(kWaveSize) void a8g32_quantize_activation_kernel(
     const hip_bfloat16* input, std::int8_t* codes, std::uint16_t* scale_words,
     std::uint32_t* status, std::uint32_t columns, std::uint32_t padded_columns) {
-    const std::uint32_t group  = blockIdx.x;
-    const std::uint32_t token  = blockIdx.y;
+    const std::uint32_t groups = padded_columns / kW8Group;
+    const std::uint32_t group  = blockIdx.x % groups;
+    const std::uint32_t token  = blockIdx.x / groups;
     const std::uint32_t lane   = threadIdx.x;
     const std::uint32_t column = group * kW8Group + lane;
     float value                = 0.0F;
@@ -1179,43 +1204,47 @@ __global__ void q4g64_linear_vector_kernel(const std::uint8_t* activation_codes,
                                            const std::uint16_t* weight_scales, hip_bfloat16* output,
                                            std::uint32_t tokens, std::uint32_t rows,
                                            std::uint32_t padded_columns) {
-    const std::uint32_t row   = blockIdx.x;
-    const std::uint32_t token = blockIdx.y;
-    if (row >= rows || token >= tokens) return;
+    const std::uint32_t row = blockIdx.x;
+    if (row >= rows) return;
     if (*activation_status != Q4G64ActivationOk) {
         if (threadIdx.x == 0U) {
-            output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
+            for (std::uint32_t token = blockIdx.y; token < tokens; token += gridDim.y) {
+                output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
+            }
         }
         return;
     }
     const std::size_t groups = padded_columns / kQ4Group;
-    float partial            = 0.0F;
-    for (std::uint32_t group = threadIdx.x; group < groups; group += blockDim.x) {
-        std::int32_t dot         = 0;
-        const std::size_t base   = static_cast<std::size_t>(group) * kQ4Group;
-        const std::size_t a_base = static_cast<std::size_t>(token) * padded_columns + base;
-#pragma unroll
-        for (std::uint32_t lane = 0; lane < kQ4Group; ++lane) {
-            dot += q4_code(activation_codes, a_base + lane) *
-                   q4_n16k16_code(weight_codes, row, static_cast<std::uint32_t>(base) + lane,
-                                  static_cast<std::uint32_t>(groups));
-        }
-        const float a_scale = __half2float(
-            __ushort_as_half(activation_scales[static_cast<std::size_t>(token) * groups + group]));
-        const float w_scale = __half2float(__ushort_as_half(
-            weight_scales[q4_n16k16_scale_index(row, group, static_cast<std::uint32_t>(groups))]));
-        partial             = fmaf(static_cast<float>(dot), a_scale * w_scale, partial);
-    }
     __shared__ float reductions[kThreads];
-    reductions[threadIdx.x] = partial;
-    __syncthreads();
-    for (std::uint32_t width = kThreads / 2U; width != 0U; width >>= 1U) {
-        if (threadIdx.x < width) reductions[threadIdx.x] += reductions[threadIdx.x + width];
+    for (std::uint32_t token = blockIdx.y; token < tokens; token += gridDim.y) {
+        float partial = 0.0F;
+        for (std::uint32_t group = threadIdx.x; group < groups; group += blockDim.x) {
+            std::int32_t dot         = 0;
+            const std::size_t base   = static_cast<std::size_t>(group) * kQ4Group;
+            const std::size_t a_base = static_cast<std::size_t>(token) * padded_columns + base;
+#pragma unroll
+            for (std::uint32_t lane = 0; lane < kQ4Group; ++lane) {
+                dot += q4_code(activation_codes, a_base + lane) *
+                       q4_n16k16_code(weight_codes, row, static_cast<std::uint32_t>(base) + lane,
+                                      static_cast<std::uint32_t>(groups));
+            }
+            const float a_scale = __half2float(__ushort_as_half(
+                activation_scales[static_cast<std::size_t>(token) * groups + group]));
+            const float w_scale = __half2float(__ushort_as_half(weight_scales[q4_n16k16_scale_index(
+                row, group, static_cast<std::uint32_t>(groups))]));
+            partial             = fmaf(static_cast<float>(dot), a_scale * w_scale, partial);
+        }
+        reductions[threadIdx.x] = partial;
         __syncthreads();
-    }
-    if (threadIdx.x == 0U) {
-        output[static_cast<std::size_t>(token) * rows + row] =
-            static_cast<hip_bfloat16>(reductions[0]);
+        for (std::uint32_t width = kThreads / 2U; width != 0U; width >>= 1U) {
+            if (threadIdx.x < width) reductions[threadIdx.x] += reductions[threadIdx.x + width];
+            __syncthreads();
+        }
+        if (threadIdx.x == 0U) {
+            output[static_cast<std::size_t>(token) * rows + row] =
+                static_cast<hip_bfloat16>(reductions[0]);
+        }
+        __syncthreads();
     }
 }
 
@@ -3410,9 +3439,12 @@ hipError_t q4g64_quantize_activation(const Q4G64ActivationQuantizeArgs& args,
         ranges_overlap(args.input, input_bytes, args.workspace.status, sizeof(std::uint32_t))) {
         return hipErrorInvalidValue;
     }
+    dim3 grid;
+    if (!token_group_grid(args.workspace.tokens, args.workspace.padded_columns / kQ4Group, &grid)) {
+        return hipErrorInvalidValue;
+    }
     hipError_t result = hipMemsetAsync(args.workspace.status, 0, sizeof(std::uint32_t), stream);
     if (result != hipSuccess) return result;
-    const dim3 grid(args.workspace.padded_columns / kQ4Group, args.workspace.tokens);
     hipLaunchKernelGGL(q4g64_quantize_activation_kernel, grid, dim3(kQ4Group), 0, stream,
                        args.input, args.workspace.codes, args.workspace.scales,
                        args.workspace.status, args.workspace.columns,
@@ -3438,8 +3470,8 @@ hipError_t q4g64_linear_wmma32(const Q4G64LinearArgs& args, hipStream_t stream) 
 
 hipError_t q4g64_linear_vector(const Q4G64LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_q4_linear_args(args)) return hipErrorInvalidValue;
-    hipLaunchKernelGGL(q4g64_linear_vector_kernel, dim3(args.rows, args.tokens), dim3(kThreads), 0,
-                       stream, args.activation_codes, args.activation_scales,
+    hipLaunchKernelGGL(q4g64_linear_vector_kernel, row_token_grid(args.rows, args.tokens),
+                       dim3(kThreads), 0, stream, args.activation_codes, args.activation_scales,
                        args.activation_status, args.weight_codes, args.weight_scales, args.output,
                        args.tokens, args.rows, args.padded_columns);
     return hipGetLastError();
@@ -3624,9 +3656,12 @@ hipError_t a8g64_quantize_activation(const A8G64ActivationQuantizeArgs& args,
             args.workspace.tokens, columns);
         return hipGetLastError();
     }
+    dim3 grid;
+    if (!token_group_grid(args.workspace.tokens, args.workspace.padded_columns / kQ4Group, &grid)) {
+        return hipErrorInvalidValue;
+    }
     hipError_t result = hipMemsetAsync(args.workspace.status, 0, sizeof(std::uint32_t), stream);
     if (result != hipSuccess) return result;
-    const dim3 grid(args.workspace.padded_columns / kQ4Group, args.workspace.tokens);
     hipLaunchKernelGGL(a8g64_quantize_activation_kernel, grid, dim3(kWaveSize), 0, stream,
                        args.input, args.workspace.low_codes, args.workspace.high_codes,
                        args.workspace.scales, args.workspace.status, args.workspace.columns,
@@ -5034,9 +5069,12 @@ hipError_t a8g32_quantize_activation(const A8G32ActivationQuantizeArgs& args,
         ranges_overlap(args.input, input_bytes, args.workspace.status, sizeof(std::uint32_t))) {
         return hipErrorInvalidValue;
     }
+    dim3 grid;
+    if (!token_group_grid(args.workspace.tokens, args.workspace.padded_columns / kW8Group, &grid)) {
+        return hipErrorInvalidValue;
+    }
     hipError_t result = hipMemsetAsync(args.workspace.status, 0, sizeof(std::uint32_t), stream);
     if (result != hipSuccess) return result;
-    const dim3 grid(args.workspace.padded_columns / kW8Group, args.workspace.tokens);
     hipLaunchKernelGGL(a8g32_quantize_activation_kernel, grid, dim3(kWaveSize), 0, stream,
                        args.input, args.workspace.codes, args.workspace.scales,
                        args.workspace.status, args.workspace.columns,
@@ -5250,8 +5288,9 @@ hipError_t bf16_linear_baseline(const Bf16LinearArgs& args, hipStream_t stream) 
     if (!valid_qualified_width(args.input, args.output, args.tokens, args.rows, args.columns) ||
         args.weights == nullptr)
         return hipErrorInvalidValue;
-    hipLaunchKernelGGL(bf16_linear_kernel, dim3(args.rows, args.tokens), dim3(kThreads), 0, stream,
-                       args.input, args.weights, args.output, args.columns, args.rows);
+    hipLaunchKernelGGL(bf16_linear_kernel, row_token_grid(args.rows, args.tokens), dim3(kThreads),
+                       0, stream, args.input, args.weights, args.output, args.columns, args.rows,
+                       args.tokens);
     return hipGetLastError();
 }
 
@@ -5265,9 +5304,9 @@ hipError_t w8g32_linear_baseline(const W8G32LinearArgs& args, hipStream_t stream
         args.code_bytes != expected_codes || args.scale_bytes != expected_scales) {
         return hipErrorInvalidValue;
     }
-    hipLaunchKernelGGL(w8g32_linear_kernel, dim3(args.rows, args.tokens), dim3(kThreads), 0, stream,
-                       args.input, args.codes, args.scales, args.output, args.columns, args.rows,
-                       args.padded_columns);
+    hipLaunchKernelGGL(w8g32_linear_kernel, row_token_grid(args.rows, args.tokens), dim3(kThreads),
+                       0, stream, args.input, args.codes, args.scales, args.output, args.columns,
+                       args.rows, args.padded_columns, args.tokens);
     return hipGetLastError();
 }
 
