@@ -1403,18 +1403,19 @@ KVDiskCache::~KVDiskCache() noexcept {
     } catch (...) {}
 }
 
-void KVDiskCache::register_location() {
+void KVDiskCache::register_location(std::filesystem::path location) {
     std::lock_guard lock(g_location_mu);
-    const std::string key = canonical_location_.string();
-    if (!g_locations.insert(key).second) {
+    if (!g_locations.insert(location.string()).second) {
         throw std::runtime_error("KV disk cache location is already open in this process");
     }
+    canonical_location_ = std::move(location);
 }
 
 void KVDiskCache::unregister_location() noexcept {
     if (canonical_location_.empty()) { return; }
     std::lock_guard lock(g_location_mu);
     g_locations.erase(canonical_location_.string());
+    canonical_location_.clear();
 }
 
 void KVDiskCache::open_directory() {
@@ -1424,8 +1425,7 @@ void KVDiskCache::open_directory() {
         throw std::runtime_error("KV disk location exists and is not a directory");
     }
     std::filesystem::create_directories(config_.location);
-    canonical_location_ = std::filesystem::weakly_canonical(config_.location);
-    register_location();
+    register_location(std::filesystem::weakly_canonical(config_.location));
     acquire_lock();
     std::filesystem::create_directories(config_.location / "packs");
     std::filesystem::create_directories(config_.location / "maps");
