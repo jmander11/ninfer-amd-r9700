@@ -339,6 +339,14 @@ set_target_properties(ninfer_r9700_engine_cache_cancel_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
 target_link_libraries(ninfer_r9700_engine_cache_cancel_qual PRIVATE ninfer_engine)
 
+# Manual fixed-K7 C12 compaction regression through the public Engine.
+add_executable(ninfer_r9700_dflash_concurrency_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_concurrency_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_dflash_concurrency_qual)
+set_target_properties(ninfer_r9700_dflash_concurrency_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_dflash_concurrency_qual PRIVATE ninfer_engine)
+
 # Manual regression for concurrent long tool prompts, checkpoint copies, reuse and decode batches.
 add_executable(ninfer_r9700_concurrent_long_prompt_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/concurrent_long_prompt_qual.cpp)

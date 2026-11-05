@@ -1,0 +1,75 @@
+{
+  "measured_on": "2026-11-04",
+  "hardware": {
+    "gpu": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "rocm": "10",
+    "hip": "7.15.26333",
+    "kernel": "7.0.0-38-generic",
+    "driver": "7.1.3.31500000"
+  },
+  "artifact_identity": "qwen3.8-27b/r9700-lq4",
+  "settings": {
+    "build": "Release",
+    "device_graphs": true,
+    "power": "auto",
+    "prefill_chunk": 2048,
+    "kv_capacity": "auto",
+    "vision": false,
+    "ram_prefix_cache": false,
+    "disk_prefix_cache": false,
+    "speculative_backend": "dflash",
+    "adaptive_draft": true,
+    "max_draft_tokens": 7,
+    "optimized_draft_head": true,
+    "max_context": 262144
+  },
+  "graph_environment": {
+    "DEBUG_HIP_GRAPH_CLASSIC_PATH": "0",
+    "ROC_ENABLE_LARGE_BAR": "0",
+    "ROC_SKIP_KERNEL_ARG_COPY": "0",
+    "HSA_DISABLE_FRAGMENT_ALLOCATOR": "1",
+    "DEBUG_HIP_GRAPH_BATCH_SIZE": "16384"
+  },
+  "method": "native-ceiling server startup, one-token prefix seeds, then 64 output tokens per concurrent request at C9..12",
+  "notes": [
+    "Allocated shared capacity, not an all-lane near-capacity qualification.",
+    "Bulk host-argument graph calibration: each complete inventory observed 64 MiB; the allowance includes the existing additional 20 MiB for persistent decode.",
+    "Every measured decode request reached 64 tokens. The physical VRAM free counter remained above the configured 64-MiB external reserve.",
+    "Raw startup metadata, responses and the prior conservative control remain local under profiles/bench/dflash-c12-20261104/capacity-final/ and capacity/."
+  ],
+  "results": [
+    {
+      "concurrency": 9,
+      "kv_capacity": 581888,
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "available_after_startup_bytes": 100143104,
+      "physical_free_after_decode_bytes": 100032512
+    },
+    {
+      "concurrency": 10,
+      "kv_capacity": 573120,
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "available_after_startup_bytes": 99201024,
+      "physical_free_after_decode_bytes": 99106816
+    },
+    {
+      "concurrency": 11,
+      "kv_capacity": 564352,
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "available_after_startup_bytes": 99442688,
+      "physical_free_after_decode_bytes": 99348480
+    },
+    {
+      "concurrency": 12,
+      "kv_capacity": 555520,
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "available_after_startup_bytes": 101134336,
+      "physical_free_after_decode_bytes": 101040128
+    }
+  ]
+}

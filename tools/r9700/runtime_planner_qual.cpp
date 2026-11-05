@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <initializer_list>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -445,10 +446,9 @@ void qualify_host_dflash_graph_allowance() {
     }
     // These constants come from independent physical measurements, not a model
     // of executable counts. Keep the production capacity regression explicit.
-    constexpr std::array<std::size_t, ninfer::kDFlashMaximumConcurrency> graph_mib{
-        318, 578, 842, 1102, 1364, 1624, 1884, 2144};
-    constexpr std::array<std::size_t, ninfer::kDFlashMaximumConcurrency> host_argument_graph_mib{
-        72, 56, 60, 60, 62, 62, 62, 62};
+    constexpr std::array<std::size_t, 8> graph_mib{318, 578, 842, 1102, 1364, 1624, 1884, 2144};
+    constexpr std::array<std::size_t, 12> host_argument_graph_mib{72, 56, 60, 60, 62, 62,
+                                                                  62, 62, 64, 64, 64, 64};
     const auto setting = [](const char* name, const char* expected) {
         const char* value = std::getenv(name);
         return value != nullptr && std::strcmp(value, expected) == 0;
@@ -456,7 +456,9 @@ void qualify_host_dflash_graph_allowance() {
     const bool bulk_arguments =
         setting("DEBUG_HIP_GRAPH_CLASSIC_PATH", "0") && setting("ROC_ENABLE_LARGE_BAR", "0") &&
         setting("ROC_SKIP_KERNEL_ARG_COPY", "0") && setting("HSA_DISABLE_FRAGMENT_ALLOCATOR", "1");
-    const auto& measured_graph_mib = bulk_arguments ? host_argument_graph_mib : graph_mib;
+    const std::span<const std::size_t> measured_graph_mib =
+        bulk_arguments ? std::span<const std::size_t>(host_argument_graph_mib)
+                       : std::span<const std::size_t>(graph_mib);
     constexpr std::array<std::size_t, ninfer::kMaximumConcurrency> main_driver_mib{
         6, 6, 4, 4, 2, 4, 4, 6, 32, 32, 32, 34, 34, 34, 34, 34};
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
@@ -495,7 +497,7 @@ void qualify_host_dflash_graph_allowance() {
         const auto calibrated      = Variant::calibrated_dflash_graph_allowance_bytes(
             inputs.weights_profile, inputs.features, inputs.capacity, c, inputs.prefill_chunk,
             inputs.draft_window, inputs.adaptive_draft);
-        require(calibrated.has_value() == measured_build,
+        require(calibrated.has_value() == (measured_build && c <= measured_graph_mib.size()),
                 "production calibration applicability differs from measured build profile");
         for (const bool disk : {false, true}) {
             inputs.kv_disk_capacity_bytes = disk ? 1ULL << 30U : 0U;
@@ -503,7 +505,7 @@ void qualify_host_dflash_graph_allowance() {
             require(plan->graph_definition_count == std::size_t{65U} * c &&
                         plan->graph_executable_count == std::size_t{65U} * c,
                     "production immutable executable inventory changed; remeasure residency");
-            if (measured_build)
+            if (calibrated)
                 require(plan->graph_allowance_bytes ==
                             (measured_graph_mib[c - 1U] + 20U) * (1ULL << 20U),
                         "production C-specific graph reservation differs from measurement");
@@ -635,7 +637,7 @@ void qualify_host_dflash_graph_allowance() {
     require(!chunk_calibration(Variant::WeightsProfile::R9700Q4G64Evaluation, features, 262144U, 6U,
                                1024U, 7U, true),
             "chunk1024 calibration admitted an evaluation weight profile");
-    std::printf("r9700_runtime_planner: PASS immutable DFlash C1..8/K/context inventory\n");
+    std::printf("r9700_runtime_planner: PASS immutable DFlash C1..12/K/context inventory\n");
 }
 
 void qualify_host_mtp_graph_allowance() {
@@ -959,6 +961,12 @@ int main(int argc, char** argv) {
                 "--host-hybrid-widths-csv PREFILL MAX_CONCURRENCY MTP_WIDTH DFLASH_WIDTH]");
         }
         ninfer::DeviceContext device(0);
+        bool dflash_excess_rejected = false;
+        try {
+            qualify_plan(device, ninfer::kDFlashMaximumConcurrency + 1U,
+                         ninfer::SpeculativeBackend::DFlash, 7U, false);
+        } catch (const std::invalid_argument&) { dflash_excess_rejected = true; }
+        require(dflash_excess_rejected, "DFlash accepted concurrency above twelve");
         for (std::uint32_t concurrency = 1; concurrency <= ninfer::kMaximumConcurrency;
              ++concurrency) {
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::None, 0, false);
@@ -1030,15 +1038,16 @@ int main(int argc, char** argv) {
             require(q4_workspace > mixed_workspace,
                     "all-Q4 plan did not reserve its larger MLP/Vision activation workspace");
         }
-        std::printf("r9700_runtime_planner: PASS q4_activation_bits=%d q4_prefill_cta_profile=%.*s "
-                    "w8_activation_bits=%d C=1..16 "
-                    "ordinary/vision/MTP/DFlash fixed widths; 32K MTP3 graph allowance; "
-                    "exact 32K DFlash K=1..11 C=1..8 graph inventories; profile-consistent integer "
-                    "workspace including DFlash Q4 companions\n",
-                    ninfer::ops::r9700::linear::kQ4ActivationBits,
-                    static_cast<int>(ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.size()),
-                    ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.data(),
-                    ninfer::ops::r9700::linear::kW8ActivationBits);
+        std::printf(
+            "r9700_runtime_planner: PASS q4_activation_bits=%d q4_prefill_cta_profile=%.*s "
+            "w8_activation_bits=%d C=1..16 "
+            "ordinary/vision/MTP/DFlash fixed widths; 32K MTP3 graph allowance; "
+            "exact 32K DFlash K=1..11 C=1..12 graph inventories; profile-consistent integer "
+            "workspace including DFlash Q4 companions\n",
+            ninfer::ops::r9700::linear::kQ4ActivationBits,
+            static_cast<int>(ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.size()),
+            ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.data(),
+            ninfer::ops::r9700::linear::kW8ActivationBits);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "r9700_runtime_planner: FAIL: %s\n", error.what());

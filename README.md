@@ -1,6 +1,6 @@
 # NInfer AMD — Radeon AI PRO R9700
 
-C++/HIP inference for **Qwen3.8-27B on one AMD Radeon AI PRO R9700**, with **1–16 concurrent requests** (1–8 with DFlash2).
+C++/HIP inference for **Qwen3.8-27B on one AMD Radeon AI PRO R9700**, with **1–16 concurrent requests** (1–12 with DFlash2).
 
 An AMD port of [Neroued/NInfer](https://github.com/Neroued/ninfer), distributed under Apache-2.0. Model weights are separate; see `docs/acknowledgements.md` for credits.
 
@@ -9,14 +9,14 @@ An AMD port of [Neroued/NInfer](https://github.com/Neroued/ninfer), distributed 
 - **Works with chat clients.** Run from the terminal or connect a client that uses OpenAI Chat Completions, Responses or Anthropic Messages. Answers stream as they are generated, with reasoning kept separate from the answer.
 - **Calls tools and returns structured answers.** Let the model choose a tool or require a specific one, with incremental tool-call streams. Constrain answers to JSON, a JSON Schema, an EBNF grammar, a full-match regex or literal choices.
 - **Reads images and video.** Add `--vision` at startup to accept media alongside text.
-- **Speculative decoding.** DFlash2 proposes tokens for the main model to check together, adapting up to seven drafts. It is the default for up to eight requests; MTP supports up to sixteen.
+- **Speculative decoding.** DFlash2 proposes tokens for the main model to check together, adapting up to seven drafts. It is the default for up to twelve requests; MTP supports up to sixteen.
 - **Reuses conversation history.** Cached prefixes avoid processing the same text again. Keep them in GPU memory, add a RAM cache, or save them to SSD for reuse after a restart.
 - **Controls generation and scores text.** Adjust sampling, choose greedy decoding, inspect token probabilities or compare candidate answers. `ninfer-ppl` measures how well the model predicts text.
 - **Reports server activity.** Prometheus metrics, JSON statistics and request logs report throughput, memory use, cache hits and draft acceptance.
 
 ## Built for the R9700
 
-HIP kernels and Device Graphs are tuned for `gfx1201` (wave32). The engine batches up to sixteen requests with MTP or without speculation, and up to eight with DFlash, where it can process a new prompt while other requests generate. GPU memory is planned at startup, with workspace shared between execution phases.
+HIP kernels and Device Graphs are tuned for `gfx1201` (wave32). The engine batches up to sixteen requests with MTP or without speculation, and up to twelve with DFlash, where it can process a new prompt while other requests generate. GPU memory is planned at startup, with workspace shared between execution phases.
 
 **LQ4: 4-bit codebook weights decoded to FP8 for computation.** Most Text projections and the output head use LQ4; 21 sensitive projections stay in FP8. The DFlash-enabled artifact is **16.75 GB** on disk (decimal; this is not a VRAM requirement), with identity `qwen3.8-27b/r9700-lq4`. The paged KV cache stores FP8 keys, INT4 values and FP16 scales. DFlash keeps its own BF16 state.
 
@@ -28,7 +28,7 @@ This port combines NInfer features with AMD-specific kernels, weight/cache forma
 
 Each request can use up to **262,144 tokens** for prompt and answer combined, subject to the shared GPU cache capacity below.
 
-Shared cache capacity with automatic sizing, optimized proposal heads, adaptive drafting, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333). DFlash uses up to seven drafts (measured 2026-10-17); MTP uses up to three (measured 2026-11-04):
+Shared cache capacity with automatic sizing, optimized proposal heads, adaptive drafting, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333). DFlash uses up to seven drafts (C1..8 measured 2026-10-17, C9..12 measured 2026-11-04); MTP uses up to three (measured 2026-11-04):
 
 | Concurrent requests (C) | DFlash K7 shared KV tokens | MTP K3 shared KV tokens |
 |---:|---:|---:|
@@ -40,16 +40,16 @@ Shared cache capacity with automatic sizing, optimized proposal heads, adaptive 
 | 6 | 608,704 | 611,200 |
 | 7 | 600,576 | 603,776 |
 | 8 | 592,512 | 596,224 |
-| 9 | Unsupported | 587,776 |
-| 10 | Unsupported | 580,352 |
-| 11 | Unsupported | 572,864 |
-| 12 | Unsupported | 565,312 |
+| 9 | 581,888 | 587,776 |
+| 10 | 573,120 | 580,352 |
+| 11 | 564,352 | 572,864 |
+| 12 | 555,520 | 565,312 |
 | 13 | Unsupported | 557,888 |
 | 14 | Unsupported | 550,400 |
 | 15 | Unsupported | 542,976 |
 | 16 | Unsupported | 535,488 |
 
-Capacity depends on available VRAM and enabled features; automatic sizing leaves 64 MiB headroom by default. These are allocated shared capacities, checked at startup and with short decode, rather than an all-lane near-capacity qualification. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; MTP startup summaries: `bench/results/shared-kv-mtp-20261104.json`.
+Capacity depends on available VRAM and enabled features; automatic sizing leaves 64 MiB headroom by default. These are allocated shared capacities, checked at startup and with short decode, rather than an all-lane near-capacity qualification. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; MTP startup summaries: `bench/results/shared-kv-mtp-20261104.json`; DFlash C9..12 summaries: `bench/results/shared-kv-dflash-c9-c12-20261104.json`.
 
 ## Performance and quality
 
@@ -67,21 +67,21 @@ Measured 2026-10-17 on one R9700, Release build, Device Graphs, power `auto`, ch
 
 **DFlash answer generation with the default sampling settings:**
 
-| Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s |
-|---|---:|---:|---:|---:|
-| English story | 146 | 88 | 356 | 440 |
-| Python package | 171 | 135 | 535 | 630 |
-| Math reasoning | 346 | 126 | 491 | 608 |
-| Document summary 8K | 8,192 | 93 | 340 | 420 |
-| Document summary 32K | 32,779 | 97 | 300 | 330 |
+| Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s | C12 aggregate tokens/s |
+|---|---:|---:|---:|---:|---:|
+| English story | 146–147 | 88 | 356 | 440 | 590 |
+| Python package | 171–173 | 135 | 535 | 630 | 858 |
+| Math reasoning | 346–347 | 126 | 491 | 608 | 757 |
+| Document summary 8K | 8,192–8,194 | 93 | 340 | 420 | 535 |
+| Document summary 32K | 32,779 | 97 | 300 | 330 | 430 |
 
-C1/C6 measured 2026-10-17; C8 measured 2026-11-04. The C8 8K summary has 8,194 prompt tokens. Document content follows the repository at each measurement.
+C1/C6 measured 2026-10-17; C8/C12 measured 2026-11-04. C12 uses the current document content and puts the code instruction in the user message; historical DFlash cells put it in the system message. The fresh, matched C8/C12 comparison in `docs/performance.md` measures 21–34% higher aggregate throughput at C12.
 
 P-less temperature 1.5, adaptive DFlash up to seven drafts, 512 output tokens per request (including reasoning). Means of three runs after one warmup.
 
-Generation rates exclude prompt processing. Each prompt is cached before timing; C6/C8 count only intervals with all six/eight requests decoding. Divide the aggregate rate by concurrency for the average per active request.
+Generation rates exclude prompt processing. Each prompt is cached before timing; C6/C8/C12 count only intervals with all six/eight/twelve requests decoding. Divide the aggregate rate by concurrency for the average per active request.
 
-Prompt content and sampling affect draft acceptance and speed. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results: `bench/results/readme-workloads-20261017.json` and `bench/results/readme-workloads-c8-20261104.json`.
+Prompt content and sampling affect draft acceptance and speed. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results: `bench/results/readme-workloads-20261017.json`, `bench/results/readme-workloads-c8-20261104.json` and `bench/results/readme-workloads-dflash-c12-20261104.json`.
 
 **MTP answer generation (measured 2026-11-04):**
 
@@ -139,7 +139,7 @@ build-r9700/apps/ninfer-serve /path/to/qwen3.8-27b-r9700-lq4.ninfer \
 
 CLI and server default to DFlash with the optimized draft head and adaptive drafting up to seven tokens. `--spec none` disables speculation; `--no-lm-head-draft` selects the full proposal head. Server KV capacity defaults to `auto`. Use `--draft-tokens N --no-adaptive-draft` for a fixed length.
 
-For C9..16 use `--spec mtp --draft-tokens 3 --adaptive-draft --lm-head-draft`, or `--spec none`.
+For C13..16 use `--spec mtp --draft-tokens 3 --adaptive-draft --lm-head-draft`, or `--spec none`.
 
 P-less sampling uses temperature **1.5** by default; `--temperature` overrides it. It ignores top-p/top-k/min-p and penalties; `--no-p-less-sampling` enables those controls. Use `--greedy` for argmax. Vision and speculation settings are fixed at startup. Each executable's `--help` lists all options.
 

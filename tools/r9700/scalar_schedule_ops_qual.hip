@@ -337,7 +337,7 @@ void qualify_masked_block(hipStream_t stream) {
     d_valid.verify_guards("masked valid");
     d_ids.verify_guards("masked ids");
     d_positions.verify_guards("masked positions");
-    std::cout << "prepare_masked_block PASS W1..16_B1..8 W16B4_us=" << elapsed << '\n';
+    std::cout << "prepare_masked_block PASS W1..16_B1..12 W16B12_us=" << elapsed << '\n';
 }
 
 std::vector<hip_bfloat16> bit_fixture(std::size_t count, std::uint32_t seed) {
@@ -360,7 +360,7 @@ void qualify_ragged_prefix(hipStream_t stream) {
     // A fixed non-identity lane permutation and distinct starts for every row.
     std::vector<std::int32_t> lanes(kMaxBatch), starts(kMaxBatch);
     for (std::int32_t row = 0; row < kMaxBatch; ++row) {
-        lanes[row]  = (row * 3 + kMaxBatch - 1) % kMaxBatch;
+        lanes[row]  = kMaxBatch - 1 - row;
         starts[row] = 100 + row * 101;
     }
     std::vector<std::int32_t> ends(kMaxBatch);
@@ -433,7 +433,7 @@ void qualify_ragged_prefix(hipStream_t stream) {
     d_output.verify_guards("ragged output");
     d_positions.verify_guards("ragged positions");
     d_counts.verify_guards("ragged counts");
-    std::cout << "prepare_ragged_prefix PASS D25600_W16_B4_us=" << elapsed << '\n';
+    std::cout << "prepare_ragged_prefix PASS D25600_W16_B12_us=" << elapsed << '\n';
 }
 
 } // namespace

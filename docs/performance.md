@@ -13,7 +13,7 @@ NInfer distinguishes four scopes:
 3. runtime phases/rounds;
 4. complete Engine inference at fixed concurrency.
 
-A result is stated only at the scope directly measured. Kernel or Op timings do not establish tokens per second. Final production selection requires a complete model artifact, numerical quality guardrails, same-candidate graph/eager parity, resolved capacity, and end-to-end C=1..16 measurements (C=1..8 under DFlash) on an otherwise idle R9700.
+A result is stated only at the scope directly measured. Kernel or Op timings do not establish tokens per second. Final production selection requires a complete model artifact, numerical quality guardrails, same-candidate graph/eager parity, resolved capacity, and end-to-end C=1..16 measurements (C=1..12 under DFlash) on an otherwise idle R9700.
 
 Benchmark schema 21 sums each request's active prepare, Vision and prefill service time across lanes. Aggregate prefill throughput divides all prompt tokens by that summed prefill service time. Batched decode retains the maximum shared lane duration; complete inference separately measures elapsed wall time. Service costs are not an additive wall-time decomposition. Schema 20 instead used the maximum lane prefill duration and overstated aggregate C>1 prefill throughput. Those concurrent prefill fields are ineligible for selection; retained C1, capacity, decode and independently measured whole-wall evidence remain valid in their respective scopes. The stopped attempt and valid raw results are retained in `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/whole/closure.json` as historical evidence. The FP8 shared-context resource bridge and the benchmark-reporting bridge that re-admitted the hipBLASLt-era four-role hybrid evaluation artifact were retired with hipBLASLt (438f6a89): their bound runtime sources and qualifier no longer exist, and the Pareto, cutover, and DFlash-selection tools now reject any authority that binds either bridge.
 
@@ -153,6 +153,35 @@ Published summary: `bench/results/readme-workloads-c8-20261104.json`. Raw reques
 commands, startup metadata and timing intervals remain under
 `profiles/bench/readme-workloads-c8-20261104/`. Reproduce with the README workload command in
 `tools/bench/README.md`, selecting `--concurrency 8`.
+
+
+### DFlash C12 concurrency and matched README workloads (2026-11-04)
+
+DFlash now admits C1..12. It reuses the C16 Engine scheduler, paged-cache transactions, Text verification, GDN replay records and graph inventory. DFlash-specific ingress/egress, deferred-fold rows, selector and convolution contracts now admit twelve requests. At K7 this reaches 84 selector columns and 96 target columns. The historical graph-residency calibration remains explicitly bounded to its measured concurrency domain, avoiding zero-filled allowance entries when the product limit grows.
+
+The same selected LQ4 artifact and R9700/HIP 7.15.26333 Release build ran the five current README workloads at C8 and C12, power `auto`, Compose graph environment, adaptive DFlash K<=7, optimized proposal head, chunk 2048, max context 65536, automatic shared KV, RAM/SSD/Vision off, p-less temperature 1.5, 512 output tokens, one warmup and three measured waves. All measured requests reached 512 tokens. The metric remains committed tokens per complete full-batch decode-only 100-ms wall interval; it includes host scheduling and reasoning, and excludes startup/prefill and intervals after a lane finishes.
+
+Both concurrencies use the current user-message code instruction and the same document revision. The published historical DFlash C8 sample used a system-message code instruction; its document text also differs. The matched C8 comparison separates concurrency scaling from those workload changes. These measurements do not score task quality.
+
+| Workload | Fresh C8 mean ± sample stddev tok/s | C12 mean ± sample stddev tok/s | C12 gain over fresh C8 | C12 gain over published DFlash C8 |
+|---|---:|---:|---:|---:|
+| English story | 439.0 ± 9.5 | 590.1 ± 1.1 | 34.4% | 34.1% |
+| Python package | 709.8 ± 33.6 | 858.2 ± 38.5 | 20.9% | 36.2% |
+| Math reasoning | 602.1 ± 17.0 | 756.9 ± 8.4 | 25.7% | 24.5% |
+| Document summary 8K | 417.4 ± 6.5 | 535.4 ± 6.2 | 28.3% | 27.5% |
+| Document summary 32K | 338.1 ± 13.0 | 429.9 ± 8.5 | 27.2% | 30.3% |
+
+These C12 means exceed the README's DFlash C8 column by 25–36%; they do not exceed every published MTP C16 cell. The published MTP C16 means remain higher for English, code and both summaries; C12 DFlash's math mean is higher. The MTP samples were measured separately and are not a controlled backend A/B.
+
+At the benchmark's 65536-token ceiling, C8/C12 use conservative graph inventory allowances of 2158/3038 MiB and observe 64/64 MiB at startup; automatic shared KV capacities are 509760/439232 tokens. These reservations are included in the measured workload. They leave enough capacity for all twelve 32K requests and their 512-token outputs. Native-ceiling capacity is measured separately.
+
+Native-ceiling (`max_context=262144`) C9..12 startup probes captured every immutable graph and each observed 64 MiB. The rebuilt bulk host-argument calibration reserves 84 MiB including the existing 20-MiB persistent-decode allowance, while classic calibration remains bounded to C1..8. It raises C12 automatic shared KV from 417920 to 555520 tokens. C9/C10/C11 capacities are 581888/573120/564352. Each final startup was followed by prefix seeding and a concurrent 64-token decode wave; every request reached 64 tokens, with average decode batch C. Physical free VRAM after decoding was 95–96 MiB, above the configured 64-MiB reserve. These are startup/short-decode capacities, not all-lane near-capacity qualification. `bench/results/shared-kv-dflash-c9-c12-20261104.json` records the final capacities and graph/free-memory observations; raw control/final probes are under `profiles/bench/dflash-c12-20261104/capacity/` and `capacity-final/`.
+
+Independent GPU qualifiers pass the new C9/C12 SWA topology, C12 grouped convolution and deferred GDN fold, C9/C12 selector and context append, exact twelve-lane KV append, and LQ4 output-head widths T72/T84/T96. The owning represented-input FP64 or exact oracle remains the criterion; no kernel arithmetic changed. Fixed-K7 public-Engine C9..12 graph/eager runs retain all 2730 generated token IDs and speculative counters exactly. A separate C12 fixed-K7 compaction test observes twelve decode-ready requests, lets eleven finish at 32 tokens, and keeps the twelfth alive to 512; graph/eager and diagnostic eager outputs match exactly across 864 tokens. The eager decision trace records lanes 0..11 and ends with lane11 alone. An eleven-decoder/one-8192-token-prefill mixed round also completes. The MTP round qualifier still passes K1..5/C1..16; no MTP C>8 production defect was found. Adaptive graph/eager runs choose different K from their measured round times and are not treated as fixed-route token-parity checks.
+
+One matched C12/P8192/G128 benchmark geometry was measured unprofiled, then traced with rocprofv3 1.3.5 under `auto`, using only `ninfer_bench_measured` (including its small prefix repairs). Of 49436 kernel dispatches, LQ4 Linear accounts for 50.3% of traced kernel time; SWA partial+merge is 1.5% and target output-head Linear is 2.9%. Dense attention and deferred GDN recurrence are also substantial. These are attribution-only fractions; profiler interception changes adaptive choices and its durations do not admit a route. The new head/SWA boundaries passed their oracle, and this task retains the existing qualified kernels rather than promoting a new arithmetic path. Exact commands, unprofiled report, trace CSV/database and analysis remain under `profiles/bench/dflash-c12-20261104/profile/`.
+
+Machine-readable results: `bench/results/readme-workloads-dflash-c12-20261104.json`. Exact requests, responses, per-wave acceptance, startup plans and periodic intervals are under `profiles/bench/dflash-c12-20261104/readme/`. Reproduce with `tools/bench/run_readme_workloads.py --concurrency 8 12` and the explicit artifact/tokenizer and graph environment in `tools/bench/README.md`.
 
 
 ### MTP README workload and shared-capacity measurements (2026-11-04)
@@ -815,7 +844,7 @@ Chunk size no longer moves prefill: 32K 2,949 / 2,949 tok/s and 128K 1,916 / 1,9
 
 ## C=1..8: verify-width kernels for C5..C8 (2026-10-01)
 
-`kDFlashMaximumConcurrency` is 8. DFlash verify rounds at C5..C8 run the Text and drafter projections at T = B x W = 17..64 columns (B <= 8 lanes, W = 4..8), widths the C2..C4 routes never reached. A C8 contention trace (7 decode lanes, 8K owner, production DFlash adaptive K7, `prof.sh`) attributed the regressions, and each fix was qualified against its FP64 oracle before adoption (unprofiled interleaved medians, `profiles/bench/r9700-c8-20260930/`):
+At this measurement, `kDFlashMaximumConcurrency` was 8. DFlash verify rounds at C5..C8 run the Text and drafter projections at T = B x W = 17..64 columns (B <= 8 lanes, W = 4..8), widths the C2..C4 routes never reached. A C8 contention trace (7 decode lanes, 8K owner, production DFlash adaptive K7, `prof.sh`) attributed the regressions, and each fix was qualified against its FP64 oracle before adoption (unprofiled interleaved medians, `profiles/bench/r9700-c8-20260930/`):
 
 | Change | Before -> after |
 |---|---|

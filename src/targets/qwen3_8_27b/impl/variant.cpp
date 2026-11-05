@@ -1900,8 +1900,11 @@ std::optional<std::size_t> Variant::calibrated_dflash_graph_allowance_bytes(
         // and runtime headroom are qualified separately from chunk2048.
         // C1 remeasured after decode hosting and host-allocation changes.
         // profiles/bench/readme-refresh-20261017/
-        constexpr std::array<std::size_t, kDFlashMaximumConcurrency> host_argument_graph_mib{
-            72, 56, 60, 60, 62, 62, 62, 62};
+        // C9..12 complete inventories each observed 64 MiB (2026-11-04).
+        // profiles/bench/dflash-c12-20261104/capacity/
+        constexpr std::array<std::size_t, 12> host_argument_graph_mib{72, 56, 60, 60, 62, 62,
+                                                                      62, 62, 64, 64, 64, 64};
+        if (concurrency > host_argument_graph_mib.size()) { return std::nullopt; }
         return host_argument_graph_mib[concurrency - 1U] << 20U;
     }
 
@@ -1910,8 +1913,8 @@ std::optional<std::size_t> Variant::calibrated_dflash_graph_allowance_bytes(
 
     // Complete immutable inventory, measured separately at every C on gfx1201.
     // profiles/bench/r9700-vram-runtime-budget-20261015/
-    constexpr std::array<std::size_t, kDFlashMaximumConcurrency> graph_mib{318,  578,  842,  1102,
-                                                                           1364, 1624, 1884, 2144};
+    constexpr std::array<std::size_t, 8> graph_mib{318, 578, 842, 1102, 1364, 1624, 1884, 2144};
+    if (concurrency > graph_mib.size()) { return std::nullopt; }
     return graph_mib[concurrency - 1U] << 20U;
 }
 

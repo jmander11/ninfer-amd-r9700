@@ -707,7 +707,8 @@ void qualify_w8_batch(int batch, const Fixture& fixture, hipStream_t stream) {
     auto output = allocate(ninfer::DType::BF16, {128, 48, width, batch});
     auto slots  = allocate(ninfer::DType::I32, {batch});
     auto valid  = allocate(ninfer::DType::I32, {batch});
-    auto rows   = allocate(ninfer::DType::I32, {4, 8});
+    auto rows =
+        allocate(ninfer::DType::I32, {4, static_cast<int>(ninfer::kDFlashMaximumConcurrency)});
     ninfer::ops::GdnRecordFold staged{allocate(ninfer::DType::BF16, {128, 16, width, batch}),
                                       allocate(ninfer::DType::BF16, {128, 48, width, batch}),
                                       allocate(ninfer::DType::FP32, {2, 48, width, batch}),
@@ -753,7 +754,7 @@ void qualify_w8_batch(int batch, const Fixture& fixture, hipStream_t stream) {
     HIP_CHECK(hipMemcpy(beta.data, host_beta.data(), beta.bytes(), hipMemcpyHostToDevice));
     std::vector<int> host_slots(batch), host_valid(batch);
     ninfer::ops::GdnDeferredFoldRows host_rows{};
-    constexpr int commits[8] = {0, 1, 2, 3, 6, 8, 4, 7};
+    constexpr int commits[12] = {0, 1, 2, 3, 6, 8, 4, 7, 8, 5, 0, 6};
     for (int b = 0; b < batch; ++b) {
         host_slots[b]    = (b + 3) % batch;
         host_valid[b]    = width - b % 3;
@@ -958,6 +959,7 @@ void qualify(hipStream_t stream) {
     const Fixture fixture = make_fixture(records);
     qualify_w8_batch(6, fixture, stream);
     qualify_w8_batch(8, fixture, stream);
+    qualify_w8_batch(12, fixture, stream);
     HIP_CHECK(hipMemcpy(records.conv.data, fixture.conv.data(), records.conv.bytes(),
                         hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(records.key.data, fixture.key.data(), records.key.bytes(),
@@ -1102,7 +1104,8 @@ int main() {
             throw;
         }
         std::cout << "r9700_gdn_replay_fold: PASS gfx1201 wave32 Qwen3.8 L48/Hq16/Hv48 "
-                     "B=2,16 W=6 prefix/path/no-op/read-only ordinary-state-exact "
+                     "B=2,16 W=6 and prepared W8 B=6,8,12 prefix/path/no-op/read-only "
+                     "ordinary-state-exact "
                      "deferred-layer/front-fused-bitwise max_state_abs="
                   << g_max_state_abs << " max_state_rel_l2=" << g_max_state_relative_l2 << '\n';
         return 0;

@@ -1022,7 +1022,9 @@ int main(int argc, char** argv) {
             kT = std::stoi(argv[2]);
             kB = std::stoi(argv[3]);
             kV = 131072;
-            if ((kT != 4 && kT != 5) || kB < 1 || kB > 4) fail("expected K=4/5 and C=1..4");
+            if (kT < 1 || kT > 7 || kB < 1 ||
+                kB > static_cast<int>(ninfer::kDFlashMaximumConcurrency))
+                fail("expected K=1..7 and C=1..12");
         } else if (argc != 1) {
             fail("usage: dflash2_select_qual [--dflash-companion K C]");
         }

@@ -305,14 +305,32 @@ int main() {
         const Result c8_k6 =
             run_case(device, 4096, 7, {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000},
                      {7, 7, 7, 7, 7, 7, 7, 7}, {7, 0, 6, 1, 5, 2, 4, 3}, {0, 9000});
+        for (const int batch : {9, 12}) {
+            for (const int width : {4, 7, 8}) {
+                std::vector<std::int32_t> lengths(batch), valid(batch), lanes(batch);
+                for (int row = 0; row < batch; ++row) {
+                    lengths[row] = 2048 + row * 257;
+                    valid[row]   = width - row % width;
+                    lanes[row]   = batch - 1 - row;
+                }
+                (void)run_case(device, 2048, width, lengths, valid, lanes, {0, 9000});
+            }
+        }
+        // C12 reaches 96 columns; mixed valid tails and permuted high lanes.
+        const Result c12_k7 =
+            run_case(device, 2048, 8,
+                     {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000, 10000, 2050, 4096, 2047},
+                     {8, 7, 6, 8, 5, 8, 4, 8, 8, 3, 8, 1}, {11, 0, 10, 1, 9, 2, 8, 3, 7, 4, 6, 5},
+                     {0, 10000});
         std::cout << "swa: PASS gfx1201 wave32 D128/Hq32/Hkv8 W4096 T3/B2 mixed-tail "
                      "W2048 T1 poisoned-unused max_abs="
                   << std::max({w4096.max_abs, w2048.max_abs, w2048_b2.max_abs, direct.max_abs,
-                               saturated.max_abs, production.max_abs, c8_k7.max_abs, c8_k6.max_abs})
+                               saturated.max_abs, production.max_abs, c8_k7.max_abs, c8_k6.max_abs,
+                               c12_k7.max_abs})
                   << " rel_l2="
                   << std::max({w4096.relative_l2, w2048.relative_l2, w2048_b2.relative_l2,
                                direct.relative_l2, saturated.relative_l2, production.relative_l2,
-                               c8_k7.relative_l2, c8_k6.relative_l2})
+                               c8_k7.relative_l2, c8_k6.relative_l2, c12_k7.relative_l2})
                   << " ms4096=" << w4096.milliseconds << " ms2048=" << w2048.milliseconds
                   << " ms2048_t3b2=" << w2048_b2.milliseconds
                   << " ms2048_t16b4=" << saturated.milliseconds

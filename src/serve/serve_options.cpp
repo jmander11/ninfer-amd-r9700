@@ -131,7 +131,7 @@ std::string serve_usage_text(const char* argv0) {
            "       Responses history is memory-only by default; --response-store-location persists "
            "it\n"
            "       Response history defaults to 1024 records / 256 MiB\n"
-           "       --max-concurrency accepts 1..16 with --spec none or mtp; DFlash: 1..8\n"
+           "       --max-concurrency accepts 1..16 with --spec none or mtp; DFlash: 1..12\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
            "       --kv-capacity defaults to auto: sizes KV from all free GPU memory except "

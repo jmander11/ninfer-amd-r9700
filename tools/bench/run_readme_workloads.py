@@ -182,7 +182,7 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--port", type=int, default=18082)
     args = parser.parse_args()
-    maximum_concurrency = 8 if args.spec == "dflash" else 16
+    maximum_concurrency = 12 if args.spec == "dflash" else 16
     maximum_drafts = 7 if args.spec == "dflash" else 5
     if args.draft_tokens is None:
         args.draft_tokens = 7 if args.spec == "dflash" else 3

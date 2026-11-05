@@ -104,7 +104,7 @@ void run_cyclic(ninfer::DeviceContext& device) {
     std::vector<std::int32_t> counts(batch, 0);
     // A fixed non-identity permutation of every lane.
     std::vector<std::int32_t> selectors(batch);
-    for (int row = 0; row < batch; ++row) { selectors[row] = (row * 3 + batch - 1) % batch; }
+    for (int row = 0; row < batch; ++row) { selectors[row] = batch - 1 - row; }
     auto d_key         = upload(key);
     auto d_value       = upload(value);
     auto d_positions   = upload(positions);
@@ -138,8 +138,8 @@ void run_cyclic(ninfer::DeviceContext& device) {
     executable.instantiate(definition);
 
     for (const std::array<std::int32_t, batch>& replay_counts :
-         {std::array<std::int32_t, batch>{0, 3, 7, 12, 1, 12, 5, 9},
-          std::array<std::int32_t, batch>{12, 8, 2, 0, 11, 4, 12, 6}}) {
+         {std::array<std::int32_t, batch>{0, 3, 7, 12, 1, 12, 5, 9, 12, 2, 8, 4},
+          std::array<std::int32_t, batch>{12, 8, 2, 0, 11, 4, 12, 6, 1, 12, 5, 10}}) {
         counts.assign(replay_counts.begin(), replay_counts.end());
         d_counts.copy_from_host(counts.data(), d_counts.size());
         d_cache_key.copy_from_host(initial_key.data(), d_cache_key.size());
@@ -263,7 +263,7 @@ int main() {
         }
         run_cyclic(device);
         run_paged(device);
-        std::cout << "kv_cache_append_prefix: PASS exact BF16 D128 Hkv8 W12 B8 "
+        std::cout << "kv_cache_append_prefix: PASS exact BF16 D128 Hkv8 W12 B12 "
                      "cyclic2048 graph_replay paged64\n";
         return 0;
     } catch (const std::exception& error) {

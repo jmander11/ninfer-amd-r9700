@@ -13,7 +13,7 @@
 ### 1.1 Supported workload
 
 - 单 GPU、单 resident model instance；
-- 启动时固定 `max_concurrency=C`，ordinary 与 MTP 支持 `C=1..16`，DFlash 支持 `C=1..8`（`kDFlashMaximumConcurrency`，speculative option validation 在 startup 拒绝更大的 `C`），典型 `C=2..16`；
+- 启动时固定 `max_concurrency=C`，ordinary 与 MTP 支持 `C=1..16`，DFlash 支持 `C=1..12`（`kDFlashMaximumConcurrency`，speculative option validation 在 startup 拒绝更大的 `C`），典型 `C=2..16`；
 - 运行时 `0..C` 个 resident requests；RAM suspension 保持 admitted identity，总 logical request 数仍受 `C + max_pending_requests` 限制；
 - Text 与 image/video prompt；
 - ordinary decoding 与 engine-wide speculative decoding；

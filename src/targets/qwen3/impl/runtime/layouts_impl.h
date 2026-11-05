@@ -826,7 +826,7 @@ void validate_target_options(DeviceContext& device, const EngineOptions& options
         }
         if (options.max_concurrency > kDFlashMaximumConcurrency) {
             throw std::invalid_argument(
-                "DFlash supports max_concurrency 1..8; use MTP or no speculation above 8");
+                "DFlash supports max_concurrency 1..12; use MTP or no speculation above 12");
         }
         if (options.speculative.draft_tokens == 0 ||
             options.speculative.draft_tokens > kMaximumDFlashDraftTokens) {

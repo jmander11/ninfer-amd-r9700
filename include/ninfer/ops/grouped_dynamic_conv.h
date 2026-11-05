@@ -57,7 +57,7 @@ inline constexpr std::int32_t kGroupedDynamicConvMaxWidthWhenBatched = 16;
  *   projection is contiguous BF16 [1280,T] or [1280,T,B]. finish_dynamic is contiguous BF16
  *   [G,2,T] or [G,2,T,B]. base_kernel is contiguous BF16 [D,2,2] stored D-fastest, then kernel
  *   offset, then phase (physical layout of a PyTorch [2,2,D] parameter). norm is BF16 [D]. T is any
- *   positive value at B=1; B=2..8 admits T=1..16. An image is bound for (T*B, 5120).
+ *   positive value at B=1; B=2..12 admits T=1..16. An image is bound for (T*B, 5120).
  *
  * Numeric:
  *   The oracle evaluates the complete formula in FP64 from the represented BF16 activations and

@@ -304,7 +304,7 @@ std::string usage_text(std::string_view program) {
         << "  --contention-context <L>    prompt tokens of each contention decode lane\n"
         << "                              (default: 512)\n"
         << "  --contention-lanes <N>      contention decode lanes, 1..C-1 (default: C-1)\n"
-        << "  --concurrency <1..16>       concurrent Engine lanes (default: 1; DFlash: 1..8);\n"
+        << "  --concurrency <1..16>       concurrent Engine lanes (default: 1; DFlash: 1..12);\n"
         << "                              pp+tg at C>1 reports batched decode after a sequential\n"
         << "                              prefix-reuse seed so prefill/decode do not interleave\n"
         << "                              benchmark requests use a fixed non-expiring long-run\n"
