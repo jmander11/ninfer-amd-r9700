@@ -1221,8 +1221,8 @@ template <std::uint32_t Group>
 __global__
 __launch_bounds__(kDenseVerifyThreads) void dense_verify_kernel(DenseVerifySequences sequences) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    // Grid y covers the batch's longest chunk split; a shorter sequence's surplus CTAs exit.
-    const std::uint32_t sequence = blockIdx.z, chunk = blockIdx.y;
+    // Interleave sequences within each chunk so a long final sequence starts promptly.
+    const std::uint32_t sequence = blockIdx.y, chunk = blockIdx.z;
     if (chunk >= sequences.chunks[sequence]) return;
     const Fp8Int4KvAttentionArgs& a = sequences.sequence[sequence];
     const std::uint32_t chunk_keys  = sequences.chunk_keys[sequence];
@@ -1666,7 +1666,7 @@ hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& a,
 
 namespace {
 
-// Context chunks per KV head: at most 64, each at least 256 keys (a multiple of the 32-key block).
+// Context chunks per KV head are bounded by ceil(context / 256), capped at 64.
 // The bound is monotonic in the context, so the workspace sized at a frontier envelope covers
 // every smaller context.
 std::uint32_t dense_verify_chunk_bound(std::size_t context) noexcept {
@@ -1675,9 +1675,14 @@ std::uint32_t dense_verify_chunk_bound(std::size_t context) noexcept {
     return static_cast<std::uint32_t>(std::min<std::size_t>(chunks, kDenseVerifyMaximumChunks));
 }
 
-std::uint32_t dense_verify_chunk_keys(std::size_t context) noexcept {
-    const std::size_t bound = dense_verify_chunk_bound(context);
-    const std::size_t keys  = (context + bound - 1U) / bound;
+std::uint32_t dense_verify_chunk_keys(std::size_t context, std::uint32_t rows) noexcept {
+    // Match the captured frontier ranges: the 128K envelope needs more parallelism near 64K.
+    const std::size_t maximum_chunks =
+        rows >= 5U ? (context <= 65536U ? 16U : (context > 131072U ? 32U : 64U))
+                   : kDenseVerifyMaximumChunks;
+    const std::size_t bound =
+        std::min<std::size_t>(dense_verify_chunk_bound(context), maximum_chunks);
+    const std::size_t keys = (context + bound - 1U) / bound;
     return static_cast<std::uint32_t>((keys + kDensePrefillKeys - 1U) / kDensePrefillKeys *
                                       kDensePrefillKeys);
 }
@@ -1804,7 +1809,7 @@ hipError_t fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentio
             a.page_table_pages < (a.context + kPageSize - 1U) / kPageSize || a.value_group != 16U) {
             return hipErrorInvalidValue;
         }
-        const std::uint32_t chunk_keys = dense_verify_chunk_keys(a.context);
+        const std::uint32_t chunk_keys = dense_verify_chunk_keys(a.context, a.query_rows);
         batch.sequence[sequence]       = a;
         batch.chunk_keys[sequence]     = chunk_keys;
         batch.chunks[sequence] =
@@ -1814,7 +1819,7 @@ hipError_t fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentio
     }
 #if defined(__HIPCC__)
     const auto count = static_cast<std::uint32_t>(sequences.size());
-    hipLaunchKernelGGL((dense_verify_kernel<16U>), dim3(4U, grid_chunks, count),
+    hipLaunchKernelGGL((dense_verify_kernel<16U>), dim3(4U, count, grid_chunks),
                        dim3(kDenseVerifyThreads), 0, stream, batch);
     const hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;

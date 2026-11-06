@@ -165,14 +165,15 @@ fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(std::size_t context,
 
 // Production packed decode route (1..8 host-fixed rows: ordinary decode, MTP, DFlash chain
 // verification), split over the context: one
-// 192-thread CTA per KV head and context chunk (at most 64 chunks of at least 256 keys) runs the
+// 192-thread CTA per KV head and context chunk (at most 64 chunks) runs the
 // dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K in BF16 WMMA, online FP32
 // Softmax with FP16 probabilities, FP16 V/8 PV with FP32 accumulation) and writes per-row
 // numerator/origin/denominator partials to the caller workspace; one stable FP32 merge normalizes.
 // Row positions are absolute; invalid positions, page-table rows and physical pages poison exactly
 // the dependent rows with NaN.
-// One launch pair serves up to kMaximumConcurrency sequences of a compact decode batch (grid z =
-// sequence), each with its own arguments, rows, frontier and caller-owned score_workspace partials;
+// One launch pair serves up to kMaximumConcurrency sequences of a compact decode batch (split
+// grid y = sequence, z = chunk; merge grid z = sequence), each with its own arguments, rows,
+// frontier and caller-owned score_workspace partials;
 // every sequence's output bytes equal those of its one-sequence launch. Sequences must not share
 // output or workspace storage.
 inline constexpr std::size_t kPackedDecodeMaximumSequences = kMaximumConcurrency;

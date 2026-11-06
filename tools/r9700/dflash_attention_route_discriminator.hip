@@ -400,12 +400,17 @@ double median(std::array<double, kTrials> values) {
 // exact bytes of its own one-sequence launch from identically poisoned outputs, workspaces and
 // cache planes. The pool is shared as in production: disjoint shuffled physical pages per sequence,
 // either selected through device table rows of one pool-wide table or passed as direct page tables.
-Json sequence_batch_qualification(ninfer::DeviceContext& device) {
-    constexpr std::array<std::size_t, 16> kContexts{37U,   600U,  4100U, 33000U, 129U, 2050U,
-                                                    8200U, 1000U, 9U,    65U,    320U, 16385U,
-                                                    257U,  3071U, 64U,   70000U};
+Json sequence_batch_qualification(ninfer::DeviceContext& device,
+                                  const std::vector<std::size_t>& selected = {},
+                                  std::uint32_t selected_rows = 8U, bool profile = false) {
+    std::array<std::size_t, 16> kContexts{37U, 600U, 4100U, 33000U, 129U, 2050U, 8200U, 1000U,
+                                          9U,  65U,  320U,  16385U, 257U, 3071U, 64U,   70000U};
     static_assert(kContexts.size() == kv::kPackedDecodeMaximumSequences &&
                   kContexts.size() == kv::kAppendMaximumSequences);
+    if (!selected.empty()) {
+        kContexts.fill(64U);
+        std::copy(selected.begin(), selected.end(), kContexts.begin());
+    }
     constexpr std::size_t kSparePages  = 7U;
     constexpr std::size_t kRowElements = static_cast<std::size_t>(kQueryHeads) * kHeadDim;
     std::array<std::size_t, kContexts.size()> page_counts{};
@@ -467,7 +472,7 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
         bool table_rows;
     };
 
-    const std::vector<Case> cases{
+    std::vector<Case> cases{
         {"b1_w8_table_row", {3U}, {8U}, true},
         {"b2_w8_table_rows", {1U, 3U}, {8U, 8U}, true},
         {"b3_w8_table_rows", {1U, 2U, 3U}, {8U, 8U, 8U}, true},
@@ -495,6 +500,12 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
          {8U, 5U, 1U, 7U, 4U, 8U, 2U, 6U, 1U, 3U, 6U, 8U, 2U, 1U, 5U, 4U},
          false},
     };
+    if (!selected.empty()) {
+        std::vector<std::size_t> indices(selected.size());
+        std::iota(indices.begin(), indices.end(), 0U);
+        cases = {{"selected", indices, std::vector<std::uint32_t>(selected.size(), selected_rows),
+                  true}};
+    }
     Json attention_cells = Json::array();
     for (const Case& cell : cases) {
         const std::size_t count = cell.sequences.size();
@@ -602,6 +613,12 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
         device.synchronize();
         if (read_outputs("sequence-batch batched graph") != reference)
             fail(std::string(cell.name) + " batched graph bytes differ from per-sequence");
+        if (profile) {
+            for (int i = 0; i < 8; ++i) hip_check(batched(), "profile packed attention");
+            device.synchronize();
+            return {{"profile_only", true}, {"contexts", selected}, {"rows", selected_rows}};
+        }
+        ninfer::r9700_qualification::device_guard().check("before-sequence-timing");
         std::array<double, kTrials> serial_ms{}, batched_ms{};
         for (int trial = 0; trial < kTrials; ++trial) {
             if (trial % 2 == 0) {
@@ -622,6 +639,14 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
                                    {"graph_bytes_equal", true},
                                    {"serial_median_ms", median(serial_ms)},
                                    {"batched_median_ms", median(batched_ms)}});
+    }
+
+    if (!selected.empty()) {
+        ninfer::r9700_qualification::device_guard().check("after-sequence-timing");
+        return {{"attention", attention_cells},
+                {"diagnostic_only", true},
+                {"iterations", kTimingIterations},
+                {"trials", kTrials}};
     }
 
     // Append: all sequences write disjoint suffixes into one poisoned pool; one uses a device
@@ -727,6 +752,25 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc >= 4 && (std::string_view(argv[1]) == "--sequence-cell" ||
+                          std::string_view(argv[1]) == "--sequence-profile")) {
+            const auto rows = static_cast<std::uint32_t>(std::stoul(argv[2]));
+            std::vector<std::size_t> contexts;
+            for (int i = 3; i < argc; ++i) contexts.push_back(std::stoul(argv[i]));
+            if (contexts.size() > kv::kPackedDecodeMaximumSequences || rows < 1U || rows > 8U ||
+                std::any_of(contexts.begin(), contexts.end(),
+                            [&](std::size_t n) { return n < rows || n > 262144U; }))
+                fail("sequence cell requires rows1..8 and up to16 contexts in rows..262144");
+            const int selected_device = ninfer::r9700_qualification::device_guard().select();
+            ninfer::DeviceContext device(selected_device);
+            std::cout << Json{{"sequence_batch",
+                               sequence_batch_qualification(device, contexts, rows,
+                                                            std::string_view(argv[1]) ==
+                                                                "--sequence-profile")}}
+                             .dump(2)
+                      << '\n';
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--sequence-batch") {
             const int selected_device = ninfer::r9700_qualification::device_guard().select();
             ninfer::DeviceContext device(selected_device);
@@ -741,7 +785,8 @@ int main(int argc, char** argv) {
         if (argc != 1 && !long_context && !live_context)
             fail("usage: dflash_attention_route_discriminator "
                  "[--long-context|--live-context|--live-context-cell ENVELOPE ROWS "
-                 "LIVE|--sequence-batch]");
+                 "LIVE|--sequence-batch|--sequence-cell ROWS CTX...|"
+                 "--sequence-profile ROWS CTX...]");
         std::vector<std::size_t> selected_envelopes{8192U, 65536U};
         std::vector<std::uint32_t> selected_widths{1U, 4U, 6U};
         std::vector<std::size_t> selected_live{4097U, 65U, 257U};

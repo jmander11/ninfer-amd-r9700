@@ -17,7 +17,7 @@ flock --exclusive "$NINFER_GPU_LOCK" \
   /path/to/python3.11 tools/bench/run_readme_workloads.py \
     --artifact /path/to/qwen3.8-27b-r9700-lq4.ninfer \
     --tokenizer /path/to/qwen3.8-27b-bf16 \
-    --concurrency 1 6 8 --tokens 512 --warmup 1 --repetitions 3 \
+    --concurrency 1 6 8 12 --tokens 512 --warmup 1 --repetitions 3 \
     --output profiles/bench/readme-workloads
 ```
 
@@ -25,7 +25,7 @@ The server defaults to adaptive DFlash up to K7. Select `--spec mtp` for adaptiv
 
 Each lane first runs a one-token request to seed its prompt cache. A synchronized wave then generates up to the output budget per lane; natural stop tokens remain enabled. One warmup wave precedes three measured waves per cell. Only complete 100-ms server intervals with no prefill and exactly C active decode lanes count. The reported rate is total committed decode tokens divided by those intervals' wall time, including host scheduling between rounds. It excludes prefill, startup, and intervals where some lanes have finished. Missing full-batch intervals fail the run rather than substitute an end-to-end or per-request rate. C>1 is aggregate; divide by the concurrency for the average rate per active request in those intervals.
 
-The published C1/C6 summary is `../../bench/results/readme-workloads-20261017.json`; the separately measured C8 summary is `../../bench/results/readme-workloads-c8-20261104.json`.
+The current DFlash C1/C6/C8/C12 matrix and its matched pre-attention-change baseline are in `../../bench/results/readme-workloads-attention-20261105.json`. It records every cell’s mean, standard deviation, three measured rates, acceptance, average draft count and speed ratio. The overall comparison is the geometric mean of all 20 candidate/baseline throughput ratios. Historical October 17 / November 4 samples remain in their separately dated result files; prompt revisions and code-instruction placement make those historical differences unsuitable for attributing the attention change’s effect.
 
 The MTP C1/C6/C8/C12/C16 summary is `../../bench/results/readme-workloads-mtp-20261104.json`.
 

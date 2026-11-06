@@ -53,7 +53,7 @@ Capacity depends on available VRAM and enabled features; automatic sizing leaves
 
 ## Performance and quality
 
-Measured 2026-10-17 on one R9700, Release build, Device Graphs, power `auto`, chunk 2048 and the optimized DFlash proposal head.
+One R9700, Release build, Device Graphs, power `auto`, chunk 2048 and optimized proposal heads. Prefill samples were measured 2026-10-17; generation dates are given below.
 
 **Prompt processing (prefill), one request:**
 
@@ -69,19 +69,19 @@ Measured 2026-10-17 on one R9700, Release build, Device Graphs, power `auto`, ch
 
 | Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s | C12 aggregate tokens/s |
 |---|---:|---:|---:|---:|---:|
-| English story | 146–147 | 88 | 356 | 440 | 590 |
-| Python package | 171–173 | 135 | 535 | 630 | 858 |
-| Math reasoning | 346–347 | 126 | 491 | 608 | 757 |
-| Document summary 8K | 8,192–8,194 | 93 | 340 | 420 | 535 |
-| Document summary 32K | 32,779 | 97 | 300 | 330 | 430 |
+| English story | 146–147 | 86 | 356 | 434 | 600 |
+| Python package | 172–173 | 136 | 608 | 702 | 852 |
+| Math reasoning | 346–347 | 122 | 503 | 601 | 773 |
+| Document summary 8K | 8,194 | 92 | 370 | 446 | 578 |
+| Document summary 32K | 32,779 | 91 | 305 | 352 | 452 |
 
-C1/C6 measured 2026-10-17; C8/C12 measured 2026-11-04. C12 uses the current document content and puts the code instruction in the user message; historical DFlash cells put it in the system message. The fresh, matched C8/C12 comparison in `docs/performance.md` measures 21–34% higher aggregate throughput at C12.
+All DFlash cells measured 2026-11-05 with the same current workload definitions. A matched baseline/candidate comparison measured **1.8% higher geometric-mean throughput across all 20 cells**, and **2.5% across C6/C8/C12**. The 8K summary improved 7.8% / 10.3% / 8.6% at C6 / C8 / C12; individual short-context cells include small decreases. Full paired results and variation are in `docs/performance.md`.
 
 P-less temperature 1.5, adaptive DFlash up to seven drafts, 512 output tokens per request (including reasoning). Means of three runs after one warmup.
 
 Generation rates exclude prompt processing. Each prompt is cached before timing; C6/C8/C12 count only intervals with all six/eight/twelve requests decoding. Divide the aggregate rate by concurrency for the average per active request.
 
-Prompt content and sampling affect draft acceptance and speed. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results: `bench/results/readme-workloads-20261017.json`, `bench/results/readme-workloads-c8-20261104.json` and `bench/results/readme-workloads-dflash-c12-20261104.json`.
+Prompt content and sampling affect draft acceptance and speed. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results, including the matched baseline and all per-cell changes: `bench/results/readme-workloads-attention-20261105.json`.
 
 **MTP answer generation (measured 2026-11-04):**
 
@@ -93,9 +93,9 @@ Prompt content and sampling affect draft acceptance and speed. Prefill above use
 | Document summary 8K | 8,194 | 78 | 328 | 398 | 498 | 571 |
 | Document summary 32K | 32,779 | 84 | 286 | 336 | 406 | 452 |
 
-Adaptive MTP up to three drafts with the optimized proposal head; the same five workloads, p-less temperature 1.5, 512-token output budget per request, seeded prompts, one warmup and three measured waves. C>1 reports aggregate throughput during full-batch decode-only wall intervals; divide by C for the average per active request. The per-request ceiling is 65,536 tokens; RAM/SSD and Vision are off. These samples were measured separately from DFlash; document content and the placement of the code instruction differ. Rates exclude prefill and do not score answer quality. Variation, draft acceptance and actual output lengths: `docs/performance.md` and `bench/results/readme-workloads-mtp-20261104.json`.
+Adaptive MTP up to three drafts with the optimized proposal head; the same five workloads, p-less temperature 1.5, 512-token output budget per request, seeded prompts, one warmup and three measured waves. C>1 reports aggregate throughput during full-batch decode-only wall intervals; divide by C for the average per active request. The per-request ceiling is 65,536 tokens; RAM/SSD and Vision are off. These samples were measured separately from the fresh DFlash matrix and use an earlier document revision. The attention change selects widths 5–8, so this default MTP K≤3/W≤4 table retains its historical measurements. Rates exclude prefill and do not score answer quality. Variation, draft acceptance and actual output lengths: `docs/performance.md` and `bench/results/readme-workloads-mtp-20261104.json`.
 
-In every tested 8K/32K cell, the increase in prediction loss over the BF16 source was smaller than for the fixed 5090 NVFP4 reference. This compares next-token prediction loss, not answer quality or speed against another GPU. Standard and multikey needle retrieval passed through 240K; multikey also passed at 260K. Test conditions and limitations are in `docs/performance.md`.
+The stored weight recipe’s original standard 8K/32K prefill and ordinary-decode admission cells measured smaller prediction-loss increases over BF16 than the fixed 5090 NVFP4 reference. The updated verification partitioning changes floating-point rounding; its separate NLL measurements and 103/103 exact retrieval answers are recorded in `docs/performance.md`. Historical standard and multikey needle retrieval passed through 240K; multikey also passed at 260K. These are prediction-loss and retrieval measurements; test conditions and limitations are documented with the results.
 
 ## Build
 

@@ -204,6 +204,535 @@ The MTP shared-capacity column in the README is a separate native-ceiling startu
 
 The reviewed candidate passes 65 host CTests and the selected speculative-round, MTP-round, GDN, GDN-fold, attention and runtime-planner GPU qualifiers. The C16 GDN fold is checked against the independent FP64 recurrence and exact convolution history. Packed append/attention at B12/B16 retain exact per-sequence bytes and graph/eager output; their qualifier fixture now initializes and checks all 16 sequence entries. Both the fold and sequence-batch attention/append checks pass memcheck and initcheck. A public-Engine C16/P512/G32 MTP test retains identical token IDs and speculative statistics between graph and eager execution over two repetitions; plain C16 also completes, and DFlash C9 is rejected at startup. Pinned formatting and affected clang-tidy checks pass. These checks support the expanded concurrency domain; they do not establish batch-invariant tokens across different concurrency values.
 
+### DFlash optimization investigation at C1..12 (2026-11-05)
+
+The mixed prefill/decode objective is the co-batching score, not standalone decode
+throughput or an inter-token latency target:
+
+`score = mixed_prefill_tok_s / prefill_first_tok_s + mixed_decode_rounds_s / mean(before_decode_rounds_s, after_decode_rounds_s)`.
+
+Both decode references bracket the contention interval on the same build. Decode
+rounds, rather than accepted output tokens, reduce sensitivity to draft acceptance.
+Time-sharing scores approximately 1.0. Keep the draft policy fixed when comparing
+scheduling choices; reducing useful draft work merely to inflate round counts is
+not a valid improvement. A faster decode-only denominator does not by itself
+improve this score.
+
+On the production R9700 LQ4 artifact and fixed three-plane cache, C12 with eleven
+decoding requests initialized from 512-token prompts, three incoming 8192-token
+prompts, chunk 2048, adaptive DFlash
+up to K7 and D=1 scored **1.075** at forward width 1024: 2972.95 prefill tok/s
+against 3378.25 prefill-first, plus a 0.1949 decode-round share. An exploratory
+width sweep on a subsequently rejected kernel candidate also favored 1024 among
+512/768/1024/1280/1536/2048. It does not establish a global optimum or justify a
+default change.
+
+Three kernel directions were investigated with independent Op oracles, resource
+inspection and model measurements. No candidate was promoted:
+
+- **LQ4 MLP pipeline drain:** removing unnecessary final prefetches improved selected
+  T56/T72/T96 fused MLP Op timings by roughly 1–3%, but raised VGPR use. Combined
+  with the GDN staging change, fixed-K5 model decode changed by -5.3% / -0.4% /
+  +0.3% / -0.6% at C1/C4/C8/C12. A predicated-refill alternative slowed the T56
+  fused gate/up Op by about 5.7% and was rejected.
+- **Deferred GDN fold/record:** halving width staging reduced LDS from 18,560 to
+  9,280 bytes without spills. The isolated C12 model comparison improved only
+  0.31% across alternating controls, insufficient to establish a useful gain.
+- **Target attention:** limiting wide-row attention to sixteen partitions through
+  context 65,536 improved representative batched Op times by about 6–22%.
+  Fixed-K5 model decode measured 129.0→125.6 / 379.0→391.9 / 619.1→650.0 /
+  737.8→789.5 aggregate tok/s at C1/C4/C8/C12. Accepted draft fractions fell
+  slightly at C8/C12, so their gains are not explained by increased acceptance.
+  Concurrent token trajectories changed; even C1, whose output tokens matched,
+  required more speculative rounds. These measurements do not isolate a
+  constant-work execution speedup or establish production model quality.
+
+The attention candidate passes represented-input FP64 attention oracles at 8192,
+32768 and 65536 contexts, and the W5/W6 discriminator. That is Op qualification,
+not the model-level quality and graph/eager promotion gate. Subsequent full-model
+gold-input scoring exceeded the initial strict W8/8K ceiling, as detailed below.
+Later NLL measurements, task/execution checks and the accepted rounding profile
+support the selected policy in the matched README comparison.
+
+Model A/Bs use one warmup and three measured repetitions, P8192/G128, fixed K5,
+Device Graphs, max context 65536 and automatic KV sizing on an otherwise idle
+R9700 with HIP 7.15.26333. The speculative counters and retained token IDs support
+the acceptance qualifications above. Source snapshots, commands, raw reports and
+oracle/resource evidence remain under
+`profiles/bench/r9700-op-speed-20261104/`. Production kernels and temporary
+qualifier edits were restored after the investigation.
+
+### Initial bounded attention NLL comparison (2026-11-05)
+
+The initial strict-cell comparison of the sixteen-partition verification profile
+exceeded the frozen 5090 mean-NLL ceiling at W8/8K. That measured result is retained
+below; later adoption accepts the verified runtime rounding profile rather than
+reclassifying the cell as a pass. The stored weight recipe and its original
+standard admission requirement remain unchanged. Ordinary T1
+teacher-forced decode does not exercise its changed W5..8 attention profile, and
+the public scorer does not teacher-force DFlash verification. A temporary scoring
+diagnostic therefore processes the first half of each gold corpus normally in
+2048-token chunks, then advances the full model in eight-token gold-input chunks.
+These chunks dispatch to the same packed attention leaf used by verification;
+all scored conditional targets align exactly with the retained independent BF16
+and frozen 5090 ordinary-decode references. Both builds use the identical diagnostic,
+with only the candidate's attention partition limit differing. This is full-model
+gold-input packed-profile scoring, not DFlash teacher-forcing or a generated-task
+quality evaluation.
+
+| W8 gold-input cell | Baseline mean NLL | Candidate mean NLL | Candidate minus baseline | 5090 ceiling | Candidate new BF16-severe / cap |
+|---|---:|---:|---:|---:|---:|
+| 8K, last 4095 targets | 1.87800505 | 1.88185077 | +0.00384572 | 1.88156219 | 2 / 5 |
+| 32K, last 16383 targets | 1.74058408 | 1.74139796 | +0.00081388 | 1.74402258 | 16 / 17 |
+
+Lower NLL is better. At 8K the candidate exceeds the hard measured-cell ceiling
+by 0.00028858 nats/token; passing the separate severe-position limit does not waive
+that failure. All NLL and argmax sidecars are complete and finite, and packed corpus
+hashes match the BF16 authorities. The baseline diagnostic's 32K severe count is
+18 against cap 17 (candidate 16); these small-row gold-input profiles are distinct
+from the previously admitted ordinary-decode execution profile. The measured-cell
+comparison does not establish population-wide degradation or a universal bound.
+
+Astra independently checked the diagnostic dispatch, alignment and 8K gate failure.
+The already-running 32K pair was completed, then the remaining widths and
+DFlash/MTP graph/eager and NIAH tests were cancelled because this candidate could
+no longer qualify. No restricted-width alternative was inferred from these results.
+At this initial stage both the candidate and temporary scorer hook were removed;
+production binaries were rebuilt. Adoption is described in the matched README
+workload comparison below.
+
+Reproduction inputs, the diagnostic patch, frozen binaries, explicit commands,
+sidecars and `quality-summary.json` remain under
+`profiles/bench/r9700-attention-quality-20261105/`. The model, cache, hardware,
+HIP version and graph environment are the same as the preceding investigation.
+The BF16 and 5090 references are the retained `bf16-reference-rocm10` and
+`r9700-nvfp4-budget-20260929` authorities in the sibling checkout's `profiles/ppl/`.
+
+### Longer-context attention NLL and acceptance attribution (2026-11-05)
+
+Further paired full-model gold-input scoring measures both W6 (fixed K5 in the
+throughput A/B) and W8 (K7 verification). The 48K/64K inputs are a deduplicated
+composite corpus: 32,768 tokens of nonrepeating English followed by 32,768 tokens
+of multilingual technical documentation, encoded with the artifact tokenizer.
+Each long cell scores the final 8,191 conditional targets after a normal 2048-row
+prefix; all scored calls use the specified packed attention width except the
+last partial block. The checkpoint, cache and scoring hook match the earlier
+investigation. Raw NLL across lengths is not a context-length trend: the windows
+contain different passages. Compare candidate and baseline within each row.
+
+| Context | Width | Baseline mean NLL | Candidate mean NLL | Candidate minus baseline | Relative PPL change |
+|---|---:|---:|---:|---:|---:|
+| 48K | 6 | 2.70653670 | 2.70380406 | -0.00273264 | -0.273% |
+| 48K | 8 | 2.70375157 | 2.70630072 | +0.00254916 | +0.255% |
+| 64K | 6 | 2.38478596 | 2.38462472 | -0.00016124 | -0.016% |
+| 64K | 8 | 2.38231877 | 2.38426691 | +0.00194813 | +0.195% |
+
+The scored 48K window has no exact 32-token window repeated at an earlier position;
+the 64K window has 7 of 8,161 (0.086%), counting earlier positions inside the
+scored window too. Initial long runs from the NIAH master are excluded: that master
+internally repeats text, making the first 64K scored window entirely repeated.
+The corrected corpus uses only its audited first 32K English tokens, followed by
+paragraph-deduplicated technical text. Source hashes, the complete corpus and the overlap
+audit are retained. No earlier repeated-master long result supports this table.
+
+Additional W6 checks on the original matched 8K/32K corpus measure 1.87800505 to
+1.88052009 (+0.00251504) and 1.74170617 to 1.74043751 (-0.00126866) mean NLL.
+Both candidate means remain below their original frozen 5090 ceilings. Those
+ceilings do not transfer to the new 48K/64K passages. The earlier W8/8K measured-cell
+ceiling failure is unchanged; these are bounded numerical observations, not a
+population-wide quality guarantee or a full speculative-state qualification.
+
+The independently scored original BF16 checkpoint measures 2.36833629 mean NLL
+on the same 64K input and final 8,191 targets, with matching packed corpus hash,
+finite complete NLL sidecars and aligned argmax IDs. W6 baseline/candidate deltas
+from BF16 are +0.01644967 / +0.01628843; W8 deltas are +0.01398248 /
++0.01593061. Newly severe positions (NLL at least 10 where BF16 is below 10)
+number 19 / 22 for W6 and 21 / 19 for W8. Thus mean shifts do not eliminate
+position-level changes. These new-passage diagnostics have no frozen 5090
+comparison and do not establish full admission or generated-task quality.
+
+The original fixed-K5/W6 speed gains at C8/C12 do not come from increased draft
+acceptance: accepted fractions fall from 66.22% to 64.81% and 65.40% to 64.96%,
+respectively. Output tokens per speculative row-round fall 0.83% / 0.27%, while
+amortized decode wall time per row-round falls 5.54% / 6.82%, yielding aggregate
+throughput gains of 4.98% / 7.02%. This amortized cost divides total decode seconds
+by summed lane-level speculative rounds; it is not GPU batch-round latency.
+Fallback output tokens are included in the output/round ratio. At C4, higher
+acceptance contributes to the 3.42% gain. Token trajectories and batch occupancy
+still differ, so this is end-to-end attribution rather than an isolated kernel A/B.
+
+Frozen binaries, explicit commands, sidecars, corpus provenance, exclusion notes
+and `summary.json` remain under
+`profiles/bench/r9700-attention-long-nll-20261105/`; eligible long cells are under
+its `deduplicated/` directory. These measurements used frozen executables before
+adoption.
+
+### Attention candidate execution and retrieval checks (2026-11-05)
+
+The bounded sixteen-partition attention candidate passes the following additional
+public-Engine and serving checks on the production LQ4 artifact, one R9700,
+HIP 7.15.26333, fixed three-plane cache and the same Compose graph environment.
+The previously measured small NLL shifts remain; these execution/task checks do
+not turn them into zero quality cost or waive the historical measured-cell ceiling.
+
+| Check | Geometry | Result |
+|---|---|---|
+| DFlash graph/eager | Fixed K4..7 at C1/C12, plus K5 at C4/C8; P8192/G128 | All 10 cells retain exact tokens and speculative counters |
+| MTP graph/eager and ordinary target | Fixed K4/K5 at C1/C16; P8192/G128 | All 4 cells retain exact graph/eager tokens/counters and exact ordinary-decoding tokens |
+| Greedy retrieval | Standard and multikey; nominal 8K/32K/64K, five needle positions | 30/30 exact answers |
+| Sampled retrieval | Multikey, same lengths/positions; p-less T1.5, seeds 1/2/3 | 45/45 exact answers |
+| Concurrent retrieval | C12 at 8K/32K, C4 at 64K | 28/28 exact answers; a full 12-row decode batch is observed |
+| C12 compaction | 8192-token seeded prefixes; eleven requests finish at 32 output tokens, last physical lane continues alone to 512 | All 864 graph/eager token IDs match |
+| Adaptive mixed rounds | C12, eleven 8192-context decoders plus three fresh 8192-token prefills; max K7, N1024/D1 | Graph and eager complete; all eleven decoder rows participate in every measured round |
+
+The 14 fixed-route parity cells compare 12,642 generated token IDs between graph
+and eager execution; the MTP-to-ordinary controls compare 4,386 IDs. Ordinary
+benchmark controls use its delivered `--spec mtp --draft-tokens 0` interface with
+no optimized draft-head flag, and report speculative execution disabled. Each
+cell uses one measured repetition without a warmup; these are correctness checks,
+not additional performance measurements. Adaptive mixed evidence establishes
+functional progress and does not claim generated-token parity across schedules.
+
+All 103 retrieval responses equal `ORCHID=493817; COLOR=COBALT` after trimming
+whitespace. Request logs independently confirm complete fresh prefills, zero
+prefix hits/restores, no generation-recovery attempts, and actual fixed-K7
+speculative rounds. Response usage agrees with the logs and fixture hashes remain
+unchanged. Baseline failure controls were not needed because no candidate task
+failed. The concurrent waves submit the stated request counts together; the
+retained periodic log observes decode-ready count 12 and average batch size 12.
+
+The committed multikey 64K fixture encodes to 65,548 prompt tokens and would exceed
+the candidate's 65,536 ceiling before output. The local test regenerates that
+five-position fixture with a 272,000-character document, retaining all distractors
+and needle semantics. Its 65,064 prompt tokens plus the 64-token output allowance
+fit the ceiling, so it exercises the changed partition policy. Standard 64K
+prompts contain 64,511 tokens; actual retrieval prompt counts span 7,669..65,064.
+No source fixture or runtime contract was changed for this adjustment.
+
+Astra reviewed the harnesses and completed evidence. Temporary high-context
+compaction qualifier edits were restored after freezing the test executable;
+production kernels and the running deployment were unchanged during these
+checks. Commands, frozen
+binaries, per-case token IDs/counters, full responses, request logs, fixture
+provenance and `execution-summary.json` remain under
+`profiles/bench/r9700-attention-execution-20261105/`. No commit or deployment change
+was part of that qualification.
+
+### Selected attention partition policy and matched README workloads (2026-11-05)
+
+Packed attention uses at most sixteen context partitions for 5..8 query rows
+through host envelope 65,536, retains up to 64 through 131,072, and uses up to
+32 above 131,072. Narrower rows retain the original up-to-64 policy. The
+long-context profiling below selects the two larger-envelope regimes and
+interleaves sequences within each chunk. The README A/B in this section measured
+the earlier sixteen-through-64K policy with the original grid order and 64
+partitions elsewhere; its published table remains that dated measurement.
+All represented keys/values and the attention formula remain unchanged; different
+partition grouping changes floating-point rounding. The fixed FP8-K/INT4-V/FP16-scale
+cache, weight payload, caller workspace bound and supported 262,144-token context
+are unchanged. Since the original chunk-count bound is ceil(context/256),
+contexts through 4096 also keep their prior decomposition.
+
+The initial 64K boundary was a performance guard. An unrestricted sixteen-partition Op
+candidate increased time by 30.4% on one heterogeneous B16/W6 case containing a
+70,000-token sequence, while another long-context mixture improved. The guard
+retained the prior long-context parallelism; it is neither an accuracy cutoff nor
+a claim that 64K is the universal optimal boundary. The earlier NLL comparisons
+and 103 exact retrieval answers document the accepted rounding profile. The
+stored weight recipe's original standard prefill/ordinary-decode admission bar
+is preserved; the extra W8 gold-input diagnostic was not reclassified as passing
+its initial strict ceiling.
+
+A fresh A/B runs the five README workloads at C1/C6/C8/C12 with identical input
+messages, seeds, prompt counts and 512-token output budgets. Each cell discards
+one warmup and measures three differently seeded waves. Paired executable order
+alternates by concurrency: baseline/candidate at C1/C8, candidate/baseline at
+C6/C12. Both builds use adaptive DFlash up to K7, the optimized proposal head,
+p-less T1.5, Device Graphs, chunk 2048, a 65,536-token per-request ceiling,
+automatic shared KV and RAM/SSD/Vision off. Startup capacities match within each
+pair. All measured requests reach 512 output tokens.
+
+The metric is committed tokens per complete 100-ms full-batch decode-only wall
+interval, including host scheduling and excluding startup, prefill and intervals
+after a lane finishes. The one otherwise idle R9700 runs Release/HIP 7.15.26333
+under the same Compose graph environment. Inputs remain fixed throughout the
+experiment; the report independently compares all four waves' requests and the
+actual prompt counts before calculating ratios.
+
+Across all 20 equally weighted cells, candidate/baseline ratios have a geometric
+mean of **+1.78%**; the fifteen C6/C8/C12 aggregate-throughput cells average
+**+2.48%** by the same metric. By concurrency the changes are -0.28% / +2.44% /
++1.83% / +3.16% at C1 / C6 / C8 / C12. Thirteen means increase and seven decrease.
+The eight document rows average +4.29%; the 8K summary gains 7.8% / 10.3% / 8.6%
+at C6 / C8 / C12. These samples do not establish a uniform improvement at every
+concurrency or workload.
+
+All rates below are aggregate decode tok/s, mean ± sample standard deviation
+across the three measured seeds:
+
+| Workload | C | Baseline | Candidate | Change |
+|---|---:|---:|---:|---:|
+| English story | 1 | 87.2 ± 1.4 | 86.4 ± 2.1 | -0.9% |
+| Python package | 1 | 137.7 ± 25.4 | 136.4 ± 25.0 | -1.0% |
+| Math reasoning | 1 | 121.9 ± 5.6 | 121.9 ± 5.6 | 0.0% |
+| Document summary 8K | 1 | 93.7 ± 3.0 | 92.4 ± 2.1 | -1.4% |
+| Document summary 32K | 1 | 89.7 ± 5.5 | 91.4 ± 7.9 | +1.9% |
+| English story | 6 | 356.5 ± 9.4 | 355.9 ± 3.7 | -0.2% |
+| Python package | 6 | 604.1 ± 36.6 | 608.2 ± 27.9 | +0.7% |
+| Math reasoning | 6 | 497.4 ± 21.4 | 503.0 ± 16.8 | +1.1% |
+| Document summary 8K | 6 | 343.0 ± 8.6 | 369.8 ± 8.5 | +7.8% |
+| Document summary 32K | 6 | 295.9 ± 4.7 | 304.7 ± 8.8 | +2.9% |
+| English story | 8 | 439.6 ± 6.9 | 433.8 ± 5.5 | -1.3% |
+| Python package | 8 | 714.4 ± 21.7 | 701.6 ± 19.2 | -1.8% |
+| Math reasoning | 8 | 589.9 ± 24.2 | 600.7 ± 11.4 | +1.8% |
+| Document summary 8K | 8 | 404.8 ± 7.1 | 446.3 ± 3.1 | +10.3% |
+| Document summary 32K | 8 | 349.7 ± 11.4 | 352.0 ± 2.1 | +0.7% |
+| English story | 12 | 592.8 ± 5.6 | 600.4 ± 4.4 | +1.3% |
+| Python package | 12 | 848.4 ± 35.8 | 851.6 ± 32.5 | +0.4% |
+| Math reasoning | 12 | 760.2 ± 15.6 | 772.7 ± 24.4 | +1.6% |
+| Document summary 8K | 12 | 532.0 ± 7.5 | 577.9 ± 3.4 | +8.6% |
+| Document summary 32K | 12 | 433.9 ± 2.3 | 451.8 ± 7.1 | +4.1% |
+
+The candidate is +2.55% by geometric mean against the previously published README
+means, but that historical comparison also includes different document revisions
+and, for older code cells, instruction placement. The matched A/B above is the
+basis for attributing the candidate's observed throughput change. Adaptive widths,
+acceptance and generated trajectories can vary; the machine-readable report
+retains per-cell acceptance and average draft count along with the three rates.
+These whole-serving observations are not a constant-work kernel timing claim.
+
+Because the declared overall metric is positive, the README uses the entire
+fresh candidate matrix, including rows whose means fell. Its historical MTP
+K≤3/W≤4 table, separate prefill measurements and native-ceiling KV capacities
+remain separately dated: they do not select this changed attention policy or
+measure a changed allocation plan. No commit or deployment update accompanies
+this source/table change; the existing deployment is restored after testing.
+
+`bench/results/readme-workloads-attention-20261105.json` contains the candidate
+and matched baseline means, variation, measured rates, acceptance, draft counts,
+all 20 ratios and the historical comparison. Frozen binaries/source snapshots,
+commands, exact inputs/responses and startup/periodic logs remain under
+`profiles/bench/r9700-attention-readme-20261105/`. The runner's HEAD field identifies
+the common base revision; the candidate includes the uncommitted partition-policy
+change. The server build, pinned formatting and focused clang-tidy checks pass.
+
+### Attention beyond 64K: graph envelopes and grid order (2026-11-05)
+
+The selected split policy is based on the **host context envelope**, not the
+live prompt length. Widths 5..8 use up to 16 partitions through 65,536, retain
+up to 64 through 131,072, and use up to 32 above 131,072. Widths 1..4 retain the
+original up-to-64 policy. The split launch now interleaves sequences within each
+chunk: grid x is KV head, y is sequence and z is chunk. Each sequence/chunk still
+owns the same partial slot, and the merge order is unchanged. Interleaving
+preserves arithmetic exactly; changing partition counts changes rounding.
+
+Extending 16 partitions unconditionally was numerically qualified but slower in
+real inference. At P131072 the captured envelope is 262144, so only about eight
+of sixteen chunks contain keys. Fixed-K7 decode fell 199.872→181.092 tok/s
+(-9.40%) with identical generated IDs and speculative counters. Using 32
+partitions for that envelope recovers parallelism and measures 203.034 tok/s.
+At P70000, however, a 131072 envelope with 32 partitions is slower than the
+original 64: 193.349→187.555 tok/s (-3.00%), again with identical work. This is
+why the middle envelope retains 64 rather than extending a universal cap.
+
+A whole-Engine selected-region trace isolates the P70000 regression. Both arms
+execute 19 K7 rounds, including 304 W8 attention calls; all traced kernels lie
+inside `ninfer_bench_measured`. Mean verify time rises 331.097→406.678 µs while
+merge time falls 12.923→8.399 µs. The dominant persistent decode family remains
+477.455→477.219 ms in total. Thus the larger verify cost accounts for essentially
+the whole regression. Profiler times are attribution only; unprofiled Engine
+measurements select the policy.
+
+The heterogeneous raw B16/W6 fixture separately exposes a grid-order problem.
+The final interleaved route retains exactly the guarded baseline's per-sequence
+partition counts and improves seven-trial, fifty-iteration median complete-Op
+time from 0.731160 to 0.600496 ms (**21.76% higher throughput**). This is an
+Op diagnostic, including below-minimum-routing contexts, not an inference or
+DFlash-C16 claim. Focused final-eight-dispatch traces reduce median verify time
+790.701→618.207 µs, with merge essentially flat at 48.24→48.80 µs. SQ waves remain
+24,192 and median SQ busy cycles fall 72.02M→55.24M. The emitted kernel retains
+235 VGPR, 107 SGPR, 41,656-byte LDS, zero private bytes, four SGPR spills and zero
+VGPR spills. These observations support improved scheduling; they do not measure
+achieved occupancy or absolute memory bandwidth. The narrow B16/W4 diagnostic
+also passes and changes 0.625373→0.617475 ms.
+
+Matched production-Engine decode results use the selected LQ4 artifact, one
+R9700/gfx1201, Release/HIP 7.15.26333, power `auto`, the fixed G16 cache, greedy
+fixed K7/W8, optimized proposal head, Device Graphs, chunk 2048, max context
+262144 and automatic KV sizing. The Compose graph environment is identical in
+both arms; no clock or power policy is changed. Each point seeds prefixes,
+discards one warmup and measures three repetitions of 128 post-seed tokens per
+lane. Rates exclude prefill/startup and are aggregate at C4. These phase rates
+use `ninfer_bench`, rather than the README's clipped full-batch serving intervals.
+
+| C | Live prompt | Baseline tok/s | Selected tok/s | Change |
+|---:|---:|---:|---:|---:|
+| 1 | 70,000 | 193.349 ± 0.071 | 193.819 ± 0.056 | +0.24%, effectively flat |
+| 4 | 70,000 | 450.061 ± 0.355 | 454.586 ± 0.119 | +1.01% |
+| 1 | 131,072 | 199.872 ± 0.013 | 203.034 ± 0.032 | +1.58% |
+| 1 | 245,760 | 142.191 ± 0.060 | 142.129 ± 0.106 | -0.04%, effectively flat |
+
+All 2,709 paired generated IDs and every speculative counter match. Acceptance
+does not explain these speed differences. Startup capacities match within each
+pair: 262144 at C1 and 613376 at C4. Arm order reverses across points. The P131072
+measurement uses the earlier `long32` executable: its 262144-envelope branch and
+device kernel are identical to the final selection; restoring the middle
+envelope's 64 partitions does not affect that point. The near-full-envelope
+P245760 comparison uses the final selected build directly and remains flat.
+Short-context interleaving diagnostics at B12/W8 are also essentially flat:
+0.528939→0.523233 ms at 8K and 1.556569→1.554792 ms at 32K. They do not replace
+the separately dated twenty-cell README campaign above.
+
+Independent represented-input FP64 checks cover W1/W4/W5/W6/W7/W8 at
+envelope/live 131072/70000 in the 32-split challenger, and W8 at
+262144/131072 and 262144/245760 in the retained 32-split profile. Maximum absolute
+error is below 2.8e-5 against the unchanged 2e-3 absolute-or-relative criterion.
+Compact table rows, pending publication, poisoned workspace/output guards,
+device-count graph states and eager/graph equality pass. The selected sequence
+suite passes all eleven cases through B16, including mixed widths and exact
+append-plane/status checks. Fresh fixed-K7 retrieval at 131073 prompt tokens
+returns the exact requested answer in graph and eager modes; all seventeen
+generated IDs and speculative counters match, with no prefix reuse, recovery or
+RAM/disk restores. These are focused long-context numerical and task checks,
+not a new long-context NLL measurement. Weights, cache format, workspace bound
+and the supported 262144-token context remain unchanged.
+
+Evidence is under `profiles/bench/r9700-attention-long-profile-20261105/`:
+`summary.json` joins the four unprofiled Engine comparisons and retrieval checks;
+`engine-profile-summary.json` validates the measured-region P70000 trace;
+`profile-summary.json` and `selected-profile-summary.json` retain the focused
+Op trace/counter comparisons. Commands and frozen source/executables accompany
+the reports. Source and evidence review, the affected application/qualifier
+builds, pinned formatting and focused clang-tidy pass. No commit or deployment
+update is made; the existing server image is restored after testing.
+
+### Long-context resident cohorts at active C5..12 (2026-11-05)
+
+A follow-up measures active C5..12 within one Engine configured at startup for
+C12. Every cohort has one 131072-token prompt and C−1 distinct 32768-token prompts.
+The C12 prompt total is 491520 tokens; both arms allocate 530880 shared KV tokens.
+All requests fit on the GPU with RAM and disk tiers off. These are heterogeneous
+resident decode cohorts, not uniform 128K contexts or eight independently sized
+Engine configurations. Twelve uniform 70K prompts would need 840000 KV tokens.
+
+The matched arms are the previous guarded partition policy/grid and the selected
+16/64/32 envelope policy with interleaved sequences. Both use the same production
+artifact and settings as the preceding fixed-K7 Engine comparison. Each Engine
+reuses seeded prefixes across ascending active cohort sizes, with one warmup and
+three measured waves per cohort. Each lane generates 128 post-seed tokens. Rates
+exclude fresh-prompt prefill and startup; they are aggregate Engine decode-phase
+rates, not the README's full-batch serving-interval metric.
+
+| Active C | Baseline tok/s | Selected tok/s | Change |
+|---:|---:|---:|---:|
+| 5 | 626.498 ± 0.666 | 643.332 ± 0.724 | +2.69% |
+| 6 | 694.586 ± 0.448 | 689.199 ± 0.512 | -0.78% |
+| 7 | 763.876 ± 0.575 | 760.813 ± 1.728 | -0.40% |
+| 8 | 814.317 ± 0.252 | 830.377 ± 0.388 | +1.97% |
+| 9 | 830.381 ± 0.525 | 857.416 ± 0.588 | +3.26% |
+| 10 | 850.362 ± 0.395 | 855.309 ± 0.598 | +0.58% |
+| 11 | 879.007 ± 0.350 | 891.605 ± 0.751 | +1.43% |
+| 12 | 922.818 ± 1.443 | 936.060 ± 1.420 | +1.43% |
+
+The equal-cell geometric mean is **+1.26%**, with six gains and two small
+regressions. All 26316 paired generated IDs match. Target round counts, total
+accepted tokens and fallback counts also match. Proposal-position acceptance
+histograms differ, and C6/C7/C8 each draft three additional tokens across the
+three measured waves; their acceptance rate is consequently slightly lower.
+Thus these are not identical proposal-counter traces, but the gains do not come
+from more accepted tokens or fewer target rounds.
+
+An observer runs only during warmup and confirms all C requests simultaneously
+decode-ready at every cohort size. Measured waves run without that observer.
+Public round/row counters establish at least 14..16 full-cohort decode rounds
+out of 17 per measured wave; they do not assert that every dispatch stays full
+through the completion tail. Every measured wave appends only its one seed token
+per lane, passes the full-prefix reuse check, completes all requested outputs and
+has zero KV suspensions. Aggregate rates are independently recomputed from the
+active lane count and each repetition's decode duration.
+
+The newly relevant short-prefix geometry, W8 at host envelope 262144 with live
+context 32768, passes the independent FP64 oracle, poisoned workspace/output,
+device-count states and graph/eager checks. Maximum absolute error is 3.29e-5
+against the unchanged 2e-3 absolute-or-relative criterion. No additional kernel
+change is selected from this extension.
+
+Evidence and the explicit lane-length/active-C mapping are under
+`profiles/bench/r9700-attention-c5-c12-long-20261105/`. The qualification-only
+benchmark source uses the public Engine and is retained with the matched
+binaries; normal benchmark and selected attention sources/binaries were restored
+before execution. `summary.json` joins rates, variation, ID/counter comparisons
+and residency evidence. Astra reviewed the harness. The existing server image
+is restored after testing; no commit or deployment update is made.
+
+### MTP follow-up at active C5..12 (2026-11-05)
+
+The same resident long/short cohort benchmark also compares fixed MTP K3 and K5.
+Each arm has one startup-C12 Engine, active cohorts C5..12, one 131072-token lane
+and C−1 32768-token lanes. Prefixes are seeded, each cohort discards one warmup,
+and three measured repetitions generate 128 post-seed tokens per lane. Settings
+remain greedy, optimized proposal head, Device Graphs, chunk 2048, native maximum
+context, automatic KV sizing, fixed G16 cache, RAM/disk off and power `auto`.
+Reported rates are aggregate decode-phase tokens/s; fresh-prompt prefill and
+startup are excluded. They are not submission-to-completion or README serving
+interval rates. No additional implementation change is made for these tests.
+
+MTP K3 uses width-4 target verification and MTP alignment plus width-1 AR steps.
+Their partition cap remains 64; only the shared grid-order change applies.
+K5 uses width-6 panels, which also receive the selected 32-partition largest-
+envelope profile, while its width-1 AR steps retain 64. MTP's graph boundaries
+end at 32768 before the capacity envelope, so both prompt lengths in this test
+exercise the large host envelope. There is no MTP-specific code edit, but the
+shared attention change is consequently relevant to both MTP windows.
+
+| Active C | K3 baseline → selected tok/s | Change | K5 baseline → selected tok/s | Change |
+|---:|---:|---:|---:|---:|
+| 5 | 324.981 → 327.644 | +0.82% | 413.492 → 414.859 | +0.33% |
+| 6 | 362.394 → 363.534 | +0.31% | 464.423 → 452.096 | -2.65% |
+| 7 | 400.343 → 403.027 | +0.67% | 507.921 → 498.094 | -1.93% |
+| 8 | 430.604 → 430.544 | -0.01% | 547.046 → 541.535 | -1.01% |
+| 9 | 456.293 → 461.418 | +1.12% | 567.049 → 570.082 | +0.53% |
+| 10 | 487.010 → 491.652 | +0.95% | 612.617 → 607.065 | -0.91% |
+| 11 | 506.010 → 510.796 | +0.95% | 612.841 → 606.501 | -1.03% |
+| 12 | 534.381 → 538.313 | +0.74% | 652.874 → 648.286 | -0.70% |
+
+Equal-cell geometric means are **+0.69% for K3** and **-0.93% for K5**. The
+DFlash review and positive DFlash measurements therefore do not establish a
+universal MTP speedup: the optional wider MTP window has a small observed
+regression. At C12, selected K5 is faster than selected K3 on this corpus, but
+both remain below the selected DFlash K7 result of 936.060 tok/s. This comparison
+does not establish a best draft window for other workloads or adaptive policies.
+
+All 26316 paired generated IDs and complete speculative-stat objects match in
+each MTP window, for 52632 paired IDs in total. The selected MTP outputs also
+match the DFlash cohort outputs. Target round counts, accepted tokens, position
+histograms, proposals and fallback counts are unchanged across each MTP A/B;
+acceptance changes do not explain these throughput differences.
+
+Warmup observes all C requests simultaneously decode-ready. Measured waves
+have C seed-append prefill tokens, zero suspensions and full prefix reuse. The
+round/row counters give at least 29 full-cohort rounds per measured K3 wave and
+13 per K5 wave, without asserting full-width execution throughout completion.
+Participating-request row counts equal speculative rounds plus fallback steps;
+accepted tokens plus those counts equal C×128. Both arms match automatic KV
+capacity within each window: 565312 tokens for K3 and 569344 for K5. Aggregate
+means and sample standard deviations are independently recomputed using the
+active C, rather than the startup-C12 configuration field.
+
+The independent FP64 qualification additionally covers the padded short prefix
+at envelope/live 262144/32768 for widths 1/4/5/6/7/8, including device-count
+states, poisoned outputs/workspaces and graph/eager equality. Maximum absolute
+errors are 2.36e-5 for W4 and 3.21e-5 for W6, within the unchanged 2e-3
+absolute-or-relative criterion. No new NLL claim is made.
+
+Evidence is under `profiles/bench/r9700-attention-mtp-c5-c12-long-20261105/`;
+`summary.json` joins both windows, raw repetitions, counter comparisons and
+residency evidence. The previously reviewed public-Engine qualification binaries
+are reused with normal MTP flags. Astra reviewed MTP-specific measurement
+semantics and independently checked the final results. Testing stops after these
+comparisons as requested; no MTP retuning, commit or deployment update is made.
+The existing server image is restored and healthy.
+
 ### Windowed KV reservations at C8 (2026-10-22)
 
 A matched full-workload comparison on one R9700 measured automatic shared KV capacity of
