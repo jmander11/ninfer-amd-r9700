@@ -460,9 +460,13 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
                         return xgrammar::Grammar::FromRegex(constraint->source);
                     if (constraint->kind == OutputConstraintKind::Choice)
                         return structural_grammar(content);
-                    return xgrammar::Grammar::FromJSONSchema(
-                        content.at("json_schema").dump(), false, std::nullopt,
-                        std::pair<std::string, std::string>{",", ":"}, false);
+                    // JSON whitespace is syntax, not a schema restriction. In particular,
+                    // preserve space-plus-quote tokens at free-form string boundaries rather
+                    // than forcing the model onto low-probability compact spellings.
+                    auto json = xgrammar::Grammar::FromJSONSchema(
+                        content.at("json_schema").dump(), true, std::nullopt, std::nullopt, false);
+                    const auto whitespace = xgrammar::Grammar::FromEBNF(R"(root ::= [ \t\r\n]*)");
+                    return xgrammar::Grammar::Concat({whitespace, json, whitespace});
                 }();
                 if (starts_in_reasoning)
                     grammar = xgrammar::Grammar::Concat(
