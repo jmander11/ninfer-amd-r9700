@@ -175,6 +175,12 @@ def main() -> None:
     parser.add_argument("--spec", choices=["dflash", "mtp"], default="dflash")
     parser.add_argument("--draft-tokens", type=int, help="adaptive maximum (DFlash: 7; MTP: 3)")
     parser.add_argument(
+        "--kv-cache",
+        choices=tuple(corpus.KV_CACHE_FORMATS),
+        default="fp8-int4",
+        help="ninfer-serve KV cache codec (default: fp8-int4)",
+    )
+    parser.add_argument(
         "--workload", action="append", help="workload name to run; repeat to select several"
     )
     parser.add_argument("--tokens", type=int, default=512)
@@ -198,6 +204,7 @@ def main() -> None:
             f"require C=1..{maximum_concurrency}, at least 128 output tokens, "
             "positive repetitions and nonnegative warmup"
         )
+    kv_cache_format = corpus.KV_CACHE_FORMATS[args.kv_cache]
     args.output.mkdir(parents=True, exist_ok=False)
     provenance = {
         "command": sys.argv,
@@ -211,7 +218,10 @@ def main() -> None:
         },
         "manifest": json.loads(args.manifest.read_text()),
         "settings": vars(args)
-        | {"method": "full-batch decode-only periodic wall intervals; seeded prompts; p-less T1.5"},
+        | {
+            "kv_cache_format": kv_cache_format,
+            "method": "full-batch decode-only periodic wall intervals; seeded prompts; p-less T1.5",
+        },
     }
     (args.output / "provenance.json").write_text(
         json.dumps(provenance, default=str, indent=2) + "\n"
@@ -234,6 +244,8 @@ def main() -> None:
             "65536",
             "--max-concurrency",
             str(c),
+            "--kv-cache",
+            args.kv_cache,
             "--kv-capacity",
             "auto",
             "--spec",
@@ -253,6 +265,11 @@ def main() -> None:
         with corpus.RunningServer(command, "127.0.0.1", args.port, log) as server:
             startup = server.wait_until_ready()
             (args.output / f"startup-c{c}.json").write_text(json.dumps(startup, indent=2) + "\n")
+            reported = startup.get("engine", {}).get("kv_cache_format")
+            if reported != kv_cache_format:
+                raise RuntimeError(
+                    f"server_start kv_cache_format {reported!r} != expected {kv_cache_format!r}"
+                )
             for index, workload in enumerate(workloads):
                 raw = []
                 path = args.output / f"c{c}-w{index}.json"
@@ -276,6 +293,7 @@ def main() -> None:
                 row = {
                     "workload": workload["name"],
                     "concurrency": c,
+                    "kv_cache_format": kv_cache_format,
                     "mean_tok_s": statistics.mean(rates),
                     "stdev_tok_s": statistics.stdev(rates) if len(rates) > 1 else 0,
                     "prompt_tokens": sorted({n for run in measured for n in run["prompt_tokens"]}),

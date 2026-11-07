@@ -123,6 +123,30 @@ class ContextLadderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "one lane"):
             ladder.speed_cell(self.raw, 8192, self.contract, "dense")
 
+    def test_nvfp4_cache_reaches_command_and_report_validation(self):
+        args = argparse.Namespace(
+            binary=Path("/bench"),
+            weights=Path("/model.ninfer"),
+            kind="speed",
+            ids=Path("/corpus.ids"),
+            chunk=2048,
+            max_context=131200,
+            spec="none",
+            lm_head_draft=False,
+            warmup=0,
+            repetitions=1,
+            kv_cache="nvfp4",
+        )
+        command = ladder.command_for(args, 8192, Path("/p8192.json"))
+        self.assertEqual(command[command.index("--kv-cache") + 1], "nvfp4")
+        args.kv_cache = "fp8-int4"
+        self.assertNotIn("--kv-cache", ladder.command_for(args, 8192, Path("/p8192.json")))
+        contract = dict(self.contract, kv_cache="nvfp4")
+        with self.assertRaisesRegex(ValueError, "wrong cache format"):
+            ladder.speed_cell(self.raw, 8192, contract, "dense")
+        self.raw["config"]["kv_cache_format"] = "nvfp4"
+        ladder.speed_cell(self.raw, 8192, contract, "dense")
+
     def test_ppl_sidecar_alignment_and_nonfinite(self):
         contract = dict(kind="ppl", weights=self.contract["weights"], chunk=2048, skip="half")
         raw = dict(
@@ -172,6 +196,7 @@ class ContextLadderTests(unittest.TestCase):
             kind="ppl",
             contexts=[8],
             chunk=2048,
+            kv_cache="fp8-int4",
             repetitions=1,
             warmup=0,
             skip="half",
@@ -211,6 +236,7 @@ class ContextLadderTests(unittest.TestCase):
             kind="speed",
             contexts=[8192],
             chunk=2048,
+            kv_cache="fp8-int4",
             max_context=131200,
             repetitions=1,
             warmup=0,

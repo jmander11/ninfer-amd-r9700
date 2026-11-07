@@ -19,6 +19,11 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.bench.matrix_contract import KV_CACHE_FORMATS  # noqa: E402  sys.path bootstrap
+
 MANIFEST_PATH = REPO_ROOT / "examples/cli/manifest.json"
 
 TARGET_KEY = "qwen3_8_27b_r9700"
@@ -86,9 +91,8 @@ SCENARIO_FIXTURES = {
 }
 
 WARMUP_FIXTURE = "text_smoke_zh"
-KV_CACHE_FORMAT = "fp8-k-int4-v"
 RUN_ARTIFACT_TYPE = "ninfer_serve_corpus_result"
-RUN_SCHEMA_VERSION = 6
+RUN_SCHEMA_VERSION = 7
 SERVER_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
 SERVER_LOG_SCHEMA_VERSION = 29
 STARTUP_TIMEOUT_SECONDS = 1800.0
@@ -116,6 +120,7 @@ class RunSpec:
     draft_tokens: int
     dflash_verify_width: int
     sampling_mode: str
+    kv_cache: str
     fixture: Fixture
     seed: int
 
@@ -312,6 +317,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="stochastic",
         help="sampling profile for all requests (default: stochastic)",
     )
+    parser.add_argument(
+        "--kv-cache",
+        choices=tuple(KV_CACHE_FORMATS),
+        default="fp8-int4",
+        help="ninfer-serve KV cache codec (default: fp8-int4)",
+    )
     parser.add_argument("--output", type=Path, required=True, help="campaign output directory")
     parser.add_argument(
         "--prefill-chunk",
@@ -405,6 +416,7 @@ def build_specs(
     fixtures: dict[str, Fixture],
     mode_names: Sequence[str],
     sampling_mode: str,
+    kv_cache: str,
     fixture_filter: Sequence[str] | None = None,
     seed_filter: Sequence[int] | None = None,
 ) -> list[RunSpec]:
@@ -438,6 +450,7 @@ def build_specs(
                             draft_tokens=draft_tokens,
                             dflash_verify_width=verify_width,
                             sampling_mode=sampling_mode,
+                            kv_cache=kv_cache,
                             fixture=fixtures[fixture_name],
                             seed=seed,
                         )
@@ -576,7 +589,7 @@ def validate_server_start(
         "max_context": 262144,
         "kv_capacity": 262144,
         "prefill_chunk": prefill_chunk,
-        "kv_cache_format": KV_CACHE_FORMAT,
+        "kv_cache_format": KV_CACHE_FORMATS[spec.kv_cache],
         "device_graph": True,
         "prefix_reuse": False,
         "speculative_backend": spec.speculative_backend,
@@ -706,6 +719,7 @@ def build_result_record(
         "prefill_chunk": prefill_chunk,
         "kv_value_group": expected_group,
         "xattention_profile": expected_profile,
+        "kv_cache_format": KV_CACHE_FORMATS[spec.kv_cache],
         "fixture": spec.fixture.name,
         "suite": spec.fixture.suite,
         "category": spec.fixture.category,
@@ -781,6 +795,10 @@ def load_existing_records(
                     raise CampaignError(
                         f"{path}:{line_number}: static profile differs from the current command"
                     )
+                if record.get("kv_cache_format") != KV_CACHE_FORMATS[spec.kv_cache]:
+                    raise CampaignError(
+                        f"{path}:{line_number}: KV cache format differs from the current command"
+                    )
                 records[key] = record
     except (OSError, json.JSONDecodeError) as exc:
         raise CampaignError(f"failed to read existing results from {path}: {exc}") from exc
@@ -824,6 +842,8 @@ def server_command(
         "--request-log-jsonl",
         str(server_log),
         "--no-prefix-reuse",
+        "--kv-cache",
+        spec.kv_cache,
     ]
     command.extend(["--spec", spec.speculative_backend])
     if spec.speculative_backend != "none":
@@ -986,6 +1006,7 @@ SUMMARY_FIELDS = (
     "fixture",
     "speculative_mode",
     "sampling_mode",
+    "kv_cache_format",
     "samples",
     "prompt_tokens_mean",
     "prompt_tokens_stddev",
@@ -1035,6 +1056,7 @@ def summary_row(
         "fixture": fixture,
         "speculative_mode": speculative_mode,
         "sampling_mode": sampling_mode,
+        "kv_cache_format": records[0].get("kv_cache_format"),
         "samples": len(records),
     }
     set_stats(row, "prompt_tokens", records, "prompt_tokens")
@@ -1271,7 +1293,8 @@ def write_summaries(rows: Sequence[dict[str, Any]], output_dir: Path) -> None:
     markdown = (
         "# Serving corpus performance summary\n\n"
         "All values are arithmetic mean ± sample standard deviation. "
-        f"Sampling: {rows[0]['sampling_mode'] if rows else 'n/a'}.\n\n"
+        f"Sampling: {rows[0]['sampling_mode'] if rows else 'n/a'}. "
+        f"KV cache: {rows[0]['kv_cache_format'] if rows else 'n/a'}.\n\n"
         + "\n\n".join(sections)
         + "\n"
     )
@@ -1298,7 +1321,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if len(mode_names) != len(set(mode_names)):
         raise CampaignError("duplicate --mode value")
     fixtures = load_fixtures()
-    specs = build_specs(artifacts, fixtures, mode_names, args.sampling, args.fixtures, args.seeds)
+    specs = build_specs(
+        artifacts, fixtures, mode_names, args.sampling, args.kv_cache, args.fixtures, args.seeds
+    )
     expected_specs = {spec.key: spec for spec in specs}
     total = len(expected_specs)
 

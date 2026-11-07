@@ -708,7 +708,7 @@ class AssembleParetoTest(unittest.TestCase):
             patch("tools.ppl.assemble_pareto.build_cases", return_value=[case]),
             self.assertRaisesRegex(ValueError, "exact pareto matrix point set"),
         ):
-            _reports(Path(directory), manifest, "pareto", 4096)
+            _reports(Path(directory), manifest, "pareto", 4096, kv_cache_format="fp8-k-int4-v")
 
     def test_report_loader_rejects_report_outside_campaign(self) -> None:
         case = BenchCase("suite", "case", ("-p", "128"), 1, 0)
@@ -732,7 +732,7 @@ class AssembleParetoTest(unittest.TestCase):
                 patch("tools.ppl.assemble_pareto.build_cases", return_value=[case]),
                 self.assertRaisesRegex(ValueError, "resolves outside"),
             ):
-                _reports(root, manifest, "pareto", 4096)
+                _reports(root, manifest, "pareto", 4096, kv_cache_format="fp8-k-int4-v")
 
     def test_assembly_binds_artifact_bench_and_all_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1006,6 +1006,7 @@ class AssembleParetoTest(unittest.TestCase):
             self.assertEqual(provenance["artifact"]["sha256"], "a" * 64)
             self.assertEqual(candidate["prefill_chunk"], 4096)
             self.assertEqual(provenance["selected_prefill_chunk"], 4096)
+            self.assertEqual(provenance["cache_kv_format"], "fp8-k-int4-v")
             self.assertEqual(provenance["quality"]["sha256"], file_sha256(quality_path))
             self.assertEqual(provenance["quality"]["artifact"]["sha256"], "a" * 64)
             classified = classify(

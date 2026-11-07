@@ -21,7 +21,7 @@ flock --exclusive "$NINFER_GPU_LOCK" \
     --output profiles/bench/readme-workloads
 ```
 
-The server defaults to adaptive DFlash up to K7. Select `--spec mtp` for adaptive MTP up to K3; `--draft-tokens N` changes the adaptive maximum (MTP: 1–5, DFlash: 1–7). DFlash accepts C1..12; MTP accepts C1..16. For the MTP matrix use `--spec mtp --concurrency 1 6 8 12 16` and a separate output directory. Both backends use the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
+The server defaults to adaptive DFlash up to K7. Select `--spec mtp` for adaptive MTP up to K3; `--draft-tokens N` changes the adaptive maximum (MTP: 1–5, DFlash: 1–7). DFlash accepts C1..12; MTP accepts C1..16. For the MTP matrix use `--spec mtp --concurrency 1 6 8 12 16` and a separate output directory. Both backends use the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. `--kv-cache nvfp4` (G16 build only) launches the opt-in cache instead of the default `fp8-int4`; startup must report the matching `kv_cache_format`, which `provenance.json` and every summary row record. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
 
 Each lane first runs a one-token request to seed its prompt cache. A synchronized wave then generates up to the output budget per lane; natural stop tokens remain enabled. One warmup wave precedes three measured waves per cell. Only complete 100-ms server intervals with no prefill and exactly C active decode lanes count. The reported rate is total committed decode tokens divided by those intervals' wall time, including host scheduling between rounds. It excludes prefill, startup, and intervals where some lanes have finished. Missing full-batch intervals fail the run rather than substitute an end-to-end or per-request rate. C>1 is aggregate; divide by the concurrency for the average rate per active request in those intervals.
 
@@ -111,6 +111,12 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset core \
 python3 tools/bench/run_ninfer_bench_matrix.py --preset full \
   --weights /absolute/path/to/selected.ninfer \
   --expected-kv-value-group 16
+
+# Opt-in NVFP4 cache (G16 build only): every bench command gets --kv-cache nvfp4 and every
+# report must name kv_cache_format=nvfp4 (recorded as the manifest's expected_kv_cache_format).
+# The default fp8-int4 commands carry no --kv-cache; fixed admission protocols stay default-only.
+python3 tools/bench/run_ninfer_bench_matrix.py --preset core \
+  --weights /absolute/path/to/selected.ninfer --kv-cache nvfp4
 
 # Longer run that adds 32k/64k prompt and context-decode points.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset full \
@@ -987,9 +993,9 @@ The recipe above is illustrative, not a selected winner. Admission reopens the c
 
 The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its prefill cases submit `C` Engine requests concurrently. Pure and context decode cases exclude their seed prefills and report aggregate batched-decode throughput. Use the serving benchmark below for the end-to-end request makespan and request throughput claim.
 
-`run_serve_corpus.py` runs the selected target and published MTP0/MTP3 suites. Pass the sole Qwen3.8 R9700 `--artifact` and `--mode mtp0` or `--mode mtp3` to run only that suite. The existing `--mode dflash7` is retained historical regression support and is not an active production-selection command; the replacement DFlash campaign uses K4/W5 and K5/W6. Add `--sampling greedy` to force exact argmax while retaining the same fixtures and repetition count. Its schema-v6 result and flattened summaries retain the canonical `weights_id` received from the schema-v20 serving startup record. The stochastic route pins its complete temperature/top-p/top-k/min-p/presence/frequency profile explicitly, so model-default changes do not alter the measurement method.
+`run_serve_corpus.py` runs the selected target and published MTP0/MTP3 suites. Pass the sole Qwen3.8 R9700 `--artifact` and `--mode mtp0` or `--mode mtp3` to run only that suite. The existing `--mode dflash7` is retained historical regression support and is not an active production-selection command; the replacement DFlash campaign uses K4/W5 and K5/W6. Add `--sampling greedy` to force exact argmax while retaining the same fixtures and repetition count. Its schema-v7 result and flattened summaries retain the canonical `weights_id` received from the schema-v20 serving startup record and the validated `kv_cache_format`; `--kv-cache nvfp4` (G16 build only) selects the opt-in cache instead of the default `fp8-int4`. The stochastic route pins its complete temperature/top-p/top-k/min-p/presence/frequency profile explicitly, so model-default changes do not alter the measurement method.
 
-The serving-corpus runner has no chunk default: pass the value from the validated schema-v2 selection explicitly. Schema-v6 request records retain it, and resume rejects records produced with another chunk. This corpus-quality workflow explicitly launches and validates `--max-concurrency 1`; concurrency evidence belongs to the separate C=1..4 runner below.
+The serving-corpus runner has no chunk default: pass the value from the validated schema-v2 selection explicitly. Schema-v7 request records retain it and the KV cache format, and resume rejects records produced with another chunk or cache. This corpus-quality workflow explicitly launches and validates `--max-concurrency 1`; concurrency evidence belongs to the separate C=1..4 runner below.
 
 ```bash
 NINFER_SELECTED_BUILD=/path/to/selected-build
@@ -1045,7 +1051,7 @@ python3 tools/bench/run_serve_concurrency.py \
   --output profiles/bench/concurrent-corpus
 ```
 
-Dry runs accept a future explicit artifact path and print every server command without opening the artifact or starting a process. Use `--kv-capacity auto` when the fixed corpus needs more shared KV than the default 262,144-token pool. A point is intentionally not resumable: combining fragments from separate server processes would not preserve either a steady interval or one continuous makespan. For post-selection evidence, derive `NINFER_SELECTED_PREFILL_CHUNK` from the retained schema-v7 selection as in the NIAH workflow below; do not rely on this generic runner's 4096 default.
+Dry runs accept a future explicit artifact path and print every server command without opening the artifact or starting a process. Use `--kv-capacity auto` when the fixed corpus needs more shared KV than the default 262,144-token pool. `--kv-cache nvfp4` (G16 build only) selects the opt-in cache; point reports and summaries record the validated `kv_cache_format`. A point is intentionally not resumable: combining fragments from separate server processes would not preserve either a steady interval or one continuous makespan. For post-selection evidence, derive `NINFER_SELECTED_PREFILL_CHUNK` from the retained schema-v7 selection as in the NIAH workflow below; do not rely on this generic runner's 4096 default.
 
 ## Speed suite (live-serve scenario matrix)
 

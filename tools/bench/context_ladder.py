@@ -20,6 +20,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.bench.matrix_contract import DEFAULT_KV_CACHE, KV_CACHE_FORMATS
 from tools.r9700.host import power_profile_path
 
 if __package__ in (None, ""):
@@ -65,6 +66,12 @@ def sha(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def cache_format(contract):
+    # Default-cache ladders keep the established contract (and retained ladders stay collectable);
+    # an opt-in codec is recorded in the contract and passed to the binary explicitly.
+    return KV_CACHE_FORMATS[contract.get("kv_cache", DEFAULT_KV_CACHE)]
+
+
 def profile(report):
     enabled = report["xattention_qualification"]
     require(type(enabled) is bool, "missing/invalid attention qualification metadata")
@@ -97,7 +104,7 @@ def speed_cell(raw, context, contract, attention):
     )
     for key, value in expected.items():
         require(config[key] == value, f"speed report mismatch: {key}")
-    require(config["kv_cache_format"] == "fp8-k-int4-v", "wrong cache format")
+    require(config["kv_cache_format"] == cache_format(contract), "wrong cache format")
     require(
         config["use_device_graph"] is True and config["isolate_prompt_decode"] is False,
         "unexpected execution policy",
@@ -158,7 +165,7 @@ def ppl_cell(raw, report_path, context, contract, attention):
         tokens_scored=context - skip - 1,
         argmax_tokens=context - skip - 1,
         non_finite=0,
-        kv_format="fp8-k-int4-v",
+        kv_format=cache_format(contract),
     )
     for key, value in expected.items():
         require(raw[key] == value, f"PPL report mismatch: {key}")
@@ -185,6 +192,8 @@ def ppl_cell(raw, report_path, context, contract, attention):
 
 def command_for(args, context, report):
     command = [str(args.binary), "--weights", str(args.weights)]
+    if args.kv_cache != DEFAULT_KV_CACHE:
+        command += ["--kv-cache", args.kv_cache]
     if args.kind == "speed":
         command += [
             "--corpus",
@@ -288,6 +297,8 @@ def run(args):
         weights=dict(path=str(args.weights), bytes=args.weights.stat().st_size),
         ids=dict(path=str(args.ids), sha256=sha(args.ids), tokens=len(ids)),
     )
+    if args.kv_cache != DEFAULT_KV_CACHE:
+        contract.update(kv_cache=args.kv_cache)
     if args.kind == "speed":
         contract.update(
             max_context=args.max_context,
@@ -467,6 +478,12 @@ def main():
     )
     run_parser.add_argument("--contexts", nargs="+", type=int, required=True)
     run_parser.add_argument("--chunk", type=int, default=2048)
+    run_parser.add_argument(
+        "--kv-cache",
+        choices=tuple(KV_CACHE_FORMATS),
+        default=DEFAULT_KV_CACHE,
+        help="startup-selected Text/MTP KV codec passed to the binary (default: fp8-int4)",
+    )
     run_parser.add_argument("--max-context", type=int, default=131200)
     run_parser.add_argument("--spec", choices=("none", "dflash"), default="none")
     run_parser.add_argument("--draft-tokens", type=int, default=0)

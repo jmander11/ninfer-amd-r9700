@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Run the Qwen3.8-27B R9700 FP8-K/INT4-V accuracy campaign.
+"""Run the Qwen3.8-27B R9700 candidate accuracy campaign.
 
 The campaign compares separately built G16 and G32 executables against an
 independent BF16 reference executable. Both candidate executables consume the
 same explicit R9700 artifact; their JSON reports prove which value-group constant
-was compiled through the runtime. The campaign never changes the product's fixed
-cache format through a runtime flag. Device Graphs default on. Every candidate
+was compiled through the runtime. ``--kv-cache`` selects one growing-cache codec
+for every candidate cell (default FP8-K/INT4-V; opt-in NVFP4 is G16-only), and
+every candidate report must name it; the BF16 reference has no lossy cache and
+ignores the option. Device Graphs default on. Every candidate
 must meet finite/aligned, mean-NLL, and new-severe-position quality guardrails.
 Greedy-token differences from BF16 are retained as a diagnostic because the
 fixed lossy cache is not expected to reproduce BF16 argmax identity.
@@ -30,6 +32,10 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from tools.bench.matrix_contract import (  # noqa: E402  after sys.path setup
+    DEFAULT_KV_CACHE,
+    KV_CACHE_FORMATS,
+)
 from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
     fp8_hybrid_decision,
     fp8_hybrid_inventory,
@@ -947,6 +953,18 @@ def _extra_value(extra: list[str], flag: str) -> str | None:
     return extra[index + 1]
 
 
+def candidate_kv_cache_args(profile_name: str, kv_cache: str) -> list[str]:
+    """Name an opt-in candidate codec on ninfer-ppl; the BF16 reference has no lossy cache.
+
+    The default codec keeps the established command shape that retained campaigns and
+    exact-token admission bind; every cell report still names its measured kv_format.
+    """
+
+    if PROFILES[profile_name].reference or kv_cache == DEFAULT_KV_CACHE:
+        return []
+    return ["--kv-cache", kv_cache]
+
+
 def validate_cell_report(
     cell: dict,
     *,
@@ -963,9 +981,10 @@ def validate_cell_report(
     expected_w8_activation_bits: int,
     expected_fp8_qk_wmma: bool,
     expected_xattention_profile: str = "dense",
+    kv_cache: str = DEFAULT_KV_CACHE,
 ) -> None:
     profile = PROFILES[profile_name]
-    expected_format = "bf16-reference" if profile.reference else "fp8-k-int4-v"
+    expected_format = BASELINE if profile.reference else KV_CACHE_FORMATS[kv_cache]
     expected_graph = False if profile.reference else "--no-device-graph" not in extra
     expected_spec = _extra_value(extra, "--spec") or "none"
     draft_text = _extra_value(extra, "--draft-tokens")
@@ -1132,6 +1151,7 @@ def run_cell(
     expected_w8_activation_bits: int = 8,
     expected_fp8_qk_wmma: bool = True,
     expected_xattention_profile: str = "dense",
+    kv_cache: str = DEFAULT_KV_CACHE,
 ) -> dict:
     profile = PROFILES[profile_name]
     cmd = [
@@ -1152,6 +1172,7 @@ def run_cell(
         str(prefill_chunk),
         "--device",
         str(device),
+        *candidate_kv_cache_args(profile_name, kv_cache),
         "--out-json",
         str(cell_path),
         *extra,
@@ -1182,6 +1203,7 @@ def run_cell(
         expected_w8_activation_bits=expected_w8_activation_bits,
         expected_fp8_qk_wmma=expected_fp8_qk_wmma,
         expected_xattention_profile=expected_xattention_profile,
+        kv_cache=kv_cache,
     )
     nll_path = cell_path.with_suffix(".nllf32")
     argmax_path = cell_path.with_suffix(".argmaxi32")
@@ -1698,6 +1720,7 @@ def load_reused_candidate_cells(
     expected_w8_activation_bits: int,
     expected_fp8_qk_wmma: bool,
     expected_xattention_profile: str,
+    kv_cache: str = DEFAULT_KV_CACHE,
     allow_partial: bool = False,
 ) -> dict[tuple[str, int], tuple[dict, Path]]:
     """Import unchanged candidate sidecars while recomputing BF16-relative gates.
@@ -1814,6 +1837,7 @@ def load_reused_candidate_cells(
             expected_w8_activation_bits=expected_w8_activation_bits,
             expected_fp8_qk_wmma=expected_fp8_qk_wmma,
             expected_xattention_profile=expected_xattention_profile,
+            kv_cache=kv_cache,
         )
         cell_path = _command_output_path(cell, evidence="candidate")
         expected_command = [
@@ -1834,6 +1858,7 @@ def load_reused_candidate_cells(
             str(prefill_chunk),
             "--device",
             str(device),
+            *candidate_kv_cache_args(name, kv_cache),
             "--out-json",
             cell["command"][cell["command"].index("--out-json") + 1],
         ]
@@ -2018,6 +2043,7 @@ def write_markdown(path: Path, payload: dict) -> None:
         "",
         f"- weight inputs: {payload['weights_inputs']}",
         f"- candidate artifact: {payload.get('candidate_artifact')}",
+        f"- candidate KV cache: {payload.get('candidate_kv_format')}",
         f"- lengths: {payload['lengths']}",
         f"- skip default: {payload['skip']}",
         "- device graphs: on unless a cell sets device_graph=false",
@@ -2180,6 +2206,16 @@ def main() -> int:
     )
     parser.add_argument("--prefill-chunk", type=int, default=4096)
     parser.add_argument("--device", type=int, default=0)
+    parser.add_argument(
+        "--kv-cache",
+        choices=tuple(KV_CACHE_FORMATS),
+        default=DEFAULT_KV_CACHE,
+        help=(
+            f"candidate growing-KV codec (default: {DEFAULT_KV_CACHE}, the scorer default); "
+            "nvfp4 is named on every candidate ninfer-ppl command and requires the G16 "
+            "build only; the BF16 reference has no lossy cache and ignores it"
+        ),
+    )
     parser.add_argument(
         "--expected-q4-activation-bits",
         type=int,
@@ -2353,6 +2389,10 @@ def main() -> int:
         for name in profiles
     }
     selected_candidates = [name for name in profiles if name != BASELINE]
+    if args.kv_cache == "nvfp4" and any(
+        PROFILES[name].value_group != 16 for name in selected_candidates
+    ):
+        raise SystemExit("--kv-cache nvfp4 requires the G16 value-group build only")
     missing_gates = [name for name in selected_candidates if name not in gates]
     if missing_gates and not args.allow_ungated:
         raise SystemExit(
@@ -2442,6 +2482,7 @@ def main() -> int:
                 expected_w8_activation_bits=args.expected_w8_activation_bits,
                 expected_fp8_qk_wmma=bool(args.expected_fp8_qk_wmma),
                 expected_xattention_profile=args.expected_xattention_profile,
+                kv_cache=args.kv_cache,
                 allow_partial=allow_partial,
             )
             overlap = set(reused_candidates) & set(imported)
@@ -2497,6 +2538,7 @@ def main() -> int:
                         args.expected_w8_activation_bits,
                         bool(args.expected_fp8_qk_wmma),
                         args.expected_xattention_profile,
+                        args.kv_cache,
                     )
                 cell["profile_value_group"] = PROFILES[name].value_group
                 cell["quality_tier"] = args.quality_tier
@@ -2548,6 +2590,7 @@ def main() -> int:
                 args.expected_w8_activation_bits,
                 bool(args.expected_fp8_qk_wmma),
                 args.expected_xattention_profile,
+                args.kv_cache,
             )
             cell["profile_value_group"] = PROFILES[name].value_group
             cell["quality_tier"] = args.quality_tier
@@ -2611,6 +2654,7 @@ def main() -> int:
                 args.expected_w8_activation_bits,
                 bool(args.expected_fp8_qk_wmma),
                 args.expected_xattention_profile,
+                args.kv_cache,
             )
             cell["profile_value_group"] = PROFILES[name].value_group
             cell["quality_tier"] = args.quality_tier
@@ -2749,6 +2793,7 @@ def main() -> int:
         "draft_tokens": draft_tokens,
         "q4_activation_bits": args.expected_q4_activation_bits,
         "w8_activation_bits": args.expected_w8_activation_bits,
+        "candidate_kv_format": (KV_CACHE_FORMATS[args.kv_cache] if selected_candidates else None),
         "candidate_kv_plane_layouts": (R9700_KV_PLANE_LAYOUTS if selected_candidates else None),
         "split512_enabled": bool(args.expected_fp8_qk_wmma),
         "decode_attention_profile": DECODE_ATTENTION_PROFILE,

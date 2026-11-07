@@ -52,6 +52,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.bench.matrix_contract import (  # noqa: E402  sys.path bootstrap
+    DEFAULT_KV_CACHE,
+    KV_CACHE_FORMATS,
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     PRODUCTION_PREFILL_CHUNKS,
@@ -1669,7 +1671,7 @@ def validate_automatic_feasibility(report: dict[str, Any]) -> dict[str, Any]:
     """Validate auto sizing and classify feasibility or the effective native-context maximum."""
 
     config = report.get("config", {})
-    if config.get("kv_cache_format") not in ("fp8-k-int4-v", "nvfp4"):
+    if config.get("kv_cache_format") not in KV_CACHE_FORMATS.values():
         raise ValueError("benchmark report has invalid kv_cache_format")
     if report.get("memory", {}).get("kv_cache_format") != config.get("kv_cache_format"):
         raise ValueError("benchmark memory report has invalid kv_cache_format")
@@ -2039,6 +2041,7 @@ def load_bench_report(
     expected_command: Sequence[str] | None = None,
     expected_case: BenchCase | None = None,
     expected_xattention_profile: str = "dense",
+    expected_kv_cache_format: str | None = None,
 ) -> dict[str, Any]:
     if expected_xattention_profile not in XATTENTION_PROFILES:
         raise ValueError(
@@ -2066,6 +2069,14 @@ def load_bench_report(
             f"tool={identity[2]!r}; expected {expected!r}"
         )
     config = report.get("config", {})
+    if expected_kv_cache_format is not None and (
+        config.get("kv_cache_format") != expected_kv_cache_format
+        or report.get("memory", {}).get("kv_cache_format") != expected_kv_cache_format
+    ):
+        raise ValueError(
+            f"benchmark report kv_cache_format={config.get('kv_cache_format')!r}; "
+            f"expected {expected_kv_cache_format!r}"
+        )
     value_group = config.get("kv_value_group")
     if value_group not in (16, 32):
         raise ValueError(f"benchmark report has invalid kv_value_group={value_group!r}")
@@ -2219,6 +2230,7 @@ def report_rows(
     expected_artifact: dict[str, Any] | None = None,
     expected_command: Sequence[str] | None = None,
     expected_xattention_profile: str = "dense",
+    expected_kv_cache_format: str | None = None,
 ) -> list[dict[str, Any]]:
     report = load_bench_report(
         report_path,
@@ -2231,6 +2243,7 @@ def report_rows(
         expected_command,
         case,
         expected_xattention_profile,
+        expected_kv_cache_format,
     )
     config = report.get("config", {})
     load = report.get("load", {})
@@ -3537,6 +3550,7 @@ def write_manifest(
             if args.preset in POWER_BOUND_PRESETS
             else None
         ),
+        "expected_kv_cache_format": KV_CACHE_FORMATS[args.kv_cache],
         "expected_kv_value_group": args.expected_kv_value_group,
         "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
         "expected_q4_activation_bits": args.expected_q4_activation_bits,
@@ -3635,6 +3649,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         metavar="N",
         help="fixed Engine concurrency; repeat to sweep (default: 1)",
+    )
+    parser.add_argument(
+        "--kv-cache",
+        choices=tuple(KV_CACHE_FORMATS),
+        default=DEFAULT_KV_CACHE,
+        help="startup-selected Text/MTP KV codec passed to ninfer_bench (default: fp8-int4)",
     )
     parser.add_argument(
         "--expected-kv-value-group",
@@ -3749,6 +3769,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("duplicate --concurrency value")
     if any(concurrency not in PRODUCT_CONCURRENCIES for concurrency in args.concurrency):
         raise SystemExit("--concurrency must be in [1, 4]")
+    if args.kv_cache != DEFAULT_KV_CACHE:
+        if args.expected_kv_value_group == 32:
+            raise SystemExit("--kv-cache nvfp4 requires the G16 value-group build")
+        if (
+            args.preset in ("low-context-prefill", "ordinary-diagnostic")
+            or args.require_fp8_hybrid
+            or args.require_post_chunk_capacity
+        ):
+            raise SystemExit("fixed admission protocols are bound to the default fp8-int4 cache")
     validate_fp8_hybrid_performance_contract(args)
     validate_post_chunk_capacity_contract(args)
     if args.preset == "dflash-shortlist":
@@ -3975,6 +4004,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         for concurrency in args.concurrency
         if not case.concurrency_one_only or concurrency == 1
     ]
+    # The default codec keeps the established fixed-protocol command shape; an opt-in codec is
+    # named explicitly on every benchmark invocation.
+    kv_cache_args = [] if args.kv_cache == DEFAULT_KV_CACHE else ["--kv-cache", args.kv_cache]
     for case, concurrency in points:
         report_path = json_dir / case.suite / f"c{concurrency}" / f"{case.name}.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3988,6 +4020,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             str(args.device),
             "--concurrency",
             str(concurrency),
+            *kv_cache_args,
             *case.args,
             "--output",
             "json",
@@ -4052,6 +4085,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.dflash_draft_tokens is not None
                 else 0
             ),
+            "expected_kv_cache_format": KV_CACHE_FORMATS[args.kv_cache],
             "expected_kv_value_group": args.expected_kv_value_group,
             "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
             "expected_q4_activation_bits": args.expected_q4_activation_bits,
@@ -4183,6 +4217,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     record["command"],
                     case,
                     args.expected_xattention_profile,
+                    KV_CACHE_FORMATS[args.kv_cache],
                 )
                 if case.diagnostic:
                     validate_bound_diagnostic(
@@ -4277,6 +4312,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     artifact_provenance,
                     record["command"],
                     args.expected_xattention_profile,
+                    KV_CACHE_FORMATS[args.kv_cache],
                 )
             )
         except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as exc:

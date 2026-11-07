@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import io
@@ -14,10 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.bench.run_serve_concurrency import (
     Job,
+    build_points,
     receive_stream,
 )
 from tools.bench.run_serve_concurrency import (
     parse_args as parse_concurrency_args,
+)
+from tools.bench.run_serve_concurrency import (
+    server_command as concurrency_server_command,
 )
 from tools.bench.run_serve_corpus import (
     RUN_ARTIFACT_TYPE,
@@ -108,6 +113,13 @@ class ServeCorpusTest(unittest.TestCase):
             parse_concurrency_args(common)
         parsed = parse_concurrency_args([*common, "--prefill-chunk", "2048"])
         self.assertEqual(parsed.prefill_chunk, 2048)
+        self.assertEqual(parsed.kv_cache, "fp8-int4")
+        nvfp4 = parse_concurrency_args([*common, "--prefill-chunk", "2048", "--kv-cache", "nvfp4"])
+        point = build_points((("qwen3_8_27b_r9700", Path("/tmp/model.ninfer")),), nvfp4)[0]
+        command = concurrency_server_command(
+            Path("/tmp/ninfer-serve"), point, Path("/tmp/server.jsonl"), nvfp4
+        )
+        self.assertEqual(command[command.index("--kv-cache") + 1], "nvfp4")
 
     def test_selected_prefill_chunk_is_launched_and_binds_resume(self) -> None:
         fixture = Fixture("fixture", [], False, 1, "suite")
@@ -121,6 +133,7 @@ class ServeCorpusTest(unittest.TestCase):
             0,
             0,
             "greedy",
+            "fp8-int4",
             fixture,
             7,
         )
@@ -130,6 +143,7 @@ class ServeCorpusTest(unittest.TestCase):
         self.assertEqual(command[command.index("--prefill-chunk") + 1], "8192")
         self.assertEqual(command[command.index("--max-concurrency") + 1], "1")
         self.assertEqual(command[command.index("--spec") + 1], "none")
+        self.assertEqual(command[command.index("--kv-cache") + 1], "fp8-int4")
         dflash = dataclasses.replace(spec, speculative_backend="dflash", draft_tokens=5)
         full = server_command(
             Path("/tmp/ninfer-serve"),
@@ -173,6 +187,19 @@ class ServeCorpusTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(CampaignError, "Engine configuration mismatch"):
             validate_server_start(start, spec, 0, 4096, 16, "dense")
+        nvfp4 = dataclasses.replace(spec, kv_cache="nvfp4")
+        nvfp4_command = server_command(
+            Path("/tmp/ninfer-serve"), nvfp4, Path("/tmp/server.jsonl"), 8080, 0, 8192
+        )
+        self.assertEqual(nvfp4_command[nvfp4_command.index("--kv-cache") + 1], "nvfp4")
+        with self.assertRaisesRegex(CampaignError, "Engine configuration mismatch"):
+            validate_server_start(start, nvfp4, 0, 8192, 16, "dense")
+        nvfp4_start = copy.deepcopy(start)
+        nvfp4_start["engine"]["kv_cache_format"] = "nvfp4"
+        self.assertEqual(
+            validate_server_start(nvfp4_start, nvfp4, 0, 8192, 16, "dense"),
+            ("server", "weights"),
+        )
         start["engine"]["max_concurrency"] = 5
         with self.assertRaisesRegex(CampaignError, "Engine configuration mismatch"):
             validate_server_start(start, spec, 0, 8192, 16, "dense")
@@ -189,6 +216,7 @@ class ServeCorpusTest(unittest.TestCase):
             "prefill_chunk": 8192,
             "kv_value_group": 16,
             "xattention_profile": "dense",
+            "kv_cache_format": "fp8-k-int4-v",
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "run.jsonl"
@@ -199,6 +227,9 @@ class ServeCorpusTest(unittest.TestCase):
             )
             with self.assertRaisesRegex(CampaignError, "prefill chunk differs"):
                 load_existing_records(path, {spec.key: spec}, 4096, 16, "dense")
+            nvfp4 = dataclasses.replace(spec, kv_cache="nvfp4")
+            with self.assertRaisesRegex(CampaignError, "KV cache format differs"):
+                load_existing_records(path, {spec.key: nvfp4}, 8192, 16, "dense")
             record["prefill_chunk"] = True
             path.write_text(json.dumps(record) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(CampaignError, "prefill chunk differs"):

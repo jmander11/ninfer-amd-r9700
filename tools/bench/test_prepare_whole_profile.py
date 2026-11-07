@@ -38,6 +38,7 @@ class PrepareWholeProfileTest(unittest.TestCase):
                     "load": {"weights_id": "selected"},
                     "config": {
                         "concurrency": 4,
+                        "kv_cache_format": "fp8-k-int4-v",
                         "kv_value_group": 16,
                         "prefill_chunk": 4096,
                         "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
@@ -274,6 +275,7 @@ class PrepareWholeProfileTest(unittest.TestCase):
             self.assertTrue((root / "plan" / "commands.sh").is_file())
             self.assertEqual(payload["workload"]["xattention_profile"], "dense")
             self.assertEqual(payload["workload"]["prefill_chunk"], 4096)
+            self.assertEqual(payload["workload"]["kv_cache_format"], "fp8-k-int4-v")
             self.assertEqual(payload["required_power_profile"]["value"], "auto")
             commands = (root / "plan" / "commands.sh").read_text(encoding="utf-8")
             self.assertEqual(commands.count("power_dpm_force_performance_level"), 2)

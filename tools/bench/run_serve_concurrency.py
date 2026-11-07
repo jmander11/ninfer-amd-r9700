@@ -45,7 +45,7 @@ SATURATION_SEEDS = (
 CORPUS_ORDER_SEED = 20260811
 POINT_ARTIFACT_TYPE = "ninfer_serve_concurrency_bench_point"
 SUMMARY_ARTIFACT_TYPE = "ninfer_serve_concurrency_bench_summary"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclasses.dataclass(frozen=True)
@@ -180,6 +180,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="override fixture thinking for decode-saturation (default: fixture/manifest value)",
     )
     parser.add_argument("--max-context", type=int, default=262144)
+    parser.add_argument(
+        "--kv-cache",
+        choices=tuple(corpus.KV_CACHE_FORMATS),
+        default="fp8-int4",
+        help="ninfer-serve KV cache codec (default: fp8-int4)",
+    )
     parser.add_argument(
         "--kv-capacity",
         default="262144",
@@ -405,6 +411,8 @@ def server_command(
         point.model_id,
         "--max-context",
         str(args.max_context),
+        "--kv-cache",
+        args.kv_cache,
         "--kv-capacity",
         args.kv_capacity,
         "--max-concurrency",
@@ -482,7 +490,7 @@ def validate_server_start(
         "pending_timeout_ms": PENDING_TIMEOUT_MS,
         "prefill_chunk": args.prefill_chunk,
         "log_stats_interval_ms": getattr(args, "log_stats_interval_ms", DEFAULT_STATS_INTERVAL_MS),
-        "kv_cache_format": corpus.KV_CACHE_FORMAT,
+        "kv_cache_format": corpus.KV_CACHE_FORMATS[args.kv_cache],
         "device_graph": True,
         "prefix_reuse": False,
         "speculative_backend": point.speculative_backend,
@@ -1045,6 +1053,7 @@ def analyze_point(
         "speculative_backend": point.speculative_backend,
         "draft_tokens": point.draft_tokens,
         "sampling_mode": point.sampling_mode,
+        "kv_cache_format": server_start["engine"]["kv_cache_format"],
         "suite": point.suite,
         "streaming": point.streaming,
         "workload_order": workload_order(point),
@@ -1170,6 +1179,7 @@ SUMMARY_FIELDS = (
     "weights_id",
     "speculative_mode",
     "sampling_mode",
+    "kv_cache_format",
     "corpus_order_seed",
     "concurrency",
     "request_count",
@@ -1194,6 +1204,7 @@ def summary_row(report: dict[str, Any]) -> dict[str, Any]:
         "weights_id": report["weights_id"],
         "speculative_mode": report["speculative_mode"],
         "sampling_mode": report["sampling_mode"],
+        "kv_cache_format": report["kv_cache_format"],
         "corpus_order_seed": report.get("workload_order", {}).get("seed"),
         "concurrency": report["concurrency"],
         "request_count": report["request_count"],
@@ -1265,20 +1276,21 @@ def write_summaries(reports: Sequence[dict[str, Any]], output_dir: Path) -> None
             {field: csv_value(row.get(field)) for field in SUMMARY_FIELDS} for row in rows
         )
 
-    groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
     for row in rows:
         key = (
             str(row["target"]),
             str(row["weights_id"]),
+            str(row["kv_cache_format"]),
             str(row["speculative_mode"]),
             str(row["suite"]),
         )
         groups.setdefault(key, []).append(row)
 
     sections: list[str] = []
-    for (target, weights_id, mode, suite), group in groups.items():
+    for (target, weights_id, kv_cache_format, mode, suite), group in groups.items():
         group.sort(key=lambda row: int(row["concurrency"]))
-        title = f"## {target} / {weights_id} / {mode} / {suite}"
+        title = f"## {target} / {weights_id} / {kv_cache_format} / {mode} / {suite}"
         if suite == "decode-saturation":
             table = markdown_table(
                 ("C", "Requests", "Steady s", "Avg batch", "Decode tok/s", "Speedup"),

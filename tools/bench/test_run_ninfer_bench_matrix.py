@@ -1515,6 +1515,41 @@ class CompiledKvGroupTest(unittest.TestCase):
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["expected_xattention_profile"], "b128-s16-tau900")
 
+    def test_nvfp4_cache_reaches_every_command_and_report_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "matrix"
+            argv = [
+                "--preset",
+                "pareto-capacity",
+                "--weights",
+                str(root / "eventual-selected.ninfer"),
+                "--prefill-chunk",
+                "4096",
+                "--dry-run",
+            ]
+            self.assertEqual(main([*argv, "--output-dir", str(output), "--kv-cache", "nvfp4"]), 0)
+            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["expected_kv_cache_format"], "nvfp4")
+            for record in manifest["commands"]:
+                command = record["command"]
+                self.assertEqual(command[command.index("--kv-cache") + 1], "nvfp4")
+            default = root / "default"
+            self.assertEqual(main([*argv, "--output-dir", str(default)]), 0)
+            manifest = json.loads((default / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["expected_kv_cache_format"], "fp8-k-int4-v")
+            self.assertTrue(all("--kv-cache" not in row["command"] for row in manifest["commands"]))
+
+            report = root / "report.json"
+            self.write_report(report, 16)
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            payload["config"]["kv_cache_format"] = "nvfp4"
+            payload["memory"]["kv_cache_format"] = "nvfp4"
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            load_bench_report(report, expected_kv_cache_format="nvfp4")
+            with self.assertRaisesRegex(ValueError, "expected 'fp8-k-int4-v'"):
+                load_bench_report(report, expected_kv_cache_format="fp8-k-int4-v")
+
     def test_fresh_campaign_rejects_an_existing_output_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

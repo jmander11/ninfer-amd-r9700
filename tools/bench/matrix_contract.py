@@ -8,3 +8,6 @@ R9700_KV_PLANE_LAYOUTS = {
     "value": "feature-fastest-page-major",
     "value_scale": "feature-fastest-page-major",
 }
+# Startup-selected Text/MTP KV codec: CLI `--kv-cache` value -> report `kv_cache_format` name.
+KV_CACHE_FORMATS = {"fp8-int4": "fp8-k-int4-v", "nvfp4": "nvfp4"}
+DEFAULT_KV_CACHE = "fp8-int4"

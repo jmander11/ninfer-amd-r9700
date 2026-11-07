@@ -295,6 +295,7 @@ class CompiledProfileIdentityTest(unittest.TestCase):
         w8_activation_bits: int = 8,
         fp8_qk_wmma: bool = True,
         xattention: bool = False,
+        kv_format: str = "fp8-k-int4-v",
     ) -> None:
         path.write_text(
             json.dumps(
@@ -303,7 +304,7 @@ class CompiledProfileIdentityTest(unittest.TestCase):
                     "weights": "model.ninfer",
                     "model_id": run.MODEL_ID,
                     "weights_id": "candidate",
-                    "kv_format": "fp8-k-int4-v",
+                    "kv_format": kv_format,
                     "kv_value_group": group,
                     "kv_plane_layouts": run.R9700_KV_PLANE_LAYOUTS,
                     "q4_activation_bits": q4_activation_bits,
@@ -399,6 +400,43 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             self.assertEqual(cell["kv_plane_layouts"], run.R9700_KV_PLANE_LAYOUTS)
             self.assertIn("command", cell)
             self.assertRegex(cell["nll_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_nvfp4_cache_reaches_scorer_and_report_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cell_path = Path(directory) / "cell.json"
+            reported = "nvfp4"
+
+            def publish(*_args, **_kwargs) -> None:
+                self.write_cell(cell_path, scheme="r9700-g16", group=16, kv_format=reported)
+
+            def score(kv_cache: str) -> dict:
+                return run.run_cell(
+                    Path("ninfer-ppl-g16"),
+                    Path("model.ninfer"),
+                    Path("corpus.ids"),
+                    "r9700-g16",
+                    "decode",
+                    "half",
+                    257,
+                    4096,
+                    0,
+                    cell_path,
+                    [],
+                    "candidate",
+                    kv_cache=kv_cache,
+                )
+
+            with mock.patch.object(run.subprocess, "run", side_effect=publish):
+                cell = score("nvfp4")
+                command = cell["command"]
+                self.assertEqual(command[command.index("--kv-cache") + 1], "nvfp4")
+                self.assertLess(command.index("--kv-cache"), command.index("--out-json"))
+                with self.assertRaisesRegex(SystemExit, "kv_format='nvfp4'"):
+                    score("fp8-int4")
+                reported = "fp8-k-int4-v"
+                self.assertNotIn("--kv-cache", score("fp8-int4")["command"])
+                with self.assertRaisesRegex(SystemExit, "kv_format='fp8-k-int4-v'"):
+                    score("nvfp4")
 
     def test_python_scorer_subprocess_uses_runner_interpreter(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1735,6 +1773,7 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 _expected_w8_activation_bits: int,
                 _expected_fp8_qk_wmma: bool,
                 _expected_xattention_profile: str,
+                _kv_cache: str,
             ) -> dict:
                 calls.append((profile_name, tokens, tuple(extra)))
                 requested_skip = tokens // 2 if skip == "half" else int(skip)
