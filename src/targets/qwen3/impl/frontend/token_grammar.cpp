@@ -82,19 +82,37 @@ void relax_schema(Json& schema) {
 TokenGrammarState::TokenGrammarState(std::shared_ptr<const TokenGrammarData> grammar,
                                      std::vector<TokenId> ignored_model_stops)
     : grammar_(std::move(grammar)), ignored_model_stops_(std::move(ignored_model_stops)),
-      committed_(grammar_->compiled), work_(grammar_->constraint) {}
+      committed_(grammar_->compiled), committed_complete_(committed_.IsCompleted()),
+      committed_terminated_(committed_.IsTerminated()), work_(grammar_->constraint) {}
 
-bool TokenGrammarState::accept(xgrammar::GrammarMatcher& matcher, TokenId token) const {
+bool TokenGrammarState::advance(xgrammar::GrammarMatcher& matcher, TokenId token,
+                                int& history) const {
+    if (!matcher.AcceptToken(token)) { return false; }
     if (std::find(ignored_model_stops_.begin(), ignored_model_stops_.end(), token) !=
         ignored_model_stops_.end()) {
         // Preserve the caller's disabled model-stop semantics. Such a token is
         // still forbidden inside an incomplete envelope, but an eligible EOS
         // must not permanently terminate the grammar while generation continues.
-        auto probe = matcher.Fork();
-        return probe.AcceptToken(token);
+        matcher.Rollback(1);
+        return true;
     }
-    return matcher.AcceptToken(token);
+    ++history;
+    return true;
 }
+
+namespace {
+
+// Rolls the walked matcher back to the state its scope started from, also on unwinding.
+struct MatcherRollback {
+    xgrammar::GrammarMatcher& matcher;
+    int tokens = 0;
+
+    ~MatcherRollback() {
+        if (tokens != 0) { matcher.Rollback(tokens); }
+    }
+};
+
+} // namespace
 
 void TokenGrammarState::preview(std::span<const TokenId> tokens,
                                 std::span<const std::uint8_t> ignored_framing,
@@ -106,7 +124,8 @@ void TokenGrammarState::preview(std::span<const TokenId> tokens,
     if (!reasoning_closes.empty() && reasoning_closes.size() != tokens.size()) {
         throw std::invalid_argument("token grammar reasoning-close shape mismatch");
     }
-    auto candidate = committed_.Fork();
+    Preview result;
+    MatcherRollback validated{committed_};
     for (std::size_t i = 0; i < tokens.size(); ++i) {
         if (!ignored_framing.empty() && ignored_framing[i]) { continue; }
         if (!reasoning_closes.empty() && reasoning_closes[i]) {
@@ -115,18 +134,33 @@ void TokenGrammarState::preview(std::span<const TokenId> tokens,
             }
             // The already qualified any_text body may end in a byte/marker prefix.
             // Finish that semantic phase with the actual committed close token.
-            candidate = xgrammar::GrammarMatcher(grammar_->compiled);
+            result.restarted.emplace(grammar_->compiled);
+            result.tokens.clear();
         }
-        if (!accept(candidate, tokens[i])) {
+        int history = 0;
+        if (!advance(result.restarted ? *result.restarted : committed_, tokens[i], history)) {
             throw std::logic_error("generated token violates the declared token grammar");
         }
+        if (!result.restarted) {
+            validated.tokens += history;
+            result.tokens.push_back(tokens[i]);
+        }
     }
-    preview_.emplace(std::move(candidate));
+    preview_.emplace(std::move(result));
 }
 
 void TokenGrammarState::commit_preview() noexcept {
     if (!preview_) { std::terminate(); }
-    committed_ = std::move(*preview_);
+    if (preview_->restarted) {
+        committed_ = std::move(*preview_->restarted);
+    } else {
+        for (const auto token : preview_->tokens) {
+            int history = 0;
+            if (!advance(committed_, token, history)) { std::terminate(); }
+        }
+    }
+    committed_complete_   = committed_.IsCompleted();
+    committed_terminated_ = committed_.IsTerminated();
     preview_.reset();
 }
 
@@ -134,8 +168,8 @@ void TokenGrammarState::discard_preview() noexcept { preview_.reset(); }
 
 ConstraintStats TokenGrammarState::constraint_stats() const noexcept {
     auto result       = work_;
-    result.complete   = committed_.IsCompleted();
-    result.terminated = committed_.IsTerminated();
+    result.complete   = committed_complete_;
+    result.terminated = committed_terminated_;
     return result;
 }
 
@@ -147,7 +181,7 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                                    std::span<const std::int32_t> parents,
                                    std::span<std::uint32_t> words, TokenId replay_close,
                                    std::span<const std::uint8_t> replay_close_allowed,
-                                   std::span<const std::uint8_t> reasoning_close_allowed) const {
+                                   std::span<const std::uint8_t> reasoning_close_allowed) {
     if (tokens.empty() || tokens.size() != parents.size() ||
         words.size() != tokens.size() * mask_words) {
         throw std::invalid_argument("invalid token grammar verification mask shape");
@@ -163,36 +197,20 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
          !grammar_->starts_in_reasoning)) {
         throw std::invalid_argument("invalid semantic reasoning-close mask shape");
     }
+    std::vector<std::vector<std::size_t>> children(tokens.size());
+    for (std::size_t node = 1; node < tokens.size(); ++node) {
+        const auto parent = parents[node];
+        if (parent < 0 || static_cast<std::size_t>(parent) >= node) {
+            throw std::invalid_argument("token grammar tree parent must precede child");
+        }
+        children[static_cast<std::size_t>(parent)].push_back(node);
+    }
     const auto started      = std::chrono::steady_clock::now();
     std::uint64_t evaluated = 0;
-    std::vector<std::optional<xgrammar::GrammarMatcher>> nodes(tokens.size());
-    nodes[0].emplace(committed_.Fork());
-    for (std::size_t node = 0; node < nodes.size(); ++node) {
-        if (node != 0) {
-            const auto parent = parents[node];
-            if (parent < 0 || static_cast<std::size_t>(parent) >= node) {
-                throw std::invalid_argument("token grammar tree parent must precede child");
-            }
-            const auto& parent_node = nodes[static_cast<std::size_t>(parent)];
-            if (parent_node) {
-                auto child         = parent_node->Fork();
-                const bool framing = !replay_close_allowed.empty() &&
-                                     replay_close_allowed[parent] && tokens[node] == replay_close;
-                if (!reasoning_close_allowed.empty() && reasoning_close_allowed[parent] &&
-                    tokens[node] == replay_close) {
-                    child = xgrammar::GrammarMatcher(grammar_->compiled);
-                }
-                if ((framing || accept(child, tokens[node])) && !child.IsTerminated()) {
-                    nodes[node].emplace(std::move(child));
-                }
-            }
-        }
-        auto output   = words.subspan(node * mask_words, mask_words);
-        auto& matcher = nodes[node];
-        if (!matcher) {
-            std::fill(output.begin(), output.end(), ~std::uint32_t{0});
-            continue;
-        }
+    std::vector<std::uint8_t> reached(tokens.size());
+    bool close_checked = false;
+    const auto fill    = [&](std::size_t node, xgrammar::GrammarMatcher& matcher) {
+        auto output        = words.subspan(node * mask_words, mask_words);
         std::int64_t shape = mask_words;
         DLTensor mask{.data        = output.data(),
                       .device      = {kDLCPU, 0},
@@ -201,11 +219,14 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
                       .shape       = &shape,
                       .strides     = nullptr,
                       .byte_offset = 0};
-        (void)matcher->FillNextTokenBitmask(&mask);
+        (void)matcher.FillNextTokenBitmask(&mask);
         if (!reasoning_close_allowed.empty() && reasoning_close_allowed[node]) {
-            auto closed = xgrammar::GrammarMatcher(grammar_->compiled);
-            if (!closed.AcceptToken(replay_close)) {
-                throw std::logic_error("initial reasoning grammar rejects its canonical close");
+            if (!close_checked) {
+                auto closed = xgrammar::GrammarMatcher(grammar_->compiled);
+                if (!closed.AcceptToken(replay_close)) {
+                    throw std::logic_error("initial reasoning grammar rejects its canonical close");
+                }
+                close_checked = true;
             }
             output[static_cast<std::size_t>(replay_close) / 32] |=
                 std::uint32_t{1} << (static_cast<unsigned>(replay_close) % 32);
@@ -214,7 +235,40 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
             output[static_cast<std::size_t>(replay_close) / 32] |=
                 std::uint32_t{1} << (static_cast<unsigned>(replay_close) % 32);
         }
+        reached[node] = 1;
         ++evaluated;
+    };
+    // `matcher` is at the state after `node`'s token and is returned in that state.
+    const auto visit = [&](const auto& self, std::size_t node,
+                           xgrammar::GrammarMatcher& matcher) -> void {
+        fill(node, matcher);
+        for (const auto child : children[node]) {
+            const bool framing = !replay_close_allowed.empty() && replay_close_allowed[node] &&
+                                 tokens[child] == replay_close;
+            int history        = 0;
+            if (!reasoning_close_allowed.empty() && reasoning_close_allowed[node] &&
+                tokens[child] == replay_close) {
+                xgrammar::GrammarMatcher restarted(grammar_->compiled);
+                if ((framing || advance(restarted, tokens[child], history)) &&
+                    !restarted.IsTerminated()) {
+                    self(self, child, restarted);
+                }
+                continue;
+            }
+            if (framing) {
+                self(self, child, matcher);
+                continue;
+            }
+            if (!advance(matcher, tokens[child], history)) { continue; }
+            const MatcherRollback rollback{matcher, history};
+            if (!matcher.IsTerminated()) { self(self, child, matcher); }
+        }
+    };
+    visit(visit, 0, committed_);
+    for (std::size_t node = 0; node < tokens.size(); ++node) {
+        if (!reached[node]) {
+            std::fill_n(words.begin() + node * mask_words, mask_words, ~std::uint32_t{0});
+        }
     }
     ++work_.mask_calls;
     work_.mask_nodes += evaluated;

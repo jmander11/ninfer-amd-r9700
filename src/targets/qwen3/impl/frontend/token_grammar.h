@@ -33,8 +33,9 @@ struct TokenGrammarData {
 
 namespace frontend_internal {
 
-// The OutputSession owns this state. Draft-mask construction forks committed
-// state and never advances it; only a committed publication advances grammar.
+// The OutputSession owns this state. One matcher holds the committed parse; previews and
+// draft-mask walks advance it and roll back, so per-round work is independent of the
+// committed length. GrammarMatcher::Fork copies the whole Earley history and is not used.
 class TokenGrammarState {
 public:
     static constexpr std::size_t mask_words = (248077 + 31) / 32;
@@ -52,17 +53,27 @@ public:
     // node consumes its draft token from an earlier parent. Output is node-major,
     // including the final bonus column. Unreachable nodes have an unrestricted
     // mask, not an empty sampling domain: their parent forbids their acceptance.
+    // The tree is walked depth-first on the committed matcher, which is restored on return.
     void fill_masks(std::span<const TokenId> tokens, std::span<const std::int32_t> parents,
                     std::span<std::uint32_t> words, TokenId replay_close = -1,
                     std::span<const std::uint8_t> replay_close_allowed    = {},
-                    std::span<const std::uint8_t> reasoning_close_allowed = {}) const;
+                    std::span<const std::uint8_t> reasoning_close_allowed = {});
 
 private:
-    bool accept(xgrammar::GrammarMatcher& matcher, TokenId token) const;
+    // A reasoning close restarts the grammar; the restarted matcher then replaces committed_.
+    struct Preview {
+        std::vector<TokenId> tokens;
+        std::optional<xgrammar::GrammarMatcher> restarted;
+    };
+
+    // An ignored model stop is validated and leaves the matcher unchanged.
+    bool advance(xgrammar::GrammarMatcher& matcher, TokenId token, int& history) const;
     std::shared_ptr<const TokenGrammarData> grammar_;
     std::vector<TokenId> ignored_model_stops_;
     xgrammar::GrammarMatcher committed_;
-    std::optional<xgrammar::GrammarMatcher> preview_;
+    std::optional<Preview> preview_;
+    bool committed_complete_   = false;
+    bool committed_terminated_ = false;
     mutable ConstraintStats work_;
 };
 
