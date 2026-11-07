@@ -648,10 +648,23 @@ std::optional<ToolCall> TokenGrammarData::decode_call(std::string_view text) con
     // grammar resolves types and ambiguous literal delimiters together. A raw
     // string may contain "</parameter>", so a lexical first-close parser is
     // insufficient even when generation obeyed its declared schema.
+    // The search advances one validator and rolls it back; a failed AcceptString leaves it
+    // unchanged. Successive close candidates extend the same raw string, so its
+    // JSON-string interpretation is accepted incrementally and decoding stays linear.
     xgrammar::GrammarMatcher validator(*definition->arguments_validator, std::nullopt, true);
     if (!validator.AcceptString("{")) { return std::nullopt; }
     std::set<std::string> keys;
-    auto decode = [&](auto&& self, std::string_view remaining, xgrammar::GrammarMatcher matcher,
+    // Whether the text after a value can start the next level: the close or an unused key.
+    const auto continues = [&](std::string_view rest) {
+        constexpr std::string_view parameter_open = "<parameter=";
+        if (rest.starts_with("</function>")) { return true; }
+        if (!rest.starts_with(parameter_open)) { return false; }
+        rest.remove_prefix(parameter_open.size());
+        const auto key_end = rest.find('>');
+        return key_end != 0 && key_end != std::string_view::npos &&
+               !keys.contains(std::string(rest.substr(0, key_end)));
+    };
+    auto decode = [&](auto&& self, xgrammar::GrammarMatcher& matcher, std::string_view remaining,
                       std::string serialized, std::size_t count) -> std::optional<ToolCall> {
         remaining                                 = trim_parameter(remaining);
         constexpr std::string_view function_close = "</function>";
@@ -660,7 +673,11 @@ std::optional<ToolCall> TokenGrammarData::decode_call(std::string_view text) con
             remaining = trim_parameter(remaining.substr(function_close.size()));
             if (!remaining.starts_with(tool_close) ||
                 !trim_parameter(remaining.substr(tool_close.size())).empty() ||
-                !matcher.AcceptString("}") || !matcher.IsCompleted()) {
+                !matcher.AcceptString("}")) {
+                return std::nullopt;
+            }
+            if (!matcher.IsCompleted()) {
+                matcher.Rollback(1);
                 return std::nullopt;
             }
             serialized += '}';
@@ -675,35 +692,71 @@ std::optional<ToolCall> TokenGrammarData::decode_call(std::string_view text) con
         const std::string key(remaining.substr(0, key_end));
         if (keys.contains(key)) { return std::nullopt; }
         remaining.remove_prefix(key_end + 1);
+        // The grammar opens a value with [ \n\r\t]* "\n" and closes it with "\n</parameter>".
+        // Any LF of the opening blank run can be the framing LF, the first one first; string
+        // whitespace and embedded XML-looking text remain data.
+        const auto blanks = std::min(remaining.find_first_not_of(" \t\r\n"), remaining.size());
+        if (remaining.substr(0, blanks).find('\n') == std::string_view::npos) {
+            return std::nullopt;
+        }
         const auto prefix = (count ? "," : "") + Json(key).dump() + ":";
         if (!matcher.AcceptString(prefix)) { return std::nullopt; }
         serialized += prefix;
         keys.insert(key);
-        for (auto close = remaining.find(parameter_close); close != std::string_view::npos;
-             close      = remaining.find(parameter_close, close + parameter_close.size())) {
-            auto raw = remaining.substr(0, close);
-            // Only the two canonical framing LFs are removed; string whitespace
-            // and embedded XML-looking text remain data.
-            if (raw.size() < 2 || raw.front() != '\n' || raw.back() != '\n') { continue; }
-            raw.remove_prefix(1);
-            raw.remove_suffix(1);
-            const auto parsed = parse_parameter_json(raw);
-            for (int interpretation = 0; interpretation < 2; ++interpretation) {
-                if (interpretation && (parsed.is_discarded() || parsed == Json(raw))) { continue; }
-                const auto value = interpretation ? parsed.dump() : Json(raw).dump();
-                auto candidate   = matcher.Fork();
-                if (candidate.AcceptString(value)) {
-                    if (auto call = self(self, remaining.substr(close + parameter_close.size()),
-                                         std::move(candidate), serialized + value, count + 1)) {
-                        return call;
+        std::optional<xgrammar::GrammarMatcher> json_matcher;
+        for (auto opening = remaining.find('\n'); opening < blanks;
+             opening      = remaining.find('\n', opening + 1)) {
+            const auto value_begin = opening + 1;
+            int string_rows        = 0;
+            bool string_viable     = matcher.AcceptString("\"");
+            string_rows += string_viable ? 1 : 0;
+            std::string escaped;
+            auto escaped_end = value_begin;
+            for (auto close = remaining.find(parameter_close); close != std::string_view::npos;
+                 close      = remaining.find(parameter_close, close + parameter_close.size())) {
+                if (close < value_begin + 1 || remaining[close - 1] != '\n') { continue; }
+                const auto rest = remaining.substr(close + parameter_close.size());
+                if (!continues(trim_parameter(rest))) { continue; }
+                const auto raw    = remaining.substr(value_begin, close - 1 - value_begin);
+                const auto parsed = parse_parameter_json(raw);
+                if (string_viable) {
+                    auto chunk    = Json(std::string(raw.substr(escaped_end - value_begin))).dump();
+                    chunk         = chunk.substr(1, chunk.size() - 2);
+                    string_viable = matcher.AcceptString(chunk);
+                    if (string_viable) {
+                        ++string_rows;
+                        escaped += chunk;
+                        escaped_end = close - 1;
+                        if (matcher.AcceptString("\"")) {
+                            if (auto call = self(self, matcher, rest,
+                                                 serialized + '"' + escaped + '"', count + 1)) {
+                                return call;
+                            }
+                            matcher.Rollback(1);
+                        }
                     }
                 }
+                if (parsed.is_discarded() || parsed == Json(raw)) { continue; }
+                if (!json_matcher) {
+                    json_matcher.emplace(matcher.Fork());
+                    json_matcher->Rollback(string_rows);
+                }
+                const auto value = parsed.dump();
+                if (json_matcher->AcceptString(value)) {
+                    if (auto call =
+                            self(self, *json_matcher, rest, serialized + value, count + 1)) {
+                        return call;
+                    }
+                    json_matcher->Rollback(1);
+                }
             }
+            if (string_rows != 0) { matcher.Rollback(string_rows); }
         }
         keys.erase(key);
+        matcher.Rollback(1);
         return std::nullopt;
     };
-    return decode(decode, text, std::move(validator), "{", 0);
+    return decode(decode, validator, text, "{", 0);
 }
 
 } // namespace ninfer::targets::qwen3
