@@ -1,3 +1,4 @@
+#include "../tools/r9700/qual_kv_format.h"
 #include "core/device.h"
 #include "core/fp8_int4_paged_kv_cache.h"
 #include "runtime/contract/types.h"
@@ -56,14 +57,16 @@ struct Pool {
     std::unique_ptr<ninfer::PagedKVPool> storage;
 
     explicit Pool(std::uint32_t pages) {
-        spec = {
+        const ninfer::KvCacheFormat format = ninfer::qual::kv_cache_format_from_environment();
+        spec                               = {
+            .format                = format,
             .page_group_count      = pages,
             .logical_page_capacity = 4,
             .table_rows            = 2,
             .layer_count           = 2,
             .head_dim              = 128,
             .num_kv_heads          = 2,
-            .value_group           = 32,
+            .value_group           = format == ninfer::KvCacheFormat::Nvfp4 ? 16 : 32,
             .plane_layouts = {.key         = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
                               .value       = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
                               .value_scale = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor}};

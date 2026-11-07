@@ -156,13 +156,16 @@ static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_
         return hipErrorInvalidValue;
     }
 
-    const std::uint64_t key_elements               = tensor_elements(cache.key_fp8_pages);
-    const std::uint64_t value_elements             = tensor_elements(cache.value_int4_pages);
-    const std::uint64_t scale_elements             = tensor_elements(cache.value_scale_fp16_pages);
-    constexpr std::uint64_t key_elements_per_token = kHeadDim * kKvHeads;
-    if (!contiguous_elements_at_least(cache.key_fp8_pages, DType::FP8_E4M3FN, 1U) ||
-        !contiguous_elements_at_least(cache.value_int4_pages, DType::U8, 1U) ||
-        !contiguous_elements_at_least(cache.value_scale_fp16_pages, DType::FP16, 1U) ||
+    const bool nvfp4                           = cache.format == KvCacheFormat::Nvfp4;
+    const std::uint64_t key_elements           = tensor_elements(cache.key_pages);
+    const std::uint64_t value_elements         = tensor_elements(cache.value_pages);
+    const std::uint64_t scale_elements         = tensor_elements(cache.value_scale_pages);
+    const std::uint64_t key_elements_per_token = (nvfp4 ? kHeadDim / 2U : kHeadDim) * kKvHeads;
+    if (!contiguous_elements_at_least(cache.key_pages, nvfp4 ? DType::U8 : DType::FP8_E4M3FN, 1U) ||
+        !contiguous_elements_at_least(cache.value_pages, DType::U8, 1U) ||
+        !contiguous_elements_at_least(cache.value_scale_pages,
+                                      nvfp4 ? DType::FP8_E4M3FN : DType::FP16, 1U) ||
+        (nvfp4 && !contiguous_elements_at_least(cache.key_scale_pages, DType::FP8_E4M3FN, 1U)) ||
         key_elements == 0U || key_elements % key_elements_per_token != 0U) {
         return hipErrorInvalidValue;
     }
@@ -171,6 +174,7 @@ static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_
     if (physical_tokens == 0U || physical_tokens % kPageSize != 0U ||
         value_elements != physical_tokens * kKvHeads * (kHeadDim / 2U) ||
         scale_elements != physical_tokens * kKvHeads * groups_per_token ||
+        (nvfp4 && tensor_elements(cache.key_scale_pages) != scale_elements) ||
         physical_tokens > std::numeric_limits<std::size_t>::max()) {
         return hipErrorInvalidValue;
     }
@@ -187,15 +191,16 @@ static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_
     }
 
     raw = ops::r9700::kv::Fp8Int4KvAttentionArgs{
-        .query            = static_cast<const hip_bfloat16*>(a.query.data),
-        .key_codes        = static_cast<const std::uint8_t*>(cache.key_fp8_pages.data),
-        .value_codes      = static_cast<const std::uint8_t*>(cache.value_int4_pages.data),
-        .value_scale_bits = static_cast<const std::uint16_t*>(cache.value_scale_fp16_pages.data),
-        .page_table       = a.cache_read.device_table_row() == nullptr
-                                ? static_cast<const std::uint32_t*>(cache.block_table.data)
-                                : a.cache_read.pool_block_tables(),
-        .page_table_pages = mapped_pages,
-        .page_table_row   = a.cache_read.device_table_row(),
+        .query       = static_cast<const hip_bfloat16*>(a.query.data),
+        .key_codes   = static_cast<const std::uint8_t*>(cache.key_pages.data),
+        .value_codes = static_cast<const std::uint8_t*>(cache.value_pages.data),
+        .value_scale_bits =
+            nvfp4 ? nullptr : static_cast<const std::uint16_t*>(cache.value_scale_pages.data),
+        .page_table            = a.cache_read.device_table_row() == nullptr
+                                     ? static_cast<const std::uint32_t*>(cache.block_table.data)
+                                     : a.cache_read.pool_block_tables(),
+        .page_table_pages      = mapped_pages,
+        .page_table_row        = a.cache_read.device_table_row(),
         .page_table_row_stride = a.cache_read.pool_table_row_stride(),
         .page_table_row_count  = a.cache_read.pool_table_row_count(),
         .context               = static_cast<std::size_t>(frontier),
@@ -215,6 +220,11 @@ static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_
         .value_layout          = raw_layout(cache.plane_layouts.value),
         .value_scale_layout    = raw_layout(cache.plane_layouts.value_scale),
         .output                = static_cast<float*>(a.output.data),
+        .codec = nvfp4 ? ops::r9700::kv::KvCodec::Nvfp4 : ops::r9700::kv::KvCodec::Fp8Int4,
+        .key_scale_codes =
+            nvfp4 ? static_cast<const std::uint8_t*>(cache.key_scale_pages.data) : nullptr,
+        .value_scale_codes =
+            nvfp4 ? static_cast<const std::uint8_t*>(cache.value_scale_pages.data) : nullptr,
     };
     return hipSuccess;
 }
@@ -287,8 +297,10 @@ static hipError_t launch_r9700_attention(const R9700FullAttentionArgs& a,
         raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
     if (dense_prefill) {
         hipError_t error = ops::r9700::kv::fp8_int4_kv_attention_dense_prefill(raw, stream);
-        if (error != hipSuccess || !ops::r9700::kv::use_text_p129_wmma_tail(
-                                       static_cast<std::uint32_t>(rows), raw.context)) {
+        // The WMMA tail candidate reads the default codec only; NVFP4 keeps the dense row.
+        if (error != hipSuccess || raw.codec != ops::r9700::kv::KvCodec::Fp8Int4 ||
+            !ops::r9700::kv::use_text_p129_wmma_tail(static_cast<std::uint32_t>(rows),
+                                                     raw.context)) {
             return error;
         }
         const std::size_t tail_score_bytes =

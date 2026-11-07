@@ -95,6 +95,7 @@ struct BenchOptions {
     bool retain_token_ids                      = false;
     bool isolate_prompt_decode                 = false;
     bool automatic_kv_capacity                 = false;
+    ninfer::KvCacheFormat kv_cache_format      = ninfer::KvCacheFormat::Fp8KInt4V;
     OutputFormat output                        = OutputFormat::Table;
     std::string output_file;
     bool help_requested = false;
@@ -151,6 +152,7 @@ struct BenchEnvironment {
     MemorySummary memory;
 
     std::uint32_t max_context                      = 0;
+    ninfer::KvCacheFormat kv_cache_format          = ninfer::KvCacheFormat::Fp8KInt4V;
     std::uint32_t prefill_chunk                    = kDefaultPrefillChunk;
     std::uint32_t concurrency                      = 1;
     std::uint32_t pending_timeout_ms               = kBenchmarkPendingTimeoutMs;

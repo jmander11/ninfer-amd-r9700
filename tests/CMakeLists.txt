@@ -33,6 +33,9 @@ ninfer_add_r9700_test(ninfer_kv_disk_cache_test
   LIBRARIES ninfer_engine ninfer_r9700_core)
 set_tests_properties(ninfer_kv_disk_cache_test PROPERTIES
   LABELS "r9700" RESOURCE_LOCK r9700_device TIMEOUT 300)
+add_test(NAME ninfer_kv_disk_cache_nvfp4_test COMMAND ninfer_kv_disk_cache_test)
+set_tests_properties(ninfer_kv_disk_cache_nvfp4_test PROPERTIES
+  ENVIRONMENT NINFER_QUAL_KV_CACHE=nvfp4 LABELS "r9700" RESOURCE_LOCK r9700_device TIMEOUT 900)
 add_test(NAME ninfer_kv_disk_crc_host_test COMMAND ninfer_kv_disk_cache_test --crc-only)
 set_tests_properties(ninfer_kv_disk_crc_host_test PROPERTIES LABELS "host")
 
@@ -378,6 +381,7 @@ set(ninfer_r9700_qualifiers
   ninfer_r9700_eager_qual
   ninfer_r9700_gdn_qual
   ninfer_r9700_full_attention_qual
+  ninfer_r9700_nvfp4_kv_qual
   ninfer_r9700_xattention_qual
   ninfer_r9700_target_variant_gdn_qual
   ninfer_r9700_mtp_round_qual

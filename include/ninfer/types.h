@@ -131,11 +131,25 @@ struct LoadProgress {
     std::function<void(std::string_view phase, std::uint64_t done, std::uint64_t total)> callback;
 };
 
+// Startup-fixed growing Text/MTP cache codec. Fp8KInt4V (default): FP8 E4M3FN K, signed INT4 V and
+// FP16 V-group scales, 416 bytes per head-token. Nvfp4 (opt-in): E2M1 K and V with one E4M3FN scale
+// per 16 features of each, 288 bytes per head-token, so automatic capacity holds about 1.44x the
+// context at somewhat higher K error. Retained RAM and SSD images bind their format.
+enum class KvCacheFormat : std::uint8_t {
+    Fp8KInt4V,
+    Nvfp4,
+};
+
+[[nodiscard]] constexpr const char* kv_cache_format_name(KvCacheFormat format) noexcept {
+    return format == KvCacheFormat::Nvfp4 ? "nvfp4" : "fp8-k-int4-v";
+}
+
 struct EngineOptions {
     std::filesystem::path artifact_path;
     int device                         = 0;
     std::uint32_t max_context          = 2048; // Exact logical ceiling of each request.
     KvCapacityPolicy kv_capacity       = KvCapacityPolicy::explicit_capacity(2048);
+    KvCacheFormat kv_cache_format      = KvCacheFormat::Fp8KInt4V;
     std::uint32_t max_concurrency      = 1;
     std::uint32_t max_pending_requests = 16;
     std::uint32_t pending_timeout_ms   = 300000;

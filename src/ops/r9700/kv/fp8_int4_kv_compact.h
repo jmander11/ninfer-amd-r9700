@@ -20,9 +20,13 @@ struct Fp8Int4KvCompactArgs {
     Fp8Int4KvPlaneLayout key_layout         = Fp8Int4KvPlaneLayout::FeatureFastest;
     Fp8Int4KvPlaneLayout value_layout       = Fp8Int4KvPlaneLayout::FeatureFastest;
     Fp8Int4KvPlaneLayout value_scale_layout = Fp8Int4KvPlaneLayout::FeatureFastest;
+    // Nvfp4 only, with the planes described by KvCodec; value_scale_bits is unused.
+    KvCodec codec                   = KvCodec::Fp8Int4;
+    std::uint8_t* key_scale_codes   = nullptr;
+    std::uint8_t* value_scale_codes = nullptr;
 };
 
-// Compacts a monotone speculative path in place across the exact three persistent cache planes.
+// Compacts a monotone speculative path in place across the exact persistent planes of the codec.
 // selected_path[i] must be >= i; the caller validates it, owns the zeroed status word, and only
 // commits the new frontier after status remains zero.
 [[nodiscard]] hipError_t fp8_int4_kv_compact(const Fp8Int4KvCompactArgs& a,

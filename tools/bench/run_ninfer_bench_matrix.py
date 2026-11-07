@@ -1669,9 +1669,9 @@ def validate_automatic_feasibility(report: dict[str, Any]) -> dict[str, Any]:
     """Validate auto sizing and classify feasibility or the effective native-context maximum."""
 
     config = report.get("config", {})
-    if config.get("kv_cache_format") != "fp8-k-int4-v":
+    if config.get("kv_cache_format") not in ("fp8-k-int4-v", "nvfp4"):
         raise ValueError("benchmark report has invalid kv_cache_format")
-    if report.get("memory", {}).get("kv_cache_format") != "fp8-k-int4-v":
+    if report.get("memory", {}).get("kv_cache_format") != config.get("kv_cache_format"):
         raise ValueError("benchmark memory report has invalid kv_cache_format")
     memory = report.get("memory", {})
     graph_allowance = memory.get("device_graph_allowance_bytes")

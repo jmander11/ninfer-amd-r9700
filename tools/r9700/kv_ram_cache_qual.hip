@@ -858,7 +858,7 @@ void rewrite_images_round_trip(ninfer::DeviceContext& device,
 // Independent byte oracle for the production three-plane codec. In particular, the
 // expected host image is built from documented [plane][page][head] geometry, not from
 // either transfer implementation or its tensor strides.
-void head_major_host_transfer_oracle(ninfer::DeviceContext& device) {
+void head_major_host_transfer_oracle(ninfer::DeviceContext& device, ninfer::KvCacheFormat format) {
     struct Case {
         std::uint32_t pages;
         std::uint32_t restored;
@@ -866,11 +866,18 @@ void head_major_host_transfer_oracle(ninfer::DeviceContext& device) {
     };
 
     constexpr std::uint32_t heads = 4;
-    constexpr std::array<std::size_t, 3> head_bytes{64U * 256U, 64U * 128U, 64U * 16U * 2U};
+    const bool nvfp4              = format == ninfer::KvCacheFormat::Nvfp4;
+    // K, V, V scale, then NVFP4's K scale, which is head-major like K.
+    const std::vector<std::size_t> head_bytes =
+        nvfp4 ? std::vector<std::size_t>{64U * 128U, 64U * 128U, 64U * 16U, 64U * 16U}
+              : std::vector<std::size_t>{64U * 256U, 64U * 128U, 64U * 16U * 2U};
+    const std::size_t planes_per_layer = head_bytes.size();
+    const std::size_t plane_total      = 16U * planes_per_layer;
     for (const auto test :
          std::array{Case{4, 4, 0}, Case{5, 5, 0}, Case{5, 4, 0}, Case{32, 32, 0}, Case{32, 17, 0},
                     Case{32, 32, 1}, Case{32, 17, 1}, Case{32, 32, 2}, Case{32, 17, 2}}) {
         ninfer::Fp8KInt4VPagedKVSpec spec{
+            .format                = format,
             .page_group_count      = test.pages * (test.fragmentation ? 4U : 2U) + 2U,
             .logical_page_capacity = test.pages,
             .table_rows            = 2,
@@ -908,8 +915,8 @@ void head_major_host_transfer_oracle(ninfer::DeviceContext& device) {
         materialize(destination);
 
         std::size_t expected_size = 0;
-        for (std::size_t plane = 0; plane < 48; ++plane)
-            expected_size += test.pages * heads * head_bytes[plane % 3];
+        for (std::size_t plane = 0; plane < plane_total; ++plane)
+            expected_size += test.pages * heads * head_bytes[plane % planes_per_layer];
         require(expected_size == ninfer::paged_kv_host_image_bytes(pool, test.pages),
                 "production transfer image size disagrees with exact codec oracle");
         std::vector<std::uint8_t> expected(expected_size);
@@ -922,14 +929,16 @@ void head_major_host_transfer_oracle(ninfer::DeviceContext& device) {
         const auto physical_offset = [&](std::size_t plane, std::int32_t physical,
                                          std::size_t head) {
             const auto page = static_cast<std::size_t>(physical);
+            const bool head_major =
+                plane % planes_per_layer == 0U || plane % planes_per_layer == 3U;
             const auto slot =
-                plane % 3 == 0 ? head * spec.page_group_count + page : page * heads + head;
-            return slot * head_bytes[plane % 3];
+                head_major ? head * spec.page_group_count + page : page * heads + head;
+            return slot * head_bytes[plane % planes_per_layer];
         };
         std::size_t image_offset = 0;
-        for (std::size_t plane = 0; plane < 48; ++plane) {
+        for (std::size_t plane = 0; plane < plane_total; ++plane) {
             const auto& tensor = pool.plane(plane);
-            const auto row     = head_bytes[plane % 3];
+            const auto row     = head_bytes[plane % planes_per_layer];
             require(tensor.bytes() == spec.page_group_count * heads * row,
                     "production plane size disagrees with exact codec oracle");
             std::vector<std::uint8_t> physical(tensor.bytes(), 0xa5);
@@ -958,9 +967,9 @@ void head_major_host_transfer_oracle(ninfer::DeviceContext& device) {
         require(std::all_of(guard, guard + 256U, [](auto byte) { return byte == 0xcc; }),
                 "production D2H transfer overwrote its image guard");
         image_offset = 0;
-        for (std::size_t plane = 0; plane < 48; ++plane) {
+        for (std::size_t plane = 0; plane < plane_total; ++plane) {
             const auto& tensor = pool.plane(plane);
-            const auto row     = head_bytes[plane % 3];
+            const auto row     = head_bytes[plane % planes_per_layer];
             std::vector<std::uint8_t> physical(tensor.bytes(), 0xa5), actual(tensor.bytes());
             for (std::size_t page = 0; page < test.pages; ++page)
                 for (std::size_t head = 0; head < heads; ++head) {
@@ -984,13 +993,14 @@ void head_major_host_transfer_oracle(ninfer::DeviceContext& device) {
 
 } // namespace
 
-int main() {
+int qualify_format(ninfer::KvCacheFormat format) {
     try {
         ninfer::DeviceContext device(0);
         require(device.is_gfx1201() && device.props.warpSize == 32,
                 "KV RAM qualifier requires wave32 gfx1201");
 
         const ninfer::Fp8KInt4VPagedKVSpec text_spec{
+            .format                = format,
             .page_group_count      = 10,
             .logical_page_capacity = 8,
             .table_rows            = 4,
@@ -1003,6 +1013,7 @@ int main() {
                               .value_scale = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor},
         };
         const ninfer::Fp8KInt4VPagedKVSpec mtp_spec{
+            .format                = format,
             .page_group_count      = 8,
             .logical_page_capacity = 8,
             .table_rows            = 4,
@@ -1041,8 +1052,10 @@ int main() {
         mtp_hole.materialize_pages(1, device.stream);
         mtp_source.materialize_pages(3, device.stream);
 
-        require(text_source_pool.plane_count() == 6 && mtp_source_pool.plane_count() == 3,
-                "typed Text/MTP pools do not own exactly three planes per layer");
+        const std::size_t planes_per_layer = ninfer::kv_planes_per_layer(format);
+        require(text_source_pool.plane_count() == 2U * planes_per_layer &&
+                    mtp_source_pool.plane_count() == planes_per_layer,
+                "typed Text/MTP pools do not own exactly their format's planes per layer");
         require(text_source.page_ids()[1] != text_source.page_ids()[0] + 1 &&
                     mtp_source.page_ids()[1] != mtp_source.page_ids()[0] + 1,
                 "source page maps were not fragmented");
@@ -1166,7 +1179,7 @@ int main() {
         require(eviction.entry_count == 1 && eviction.captures == 2 && eviction.evictions == 1,
                 "unpinned FIFO entry was not evicted for the replacement image");
 
-        head_major_host_transfer_oracle(device);
+        head_major_host_transfer_oracle(device, format);
         system_prompt_lru(device, text_spec);
         source_preserving_reads(device, text_spec);
         auto mixed_spec                = text_spec;
@@ -1195,4 +1208,11 @@ int main() {
         std::cerr << "kv_ram_cache: FAIL: " << error.what() << '\n';
         return 1;
     }
+}
+
+int main() {
+    return qualify_format(ninfer::KvCacheFormat::Fp8KInt4V) != 0 ||
+                   qualify_format(ninfer::KvCacheFormat::Nvfp4) != 0
+               ? 1
+               : 0;
 }

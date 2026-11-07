@@ -19,7 +19,7 @@ Start with the project `README.md` for the current Radeon AI PRO R9700 build, ar
 Runtime and numerical behavior:
 
 - `maintainer/concurrent-inference-architecture.md`: request/lane lifecycle, scheduling, and Device Graphs.
-- `maintainer/paged-kv-cache.md`: typed FP8-K/INT4-V cache, publication, capacity, and RAM spill.
+- `maintainer/paged-kv-cache.md`: typed FP8-K/INT4-V and opt-in NVFP4 caches, publication, capacity, and RAM spill.
 - `maintainer/softmax-attention.md`: Text/MTP and DFlash2 attention ownership.
 - `maintainer/replayssm-gdn.md`: Gated DeltaNet mathematics and state transitions.
 - `maintainer/op-development.md`: semantic Op admission and independent-oracle rules.

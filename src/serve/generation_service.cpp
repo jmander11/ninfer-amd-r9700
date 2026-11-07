@@ -369,6 +369,7 @@ GenerationService::GenerationService(ServeOptions options, LoadProgress load_pro
     engine_options.kv_disk_capacity_bytes   = options_.kv_disk_capacity_bytes;
     engine_options.kv_disk_location         = options_.kv_disk_location;
     engine_options.kv_disk_compress         = options_.kv_disk_compress;
+    engine_options.kv_cache_format          = options_.kv_cache_format;
     engine_options.context_checkpoint_marks = options_.context_checkpoint_marks;
     engine_options.max_concurrency          = options_.max_concurrency;
     engine_options.generation_recovery      = options_.generation_recovery;

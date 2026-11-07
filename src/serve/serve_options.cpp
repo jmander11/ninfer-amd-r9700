@@ -87,6 +87,12 @@ std::size_t parse_kv_disk_capacity_bytes(const char* text) {
     return static_cast<std::size_t>(bytes);
 }
 
+KvCacheFormat parse_kv_cache(const char* text) {
+    if (std::string_view(text) == "fp8-int4") { return KvCacheFormat::Fp8KInt4V; }
+    if (std::string_view(text) == "nvfp4") { return KvCacheFormat::Nvfp4; }
+    throw std::invalid_argument("--kv-cache must be fp8-int4 or nvfp4");
+}
+
 KvDiskCompress parse_kv_disk_compress(const char* text) {
     if (text == nullptr || std::string_view(text) == "off") { return KvDiskCompress::Off; }
     if (std::string_view(text) == "zstd") { return KvDiskCompress::Zstd; }
@@ -98,7 +104,8 @@ KvDiskCompress parse_kv_disk_compress(const char* text) {
 std::string serve_usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> [--host H] [--port N] [--api-key KEY] "
-           "[--model-id ID] [--max-context N] [--kv-capacity N|auto] [--kv-capacity-headroom MiB] "
+           "[--model-id ID] [--max-context N] [--kv-cache fp8-int4|nvfp4] [--kv-capacity N|auto] "
+           "[--kv-capacity-headroom MiB] "
            "[--kv-ram-capacity off|N] [--kv-ram-system-prompts N] "
            "[--kv-disk-capacity off|N] [--kv-disk-location PATH] [--kv-disk-compress off|zstd] "
            "[--max-concurrency 1..16] [--no-generation-recovery] "
@@ -134,6 +141,8 @@ std::string serve_usage_text(const char* argv0) {
            "       --max-concurrency accepts 1..16 with --spec none or mtp; DFlash: 1..12\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
+           "       --kv-cache selects the growing Text/MTP KV codec: fp8-int4 (default) or nvfp4,\n"
+           "       which stores about 1.44x the context at somewhat higher key error.\n"
            "       --kv-capacity defaults to auto: sizes KV from all free GPU memory except "
            "--kv-capacity-headroom "
            "MiB (default " +
@@ -216,6 +225,8 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--max-context") {
             options.max_context = static_cast<std::uint32_t>(
                 parse_nonnegative_int(require_value("--max-context"), "max-context"));
+        } else if (arg == "--kv-cache") {
+            options.kv_cache_format = parse_kv_cache(require_value("--kv-cache"));
         } else if (arg == "--kv-capacity") {
             options.kv_capacity = parse_kv_capacity(require_value("--kv-capacity"));
         } else if (arg == "--kv-capacity-headroom") {

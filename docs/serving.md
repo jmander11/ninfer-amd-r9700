@@ -522,6 +522,7 @@ curl http://127.0.0.1:8080/v1/models \
 | `--api-key KEY` | required bearer or `x-api-key` value | unset |
 | `--model-id ID` | override the public OpenAI model alias | artifact `identity.model_id` |
 | `--max-context N` | logical context ceiling of each sequence | `8192` |
+| `--kv-cache fp8-int4\|nvfp4` | growing Text/MTP KV codec; `nvfp4` holds about 1.44x the context in the same memory at higher key error | `fp8-int4` |
 | `--kv-capacity N\|auto` | explicit shared Main Text KV capacity, or maximize it from remaining GPU memory | `auto` |
 | `--kv-capacity-headroom MiB` | device memory `--kv-capacity auto` leaves free; requires `auto` | `64` |
 | `--kv-ram-capacity off\|N` | pinned host capacity in MiB for completed prefixes and live suspension; enables output windows up to 8192 tokens | `off` |

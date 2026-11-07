@@ -355,13 +355,13 @@ void qualify_long_dflash(ninfer::DeviceContext& device, std::uint32_t selected_c
             HIP_CHECK(hipMemsetAsync(tables.data, 0xff, tables.bytes(), device.stream));
             allocation.bind_row(selected_row, device.stream);
             const auto view = typed_cache.layer_view(0, allocation);
-            HIP_CHECK(hipMemcpyAsync(view.key_fp8_pages.data, cache.physical_keys.data(),
+            HIP_CHECK(hipMemcpyAsync(view.key_pages.data, cache.physical_keys.data(),
                                      cache.physical_keys.size(), hipMemcpyHostToDevice,
                                      device.stream));
-            HIP_CHECK(hipMemcpyAsync(view.value_int4_pages.data, cache.physical_values.data(),
+            HIP_CHECK(hipMemcpyAsync(view.value_pages.data, cache.physical_values.data(),
                                      cache.physical_values.size(), hipMemcpyHostToDevice,
                                      device.stream));
-            HIP_CHECK(hipMemcpyAsync(view.value_scale_fp16_pages.data, cache.physical_scales.data(),
+            HIP_CHECK(hipMemcpyAsync(view.value_scale_pages.data, cache.physical_scales.data(),
                                      cache.physical_scales.size() * sizeof(std::uint16_t),
                                      hipMemcpyHostToDevice, device.stream));
             const auto queries      = make_queries(rows);
@@ -670,18 +670,18 @@ int main(int argc, char** argv) {
                 q27::r9700_full_attention_workspace_capacity_bytes(rows, kContext + 1U, false));
         ninfer::DeviceBuffer d_score_workspace(score_workspace_capacity);
         const ninfer::Fp8KInt4VPagedKVLayerView view = typed_cache.layer_view(0, allocation);
-        if (view.key_fp8_pages.bytes() != cache.physical_keys.size() ||
-            view.value_int4_pages.bytes() != cache.physical_values.size() ||
-            view.value_scale_fp16_pages.bytes() !=
+        if (view.key_pages.bytes() != cache.physical_keys.size() ||
+            view.value_pages.bytes() != cache.physical_values.size() ||
+            view.value_scale_pages.bytes() !=
                 cache.physical_scales.size() * sizeof(std::uint16_t)) {
             fail("typed cache physical planes differ from the independent layout oracle");
         }
-        HIP_CHECK(hipMemcpyAsync(view.key_fp8_pages.data, cache.physical_keys.data(),
+        HIP_CHECK(hipMemcpyAsync(view.key_pages.data, cache.physical_keys.data(),
                                  cache.physical_keys.size(), hipMemcpyHostToDevice, device.stream));
-        HIP_CHECK(hipMemcpyAsync(view.value_int4_pages.data, cache.physical_values.data(),
+        HIP_CHECK(hipMemcpyAsync(view.value_pages.data, cache.physical_values.data(),
                                  cache.physical_values.size(), hipMemcpyHostToDevice,
                                  device.stream));
-        HIP_CHECK(hipMemcpyAsync(view.value_scale_fp16_pages.data, cache.physical_scales.data(),
+        HIP_CHECK(hipMemcpyAsync(view.value_scale_pages.data, cache.physical_scales.data(),
                                  cache.physical_scales.size() * sizeof(std::uint16_t),
                                  hipMemcpyHostToDevice, device.stream));
         device.synchronize();
@@ -1057,23 +1057,22 @@ int main(int argc, char** argv) {
 
         const auto& raw_cache = committed_read.layer();
         ninfer::ops::r9700::kv::Fp8Int4KvAttentionArgs raw_tree{
-            .query       = static_cast<const hip_bfloat16*>(d_queries.data()),
-            .key_codes   = static_cast<const std::uint8_t*>(raw_cache.key_fp8_pages.data),
-            .value_codes = static_cast<const std::uint8_t*>(raw_cache.value_int4_pages.data),
-            .value_scale_bits =
-                static_cast<const std::uint16_t*>(raw_cache.value_scale_fp16_pages.data),
-            .page_table           = static_cast<const std::uint32_t*>(raw_cache.block_table.data),
-            .page_table_pages     = static_cast<std::uint32_t>(kMappedPages),
-            .context              = kContext,
-            .physical_tokens      = kPhysicalTokens,
-            .query_heads          = static_cast<std::uint32_t>(kQueryHeads),
-            .kv_heads             = static_cast<std::uint32_t>(kKvHeads),
-            .q_to_kv              = static_cast<std::uint32_t>(kQueriesPerKv),
-            .value_group          = static_cast<std::uint32_t>(kValueGroup),
-            .query_rows           = static_cast<std::uint32_t>(kTreeRows),
-            .row_positions        = static_cast<const std::int32_t*>(d_row_positions.data()),
-            .ancestor_masks       = static_cast<const std::int32_t*>(d_ancestor_masks.data()),
-            .prefix_lengths       = static_cast<const std::int32_t*>(d_prefix_lengths.data()),
+            .query            = static_cast<const hip_bfloat16*>(d_queries.data()),
+            .key_codes        = static_cast<const std::uint8_t*>(raw_cache.key_pages.data),
+            .value_codes      = static_cast<const std::uint8_t*>(raw_cache.value_pages.data),
+            .value_scale_bits = static_cast<const std::uint16_t*>(raw_cache.value_scale_pages.data),
+            .page_table       = static_cast<const std::uint32_t*>(raw_cache.block_table.data),
+            .page_table_pages = static_cast<std::uint32_t>(kMappedPages),
+            .context          = kContext,
+            .physical_tokens  = kPhysicalTokens,
+            .query_heads      = static_cast<std::uint32_t>(kQueryHeads),
+            .kv_heads         = static_cast<std::uint32_t>(kKvHeads),
+            .q_to_kv          = static_cast<std::uint32_t>(kQueriesPerKv),
+            .value_group      = static_cast<std::uint32_t>(kValueGroup),
+            .query_rows       = static_cast<std::uint32_t>(kTreeRows),
+            .row_positions    = static_cast<const std::int32_t*>(d_row_positions.data()),
+            .ancestor_masks   = static_cast<const std::int32_t*>(d_ancestor_masks.data()),
+            .prefix_lengths   = static_cast<const std::int32_t*>(d_prefix_lengths.data()),
             .prefix_length_stride = 0U,
             .attention_scale      = kAttentionScale,
             .key_layout           = ninfer::ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest,

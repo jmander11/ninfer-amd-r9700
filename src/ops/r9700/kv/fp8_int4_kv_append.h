@@ -20,6 +20,17 @@ enum class Fp8Int4KvPlaneLayout : std::uint8_t {
     TokenFastest,
 };
 
+// Startup-selected growing-cache codec. Fp8Int4 is the default: E4M3FN K, signed INT4 V and FP16
+// V-group scales. Nvfp4 stores K and V as E2M1 with one E4M3FN scale per 16 features of each,
+// encoded E4M3_satfinite_rn(FP32_rn(max|x| / 6)) and E2M1_rn(FP32_rn(x / decoded scale)); a zero
+// scale produces zero codes. Its planes have one fixed order (the fastest measured): K codes and
+// K scales TokenFastest, V codes and V scales FeatureFastest. No caller may reinterpret one
+// codec's bytes as the other's.
+enum class KvCodec : std::uint8_t {
+    Fp8Int4,
+    Nvfp4,
+};
+
 enum Fp8Int4KvAppendStatus : std::uint32_t {
     Fp8Int4KvAppendOk              = 0,
     Fp8Int4KvAppendNonfiniteInput  = 1U << 0U,
@@ -67,6 +78,11 @@ struct Fp8Int4KvAppendArgs {
     Fp8Int4KvPlaneLayout key_layout         = Fp8Int4KvPlaneLayout::FeatureFastest;
     Fp8Int4KvPlaneLayout value_layout       = Fp8Int4KvPlaneLayout::FeatureFastest;
     Fp8Int4KvPlaneLayout value_scale_layout = Fp8Int4KvPlaneLayout::FeatureFastest;
+    // Nvfp4 only: key_codes and value_codes hold packed E2M1 bytes, and these planes the E4M3FN
+    // scales. value_scale_bits is unused.
+    KvCodec codec                   = KvCodec::Fp8Int4;
+    std::uint8_t* key_scale_codes   = nullptr;
+    std::uint8_t* value_scale_codes = nullptr;
 };
 
 // Launches the exact stored-format A2 append codec. physical_tokens must be a positive multiple

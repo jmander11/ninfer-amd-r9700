@@ -15,6 +15,11 @@
 namespace ninfer::targets::qwen3 {
 namespace {
 
+ops::r9700::kv::KvCodec raw_codec(KvCacheFormat format) noexcept {
+    return format == KvCacheFormat::Nvfp4 ? ops::r9700::kv::KvCodec::Nvfp4
+                                          : ops::r9700::kv::KvCodec::Fp8Int4;
+}
+
 ops::r9700::kv::Fp8Int4KvPlaneLayout raw_layout(Fp8KInt4VPlaneLayout layout) {
     switch (layout) {
     case Fp8KInt4VPlaneLayout::FeatureFastestPageMajor:
@@ -383,14 +388,17 @@ PagedKVTransaction::prepare_append_layer(std::uint32_t layer, const hip_bfloat16
         .page_table_row_count  = static_cast<std::uint32_t>(cache_->pool().table_row_count()),
         .physical_tokens       = static_cast<std::size_t>(cache_->spec_.page_group_count) *
                                  static_cast<std::size_t>(kPagedKVPageSize),
-        .key_codes             = static_cast<std::uint8_t*>(binding.cache.key_fp8_pages.data),
-        .value_codes           = static_cast<std::uint8_t*>(binding.cache.value_int4_pages.data),
-        .value_scale_bits = static_cast<std::uint16_t*>(binding.cache.value_scale_fp16_pages.data),
-        .status           = workspace_.status,
-        .value_group      = static_cast<std::uint32_t>(binding.cache.value_group),
-        .key_layout       = raw_layout(binding.cache.plane_layouts.key),
-        .value_layout     = raw_layout(binding.cache.plane_layouts.value),
-        .value_scale_layout = raw_layout(binding.cache.plane_layouts.value_scale),
+        .key_codes             = static_cast<std::uint8_t*>(binding.cache.key_pages.data),
+        .value_codes           = static_cast<std::uint8_t*>(binding.cache.value_pages.data),
+        .value_scale_bits      = static_cast<std::uint16_t*>(binding.cache.value_scale_pages.data),
+        .status                = workspace_.status,
+        .value_group           = static_cast<std::uint32_t>(binding.cache.value_group),
+        .key_layout            = raw_layout(binding.cache.plane_layouts.key),
+        .value_layout          = raw_layout(binding.cache.plane_layouts.value),
+        .value_scale_layout    = raw_layout(binding.cache.plane_layouts.value_scale),
+        .codec                 = raw_codec(binding.cache.format),
+        .key_scale_codes       = static_cast<std::uint8_t*>(binding.cache.key_scale_pages.data),
+        .value_scale_codes     = static_cast<std::uint8_t*>(binding.cache.value_scale_pages.data),
     };
     launched_ = true;
     return args;
@@ -498,14 +506,17 @@ void PagedKVTransaction::launch_compact_layer(std::uint32_t layer, std::uint32_t
         .physical_tokens    = static_cast<std::size_t>(cache_->spec_.page_group_count) *
                               static_cast<std::size_t>(kPagedKVPageSize),
         .kv_heads           = static_cast<std::uint32_t>(view.num_kv_heads),
-        .key_codes          = static_cast<std::uint8_t*>(view.key_fp8_pages.data),
-        .value_codes        = static_cast<std::uint8_t*>(view.value_int4_pages.data),
-        .value_scale_bits   = static_cast<std::uint16_t*>(view.value_scale_fp16_pages.data),
+        .key_codes          = static_cast<std::uint8_t*>(view.key_pages.data),
+        .value_codes        = static_cast<std::uint8_t*>(view.value_pages.data),
+        .value_scale_bits   = static_cast<std::uint16_t*>(view.value_scale_pages.data),
         .status             = workspace_.status,
         .value_group        = static_cast<std::uint32_t>(view.value_group),
         .key_layout         = raw_layout(view.plane_layouts.key),
         .value_layout       = raw_layout(view.plane_layouts.value),
         .value_scale_layout = raw_layout(view.plane_layouts.value_scale),
+        .codec              = raw_codec(view.format),
+        .key_scale_codes    = static_cast<std::uint8_t*>(view.key_scale_pages.data),
+        .value_scale_codes  = static_cast<std::uint8_t*>(view.value_scale_pages.data),
     };
     launched_ = true;
     HIP_CHECK(ops::r9700::kv::fp8_int4_kv_compact(args, stream));

@@ -145,7 +145,7 @@ void write_semantic_fingerprint(Cursor& w, const Fp8KInt4VSemanticFingerprint& f
     w.u8(static_cast<std::uint8_t>(fingerprint.plane_layouts.key));
     w.u8(static_cast<std::uint8_t>(fingerprint.plane_layouts.value));
     w.u8(static_cast<std::uint8_t>(fingerprint.plane_layouts.value_scale));
-    w.u8(0);
+    w.u8(static_cast<std::uint8_t>(fingerprint.format));
 }
 
 Fp8KInt4VSemanticFingerprint read_semantic_fingerprint(InCursor& r) {
@@ -161,13 +161,14 @@ Fp8KInt4VSemanticFingerprint read_semantic_fingerprint(InCursor& r) {
     fingerprint.plane_layouts.key         = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
     fingerprint.plane_layouts.value       = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
     fingerprint.plane_layouts.value_scale = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
-    r.skip(1);
+    fingerprint.format                    = static_cast<KvCacheFormat>(r.u8());
     return fingerprint;
 }
 
 Fp8KInt4VPagedKVSpec spec_for_pool(const Fp8KInt4VSemanticFingerprint& fingerprint,
                                    const PagedKVPool& pool) {
-    return {.page_group_count      = fingerprint.page_group_count,
+    return {.format                = fingerprint.format,
+            .page_group_count      = fingerprint.page_group_count,
             .logical_page_capacity = fingerprint.logical_page_capacity,
             .table_rows            = pool.table_row_count(),
             .layer_count           = fingerprint.layer_count,
@@ -185,9 +186,10 @@ void verify_semantic_pool(const Fp8KInt4VSemanticFingerprint& fingerprint, const
     }
     const Fp8KInt4VPagedKVSpec spec = spec_for_pool(fingerprint, pool);
     require_fp8_k_int4_v_semantic_fingerprint(fingerprint, fp8_k_int4_v_semantic_fingerprint(spec));
-    if (pool.plane_count() != static_cast<std::size_t>(fingerprint.layer_count) * 3U) {
+    if (pool.plane_count() != static_cast<std::size_t>(fingerprint.layer_count) *
+                                  kv_planes_per_layer(fingerprint.format)) {
         throw std::logic_error(std::string(label) +
-                               " must contain exactly K, V, and V-scale per layer");
+                               " must contain exactly its format's planes per layer");
     }
     for (std::int32_t layer = 0; layer < fingerprint.layer_count; ++layer) {
         (void)fp8_k_int4_v_paged_kv_layer_view(pool, spec, layer, 0);

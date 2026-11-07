@@ -1,16 +1,23 @@
-# FP8-K/INT4-V paged context store
+# Paged context store: FP8-K/INT4-V and opt-in NVFP4
 
 This document defines growing key/value storage and publication for Qwen3.8-27B on R9700, including attention access, retained prefixes, host-RAM spill and SSD storage. The attention and Op references define kernel arithmetic; `concurrent-inference-architecture.md` defines scheduling.
 
 ## 1. Product contract
 
-The Text and MTP growing caches have exactly three persistent planes:
+The Text and MTP growing caches use one startup-selected codec (`--kv-cache`, `EngineOptions::kv_cache_format`). The default FP8-K/INT4-V codec has exactly three persistent planes:
 
 - K: one OCP FP8 E4M3FN byte per feature;
 - V: signed canonical INT4, two codes per byte; and
 - V scale: one IEEE FP16 scale for each fixed feature group.
 
-There is no K scale, K mean, homogeneous cache dtype, runtime cache-format selector, or alternate growing-cache path. Represented BF16 K/V inputs are quantized only when appended. Attention reads the stored representation directly; it never gathers the cache into a request-contiguous buffer.
+The opt-in NVFP4 codec has exactly four, in the order K, V, V scale, K scale, and stores 288 instead of 416 bytes per head-token, so the same memory holds about 1.44x the context:
+
+- K and V: E2M1, two codes per byte; and
+- K scale and V scale: one E4M3FN byte per 16 features: `E4M3_satfinite_rn(FP32_rn(max|x| / 6))`, with codes `E2M1_rn(FP32_rn(x / decoded scale))` and zero codes under a zero scale.
+
+The codec is fixed for an Engine's lifetime and requests cannot select it. NVFP4 uses no global scales or K mean, and qualifies only G16 in its one plane order below. Sections below that name the three-plane format apply to both codecs unless they say otherwise.
+
+There is no K mean, homogeneous cache dtype, or per-request cache-format selector. Represented BF16 K/V inputs are quantized only when appended. Attention reads the stored representation directly; it never gathers the cache into a request-contiguous buffer.
 
 The product is one resident model on one `gfx1201` wave32 device with startup-fixed concurrency `C=1..16` (`C=1..12` under DFlash). A single request may consume most of the shared physical page pool. Active, retained, and speculative provisional state use the same entitlement accounting.
 
@@ -120,9 +127,9 @@ The retained historical schema-v12 directories are `profiles/bench/pareto-capaci
 
 These once superseded every earlier capacity generation, but are themselves historical after the C=1..4 product-cap migration and cannot enter the current selection. Fresh exact C=1..8 capacity matrices are required for both eligible recipes, both cache groups, and each candidate execution profile. The still earlier generations are the `pareto-capacity-layout-*` pair with always-on nested ROCTX markers, the completed G16 and interrupted G32 `pareto-capacity-unprofiled-layout-*` intermediate runs, and the schema-v11 manifest/schema-v18 report `pareto-capacity-max-*` pair. All old raw evidence remains unchanged as historical evidence; none is valid input to the current selection frontier.
 
-## 5. Three-plane physical layout
+## 5. Physical plane layout
 
-Every layer has three required planes. A page-group ID identifies the same 64 logical positions across all three planes and all layers in that pool. There is one I32 block-table row per allocation, not a table per plane, layer, or head.
+Every layer has its codec's required planes. A page-group ID identifies the same 64 logical positions across all of its codec's planes and all layers in that pool. There is one I32 block-table row per allocation, not a table per plane, layer, or head.
 
 Each plane independently selects one of two closed physical orders:
 
@@ -137,7 +144,9 @@ The startup profile fixes all three orders. Requests and runtime modes cannot se
 | V INT4 | feature-fastest, page-major |
 | V-scale FP16 | feature-fastest, page-major |
 
-The generic pool records plane extents, element type, alignment, slab order, and intra-page order. The typed wrapper validates exact K/V/scale geometry before exposing a layer view. Storage contains no optional fourth plane.
+NVFP4 fixes one profile: K codes and K scales token-fastest, head-major; V codes and V scales feature-fastest, page-major.
+
+The generic pool records plane extents, element type, alignment, slab order, and intra-page order. The typed wrapper validates exact K/V/scale geometry before exposing a layer view. The default codec has exactly three planes; NVFP4 adds its key-scale plane as a fourth, and no codec has optional planes.
 
 For a logical position `p`:
 
@@ -260,13 +269,13 @@ Direct disk reads use ordinary aligned staging before copying into pinned GTT: o
 
 A closed preserve-off turn is captured cut at its turn checkpoint. The request stopped on a stop token or string without a tool call, and its `TurnClosure` checkpoint `F` is its own generation opener (frontend `generation_opener`; a checkpoint inside a tool loop sits at the loop's first opener and is not marked). The next preserve-off prompt re-renders that reply without reasoning and diverges after `F`, so no frontier past `F` is reachable. The RAM entry, and therefore its disk spill, stores the lane as of `F`: ledger, identity, Text and backend KV end at `F`; the current GDN state, DFlash cyclic lane and tail hidden are the checkpoint's; no rewrite set and no head past `F` is stored. The next turn appends at `F` with the reuse length `restore_turn_checkpoint` had, so each entry holds one state set. Such a request appending from a cut RAM/disk entry writes no automatic turn-rollback head; a resident append writes it as usual. The VRAM retained lane is unchanged. Cost: switching that conversation to preserve-on, or continuing the reply as an assistant prefill, re-prefills the reply.
 
-RAM image version 6 binds both semantic and per-plane physical fingerprints. Capture explicitly returns captured, needs-eviction, or dropped; the caller owns spill/eviction decisions. Optional pinned allocation failure leaves the request able to proceed without retained cache capture. The startup pinned arena uses driver-backed HIP/GTT host memory and is zero-initialized; its preparation can overlap artifact materialization. Device startup fixes `HSA_USERPTR_FOR_PAGED_MEM=0` with normal SVM/unified addressing before HIP initialization, so these buffers do not use the movable USERPTR backing implicated in compaction stalls. RAM KV capacity, checkpoint slabs, mapped weights, transfer staging and runtime host buffers share the device's GTT budget as well as host-memory resources. Each allocation checks current GTT availability; HIP allocation remains authoritative under concurrent usage. Engine startup fails clearly when its requested capacity cannot be allocated; it never silently shrinks the RAM tier or falls back to registered pageable memory.
+RAM image version 6 binds both semantic and per-plane physical fingerprints, including the codec. An SSD directory binds its codec too: starting an Engine on a directory written by the other codec fails with `KV disk fingerprint mismatch: text_codec`, as for another model, so keep one `--kv-disk-location` per codec. Capture explicitly returns captured, needs-eviction, or dropped; the caller owns spill/eviction decisions. Optional pinned allocation failure leaves the request able to proceed without retained cache capture. The startup pinned arena uses driver-backed HIP/GTT host memory and is zero-initialized; its preparation can overlap artifact materialization. Device startup fixes `HSA_USERPTR_FOR_PAGED_MEM=0` with normal SVM/unified addressing before HIP initialization, so these buffers do not use the movable USERPTR backing implicated in compaction stalls. RAM KV capacity, checkpoint slabs, mapped weights, transfer staging and runtime host buffers share the device's GTT budget as well as host-memory resources. Each allocation checks current GTT availability; HIP allocation remains authoritative under concurrent usage. Engine startup fails clearly when its requested capacity cannot be allocated; it never silently shrinks the RAM tier or falls back to registered pageable memory.
 
 `--kv-disk-capacity` and `--kv-disk-location` enable an inclusive persistent SSD tier; a nonzero RAM tier is required. Each RAM capture requests a write-behind spill on the disk worker, so entries usually become durable while other requests decode.
 
 When a capture needs RAM, the oldest unpinned disk-durable entry is evicted first. Without one, the in-flight write-behind spill, or else the oldest savable entry, is spilled first: synchronously when no other lane is decoding, otherwise at emergency priority on the disk worker while the admission stays queued, claims and captures nothing, and the other lanes keep decoding. The admission retries once that spill commits, so decoding never waits for a disk write and an entry is dropped unsaved only when the disk cannot store it; when disk bandwidth is the limit, admission (TTFT) waits for it. Entries captured earlier in the same admission attempt, which the deferral rolls back, are never the spill it waits on nor the unsaved drop, so the retried attempt cannot defer on its own capture. A disk restore whose setup would wait for another entry's window reads holds admission while other lanes keep decoding.
 
-Disk version 8 stores raw or Zstd-compressed exact logical-page payloads plus complete checkpoint state. Packing respects each of the three planes' slab and intra-page order; scatter restores represented bytes without dequantization. Durable identity binds model, weights, artifact, fixed codec semantics and Vision-aware prefix identity, but excludes pool allocation capacity so a compatible restart may resize the pool. RAM images retain their stricter physical fingerprint; disk restore reconstructs the current physical mapping rather than importing old page IDs.
+Disk version 8 stores raw or Zstd-compressed exact logical-page payloads plus complete checkpoint state. Packing respects each plane's slab and intra-page order; scatter restores represented bytes without dequantization. Durable identity binds model, weights, artifact, fixed codec semantics and Vision-aware prefix identity, but excludes pool allocation capacity so a compatible restart may resize the pool. RAM images retain their stricter physical fingerprint; disk restore reconstructs the current physical mapping rather than importing old page IDs.
 
 Ranking selects the longest complete usable frontier; ties keep VRAM before RAM before disk. Bounded reader/staging resources may overlap validated page copies with further reads, but a lane is not published until all state owners and the copy event complete. Cancellation drains I/O and releases the pinned entry generation without deleting its durable source.
 
@@ -381,7 +390,7 @@ The complete BF16 source checkpoint and supported Python environment are present
 
 Fixed architecture:
 
-- FP8 E4M3FN K, signed INT4 V, FP16 V scale, three planes only;
+- default FP8 E4M3FN K, signed INT4 V, FP16 V scale in three planes; opt-in NVFP4 E2M1 K/V with E4M3 G16 K and V scales in four planes;
 - `P=64`, pool-local I32 page-group IDs, one allocation-owned block-table row;
 - Text/MTP physical separation and target-derived capacity coupling;
 - generation-bound read capabilities and transaction-only publication;
@@ -399,6 +408,6 @@ Changing page size, code semantics, scale type, pool grouping, page-ID model, pu
 
 ## Disposable cache reads
 
-`ExecutionOptions.cache_write=false` forks a selected prefix into independent allocations and complete continuation state. It never shares writable pages, mutates source checkpoints, or consumes a RAM/disk original. Copy all three planes in their per-plane stored layouts, including partial final pages; preserve logical publication frontiers and initialize GDN, hidden state, position/media metadata and MTP/DFlash state at the selected frontier. Reader fences protect source allocations and images. A pending AMD GDN fold is materialized before copying current state.
+`ExecutionOptions.cache_write=false` forks a selected prefix into independent allocations and complete continuation state. It never shares writable pages, mutates source checkpoints, or consumes a RAM/disk original. Copy all of the codec's planes in their per-plane stored layouts, including partial final pages; preserve logical publication frontiers and initialize GDN, hidden state, position/media metadata and MTP/DFlash state at the selected frontier. Reader fences protect source allocations and images. A pending AMD GDN fold is materialized before copying current state.
 
 An ordinary original may migrate into a full-original RAM image before its GPU bundle is released, bypassing closed-turn rewrite cutting while keeping existing checkpoints. A disposable original cannot be offloaded. Disposable completion retains only coherent current state in VRAM; no future-reuse checkpoint, RAM or disk capture is created. Disposable retention precedes ordinary retention for lane replacement and page reclamation. A later writable continuation promotes its own resulting state. Cancellation drains destination readers; a committed original migration remains cached. The concurrent architecture defines preservation-feasible admission and failure classification.

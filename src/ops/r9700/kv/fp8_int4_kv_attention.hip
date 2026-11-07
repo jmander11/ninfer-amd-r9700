@@ -26,6 +26,38 @@ inline constexpr std::uint32_t kSplitTokens  = 512;
            layout == Fp8Int4KvPlaneLayout::TokenFastest;
 }
 
+// The codec's persistent planes are bound; Nvfp4 additionally has its one fixed plane order and
+// G16.
+[[nodiscard]] constexpr bool valid_codec_planes(const Fp8Int4KvAttentionArgs& a) noexcept {
+    if (a.codec == KvCodec::Fp8Int4) return a.value_scale_bits != nullptr;
+    return a.codec == KvCodec::Nvfp4 && a.key_scale_codes != nullptr &&
+           a.value_scale_codes != nullptr && a.value_group == 16U &&
+           a.key_layout == Fp8Int4KvPlaneLayout::TokenFastest &&
+           a.value_layout == Fp8Int4KvPlaneLayout::FeatureFastest &&
+           a.value_scale_layout == Fp8Int4KvPlaneLayout::FeatureFastest;
+}
+
+// One E2M1 magnitude table as the high byte of FP16 (exact; the low byte is zero).
+__device__ __forceinline__ std::uint32_t e2m1_f16_high_bytes(std::uint32_t codes) {
+    return __builtin_amdgcn_perm(0x46444240U, 0x3e3c3800U, codes & 0x07070707U) |
+           ((codes & 0x08080808U) << 4U);
+}
+
+// The same table divided by eight, for the FP16 V/8 PV staging.
+__device__ __forceinline__ std::uint32_t e2m1_over8_f16_high_bytes(std::uint32_t codes) {
+    return __builtin_amdgcn_perm(0x3a383634U, 0x32302c00U, codes & 0x07070707U) |
+           ((codes & 0x08080808U) << 4U);
+}
+
+__device__ __forceinline__ float e2m1_float(std::uint32_t code) {
+    return __half2float(
+        __ushort_as_half(static_cast<unsigned short>((e2m1_f16_high_bytes(code) & 0xffU) << 8U)));
+}
+
+__device__ __forceinline__ float e4m3_float(std::uint32_t code) {
+    return __half2float(__half(__hip_cvt_fp8_to_halfraw(code, __HIP_E4M3)));
+}
+
 template <bool TokenFastest>
 __device__ std::size_t key_offset(std::size_t token, std::uint32_t head, std::uint32_t feature,
                                   std::uint32_t heads, std::size_t physical_tokens) {
@@ -373,6 +405,81 @@ hipError_t int4_kv_pv_vector(const Int4KvPvArgs& a, hipStream_t stream) noexcept
                                  : hipErrorInvalidValue;
 }
 
+// Per-element plane access of the score-streaming routes.
+struct Fp8Int4ElementCodec {
+    using ValueScale = std::uint16_t;
+
+    struct Value {
+        float code, scale;
+    };
+
+    [[nodiscard]] static const ValueScale* value_scales(const Fp8Int4KvAttentionArgs& a) {
+        return a.value_scale_bits;
+    }
+
+    template <bool KToken>
+    __device__ static __forceinline__ float
+    key(const std::uint8_t* keys, const std::uint8_t*, std::size_t physical, std::uint32_t kvh,
+        std::uint32_t feature, std::uint32_t heads, std::size_t physical_tokens) {
+        return __half2float(__half(__hip_cvt_fp8_to_halfraw(
+            keys[key_offset<KToken>(physical, kvh, feature, heads, physical_tokens)], __HIP_E4M3)));
+    }
+
+    template <std::uint32_t Group, bool VToken, bool SToken>
+    __device__ static __forceinline__ Value value(const std::uint8_t* values,
+                                                  const ValueScale* scales, std::size_t physical,
+                                                  std::uint32_t kvh, std::uint32_t feature,
+                                                  std::uint32_t heads,
+                                                  std::size_t physical_tokens) {
+        const std::uint8_t packed = values[int4_offset<Group, VToken, SToken>(
+            physical, kvh, feature, heads, physical_tokens, false)];
+        int code                  = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
+        code                      = code >= 8 ? code - 16 : code;
+        const std::uint16_t bits  = scales[int4_offset<Group, VToken, SToken>(
+            physical, kvh, feature, heads, physical_tokens, true)];
+        return {static_cast<float>(code), __half2float(__ushort_as_half(bits))};
+    }
+};
+
+struct Nvfp4ElementCodec {
+    using ValueScale = std::uint8_t;
+
+    struct Value {
+        float code, scale;
+    };
+
+    [[nodiscard]] static const ValueScale* value_scales(const Fp8Int4KvAttentionArgs& a) {
+        return a.value_scale_codes;
+    }
+
+    template <bool KToken>
+    __device__ static __forceinline__ float
+    key(const std::uint8_t* keys, const std::uint8_t* key_scales, std::size_t physical,
+        std::uint32_t kvh, std::uint32_t feature, std::uint32_t, std::size_t physical_tokens) {
+        static_assert(KToken);
+        const std::size_t in_page   = physical % kPageSize;
+        const std::size_t head_page = physical / kPageSize + physical_tokens / kPageSize * kvh;
+        const std::uint32_t packed  = keys[in_page + kPageSize * (feature / 2U + 128U * head_page)];
+        const std::uint32_t scale =
+            key_scales[in_page + kPageSize * (feature / 16U + 16U * head_page)];
+        return e2m1_float((packed >> ((feature & 1U) * 4U)) & 0x0fU) * e4m3_float(scale);
+    }
+
+    template <std::uint32_t Group, bool VToken, bool SToken>
+    __device__ static __forceinline__ Value value(const std::uint8_t* values,
+                                                  const ValueScale* scales, std::size_t physical,
+                                                  std::uint32_t kvh, std::uint32_t feature,
+                                                  std::uint32_t heads,
+                                                  std::size_t physical_tokens) {
+        static_assert(Group == 16U && !VToken && !SToken);
+        const std::uint32_t packed = values[int4_offset<Group, VToken, SToken>(
+            physical, kvh, feature, heads, physical_tokens, false)];
+        const std::uint32_t scale  = scales[int4_offset<Group, VToken, SToken>(
+            physical, kvh, feature, heads, physical_tokens, true)];
+        return {e2m1_float((packed >> ((feature & 1U) * 4U)) & 0x0fU), e4m3_float(scale)};
+    }
+};
+
 struct FusedAttentionShared {
     float wave_reductions[kHeadDim / 32U];
     float running_max;
@@ -382,11 +489,12 @@ struct FusedAttentionShared {
     float probability_numerator;
 };
 
-template <std::uint32_t Group, bool KToken, bool VToken, bool SToken, bool TreeMask,
+template <class Codec, std::uint32_t Group, bool KToken, bool VToken, bool SToken, bool TreeMask,
           bool DeviceActiveRows>
 __device__ __forceinline__ void fused_attention_body(
-    const hip_bfloat16* query, const std::uint8_t* keys, const std::uint8_t* values,
-    const std::uint16_t* scales, const std::uint32_t* pages, const std::int32_t* page_table_row,
+    const hip_bfloat16* query, const std::uint8_t* keys, const std::uint8_t* key_scales,
+    const std::uint8_t* values, const typename Codec::ValueScale* scales,
+    const std::uint32_t* pages, const std::int32_t* page_table_row,
     std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count, std::size_t context,
     std::size_t physical_tokens, std::uint32_t q_to_kv, const std::int32_t* row_positions,
     const std::int32_t* ancestor_masks, const std::int32_t* prefix_lengths,
@@ -482,10 +590,8 @@ __device__ __forceinline__ void fused_attention_body(
             output[row_base + feature] = __builtin_nanf("");
             return;
         }
-        float partial = q * __half2float(__half(__hip_cvt_fp8_to_halfraw(
-                                keys[key_offset<KToken>(physical, kvh, feature, gridDim.x / q_to_kv,
-                                                        physical_tokens)],
-                                __HIP_E4M3)));
+        float partial = q * Codec::template key<KToken>(keys, key_scales, physical, kvh, feature,
+                                                        gridDim.x / q_to_kv, physical_tokens);
         for (std::uint32_t stride = 16U; stride != 0U; stride >>= 1U) {
             partial += __shfl_down(partial, stride, 32);
         }
@@ -506,92 +612,93 @@ __device__ __forceinline__ void fused_attention_body(
             shared.running_max = next_max;
         }
         __syncthreads();
-        const std::uint8_t packed = values[int4_offset<Group, VToken, SToken>(
-            physical, kvh, feature, gridDim.x / q_to_kv, physical_tokens, false)];
-        int code                  = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
-        code                      = code >= 8 ? code - 16 : code;
-        const std::uint16_t scale_bits = scales[int4_offset<Group, VToken, SToken>(
-            physical, kvh, feature, gridDim.x / q_to_kv, physical_tokens, true)];
-        numerator = numerator * shared.rescale + shared.probability_numerator *
-                                                     static_cast<float>(code) *
-                                                     __half2float(__ushort_as_half(scale_bits));
+        const auto element = Codec::template value<Group, VToken, SToken>(
+            values, scales, physical, kvh, feature, gridDim.x / q_to_kv, physical_tokens);
+        numerator = numerator * shared.rescale +
+                    shared.probability_numerator * element.code * element.scale;
         __syncthreads();
     }
     output[row_base + feature] = numerator / shared.denominator;
 }
 
-template <std::uint32_t Group, bool KToken, bool VToken, bool SToken, bool DeviceActiveRows>
+template <class Codec, std::uint32_t Group, bool KToken, bool VToken, bool SToken,
+          bool DeviceActiveRows>
 __global__ void fused_attention_causal_kernel(
-    const hip_bfloat16* query, const std::uint8_t* keys, const std::uint8_t* values,
-    const std::uint16_t* scales, const std::uint32_t* pages, const std::int32_t* page_table_row,
+    const hip_bfloat16* query, const std::uint8_t* keys, const std::uint8_t* key_scales,
+    const std::uint8_t* values, const typename Codec::ValueScale* scales,
+    const std::uint32_t* pages, const std::int32_t* page_table_row,
     std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count, std::size_t context,
     std::size_t physical_tokens, std::uint32_t q_to_kv, const std::int32_t* row_positions,
     const std::int32_t* active_query_rows, std::uint32_t query_rows, std::uint32_t row_offset,
     float attention_scale, float* output) {
     __shared__ FusedAttentionShared shared;
-    fused_attention_body<Group, KToken, VToken, SToken, false, DeviceActiveRows>(
-        query, keys, values, scales, pages, page_table_row, page_table_row_stride,
+    fused_attention_body<Codec, Group, KToken, VToken, SToken, false, DeviceActiveRows>(
+        query, keys, key_scales, values, scales, pages, page_table_row, page_table_row_stride,
         page_table_row_count, context, physical_tokens, q_to_kv, row_positions, nullptr, nullptr,
         1U, active_query_rows, query_rows, row_offset, attention_scale, output, shared);
 }
 
-template <std::uint32_t Group, bool KToken, bool VToken, bool SToken, bool DeviceActiveRows>
+template <class Codec, std::uint32_t Group, bool KToken, bool VToken, bool SToken,
+          bool DeviceActiveRows>
 __global__ void fused_attention_tree_kernel(
-    const hip_bfloat16* query, const std::uint8_t* keys, const std::uint8_t* values,
-    const std::uint16_t* scales, const std::uint32_t* pages, const std::int32_t* page_table_row,
+    const hip_bfloat16* query, const std::uint8_t* keys, const std::uint8_t* key_scales,
+    const std::uint8_t* values, const typename Codec::ValueScale* scales,
+    const std::uint32_t* pages, const std::int32_t* page_table_row,
     std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count, std::size_t context,
     std::size_t physical_tokens, std::uint32_t q_to_kv, const std::int32_t* row_positions,
     const std::int32_t* ancestor_masks, const std::int32_t* prefix_lengths,
     std::uint32_t prefix_length_stride, const std::int32_t* active_query_rows,
     std::uint32_t query_rows, std::uint32_t row_offset, float attention_scale, float* output) {
     __shared__ FusedAttentionShared shared;
-    fused_attention_body<Group, KToken, VToken, SToken, true, DeviceActiveRows>(
-        query, keys, values, scales, pages, page_table_row, page_table_row_stride,
+    fused_attention_body<Codec, Group, KToken, VToken, SToken, true, DeviceActiveRows>(
+        query, keys, key_scales, values, scales, pages, page_table_row, page_table_row_stride,
         page_table_row_count, context, physical_tokens, q_to_kv, row_positions, ancestor_masks,
         prefix_lengths, prefix_length_stride, active_query_rows, query_rows, row_offset,
         attention_scale, output, shared);
 }
 
-template <std::uint32_t G, bool K, bool V, bool S>
+template <class Codec, std::uint32_t G, bool K, bool V, bool S>
 hipError_t fused_attention_launch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
     for (std::uint32_t row_offset = 0; row_offset < a.query_rows;) {
         const std::uint32_t rows =
             a.query_rows - row_offset < kMaximumGridY ? a.query_rows - row_offset : kMaximumGridY;
         if (a.ancestor_masks != nullptr) {
             if (a.active_query_rows != nullptr) {
-                hipLaunchKernelGGL(
-                    (fused_attention_tree_kernel<G, K, V, S, true>), dim3(a.query_heads, rows),
-                    dim3(kHeadDim), 0, stream, a.query, a.key_codes, a.value_codes,
-                    a.value_scale_bits, a.page_table, a.page_table_row, a.page_table_row_stride,
-                    a.page_table_row_count, a.context, a.physical_tokens, a.q_to_kv,
-                    a.row_positions, a.ancestor_masks, a.prefix_lengths, a.prefix_length_stride,
-                    a.active_query_rows, a.query_rows, row_offset, a.attention_scale, a.output);
+                hipLaunchKernelGGL((fused_attention_tree_kernel<Codec, G, K, V, S, true>),
+                                   dim3(a.query_heads, rows), dim3(kHeadDim), 0, stream, a.query,
+                                   a.key_codes, a.key_scale_codes, a.value_codes,
+                                   Codec::value_scales(a), a.page_table, a.page_table_row,
+                                   a.page_table_row_stride, a.page_table_row_count, a.context,
+                                   a.physical_tokens, a.q_to_kv, a.row_positions, a.ancestor_masks,
+                                   a.prefix_lengths, a.prefix_length_stride, a.active_query_rows,
+                                   a.query_rows, row_offset, a.attention_scale, a.output);
             } else {
-                hipLaunchKernelGGL(
-                    (fused_attention_tree_kernel<G, K, V, S, false>), dim3(a.query_heads, rows),
-                    dim3(kHeadDim), 0, stream, a.query, a.key_codes, a.value_codes,
-                    a.value_scale_bits, a.page_table, a.page_table_row, a.page_table_row_stride,
-                    a.page_table_row_count, a.context, a.physical_tokens, a.q_to_kv,
-                    a.row_positions, a.ancestor_masks, a.prefix_lengths, a.prefix_length_stride,
-                    nullptr, a.query_rows, row_offset, a.attention_scale, a.output);
+                hipLaunchKernelGGL((fused_attention_tree_kernel<Codec, G, K, V, S, false>),
+                                   dim3(a.query_heads, rows), dim3(kHeadDim), 0, stream, a.query,
+                                   a.key_codes, a.key_scale_codes, a.value_codes,
+                                   Codec::value_scales(a), a.page_table, a.page_table_row,
+                                   a.page_table_row_stride, a.page_table_row_count, a.context,
+                                   a.physical_tokens, a.q_to_kv, a.row_positions, a.ancestor_masks,
+                                   a.prefix_lengths, a.prefix_length_stride, nullptr, a.query_rows,
+                                   row_offset, a.attention_scale, a.output);
             }
         } else {
             if (a.active_query_rows != nullptr) {
-                hipLaunchKernelGGL((fused_attention_causal_kernel<G, K, V, S, true>),
-                                   dim3(a.query_heads, rows), dim3(kHeadDim), 0, stream, a.query,
-                                   a.key_codes, a.value_codes, a.value_scale_bits, a.page_table,
-                                   a.page_table_row, a.page_table_row_stride,
-                                   a.page_table_row_count, a.context, a.physical_tokens, a.q_to_kv,
-                                   a.row_positions, a.active_query_rows, a.query_rows, row_offset,
-                                   a.attention_scale, a.output);
+                hipLaunchKernelGGL(
+                    (fused_attention_causal_kernel<Codec, G, K, V, S, true>),
+                    dim3(a.query_heads, rows), dim3(kHeadDim), 0, stream, a.query, a.key_codes,
+                    a.key_scale_codes, a.value_codes, Codec::value_scales(a), a.page_table,
+                    a.page_table_row, a.page_table_row_stride, a.page_table_row_count, a.context,
+                    a.physical_tokens, a.q_to_kv, a.row_positions, a.active_query_rows,
+                    a.query_rows, row_offset, a.attention_scale, a.output);
             } else {
-                hipLaunchKernelGGL((fused_attention_causal_kernel<G, K, V, S, false>),
+                hipLaunchKernelGGL((fused_attention_causal_kernel<Codec, G, K, V, S, false>),
                                    dim3(a.query_heads, rows), dim3(kHeadDim), 0, stream, a.query,
-                                   a.key_codes, a.value_codes, a.value_scale_bits, a.page_table,
-                                   a.page_table_row, a.page_table_row_stride,
-                                   a.page_table_row_count, a.context, a.physical_tokens, a.q_to_kv,
-                                   a.row_positions, nullptr, a.query_rows, row_offset,
-                                   a.attention_scale, a.output);
+                                   a.key_codes, a.key_scale_codes, a.value_codes,
+                                   Codec::value_scales(a), a.page_table, a.page_table_row,
+                                   a.page_table_row_stride, a.page_table_row_count, a.context,
+                                   a.physical_tokens, a.q_to_kv, a.row_positions, nullptr,
+                                   a.query_rows, row_offset, a.attention_scale, a.output);
             }
         }
         const hipError_t error = hipGetLastError();
@@ -608,21 +715,21 @@ hipError_t fused_attention_dispatch(const Fp8Int4KvAttentionArgs& a, hipStream_t
                             (a.value_scale_layout == Fp8Int4KvPlaneLayout::TokenFastest ? 4U : 0U);
     switch (layout) {
     case 0:
-        return fused_attention_launch<G, false, false, false>(a, stream);
+        return fused_attention_launch<Fp8Int4ElementCodec, G, false, false, false>(a, stream);
     case 1:
-        return fused_attention_launch<G, true, false, false>(a, stream);
+        return fused_attention_launch<Fp8Int4ElementCodec, G, true, false, false>(a, stream);
     case 2:
-        return fused_attention_launch<G, false, true, false>(a, stream);
+        return fused_attention_launch<Fp8Int4ElementCodec, G, false, true, false>(a, stream);
     case 3:
-        return fused_attention_launch<G, true, true, false>(a, stream);
+        return fused_attention_launch<Fp8Int4ElementCodec, G, true, true, false>(a, stream);
     case 4:
-        return fused_attention_launch<G, false, false, true>(a, stream);
+        return fused_attention_launch<Fp8Int4ElementCodec, G, false, false, true>(a, stream);
     case 5:
-        return fused_attention_launch<G, true, false, true>(a, stream);
+        return fused_attention_launch<Fp8Int4ElementCodec, G, true, false, true>(a, stream);
     case 6:
-        return fused_attention_launch<G, false, true, true>(a, stream);
+        return fused_attention_launch<Fp8Int4ElementCodec, G, false, true, true>(a, stream);
     default:
-        return fused_attention_launch<G, true, true, true>(a, stream);
+        return fused_attention_launch<Fp8Int4ElementCodec, G, true, true, true>(a, stream);
     }
 }
 
@@ -894,12 +1001,227 @@ __device__ __forceinline__ bool dense_load_query(const Fp8Int4KvAttentionArgs& a
     return nonfinite;
 }
 
+// The dense routes' staging policy: raw loads, LDS conversion, the Q operand and the QK WMMA type.
+struct Fp8Int4DenseCodec {
+    using KeyItem   = DenseKeyItem;
+    using ValueItem = DenseValueItem;
+
+    __device__ static __forceinline__ KeyItem load_key(const Fp8Int4KvAttentionArgs& a,
+                                                       std::uint32_t loader, std::size_t page,
+                                                       std::size_t physical_pages,
+                                                       std::size_t in_page, std::uint32_t kv_head) {
+        return dense_load_key(a, loader, page, physical_pages, in_page, kv_head);
+    }
+
+    __device__ static __forceinline__ void store_key(std::uint16_t* keys, std::uint32_t loader,
+                                                     const KeyItem& item) {
+        dense_store_key(keys, loader, item);
+    }
+
+    template <std::uint32_t Group, std::uint32_t Keys>
+    __device__ static __forceinline__ ValueItem load_value(const Fp8Int4KvAttentionArgs& a,
+                                                           std::uint32_t item_index,
+                                                           std::size_t page, std::size_t in_page,
+                                                           std::uint32_t kv_head,
+                                                           std::uint32_t written) {
+        return dense_load_value<Group, Keys>(a, item_index, page, in_page, kv_head, written);
+    }
+
+    template <std::uint32_t Keys>
+    __device__ static __forceinline__ void
+    store_value(std::uint16_t* values, std::uint32_t item_index, const ValueItem& item) {
+        dense_store_value<Keys>(values, item_index, item);
+    }
+
+    __device__ static __forceinline__ bool load_query(const Fp8Int4KvAttentionArgs& a,
+                                                      bool has_context, std::size_t query_row,
+                                                      std::uint32_t query_head, std::uint32_t half,
+                                                      I16x8 (&query)[16]) {
+        return dense_load_query(a, has_context, query_row, query_head, half, query);
+    }
+
+    __device__ static __forceinline__ F32x8 qk(I16x8 keys, I16x8 query, F32x8 scores) {
+        return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(keys, query, scores);
+    }
+};
+
+// NVFP4 staging: every E2M1*E4M3 key and V/8 is exact in FP16, and packed FP16 tables and products
+// replace per-element FP32 conversion. Scales load once per item and are masked afterwards, so an
+// unwritten slot's byte never reaches the staged value.
+struct Nvfp4DenseCodec {
+    struct KeyItem {
+        uint2 codes[2], scales[2];
+    };
+
+    struct ValueItem {
+        std::uint32_t even[4], odd[4], scales[2];
+    };
+
+    __device__ static __forceinline__ KeyItem load_key(const Fp8Int4KvAttentionArgs& a,
+                                                       std::uint32_t loader, std::size_t page,
+                                                       std::size_t physical_pages,
+                                                       std::size_t in_page, std::uint32_t kv_head) {
+        const std::uint32_t byte = loader % 128U, key_half = loader / 128U;
+        const std::size_t head_page = page + physical_pages * kv_head;
+        const std::size_t token     = in_page + key_half * 16U;
+        const std::uint8_t* codes =
+            a.key_codes + token + kPageSize * (static_cast<std::size_t>(byte) + 128U * head_page);
+        const std::uint8_t* scales =
+            a.key_scale_codes + token +
+            kPageSize * (static_cast<std::size_t>(byte / 8U) + 16U * head_page);
+        KeyItem item;
+#pragma unroll
+        for (std::uint32_t part = 0U; part < 2U; ++part) {
+            item.codes[part]  = *reinterpret_cast<const uint2*>(codes + part * 8U);
+            item.scales[part] = *reinterpret_cast<const uint2*>(scales + part * 8U);
+        }
+        return item;
+    }
+
+    __device__ static __forceinline__ void store_key(std::uint16_t* keys, std::uint32_t loader,
+                                                     const KeyItem& item) {
+        const std::uint32_t feature = (loader % 128U) * 2U, key_half = loader / 128U;
+#pragma unroll
+        for (std::uint32_t part = 0U; part < 2U; ++part) {
+#pragma unroll
+            for (std::uint32_t word = 0U; word < 2U; ++word) {
+                const std::uint32_t codes  = word == 0U ? item.codes[part].x : item.codes[part].y;
+                const std::uint32_t scales = word == 0U ? item.scales[part].x : item.scales[part].y;
+                const std::uint32_t low    = e2m1_f16_high_bytes(codes & 0x0f0f0f0fU);
+                const std::uint32_t high   = e2m1_f16_high_bytes((codes >> 4U) & 0x0f0f0f0fU);
+                const auto scale0 =
+                    __builtin_amdgcn_cvt_pk_f32_fp8(static_cast<int>(scales), false);
+                const auto scale1 = __builtin_amdgcn_cvt_pk_f32_fp8(static_cast<int>(scales), true);
+#pragma unroll
+                for (std::uint32_t token = 0U; token < 4U; ++token) {
+                    const float scale = token < 2U ? scale0[token] : scale1[token - 2U];
+                    const std::uint32_t select =
+                        0x0cU | (token << 8U) | (0x0cU << 16U) | ((token + 4U) << 24U);
+                    const DenseF16x2 pair =
+                        __builtin_bit_cast(DenseF16x2, __builtin_amdgcn_perm(high, low, select)) *
+                        __builtin_bit_cast(DenseF16x2, __builtin_amdgcn_cvt_pkrtz(scale, scale));
+                    const std::uint32_t key = key_half * 16U + part * 8U + word * 4U + token;
+                    *reinterpret_cast<DenseF16x2*>(&keys[key * kDensePrefillKeyPitch + feature]) =
+                        pair;
+                }
+            }
+        }
+    }
+
+    template <std::uint32_t Group, std::uint32_t Keys>
+    __device__ static __forceinline__ ValueItem load_value(const Fp8Int4KvAttentionArgs& a,
+                                                           std::uint32_t item_index,
+                                                           std::size_t page, std::size_t in_page,
+                                                           std::uint32_t kv_head,
+                                                           std::uint32_t written) {
+        static_assert(Group == 16U);
+        const std::uint32_t token_pair = item_index % (Keys / 2U), chunk = item_index / (Keys / 2U);
+        const std::size_t row = in_page + 2U * token_pair + kPageSize * (kv_head + 4U * page);
+        ValueItem item;
+#pragma unroll
+        for (std::uint32_t word = 0U; word < 4U; ++word) {
+            item.even[word] = *reinterpret_cast<const std::uint32_t*>(a.value_codes + row * 128U +
+                                                                      chunk * 16U + word * 4U);
+            item.odd[word]  = *reinterpret_cast<const std::uint32_t*>(
+                a.value_codes + (row + 1U) * 128U + chunk * 16U + word * 4U);
+        }
+        // This chunk's two G16 scales of each token, as one packed load.
+        std::uint32_t even =
+            *reinterpret_cast<const std::uint16_t*>(a.value_scale_codes + row * 16U + chunk * 2U);
+        std::uint32_t odd = *reinterpret_cast<const std::uint16_t*>(a.value_scale_codes +
+                                                                    (row + 1U) * 16U + chunk * 2U);
+        even &= 2U * token_pair < written ? 0xFFFFU : 0U;
+        odd &= 2U * token_pair + 1U < written ? 0xFFFFU : 0U;
+        item.scales[0] = (even & 0xFFU) | ((odd & 0xFFU) << 8U);
+        item.scales[1] = (even >> 8U) | (odd & 0xFF00U);
+        return item;
+    }
+
+    template <std::uint32_t Keys>
+    __device__ static __forceinline__ void
+    store_value(std::uint16_t* values, std::uint32_t item_index, const ValueItem& item) {
+        constexpr std::uint32_t pitch  = Keys + 8U;
+        const std::uint32_t token_pair = item_index % (Keys / 2U), chunk = item_index / (Keys / 2U);
+        DenseF16x2 scales[2];
+#pragma unroll
+        for (std::uint32_t group = 0U; group < 2U; ++group) {
+            const auto decoded =
+                __builtin_amdgcn_cvt_pk_f32_fp8(static_cast<int>(item.scales[group]), false);
+            scales[group] =
+                __builtin_bit_cast(DenseF16x2, __builtin_amdgcn_cvt_pkrtz(decoded[0], decoded[1]));
+        }
+#pragma unroll
+        for (std::uint32_t word = 0U; word < 4U; ++word) {
+            const std::uint32_t low0 = e2m1_over8_f16_high_bytes(item.even[word] & 0x0f0f0f0fU);
+            const std::uint32_t high0 =
+                e2m1_over8_f16_high_bytes((item.even[word] >> 4U) & 0x0f0f0f0fU);
+            const std::uint32_t low1 = e2m1_over8_f16_high_bytes(item.odd[word] & 0x0f0f0f0fU);
+            const std::uint32_t high1 =
+                e2m1_over8_f16_high_bytes((item.odd[word] >> 4U) & 0x0f0f0f0fU);
+#pragma unroll
+            for (std::uint32_t byte = 0U; byte < 4U; ++byte) {
+                // Low half: even token's high byte; high half: odd token's. Low bytes zero.
+                const std::uint32_t select =
+                    0x0cU | (byte << 8U) | (0x0cU << 16U) | ((byte + 4U) << 24U);
+                const DenseF16x2 lower =
+                    __builtin_bit_cast(DenseF16x2, __builtin_amdgcn_perm(low1, low0, select)) *
+                    scales[word / 2U];
+                const DenseF16x2 upper =
+                    __builtin_bit_cast(DenseF16x2, __builtin_amdgcn_perm(high1, high0, select)) *
+                    scales[word / 2U];
+                const std::uint32_t target = chunk * 32U + word * 8U + byte * 2U;
+                *reinterpret_cast<DenseF16x2*>(&values[target * pitch + token_pair * 2U]) = lower;
+                *reinterpret_cast<DenseF16x2*>(&values[(target + 1U) * pitch + token_pair * 2U]) =
+                    upper;
+            }
+        }
+    }
+
+    // Q validated on its represented bits (|Q| >= 2^16 includes every nonfinite value), then packed
+    // to FP16 with round-toward-zero.
+    __device__ static __forceinline__ bool load_query(const Fp8Int4KvAttentionArgs& a,
+                                                      bool has_context, std::size_t query_row,
+                                                      std::uint32_t query_head, std::uint32_t half,
+                                                      I16x8 (&query)[16]) {
+        bool out_of_range = false;
+#pragma unroll
+        for (std::uint32_t tile_k = 0U; tile_k < 16U; ++tile_k) {
+            query[tile_k] = has_context ? *reinterpret_cast<const I16x8*>(
+                                              a.query + (query_row * 24U + query_head) * kHeadDim +
+                                              tile_k * 16U + half * 8U)
+                                        : I16x8{};
+#pragma unroll
+            for (std::uint32_t item = 0U; item < 8U; ++item)
+                out_of_range |=
+                    (static_cast<std::uint16_t>(query[tile_k][item]) & 0x7f80U) >= 0x4780U;
+#pragma unroll
+            for (std::uint32_t item = 0U; item < 8U; item += 2U) {
+                const auto packed = __builtin_amdgcn_cvt_pkrtz(
+                    __uint_as_float(
+                        static_cast<std::uint32_t>(static_cast<std::uint16_t>(query[tile_k][item]))
+                        << 16U),
+                    __uint_as_float(static_cast<std::uint32_t>(
+                                        static_cast<std::uint16_t>(query[tile_k][item + 1U]))
+                                    << 16U));
+                const auto bits          = __builtin_bit_cast(std::uint32_t, packed);
+                query[tile_k][item]      = static_cast<short>(bits);
+                query[tile_k][item + 1U] = static_cast<short>(bits >> 16U);
+            }
+        }
+        return out_of_range;
+    }
+
+    __device__ static __forceinline__ F32x8 qk(I16x8 keys, I16x8 query, F32x8 scores) {
+        return __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(keys, query, scores);
+    }
+};
+
 // One staged block of 16 * KeyTiles keys of the online Softmax for this wave's sixteen lane rows:
 // S^T = K Q^T (KeyTiles key tiles x 16 feature tiles of BF16 WMMA), masking, the log2-domain origin
 // update, FP16 probabilities, and O += P V (16 feature tiles x KeyTiles key tiles of FP16 WMMA).
 // RowContext is this lane's causal context, or a pointer to its LDS entry: the prefill kernel
 // re-reads it on masked blocks only, so it does not occupy a VGPR across the block loop.
-template <std::uint32_t KeyTiles, class RowContext>
+template <class Codec, std::uint32_t KeyTiles, class RowContext>
 __device__ __forceinline__ void
 dense_attention_block(const std::uint16_t* staged_keys, const std::uint16_t* staged_values,
                       std::uint32_t key_base, bool page_valid, std::uint32_t full_context,
@@ -916,8 +1238,7 @@ dense_attention_block(const std::uint16_t* staged_keys, const std::uint16_t* sta
                 const I16x8 keys = *reinterpret_cast<const I16x8*>(
                     &staged_keys[(key_tile * 16U + axis) * kDensePrefillKeyPitch + tile_k * 16U +
                                  half * 8U]);
-                scores[key_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-                    keys, query[tile_k], scores[key_tile]);
+                scores[key_tile] = Codec::qk(keys, query[tile_k], scores[key_tile]);
             }
         }
     }
@@ -1012,7 +1333,7 @@ dense_attention_block(const std::uint16_t* staged_keys, const std::uint16_t* sta
 // keys [chunk * chunk_keys, +chunk_keys) and writes the dense-verify partial layout (unnormalized
 // FP32 numerator, log2-domain origin, FP32 denominator) for dense_verify_merge_kernel; a row whose
 // causal context ends before the chunk keeps origin -inf and zero numerator and denominator.
-template <std::uint32_t Group, bool Split>
+template <class Codec, std::uint32_t Group, bool Split>
 __device__ __forceinline__ void dense_prefill_body(const Fp8Int4KvAttentionArgs& a,
                                                    std::uint32_t chunk_keys, float* partial) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
@@ -1076,7 +1397,7 @@ __device__ __forceinline__ void dense_prefill_body(const Fp8Int4KvAttentionArgs&
 
     I16x8 query[16];
     const bool nonfinite =
-        dense_load_query(a, row_context != 0U, row_base + lane_row, query_head, half, query);
+        Codec::load_query(a, row_context != 0U, row_base + lane_row, query_head, half, query);
     F32x8 numerator[16];
 #    pragma unroll
     for (std::uint32_t tile_f = 0U; tile_f < 16U; ++tile_f) numerator[tile_f] = F32x8{};
@@ -1098,20 +1419,21 @@ __device__ __forceinline__ void dense_prefill_body(const Fp8Int4KvAttentionArgs&
             std::uint32_t loader = tid;
             asm volatile("" : "+v"(loader));
             if (loader < 256U)
-                dense_store_key(shared.keys, loader,
-                                dense_load_key(a, loader, page, physical_pages, in_page, kv_head));
+                Codec::store_key(
+                    shared.keys, loader,
+                    Codec::load_key(a, loader, page, physical_pages, in_page, kv_head));
             else
-                dense_store_value<kDensePrefillKeys>(
+                Codec::template store_value<kDensePrefillKeys>(
                     shared.values, loader - 256U,
-                    dense_load_value<Group, kDensePrefillKeys>(
+                    Codec::template load_value<Group, kDensePrefillKeys>(
                         a, loader - 256U, page, in_page, kv_head, maximum_context - key_base));
         }
         dense_prefill_barrier();
         // Phase boundaries bound register live ranges at the 240-VGPR budget.
         __builtin_amdgcn_sched_barrier(0);
-        dense_attention_block<2U>(shared.keys, shared.values, key_base, page_valid, full_context,
-                                  &shared.row_context[lane_row], axis, half, scale_log2, query,
-                                  numerator, reference, denominator);
+        dense_attention_block<Codec, 2U>(shared.keys, shared.values, key_base, page_valid,
+                                         full_context, &shared.row_context[lane_row], axis, half,
+                                         scale_log2, query, numerator, reference, denominator);
         dense_prefill_barrier();
     }
 
@@ -1176,17 +1498,17 @@ __device__ __forceinline__ void dense_prefill_body(const Fp8Int4KvAttentionArgs&
 #endif
 }
 
-template <std::uint32_t Group>
+template <class Codec, std::uint32_t Group>
 __global__ __launch_bounds__(kDensePrefillThreads)
     __attribute__((amdgpu_waves_per_eu(6))) void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
-    dense_prefill_body<Group, false>(a, 0U, nullptr);
+    dense_prefill_body<Codec, Group, false>(a, 0U, nullptr);
 }
 
-template <std::uint32_t Group>
+template <class Codec, std::uint32_t Group>
 __global__ __launch_bounds__(kDensePrefillThreads)
     __attribute__((amdgpu_waves_per_eu(6))) void dense_prefill_split_kernel(
         Fp8Int4KvAttentionArgs a, std::uint32_t chunk_keys, float* partial) {
-    dense_prefill_body<Group, true>(a, chunk_keys, partial);
+    dense_prefill_body<Codec, Group, true>(a, chunk_keys, partial);
 }
 
 // Split-context packed decode (1..6 rows): one CTA per KV head and context chunk of
@@ -1217,9 +1539,15 @@ struct DenseVerifySequences {
 static_assert(sizeof(DenseVerifySequences) <= 4096U,
               "dense verify sequences must fit the kernarg segment");
 
-template <std::uint32_t Group>
-__global__
-__launch_bounds__(kDenseVerifyThreads) void dense_verify_kernel(DenseVerifySequences sequences) {
+// NVFP4 loader waves: its keys cost more than its values, so the K+K wave above would be the
+// critical path. Every loader stages one key item and five waves add the 64 value items to the
+// first loaders; six waves give values their own wave, the faster shape while a launch leaves
+// compute units free.
+inline constexpr std::uint32_t kNvfp4MaximumGroupsForSixLoaderWaves = 128U;
+
+template <class Codec, std::uint32_t Group, std::uint32_t LoaderWaves>
+__global__ __launch_bounds__((kDenseVerifyComputeWaves + LoaderWaves) *
+                             32U) void dense_verify_kernel(DenseVerifySequences sequences) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     // Interleave sequences within each chunk so a long final sequence starts promptly.
     const std::uint32_t sequence = blockIdx.y, chunk = blockIdx.z;
@@ -1251,7 +1579,43 @@ __launch_bounds__(kDenseVerifyThreads) void dense_verify_kernel(DenseVerifySeque
 
     if (wave >= kDenseVerifyComputeWaves) {
         const std::uint32_t loader = tid - kDenseVerifyLoaders;
-        const bool second_is_key   = loader + kDenseVerifyLoaders < kDenseVerifyKeyItems;
+        if constexpr (LoaderWaves != 3U) {
+            const bool has_key             = loader < kDenseVerifyKeyItems;
+            const std::uint32_t value_item = loader >= kDenseVerifyKeyItems
+                                                 ? loader - kDenseVerifyKeyItems
+                                                 : (LoaderWaves == 5U ? loader + 32U : 64U);
+            const bool has_value           = value_item < 4U * kDenseVerifyKeys;
+            typename Codec::KeyItem key;
+            typename Codec::ValueItem value;
+            const auto stage = [&](std::uint32_t block) {
+                const std::uint32_t buffer   = block % 2U;
+                const std::uint32_t key_base = key_begin + block * kDenseVerifyKeys;
+                const std::size_t page       = a.page_table[table_offset + key_base / kPageSize];
+                const bool valid             = page < physical_pages;
+                if (valid) {
+                    const std::size_t in_page = key_base % kPageSize;
+                    if (has_key)
+                        key = Codec::load_key(a, loader, page, physical_pages, in_page, kv_head);
+                    if (has_value)
+                        value = Codec::template load_value<Group, kDenseVerifyKeys>(
+                            a, value_item, page, in_page, kv_head, maximum_context - key_base);
+                    if (has_key) Codec::store_key(shared.keys[buffer], loader, key);
+                    if (has_value)
+                        Codec::template store_value<kDenseVerifyKeys>(shared.values[buffer],
+                                                                      value_item, value);
+                } else if (loader == 0U) {
+                    shared.page_fault_from = min(shared.page_fault_from, key_base);
+                }
+                if (loader == 0U) shared.block_valid[buffer] = valid ? 1U : 0U;
+            };
+            if (blocks != 0U) stage(0U);
+            for (std::uint32_t block = 0U; block < blocks; ++block) {
+                dense_prefill_barrier();
+                if (block + 1U < blocks) stage(block + 1U);
+            }
+            return;
+        }
+        const bool second_is_key = loader + kDenseVerifyLoaders < kDenseVerifyKeyItems;
         DenseKeyItem keys[2];
         DenseValueItem value;
         // Stage block `block` into buffer block % 2: its loads, then the conversion and stores.
@@ -1300,7 +1664,7 @@ __launch_bounds__(kDenseVerifyThreads) void dense_verify_kernel(DenseVerifySeque
     const std::uint32_t full_context = __builtin_amdgcn_readfirstlane(shared.full_context[wave]);
     I16x8 query[16];
     const bool nonfinite =
-        dense_load_query(a, row_context != 0U, lane_row, query_head, half, query);
+        Codec::load_query(a, row_context != 0U, lane_row, query_head, half, query);
     F32x8 numerator[16];
 #    pragma unroll
     for (std::uint32_t tile_f = 0U; tile_f < 16U; ++tile_f) numerator[tile_f] = F32x8{};
@@ -1312,7 +1676,7 @@ __launch_bounds__(kDenseVerifyThreads) void dense_verify_kernel(DenseVerifySeque
         __builtin_amdgcn_sched_barrier(0);
         const std::uint32_t buffer = block % 2U;
         if (computes)
-            dense_attention_block<1U>(
+            dense_attention_block<Codec, 1U>(
                 shared.keys[buffer], shared.values[buffer], key_begin + block * kDenseVerifyKeys,
                 shared.block_valid[buffer] != 0U, full_context, row_context, axis, half, scale_log2,
                 query, numerator, reference, denominator);
@@ -1541,7 +1905,7 @@ hipError_t softmax_pv_from_wmma_scores_dispatch(const Fp8Int4KvAttentionArgs& a,
 
 hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,
                                        hipStream_t stream) noexcept {
-    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
+    if (!a.query || !a.key_codes || !a.value_codes || !valid_codec_planes(a) || !a.page_table ||
         !a.page_table_pages || !a.context || !a.physical_tokens || a.physical_tokens % kPageSize ||
         !a.query_heads || !a.kv_heads || !a.q_to_kv || a.query_heads != a.kv_heads * a.q_to_kv ||
         !a.query_rows || !a.output || !std::isfinite(a.attention_scale) ||
@@ -1555,6 +1919,9 @@ hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,
         a.page_table_pages < (a.context + kPageSize - 1U) / kPageSize) {
         return hipErrorInvalidValue;
     }
+    if (a.codec == KvCodec::Nvfp4) {
+        return fused_attention_launch<Nvfp4ElementCodec, 16U, true, false, false>(a, stream);
+    }
     return a.value_group == 16   ? fused_attention_dispatch<16>(a, stream)
            : a.value_group == 32 ? fused_attention_dispatch<32>(a, stream)
                                  : hipErrorInvalidValue;
@@ -1562,7 +1929,7 @@ hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,
 
 hipError_t fp8_int4_kv_attention_dense_prefill(const Fp8Int4KvAttentionArgs& a,
                                                hipStream_t stream) noexcept {
-    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
+    if (!a.query || !a.key_codes || !a.value_codes || !valid_codec_planes(a) || !a.page_table ||
         !a.page_table_pages || !a.context ||
         a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
         !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
@@ -1581,12 +1948,15 @@ hipError_t fp8_int4_kv_attention_dense_prefill(const Fp8Int4KvAttentionArgs& a,
     }
 #if defined(__HIPCC__)
     const dim3 grid(4U, (a.query_rows + kDensePrefillRows - 1U) / kDensePrefillRows);
-    if (a.value_group == 16U) {
-        hipLaunchKernelGGL((dense_prefill_kernel<16U>), grid, dim3(kDensePrefillThreads), 0, stream,
-                           a);
+    if (a.codec == KvCodec::Nvfp4) {
+        hipLaunchKernelGGL((dense_prefill_kernel<Nvfp4DenseCodec, 16U>), grid,
+                           dim3(kDensePrefillThreads), 0, stream, a);
+    } else if (a.value_group == 16U) {
+        hipLaunchKernelGGL((dense_prefill_kernel<Fp8Int4DenseCodec, 16U>), grid,
+                           dim3(kDensePrefillThreads), 0, stream, a);
     } else {
-        hipLaunchKernelGGL((dense_prefill_kernel<32U>), grid, dim3(kDensePrefillThreads), 0, stream,
-                           a);
+        hipLaunchKernelGGL((dense_prefill_kernel<Fp8Int4DenseCodec, 32U>), grid,
+                           dim3(kDensePrefillThreads), 0, stream, a);
     }
     return hipGetLastError();
 #else
@@ -1604,11 +1974,13 @@ fp8_int4_kv_attention_dense_prefill_resources(std::uint32_t value_group, bool sp
 #if defined(__HIPCC__)
     hipFuncAttributes attributes{};
     const void* kernel =
-        split
-            ? (value_group == 16U ? reinterpret_cast<const void*>(dense_prefill_split_kernel<16U>)
-                                  : reinterpret_cast<const void*>(dense_prefill_split_kernel<32U>))
-            : (value_group == 16U ? reinterpret_cast<const void*>(dense_prefill_kernel<16U>)
-                                  : reinterpret_cast<const void*>(dense_prefill_kernel<32U>));
+        split ? (value_group == 16U ? reinterpret_cast<const void*>(
+                                          dense_prefill_split_kernel<Fp8Int4DenseCodec, 16U>)
+                                    : reinterpret_cast<const void*>(
+                                          dense_prefill_split_kernel<Fp8Int4DenseCodec, 32U>))
+              : (value_group == 16U
+                     ? reinterpret_cast<const void*>(dense_prefill_kernel<Fp8Int4DenseCodec, 16U>)
+                     : reinterpret_cast<const void*>(dense_prefill_kernel<Fp8Int4DenseCodec, 32U>));
     const hipError_t error = hipFuncGetAttributes(&attributes, kernel);
     if (error != hipSuccess) return error;
     *resources =
@@ -1622,11 +1994,12 @@ fp8_int4_kv_attention_dense_prefill_resources(std::uint32_t value_group, bool sp
 
 hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& a,
                                       hipStream_t stream) noexcept {
-    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
-        !a.page_table_pages || !a.context || !a.physical_tokens || a.physical_tokens % kPageSize ||
-        !a.query_heads || !a.kv_heads || a.q_to_kv != 6U ||
-        a.query_heads != a.kv_heads * a.q_to_kv || !a.query_rows || !a.score_workspace ||
-        !a.output || !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
+    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits ||
+        a.codec != KvCodec::Fp8Int4 || !a.page_table || !a.page_table_pages || !a.context ||
+        !a.physical_tokens || a.physical_tokens % kPageSize || !a.query_heads || !a.kv_heads ||
+        a.q_to_kv != 6U || a.query_heads != a.kv_heads * a.q_to_kv || !a.query_rows ||
+        !a.score_workspace || !a.output || !std::isfinite(a.attention_scale) ||
+        !(a.attention_scale > 0.0F) ||
         (a.page_table_row != nullptr &&
          (a.page_table_row_stride < a.page_table_pages || a.page_table_row_count == 0U)) ||
         !valid_plane_layout(a.key_layout) || !valid_plane_layout(a.value_layout) ||
@@ -1732,7 +2105,7 @@ fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(std::size_t context,
 
 hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& a,
                                           hipStream_t stream) noexcept {
-    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
+    if (!a.query || !a.key_codes || !a.value_codes || !valid_codec_planes(a) || !a.page_table ||
         !a.page_table_pages || !a.context ||
         a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
         !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
@@ -1753,12 +2126,18 @@ hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& a,
 #if defined(__HIPCC__)
     const MidRowsSplit split = mid_rows_split(a.context, a.query_rows);
     const dim3 grid(4U, (a.query_rows + kDensePrefillRows - 1U) / kDensePrefillRows, split.chunks);
-    if (a.value_group == 16U) {
-        hipLaunchKernelGGL((dense_prefill_split_kernel<16U>), grid, dim3(kDensePrefillThreads), 0,
-                           stream, a, split.chunk_keys, a.score_workspace);
+    if (a.codec == KvCodec::Nvfp4) {
+        hipLaunchKernelGGL((dense_prefill_split_kernel<Nvfp4DenseCodec, 16U>), grid,
+                           dim3(kDensePrefillThreads), 0, stream, a, split.chunk_keys,
+                           a.score_workspace);
+    } else if (a.value_group == 16U) {
+        hipLaunchKernelGGL((dense_prefill_split_kernel<Fp8Int4DenseCodec, 16U>), grid,
+                           dim3(kDensePrefillThreads), 0, stream, a, split.chunk_keys,
+                           a.score_workspace);
     } else {
-        hipLaunchKernelGGL((dense_prefill_split_kernel<32U>), grid, dim3(kDensePrefillThreads), 0,
-                           stream, a, split.chunk_keys, a.score_workspace);
+        hipLaunchKernelGGL((dense_prefill_split_kernel<Fp8Int4DenseCodec, 32U>), grid,
+                           dim3(kDensePrefillThreads), 0, stream, a, split.chunk_keys,
+                           a.score_workspace);
     }
     const hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;
@@ -1792,8 +2171,9 @@ hipError_t fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentio
     std::uint32_t grid_chunks = 0U, grid_rows = 0U;
     for (std::size_t sequence = 0U; sequence < sequences.size(); ++sequence) {
         const Fp8Int4KvAttentionArgs& a = sequences[sequence];
-        if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
-            !a.page_table_pages || !a.context ||
+        if (!a.query || !a.key_codes || !a.value_codes || !valid_codec_planes(a) ||
+            a.codec != sequences.front().codec || !a.page_table || !a.page_table_pages ||
+            !a.context ||
             a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
             !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
             a.kv_heads != 4U || a.q_to_kv != 6U || (a.query_rows < 1U || a.query_rows > 8U) ||
@@ -1819,8 +2199,21 @@ hipError_t fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentio
     }
 #if defined(__HIPCC__)
     const auto count = static_cast<std::uint32_t>(sequences.size());
-    hipLaunchKernelGGL((dense_verify_kernel<16U>), dim3(4U, count, grid_chunks),
-                       dim3(kDenseVerifyThreads), 0, stream, batch);
+    if (sequences.front().codec == KvCodec::Nvfp4) {
+        if (4U * count * grid_chunks <= kNvfp4MaximumGroupsForSixLoaderWaves) {
+            hipLaunchKernelGGL((dense_verify_kernel<Nvfp4DenseCodec, 16U, 6U>),
+                               dim3(4U, count, grid_chunks),
+                               dim3((kDenseVerifyComputeWaves + 6U) * 32U), 0, stream, batch);
+        } else {
+            hipLaunchKernelGGL((dense_verify_kernel<Nvfp4DenseCodec, 16U, 5U>),
+                               dim3(4U, count, grid_chunks),
+                               dim3((kDenseVerifyComputeWaves + 5U) * 32U), 0, stream, batch);
+        }
+    } else {
+        hipLaunchKernelGGL((dense_verify_kernel<Fp8Int4DenseCodec, 16U, 3U>),
+                           dim3(4U, count, grid_chunks), dim3(kDenseVerifyThreads), 0, stream,
+                           batch);
+    }
     const hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;
     hipLaunchKernelGGL(dense_verify_merge_kernel, dim3(24U, grid_rows, count), dim3(kHeadDim), 0,
@@ -1891,12 +2284,14 @@ struct Split512Workspace {
     };
 }
 
-template <bool DeviceActiveRows>
-__global__ void split512_qk_bf16_t4_kernel(
-    const hip_bfloat16* query, const std::uint8_t* keys, const std::uint32_t* pages,
-    const std::int32_t* page_table_row, std::uint32_t page_table_row_stride,
-    std::uint32_t page_table_row_count, std::size_t context, std::size_t physical_tokens,
-    const std::int32_t* active_query_rows, float attention_scale, float* scores) {
+template <class Codec, bool DeviceActiveRows>
+__global__ void
+split512_qk_bf16_t4_kernel(const hip_bfloat16* query, const std::uint8_t* keys,
+                           const std::uint8_t* key_scales, const std::uint32_t* pages,
+                           const std::int32_t* page_table_row, std::uint32_t page_table_row_stride,
+                           std::uint32_t page_table_row_count, std::size_t context,
+                           std::size_t physical_tokens, const std::int32_t* active_query_rows,
+                           float attention_scale, float* scores) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     constexpr std::uint32_t kRows             = 4U;
     constexpr std::uint32_t kQueriesPerKvHead = 6U;
@@ -1958,9 +2353,8 @@ __global__ void split512_qk_bf16_t4_kernel(
                 if (physical >= physical_tokens) {
                     atomicExch(&invalid, 1U);
                 } else {
-                    decoded = hip_bfloat16(__half2float(__half(__hip_cvt_fp8_to_halfraw(
-                        keys[key_offset<true>(physical, kv_head, feature, 4U, physical_tokens)],
-                        __HIP_E4M3))));
+                    decoded = hip_bfloat16(Codec::template key<true>(
+                        keys, key_scales, physical, kv_head, feature, 4U, physical_tokens));
                 }
             }
             represented_pair |= static_cast<std::uint32_t>(static_cast<std::uint16_t>(decoded.data))
@@ -2028,6 +2422,7 @@ __global__ void split512_qk_bf16_t4_kernel(
 #else
     (void)query;
     (void)keys;
+    (void)key_scales;
     (void)pages;
     (void)page_table_row;
     (void)page_table_row_stride;
@@ -2040,9 +2435,9 @@ __global__ void split512_qk_bf16_t4_kernel(
 #endif
 }
 
-template <std::uint32_t Group, bool TreeMask, bool DeviceActiveRows>
+template <class Codec, std::uint32_t Group, bool TreeMask, bool DeviceActiveRows>
 __global__ void split512_softmax_pv_partial_kernel(
-    const float* scores, const std::uint8_t* values, const std::uint16_t* scales,
+    const float* scores, const std::uint8_t* values, const typename Codec::ValueScale* scales,
     const std::uint32_t* pages, const std::int32_t* page_table_row,
     std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count, std::size_t context,
     std::size_t physical_tokens, const std::int32_t* row_positions,
@@ -2204,16 +2599,10 @@ __global__ void split512_softmax_pv_partial_kernel(
     for (std::uint32_t offset = 0U; offset < kSplitTokens; ++offset) {
         const float probability = weights[offset];
         if (probability == 0.0F) continue;
-        const std::size_t translated   = static_cast<std::size_t>(physical[offset]);
-        const std::uint8_t packed      = values[int4_offset<Group, false, false>(
-            translated, kvh, thread, 4U, physical_tokens, false)];
-        int code                       = static_cast<int>((packed >> ((thread & 1U) * 4U)) & 0x0fU);
-        code                           = code >= 8 ? code - 16 : code;
-        const std::uint16_t scale_bits = scales[int4_offset<Group, false, false>(
-            translated, kvh, thread, 4U, physical_tokens, true)];
-        numerator =
-            fmaf(probability, static_cast<float>(code) * __half2float(__ushort_as_half(scale_bits)),
-                 numerator);
+        const std::size_t translated = static_cast<std::size_t>(physical[offset]);
+        const auto element           = Codec::template value<Group, false, false>(
+            values, scales, translated, kvh, thread, 4U, physical_tokens);
+        numerator = fmaf(probability, element.code * element.scale, numerator);
     }
     if (thread == 0U) {
         maxima[record] = denominator == 0.0F ? -INFINITY : maximum;
@@ -2319,17 +2708,17 @@ __global__ void split512_merge_kernel(const float* maxima, const float* sums,
     output[output_base + thread] = numerator / denominator;
 }
 
-template <std::uint32_t Group, bool TreeMask, bool DeviceActiveRows>
+template <class Codec, std::uint32_t Group, bool TreeMask, bool DeviceActiveRows>
 hipError_t split512_partial_merge(const Fp8Int4KvAttentionArgs& a,
                                   const Split512Workspace& workspace, hipStream_t stream) {
-    hipLaunchKernelGGL((split512_softmax_pv_partial_kernel<Group, TreeMask, DeviceActiveRows>),
-                       dim3(static_cast<unsigned>(workspace.chunks), a.query_heads, a.query_rows),
-                       dim3(kHeadDim), 0, stream, workspace.scores, a.value_codes,
-                       a.value_scale_bits, a.page_table, a.page_table_row, a.page_table_row_stride,
-                       a.page_table_row_count, a.context, a.physical_tokens, a.row_positions,
-                       a.ancestor_masks, a.prefix_lengths, a.prefix_length_stride,
-                       a.active_query_rows, a.query_rows, workspace.chunks, workspace.maxima,
-                       workspace.sums, workspace.numerators);
+    hipLaunchKernelGGL(
+        (split512_softmax_pv_partial_kernel<Codec, Group, TreeMask, DeviceActiveRows>),
+        dim3(static_cast<unsigned>(workspace.chunks), a.query_heads, a.query_rows), dim3(kHeadDim),
+        0, stream, workspace.scores, a.value_codes, Codec::value_scales(a), a.page_table,
+        a.page_table_row, a.page_table_row_stride, a.page_table_row_count, a.context,
+        a.physical_tokens, a.row_positions, a.ancestor_masks, a.prefix_lengths,
+        a.prefix_length_stride, a.active_query_rows, a.query_rows, workspace.chunks,
+        workspace.maxima, workspace.sums, workspace.numerators);
     hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;
     hipLaunchKernelGGL((split512_merge_kernel<DeviceActiveRows>), dim3(a.query_heads, a.query_rows),
@@ -2339,17 +2728,38 @@ hipError_t split512_partial_merge(const Fp8Int4KvAttentionArgs& a,
     return hipGetLastError();
 }
 
-template <std::uint32_t Group>
+template <class Codec, std::uint32_t Group>
 hipError_t split512_metadata_dispatch(const Fp8Int4KvAttentionArgs& a,
                                       const Split512Workspace& workspace, hipStream_t stream) {
     if (a.ancestor_masks != nullptr) {
         return a.active_query_rows != nullptr
-                   ? split512_partial_merge<Group, true, true>(a, workspace, stream)
-                   : split512_partial_merge<Group, true, false>(a, workspace, stream);
+                   ? split512_partial_merge<Codec, Group, true, true>(a, workspace, stream)
+                   : split512_partial_merge<Codec, Group, true, false>(a, workspace, stream);
     }
     return a.active_query_rows != nullptr
-               ? split512_partial_merge<Group, false, true>(a, workspace, stream)
-               : split512_partial_merge<Group, false, false>(a, workspace, stream);
+               ? split512_partial_merge<Codec, Group, false, true>(a, workspace, stream)
+               : split512_partial_merge<Codec, Group, false, false>(a, workspace, stream);
+}
+
+template <class Codec>
+hipError_t split512_qk_launch(const Fp8Int4KvAttentionArgs& a, const Split512Workspace& workspace,
+                              hipStream_t stream) {
+    if (a.active_query_rows != nullptr) {
+        hipLaunchKernelGGL((split512_qk_bf16_t4_kernel<Codec, true>),
+                           dim3(static_cast<unsigned>((a.context + 15U) / 16U), a.kv_heads),
+                           dim3(64), 0, stream, a.query, a.key_codes, a.key_scale_codes,
+                           a.page_table, a.page_table_row, a.page_table_row_stride,
+                           a.page_table_row_count, a.context, a.physical_tokens,
+                           a.active_query_rows, a.attention_scale, workspace.scores);
+    } else {
+        hipLaunchKernelGGL((split512_qk_bf16_t4_kernel<Codec, false>),
+                           dim3(static_cast<unsigned>((a.context + 15U) / 16U), a.kv_heads),
+                           dim3(64), 0, stream, a.query, a.key_codes, a.key_scale_codes,
+                           a.page_table, a.page_table_row, a.page_table_row_stride,
+                           a.page_table_row_count, a.context, a.physical_tokens, nullptr,
+                           a.attention_scale, workspace.scores);
+    }
+    return hipGetLastError();
 }
 
 } // namespace
@@ -2362,10 +2772,11 @@ std::size_t fp8_int4_kv_attention_split512_workspace_capacity_bytes(std::uint32_
 hipError_t fp8_int4_kv_attention_split512(const Fp8Int4KvAttentionArgs& a, void* storage,
                                           std::size_t storage_bytes, hipStream_t stream) noexcept {
     const std::size_t required = split512_workspace_bytes(a.query_rows, a.context);
-    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
+    if (!a.query || !a.key_codes || !a.value_codes || !valid_codec_planes(a) || !a.page_table ||
         !a.page_table_pages || !a.context || !a.physical_tokens || a.physical_tokens % kPageSize ||
         a.query_heads != 24U || a.kv_heads != 4U || a.q_to_kv != 6U ||
-        (a.query_rows != 1U && a.query_rows != 4U) || !a.output ||
+        (a.query_rows != 1U && a.query_rows != 4U) ||
+        (a.query_rows == 1U && a.codec != KvCodec::Fp8Int4) || !a.output ||
         !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
         a.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
         a.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
@@ -2403,26 +2814,18 @@ hipError_t fp8_int4_kv_attention_split512(const Fp8Int4KvAttentionArgs& a, void*
             .scores                = workspace.scores,
         };
         error = fp8_kv_qk_wmma(qk, stream);
-    } else if (a.active_query_rows != nullptr) {
-        hipLaunchKernelGGL((split512_qk_bf16_t4_kernel<true>),
-                           dim3(static_cast<unsigned>((a.context + 15U) / 16U), a.kv_heads),
-                           dim3(64), 0, stream, a.query, a.key_codes, a.page_table,
-                           a.page_table_row, a.page_table_row_stride, a.page_table_row_count,
-                           a.context, a.physical_tokens, a.active_query_rows, a.attention_scale,
-                           workspace.scores);
-        error = hipGetLastError();
+    } else if (a.codec == KvCodec::Nvfp4) {
+        error = split512_qk_launch<Nvfp4ElementCodec>(a, workspace, stream);
     } else {
-        hipLaunchKernelGGL((split512_qk_bf16_t4_kernel<false>),
-                           dim3(static_cast<unsigned>((a.context + 15U) / 16U), a.kv_heads),
-                           dim3(64), 0, stream, a.query, a.key_codes, a.page_table,
-                           a.page_table_row, a.page_table_row_stride, a.page_table_row_count,
-                           a.context, a.physical_tokens, nullptr, a.attention_scale,
-                           workspace.scores);
-        error = hipGetLastError();
+        error = split512_qk_launch<Fp8Int4ElementCodec>(a, workspace, stream);
     }
     if (error != hipSuccess) return error;
-    return a.value_group == 16U ? split512_metadata_dispatch<16U>(a, workspace, stream)
-                                : split512_metadata_dispatch<32U>(a, workspace, stream);
+    if (a.codec == KvCodec::Nvfp4) {
+        return split512_metadata_dispatch<Nvfp4ElementCodec, 16U>(a, workspace, stream);
+    }
+    return a.value_group == 16U
+               ? split512_metadata_dispatch<Fp8Int4ElementCodec, 16U>(a, workspace, stream)
+               : split512_metadata_dispatch<Fp8Int4ElementCodec, 32U>(a, workspace, stream);
 }
 
 } // namespace ninfer::ops::r9700::kv

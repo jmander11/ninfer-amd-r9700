@@ -108,6 +108,7 @@ PersistentLayout persistent_layout(const SequencePlanImpl& plan) {
                      .kv_heads                  = TextConfig::kv_heads,
                      .attention_head_dim        = TextConfig::head_dim,
                      .value_group               = kR9700TextKVValueGroup,
+                     .kv_cache_format           = plan.kv_cache_format,
                      .text_plane_layouts        = kR9700TextKVPlaneLayouts,
                      .mtp_plane_layouts         = kR9700TextKVPlaneLayouts,
                      .enable_mtp                = plan.features.mtp(),
@@ -916,6 +917,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
     impl->kv_disk_capacity_bytes   = inputs.kv_disk_capacity_bytes;
     impl->kv_disk_location         = inputs.kv_disk_location;
     impl->kv_disk_compress         = inputs.kv_disk_compress;
+    impl->kv_cache_format          = inputs.kv_cache_format;
     impl->model_id                 = inputs.model_id;
     impl->weights_id               = inputs.weights_id;
     impl->artifact_tensor_identity = inputs.artifact_tensor_identity;
@@ -1044,6 +1046,7 @@ make_sequence_planner_impl(DeviceContext& device, const EngineOptions& options,
         .kv_disk_capacity_bytes   = options.kv_disk_capacity_bytes,
         .kv_disk_location         = options.kv_disk_location,
         .kv_disk_compress         = options.kv_disk_compress,
+        .kv_cache_format          = options.kv_cache_format,
         .model_id                 = options.model_id,
         .weights_id               = options.weights_id,
         .artifact_tensor_identity = options.artifact_tensor_identity,

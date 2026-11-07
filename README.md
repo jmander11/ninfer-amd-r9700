@@ -49,6 +49,19 @@ Shared cache capacity with automatic sizing, optimized proposal heads, adaptive 
 | 15 | Unsupported | 542,976 |
 | 16 | Unsupported | 535,488 |
 
+The opt-in NVFP4 cache (`--kv-cache nvfp4`: E2M1 keys and values with E4M3 scales per 16 features) stores about 1.44x as many tokens. Measured 2026-11-07 with adaptive DFlash K7 (C16 without speculation), same settings:
+
+| C | Default shared KV tokens | NVFP4 shared KV tokens |
+|---:|---:|---:|
+| 1 | 262,144 | 262,144 |
+| 2 | 524,288 | 524,288 |
+| 4 | 624,128 | 901,568 |
+| 8 | 591,552 | 854,464 |
+| 12 | 556,224 | 803,456 |
+| 16 (no speculation) | 608,704 | 879,232 |
+
+NVFP4 passes the same BF16-source PPL gate as the default (no worse than the 5090 NVFP4 build on every cell) and 108/108 needle retrievals from 8K to 260K; its batched decode is equal to or faster than the default at 8K and longer contexts (up to +5.6% at C12/32K). Default remains `fp8-int4`; see `docs/performance.md`.
+
 Capacity depends on available VRAM and enabled features; automatic sizing leaves 64 MiB headroom by default. These are allocated shared capacities, checked at startup and with short decode, rather than an all-lane near-capacity qualification. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; MTP startup summaries: `bench/results/shared-kv-mtp-20261104.json`; DFlash C9..12 summaries: `bench/results/shared-kv-dflash-c9-c12-20261104.json`.
 
 ## Performance and quality

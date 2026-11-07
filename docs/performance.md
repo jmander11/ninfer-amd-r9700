@@ -33,6 +33,27 @@ The latest measurements use:
 
 The GPU must otherwise be idle. Kernel and service timings use HIP events around the claimed physical work after warmup; serving throughput below uses explicitly identified wall intervals. Operators are checked against independent exact/FP64 reference calculations before their timings are used.
 
+### Opt-in NVFP4 KV cache (2026-11-07)
+
+`--kv-cache nvfp4` (CLI, serve, bench, PPL; `NINFER_QUAL_KV_CACHE=nvfp4` in qualifiers) stores E2M1 keys and values with one E4M3 scale per 16 features of each (scale `E4M3_satfinite(max|x|/6)`, code `E2M1_rn(x/scale)`, unit global scales) in four planes per layer. Same production LQ4 artifact, Release build, Linux 7.0.0-38, power `auto`, Compose graph environment, chunk 2048.
+
+Accuracy: against the frozen 5090 scorer on the four BF16-source cells, NVFP4-cache minus 5090 NVFP4 dNLL is prefill-8K −0.0216, decode-8K −0.0038, prefill-32K −0.0092, decode-32K −0.0005 (no worse on every cell; severe counts within cap). Prefill is partition-invariant (chunk 2048 and 512 bit-identical on both caches). The 4K code cell differs from the research NVFP4 arm by +0.0019 ± 0.0019 nats (research stages QK in BF16, production in FP16). Retrieval on `ninfer-serve --kv-cache nvfp4`, no prefix reuse: 88/88 at C12 (8K/32K/64K, five positions, standard, multikey, sampled multikey at temperature 1.5, concurrent 12×8K, 12×32K and 4×64K waves) and 20/20 at C1 (128K standard and multikey, 240K standard, 260K multikey).
+
+Shared KV capacity (`--kv-capacity auto`, `--max-ctx 262144`, adaptive DFlash K7; C16 without speculation), default/NVFP4 tokens: C1 262,144/262,144, C2 524,288/524,288, C4 624,128/901,568, C8 591,552/854,464, C12 556,224/803,456, C16 608,704/879,232. Observed graph memory stayed within its allowance in every cell.
+
+`ninfer_bench` batched decode tok/s (128 tokens, two repetitions after one warmup), default → NVFP4:
+
+| Workload | C1 | C2 | C4 | C6 | C8 | C12 |
+|---|---:|---:|---:|---:|---:|---:|
+| DFlash K7, 32K | 238.6 → 239.7 | 385.8 → 391.6 | 630.6 → 653.5 | 808.0 → 844.5 | 943.6 → 988.3 | 1032.8 → 1090.4 |
+| DFlash K7, 8K | 141.5 → 163.5 | 243.5 → 261.6 | 420.8 → 457.8 | 562.8 → 614.3 | 690.7 → 741.2 | 796.9 → 813.8 |
+| DFlash K7, 512 | 90.3 → 81.8 | 137.0 → 112.9 | 245.9 → 204.1 | 382.5 → 290.3 | 458.2 → 362.5 | 477.8 → 430.6 |
+| Adaptive DFlash, 32K | 238.0 → 239.5 | | 631.8 → 628.4 | | 909.0 → 945.7 | 981.1 → 1039.8 |
+
+MTP K3: 8K C1 122.7 → 122.9, C4 387.5 → 392.8, C8 616.9 → 627.2; 32K C4 323.3 → 336.9. No speculation: 8K C1 36.5 → 36.5, 32K C1 34.8 → 35.2, 8K C16 345.5 → 356.5. Prefill time is unchanged (12×32K: 133.5 vs 133.6 s). The cache changes the generated text, so DFlash acceptance differs between arms: at 512 tokens NVFP4 accepted fewer drafts (0.21 vs 0.25 at C12) with equal time per round, and at 8K it accepted more, so those two rows mix kernel and acceptance effects; equal-round cells (8K C12, all of 32K) isolate the kernel. Whole-wave throughput at C12 G512 with 32K/48K/64K prompts is equal (43.8/26.7–27.1/18.9 tok/s) because prefill dominates; the capacity gain matters when output is long relative to the prompt. The C8 60K×8 DFlash chunked-throughput qualifier passes on NVFP4 with a 734,656-token pool. A store written by one codec fails cleanly at startup on the other (`KV disk fingerprint mismatch: text_codec`).
+
+Limitations: staged routes stage queries in FP16 and poison rows with |Q| ≥ 2^16; the NVFP4 packed-decode loader uses six waves when `4·count·chunks ≤ 128`, else five, and its kernarg grows with the fourth plane. `tools/bench/context_ladder.py`, `run_serve_corpus.py`, `tools/ppl/run.py` and `produce_fp8_hybrid_capacity.py` drive only the default cache.
+
 ### Device-count MTP packed attention (2026-11-04)
 
 PR #3 routes non-tree MTP attention with device-selected active row counts through the

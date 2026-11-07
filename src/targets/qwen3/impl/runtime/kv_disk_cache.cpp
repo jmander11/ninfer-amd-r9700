@@ -553,10 +553,12 @@ Fp8KInt4VSemanticFingerprint disk_semantics(Fp8KInt4VSemanticFingerprint value) 
 void validate_codec_pool(const PagedKVPool& pool, const Fp8KInt4VSemanticFingerprint& semantics) {
     if (semantics.format_version != Fp8KInt4VSemanticFingerprint::kFormatVersion ||
         semantics.page_size != kPagedKVPageSize || semantics.layer_count <= 0 ||
-        pool.plane_count() != static_cast<std::size_t>(semantics.layer_count) * 3U) {
-        throw std::invalid_argument("disk cache requires the fixed three-plane codec");
+        pool.plane_count() != static_cast<std::size_t>(semantics.layer_count) *
+                                  kv_planes_per_layer(semantics.format)) {
+        throw std::invalid_argument("disk cache requires its format's plane codec");
     }
     const Fp8KInt4VPagedKVSpec spec{
+        .format                = semantics.format,
         .page_group_count      = semantics.page_group_count,
         .logical_page_capacity = semantics.logical_page_capacity,
         .table_rows            = pool.table_row_count(),
@@ -581,7 +583,7 @@ void encode_semantics(OutBuf& w, const Fp8KInt4VSemanticFingerprint& value) {
     w.u8(static_cast<std::uint8_t>(value.plane_layouts.key));
     w.u8(static_cast<std::uint8_t>(value.plane_layouts.value));
     w.u8(static_cast<std::uint8_t>(value.plane_layouts.value_scale));
-    w.u8(0);
+    w.u8(static_cast<std::uint8_t>(value.format));
 }
 
 Fp8KInt4VSemanticFingerprint decode_semantics(InBuf& r) {
@@ -595,7 +597,10 @@ Fp8KInt4VSemanticFingerprint decode_semantics(InBuf& r) {
     value.plane_layouts.key         = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
     value.plane_layouts.value       = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
     value.plane_layouts.value_scale = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
-    if (r.u8() != 0 || value.format_version != Fp8KInt4VSemanticFingerprint::kFormatVersion ||
+    const std::uint8_t format       = r.u8();
+    value.format                    = static_cast<KvCacheFormat>(format);
+    if (format > static_cast<std::uint8_t>(KvCacheFormat::Nvfp4) ||
+        value.format_version != Fp8KInt4VSemanticFingerprint::kFormatVersion ||
         value.page_size != kPagedKVPageSize) {
         throw std::runtime_error("KV disk fixed codec fingerprint is invalid");
     }

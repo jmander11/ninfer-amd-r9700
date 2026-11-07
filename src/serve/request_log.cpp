@@ -687,7 +687,7 @@ std::string format_server_start_json(
         {"mixed_forward", options.mixed_forward ? Json(*options.mixed_forward) : Json("auto")},
         {"mixed_forward_rounds", options.mixed_forward_rounds},
         {"log_stats_interval_ms", options.log_stats_interval_ms},
-        {"kv_cache_format", "fp8-k-int4-v"},
+        {"kv_cache_format", ninfer::kv_cache_format_name(options.kv_cache_format)},
         {"kv_value_group", NINFER_R9700_KV_VALUE_GROUP},
         {"vision", options.enable_vision},
         {"device_graph", options.use_device_graph},

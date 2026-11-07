@@ -500,6 +500,7 @@ int main(int argc, char** argv) {
         engine_options.artifact_path        = options.artifact_path;
         engine_options.device               = options.device;
         engine_options.max_context          = max_context;
+        engine_options.kv_cache_format      = options.kv_cache_format;
         engine_options.max_concurrency      = options.concurrency;
         engine_options.max_pending_requests = options.concurrency;
         engine_options.pending_timeout_ms   = ninfer::bench::kBenchmarkPendingTimeoutMs;
@@ -523,6 +524,7 @@ int main(int argc, char** argv) {
         env.artifact_path            = options.artifact_path;
         env.artifact_file_size_bytes = ninfer::bench::file_size_or_zero(options.artifact_path);
         env.max_context              = max_context;
+        env.kv_cache_format          = options.kv_cache_format;
         env.prefill_chunk            = options.prefill_chunk;
         env.concurrency              = options.concurrency;
         env.pending_timeout_ms       = ninfer::bench::kBenchmarkPendingTimeoutMs;
@@ -549,7 +551,8 @@ int main(int argc, char** argv) {
 
         std::cerr << "[ninfer_bench] loading " << options.artifact_path
                   << " (max_context=" << max_context << ", concurrency=" << options.concurrency
-                  << ", kv_format=fp8-k-int4-v)\n";
+                  << ", kv_format=" << ninfer::kv_cache_format_name(options.kv_cache_format)
+                  << ")\n";
         ninfer::Engine engine(std::move(engine_options));
         fill_hip_environment(env, options.device);
         env.load   = engine.load_summary();

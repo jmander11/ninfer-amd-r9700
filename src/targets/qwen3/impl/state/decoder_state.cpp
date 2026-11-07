@@ -15,7 +15,7 @@ PagedKVCacheLayout plan_cache(LayoutBuilder& builder, std::uint32_t layers, std:
                               std::int32_t kv_heads, std::int32_t head_dim,
                               std::int32_t value_group, std::int32_t table_rows,
                               std::uint32_t physical_page_groups,
-                              Fp8KInt4VPlaneLayouts plane_layouts) {
+                              Fp8KInt4VPlaneLayouts plane_layouts, KvCacheFormat format) {
     if (layers == 0 ||
         layers > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
         kv_heads <= 0 || head_dim <= 0 || table_rows <= 0) {
@@ -26,6 +26,7 @@ PagedKVCacheLayout plan_cache(LayoutBuilder& builder, std::uint32_t layers, std:
         throw std::invalid_argument("FP8-K/INT4-V decoder cache physical pages are below capacity");
     }
     Fp8KInt4VPagedKVSpec spec{
+        .format                = format,
         .page_group_count      = physical_page_groups,
         .logical_page_capacity = logical_pages,
         .table_rows            = table_rows,
@@ -44,13 +45,15 @@ PagedKVCacheLayout plan_cache(LayoutBuilder& builder, std::uint32_t layers, std:
 
 DecoderStateLayout plan_decoder_state(LayoutBuilder& builder, const DecoderStateSpec& spec) {
     DecoderStateLayout layout;
-    layout.text_kv = plan_cache(builder, spec.full_attention_layers, spec.capacity, spec.kv_heads,
-                                spec.attention_head_dim, spec.value_group, spec.kv_table_rows,
-                                spec.text_physical_page_groups, spec.text_plane_layouts);
+    layout.text_kv =
+        plan_cache(builder, spec.full_attention_layers, spec.capacity, spec.kv_heads,
+                   spec.attention_head_dim, spec.value_group, spec.kv_table_rows,
+                   spec.text_physical_page_groups, spec.text_plane_layouts, spec.kv_cache_format);
     if (spec.enable_mtp) {
-        layout.mtp_kv = plan_cache(builder, spec.mtp_layers, spec.capacity, spec.kv_heads,
-                                   spec.attention_head_dim, spec.value_group, spec.kv_table_rows,
-                                   spec.mtp_physical_page_groups, spec.mtp_plane_layouts);
+        layout.mtp_kv =
+            plan_cache(builder, spec.mtp_layers, spec.capacity, spec.kv_heads,
+                       spec.attention_head_dim, spec.value_group, spec.kv_table_rows,
+                       spec.mtp_physical_page_groups, spec.mtp_plane_layouts, spec.kv_cache_format);
     }
     layout.linear_attention = plan_linear_attention_state_pool(builder, spec.linear_attention);
     return layout;

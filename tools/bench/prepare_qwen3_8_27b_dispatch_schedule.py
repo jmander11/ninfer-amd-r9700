@@ -395,7 +395,8 @@ def build_schedule(
                         f"{marker} chunk {chunk_index} has {len(dense)} dense consumers"
                     )
                 dense_group = re.search(
-                    r"fused_attention_causal_kernel<(16|32)u,", rows[dense[0]]["symbol"]
+                    r"fused_attention_causal_kernel<(?:[\w:]+, )?(16|32)u,",
+                    rows[dense[0]]["symbol"],
                 )
                 if dense_group is None or int(dense_group.group(1)) != workload["kv_value_group"]:
                     raise ValueError(

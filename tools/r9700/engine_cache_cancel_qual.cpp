@@ -1,3 +1,4 @@
+#include "qual_kv_format.h"
 #include "ninfer/engine.h"
 
 #include <algorithm>
@@ -131,6 +132,7 @@ int qualify_disk_restart(const std::filesystem::path& artifact,
             "SSD qualification requires a new, nonexistent output directory");
     const auto options = [&] {
         ninfer::EngineOptions value;
+        value.kv_cache_format        = ninfer::qual::kv_cache_format_from_environment();
         value.artifact_path          = artifact;
         value.max_context            = 256;
         value.kv_capacity            = ninfer::KvCapacityPolicy::explicit_capacity(256);
@@ -198,6 +200,7 @@ int qualify_system_prompts(const std::filesystem::path& artifact, std::string_vi
     require(backend == "none" || backend == "dflash" || backend == "mtp",
             "system cache backend must be none, dflash, or mtp");
     ninfer::EngineOptions options;
+    options.kv_cache_format       = ninfer::qual::kv_cache_format_from_environment();
     options.artifact_path         = artifact;
     options.max_context           = 8192;
     options.kv_capacity           = ninfer::KvCapacityPolicy::explicit_capacity(16384);
@@ -328,6 +331,7 @@ int qualify_chunked_pressure(const std::filesystem::path& artifact, std::string_
                              bool reasoning = false) {
     require(backend == "none" || backend == "dflash", "expected none or dflash backend");
     ninfer::EngineOptions options;
+    options.kv_cache_format       = ninfer::qual::kv_cache_format_from_environment();
     options.artifact_path         = artifact;
     options.max_context           = 16384;
     options.kv_capacity           = ninfer::KvCapacityPolicy::explicit_capacity(18432);
@@ -451,6 +455,7 @@ int qualify_chunked_throughput(const std::filesystem::path& artifact, std::strin
                                bool completion = false) {
     require(backend == "none" || backend == "dflash", "expected none or dflash backend");
     ninfer::EngineOptions options;
+    options.kv_cache_format       = ninfer::qual::kv_cache_format_from_environment();
     options.artifact_path         = artifact;
     options.max_context           = 262144;
     options.max_concurrency       = 8;
@@ -461,9 +466,11 @@ int qualify_chunked_throughput(const std::filesystem::path& artifact, std::strin
     options.pending_timeout_ms    = completion ? 1800000 : 900000;
     options.speculative.backend =
         backend == "none" ? ninfer::SpeculativeBackend::None : ninfer::SpeculativeBackend::DFlash;
-    options.speculative.draft_tokens   = 7;
-    options.speculative.adaptive_draft = true;
-    options.speculative.proposal_head  = ninfer::ProposalHead::Optimized;
+    if (backend == "dflash") {
+        options.speculative.draft_tokens   = 7;
+        options.speculative.adaptive_draft = true;
+        options.speculative.proposal_head  = ninfer::ProposalHead::Optimized;
+    }
     ninfer::Engine engine(options);
     std::cerr << "throughput loaded backend=" << backend
               << " pool_tokens=" << engine.memory_summary().kv_capacity << '\n';
@@ -717,6 +724,7 @@ int main(int argc, char** argv) {
             return qualify_disk_restart(argv[1], argv[3]);
         }
         ninfer::EngineOptions options;
+        options.kv_cache_format       = ninfer::qual::kv_cache_format_from_environment();
         options.artifact_path         = argv[1];
         options.max_context           = 256;
         options.kv_capacity           = ninfer::KvCapacityPolicy::explicit_capacity(256);

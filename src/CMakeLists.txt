@@ -646,6 +646,15 @@ set_target_properties(ninfer_r9700_full_attention_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_full_attention_qual PRIVATE ninfer_r9700_core hip::host)
 
+# Opt-in NVFP4 cache: every codec, transaction and attention route against its independent oracle.
+add_executable(ninfer_r9700_nvfp4_kv_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/nvfp4_kv_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_nvfp4_kv_qual)
+target_include_directories(ninfer_r9700_nvfp4_kv_qual PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+set_target_properties(ninfer_r9700_nvfp4_kv_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_nvfp4_kv_qual PRIVATE ninfer_r9700_core hip::host)
+
 # Standalone arithmetic discriminator for ordinary W1 versus DFlash-chain W5 attention. It calls
 # the two raw leaves directly and cannot alter the production row/context classifier.
 add_executable(ninfer_r9700_dflash_attention_route_discriminator

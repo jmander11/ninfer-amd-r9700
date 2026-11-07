@@ -41,6 +41,7 @@ struct ServeOptions {
     std::size_t kv_disk_capacity_bytes  = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress     = KvDiskCompress::Off;
+    KvCacheFormat kv_cache_format       = KvCacheFormat::Fp8KInt4V;
     std::uint32_t log_stats_interval_ms = 5000; // 0 disables periodic Engine throughput logs
     std::size_t max_request_bytes       = kDefaultMaxRequestBytes;
     std::string response_store_location;

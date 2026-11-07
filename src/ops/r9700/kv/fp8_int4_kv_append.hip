@@ -68,6 +68,28 @@ __device__ std::size_t physical_token(std::size_t logical, const std::uint32_t* 
            logical % kPageSize;
 }
 
+// E2M1_rn of value / scale, where FP32 midpoints tie to the even code. Sign is kept in bit 3, so a
+// negative value below the first threshold stores as signed zero.
+__device__ __forceinline__ std::uint32_t nvfp4_code(float value, float scale) {
+    if (scale == 0.0F) return 0U;
+    const float x   = fabsf(__fdiv_rn(value, scale));
+    std::uint32_t c = x > 0.25F ? 1U : 0U;
+    c               = x >= 0.75F ? 2U : c;
+    c               = x > 1.25F ? 3U : c;
+    c               = x >= 1.75F ? 4U : c;
+    c               = x > 2.5F ? 5U : c;
+    c               = x >= 3.5F ? 6U : c;
+    c               = x > 5.0F ? 7U : c;
+    return c | (signbit(value) ? 8U : 0U);
+}
+
+__device__ __forceinline__ float nvfp4_group_maximum(float magnitude) {
+    for (std::uint32_t delta = 8U; delta != 0U; delta >>= 1U) {
+        magnitude = fmaxf(magnitude, __shfl_down(magnitude, delta, 16));
+    }
+    return __shfl(magnitude, 0, 16);
+}
+
 // Kernel arguments of one append launch over the sequences of a compact decode batch. Grid y is
 // the sequence, whose own arguments come from this kernarg array; slots at and above gridDim.y are
 // never read.
@@ -77,7 +99,8 @@ struct AppendSequences {
 
 static_assert(sizeof(AppendSequences) <= 4096U, "append sequences must fit the kernarg segment");
 
-template <std::uint32_t Group, bool KeyTokenFastest, bool ValueTokenFastest, bool ScaleTokenFastest>
+template <KvCodec Codec, std::uint32_t Group, bool KeyTokenFastest, bool ValueTokenFastest,
+          bool ScaleTokenFastest>
 __global__ void append_kernel(AppendSequences sequences) {
     const Fp8Int4KvAppendArgs& args       = sequences.sequence[blockIdx.y];
     const std::uint32_t kv_heads          = args.kv_heads;
@@ -140,6 +163,36 @@ __global__ void append_kernel(AppendSequences sequences) {
         if (lane_in_group == 0) { atomicOr(status, Fp8Int4KvAppendNonfiniteInput); }
         return;
     }
+    if constexpr (Codec == KvCodec::Nvfp4) {
+        const std::size_t page        = destination / kPageSize;
+        const std::size_t in_page     = destination % kPageSize;
+        const std::size_t pages       = physical_tokens / kPageSize;
+        const std::uint32_t key_scale = __hip_cvt_float_to_fp8(
+            __fdiv_rn(nvfp4_group_maximum(fabsf(key)), 6.0F), __HIP_SATFINITE, __HIP_E4M3);
+        const std::uint32_t value_scale = __hip_cvt_float_to_fp8(
+            __fdiv_rn(nvfp4_group_maximum(fabsf(value)), 6.0F), __HIP_SATFINITE, __HIP_E4M3);
+        const std::uint32_t key_code =
+            nvfp4_code(key, __half2float(__half(__hip_cvt_fp8_to_halfraw(key_scale, __HIP_E4M3))));
+        const std::uint32_t value_code = nvfp4_code(
+            value, __half2float(__half(__hip_cvt_fp8_to_halfraw(value_scale, __HIP_E4M3))));
+        const std::uint32_t key_adjacent   = __shfl(key_code, lane_in_group ^ 1U, Group);
+        const std::uint32_t value_adjacent = __shfl(value_code, lane_in_group ^ 1U, Group);
+        const std::size_t head_page        = page + pages * head;
+        const std::size_t value_row        = in_page + kPageSize * (head + kv_heads * page);
+        if ((lane_in_group & 1U) == 0U) {
+            args.key_codes[in_page + kPageSize * (feature / 2U + 128U * head_page)] =
+                static_cast<std::uint8_t>(key_code | (key_adjacent << 4U));
+            args.value_codes[feature / 2U + 128U * value_row] =
+                static_cast<std::uint8_t>(value_code | (value_adjacent << 4U));
+        }
+        if (lane_in_group == 0U) {
+            args.key_scale_codes[in_page + kPageSize * (group + 16U * head_page)] =
+                static_cast<std::uint8_t>(key_scale);
+            args.value_scale_codes[group + 16U * value_row] =
+                static_cast<std::uint8_t>(value_scale);
+        }
+        return;
+    }
     float maximum = fabsf(value);
     for (std::uint32_t delta = Group / 2; delta != 0; delta >>= 1U) {
         maximum = fmaxf(maximum, __shfl_down(maximum, delta, Group));
@@ -173,11 +226,12 @@ __global__ void append_kernel(AppendSequences sequences) {
     }
 }
 
-template <std::uint32_t Group, bool KeyTokenFastest, bool ValueTokenFastest, bool ScaleTokenFastest>
+template <std::uint32_t Group, bool KeyTokenFastest, bool ValueTokenFastest, bool ScaleTokenFastest,
+          KvCodec Codec = KvCodec::Fp8Int4>
 hipError_t launch(const AppendSequences& sequences, std::uint32_t count, std::size_t grid_items,
                   hipStream_t stream) {
     hipLaunchKernelGGL(
-        (append_kernel<Group, KeyTokenFastest, ValueTokenFastest, ScaleTokenFastest>),
+        (append_kernel<Codec, Group, KeyTokenFastest, ValueTokenFastest, ScaleTokenFastest>),
         dim3(static_cast<unsigned int>(grid_items), count), dim3(kHeadDim), 0, stream, sequences);
     return hipGetLastError();
 }
@@ -216,7 +270,13 @@ hipError_t dispatch_layouts(const Fp8Int4KvAppendArgs& args, const AppendSequenc
         args.tokens == 0 || args.kv_heads == 0 || args.page_table == nullptr ||
         args.page_table_pages == 0 || args.physical_tokens == 0 ||
         args.physical_tokens % kPageSize != 0 || args.key_codes == nullptr ||
-        args.value_codes == nullptr || args.value_scale_bits == nullptr ||
+        args.value_codes == nullptr ||
+        (args.codec == KvCodec::Fp8Int4 && args.value_scale_bits == nullptr) ||
+        (args.codec == KvCodec::Nvfp4 &&
+         (args.key_scale_codes == nullptr || args.value_scale_codes == nullptr ||
+          args.value_group != 16 || args.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
+          args.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+          args.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest)) ||
         args.tokens > static_cast<std::size_t>(UINT32_MAX) / args.kv_heads ||
         (args.first_position_device == nullptr &&
          args.tokens - 1U > static_cast<std::size_t>(UINT32_MAX - args.first_position)) ||
@@ -241,8 +301,9 @@ hipError_t fp8_int4_kv_append(std::span<const Fp8Int4KvAppendArgs> sequences,
     for (std::size_t sequence = 0; sequence < sequences.size(); ++sequence) {
         const Fp8Int4KvAppendArgs& args = sequences[sequence];
         // The codec instantiation is shared: one value group and plane order per launch.
-        if (!valid_append(args) || args.value_group != first.value_group ||
-            args.key_layout != first.key_layout || args.value_layout != first.value_layout ||
+        if (!valid_append(args) || args.codec != first.codec ||
+            args.value_group != first.value_group || args.key_layout != first.key_layout ||
+            args.value_layout != first.value_layout ||
             args.value_scale_layout != first.value_scale_layout) {
             return hipErrorInvalidValue;
         }
@@ -250,6 +311,9 @@ hipError_t fp8_int4_kv_append(std::span<const Fp8Int4KvAppendArgs> sequences,
         grid_items               = std::max(grid_items, args.tokens * args.kv_heads);
     }
     const auto count = static_cast<std::uint32_t>(sequences.size());
+    if (first.codec == KvCodec::Nvfp4) {
+        return launch<16U, true, false, false, KvCodec::Nvfp4>(batch, count, grid_items, stream);
+    }
     return first.value_group == 16 ? dispatch_layouts<16>(first, batch, count, grid_items, stream)
                                    : dispatch_layouts<32>(first, batch, count, grid_items, stream);
 }

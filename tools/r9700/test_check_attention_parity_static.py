@@ -24,7 +24,7 @@ class AttentionParityStaticTest(unittest.TestCase):
         assembly = ASSEMBLY
         text = assembly.read_text(encoding="utf-8")
         marker = ".vgpr_count:     235"
-        symbol = "dense_verify_kernelILj16EE"
+        symbol = "dense_verify_kernelINS2_17Fp8Int4DenseCodecELj16ELj3EE"
         metadata = text.find(".amdgpu_metadata")
         symbol_at = text.find(symbol, metadata)
         start = text.rfind(".name:", metadata, symbol_at)

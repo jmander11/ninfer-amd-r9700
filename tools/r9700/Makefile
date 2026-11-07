@@ -650,8 +650,8 @@ $(BUILD_DIR)/kv_append.s: $(KV_APPEND_SOURCE) $(KV_APPEND_HEADER) Makefile
 	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S $(KV_APPEND_SOURCE) -o $@
 
 kv-resources: $(BUILD_DIR)/kv_op_qual.s $(BUILD_DIR)/kv_append.s
-	awk '/-- Begin function/ { selected = ($$0 ~ /softmax_wmma_scores_in_place_kernel|qk_wmma_kernel|pv_vector_kernelILj16ELb0ELb0|fused_attention_causal_kernelILj16ELb1ELb0ELb0ELb0/) } selected && $$0 ~ /-- Begin function|v_wmma_f32_16x16x16_fp8_fp8|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|NumVgprs|ScratchSize|LDSByteSize|Occupancy/' $(BUILD_DIR)/kv_op_qual.s
-	awk '/-- Begin function/ { selected = ($$0 ~ /append_kernelILj16ELb1ELb0ELb0/) } selected && $$0 ~ /-- Begin function|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|NumVgprs|ScratchSize|LDSByteSize|Occupancy/' $(BUILD_DIR)/kv_append.s
+	awk '/-- Begin function/ { selected = ($$0 ~ /softmax_wmma_scores_in_place_kernel|qk_wmma_kernel|pv_vector_kernelILj16ELb0ELb0|fused_attention_causal_kernelINS2_19Fp8Int4ElementCodecELj16ELb1ELb0ELb0ELb0/) } selected && $$0 ~ /-- Begin function|v_wmma_f32_16x16x16_fp8_fp8|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|NumVgprs|ScratchSize|LDSByteSize|Occupancy/' $(BUILD_DIR)/kv_op_qual.s
+	awk '/-- Begin function/ { selected = ($$0 ~ /append_kernelILNS2_7KvCodecE0ELj16ELb1ELb0ELb0/) } selected && $$0 ~ /-- Begin function|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|NumVgprs|ScratchSize|LDSByteSize|Occupancy/' $(BUILD_DIR)/kv_append.s
 
 $(BUILD_DIR)/xattention_s$(XATTENTION_STRIDE)_tau$(XATTENTION_TAU_PERMILLE).s: \
 		$(XATTENTION_SOURCE) $(XATTENTION_HEADER) $(XATTENTION_PROFILE) Makefile

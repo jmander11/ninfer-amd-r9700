@@ -91,6 +91,56 @@ __global__ void compact_kernel(std::size_t prefix, const std::uint32_t* selected
     }
 }
 
+// Exact byte copy of all four NVFP4 planes in their fixed order. Threads own distinct code bytes
+// (first 128) and scale bytes (first 16) of one KV head; the barrier orders overlapping tokens.
+__global__ void nvfp4_compact_kernel(std::size_t prefix, const std::uint32_t* selected_path,
+                                     std::size_t selected_count, const std::uint32_t* page_table,
+                                     std::uint32_t table_pages, std::size_t physical_tokens,
+                                     std::uint8_t* keys, std::uint8_t* key_scales,
+                                     std::uint8_t* values, std::uint8_t* value_scales,
+                                     std::uint32_t* status) {
+    const std::uint32_t head = blockIdx.x, index = threadIdx.x;
+    const std::size_t pages = physical_tokens / kPageSize;
+    for (std::size_t selected = 0; selected < selected_count; ++selected) {
+        const std::size_t source_logical      = prefix + selected_path[selected];
+        const std::size_t destination_logical = prefix + selected;
+        if (source_logical / kPageSize >= table_pages ||
+            destination_logical / kPageSize >= table_pages) {
+            if (index == 0) atomicOr(status, Fp8Int4KvAppendInvalidAddress);
+            return;
+        }
+        const std::size_t source_page      = page_table[source_logical / kPageSize];
+        const std::size_t destination_page = page_table[destination_logical / kPageSize];
+        if (source_page >= pages || destination_page >= pages) {
+            if (index == 0) atomicOr(status, Fp8Int4KvAppendInvalidAddress);
+            return;
+        }
+        const std::size_t source_in_page      = source_logical % kPageSize;
+        const std::size_t destination_in_page = destination_logical % kPageSize;
+        const auto head_major = [&](std::size_t page, std::size_t in_page, std::uint32_t coordinate,
+                                    std::uint32_t leading) {
+            return in_page + kPageSize * (coordinate + leading * (page + pages * head));
+        };
+        const auto page_major = [&](std::size_t page, std::size_t in_page, std::uint32_t coordinate,
+                                    std::uint32_t leading) {
+            return coordinate + leading * (in_page + kPageSize * (head + gridDim.x * page));
+        };
+        if (index < kHeadDim / 2U) {
+            keys[head_major(destination_page, destination_in_page, index, 128U)] =
+                keys[head_major(source_page, source_in_page, index, 128U)];
+            values[page_major(destination_page, destination_in_page, index, 128U)] =
+                values[page_major(source_page, source_in_page, index, 128U)];
+        }
+        if (index < 16U) {
+            key_scales[head_major(destination_page, destination_in_page, index, 16U)] =
+                key_scales[head_major(source_page, source_in_page, index, 16U)];
+            value_scales[page_major(destination_page, destination_in_page, index, 16U)] =
+                value_scales[page_major(source_page, source_in_page, index, 16U)];
+        }
+        __syncthreads();
+    }
+}
+
 template <std::uint32_t G, bool K, bool V, bool S>
 hipError_t launch(const Fp8Int4KvCompactArgs& a, hipStream_t stream) {
     hipLaunchKernelGGL((compact_kernel<G, K, V, S>), dim3(a.kv_heads), dim3(kHeadDim), 0, stream,
@@ -129,9 +179,22 @@ hipError_t dispatch(const Fp8Int4KvCompactArgs& a, hipStream_t s) {
 hipError_t fp8_int4_kv_compact(const Fp8Int4KvCompactArgs& a, hipStream_t stream) noexcept {
     if (!a.selected_path || !a.selected_count || !a.page_table || !a.page_table_pages ||
         !a.physical_tokens || a.physical_tokens % kPageSize || !a.kv_heads || !a.key_codes ||
-        !a.value_codes || !a.value_scale_bits || !a.status || !valid_plane_layout(a.key_layout) ||
+        !a.value_codes || !a.status || !valid_plane_layout(a.key_layout) ||
         !valid_plane_layout(a.value_layout) || !valid_plane_layout(a.value_scale_layout))
         return hipErrorInvalidValue;
+    if (a.codec == KvCodec::Nvfp4) {
+        if (!a.key_scale_codes || !a.value_scale_codes || a.value_group != 16U ||
+            a.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
+            a.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+            a.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest)
+            return hipErrorInvalidValue;
+        hipLaunchKernelGGL(nvfp4_compact_kernel, dim3(a.kv_heads), dim3(kHeadDim), 0, stream,
+                           a.prefix, a.selected_path, a.selected_count, a.page_table,
+                           a.page_table_pages, a.physical_tokens, a.key_codes, a.key_scale_codes,
+                           a.value_codes, a.value_scale_codes, a.status);
+        return hipGetLastError();
+    }
+    if (!a.value_scale_bits) return hipErrorInvalidValue;
     return a.value_group == 16   ? dispatch<16>(a, stream)
            : a.value_group == 32 ? dispatch<32>(a, stream)
                                  : hipErrorInvalidValue;

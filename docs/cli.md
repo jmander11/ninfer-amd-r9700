@@ -118,6 +118,7 @@ For DFlash, K describes the physical captured graph. Per-request output and cont
 | Option | Meaning | Default |
 |---|---|---:|
 | `--max-context N` | per-sequence logical context ceiling | `2048` |
+| `--kv-cache fp8-int4\|nvfp4` | growing Text/MTP KV codec; `nvfp4` holds about 1.44x the context in the same memory at higher key error | `fp8-int4` |
 | `--kv-capacity N\|auto` | explicit shared Main Text KV capacity, or maximize it from remaining GPU memory; omitted means `--max-context` | `2048` |
 | `--kv-capacity-headroom MiB` | device memory `--kv-capacity auto` leaves free; requires `auto` | `64` |
 | `--kv-ram-capacity off\|N` | pinned host capacity in MiB for completed prefixes and live suspension; enables output windows up to 8192 tokens | `off` |

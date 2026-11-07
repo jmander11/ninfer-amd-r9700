@@ -82,9 +82,11 @@ specific blocker plainly.
 
 NInfer is a from-scratch C++/HIP inference engine for maximum single-GPU inference performance,
 compiled only for `gfx1201` and tuned on one AMD Radeon AI PRO R9700. The sole supported model is
-Qwen3.8-27B. Its growing Text/MTP cache has exactly three planes: FP8 E4M3FN keys, signed INT4
-values, and FP16 value scales; there is no cache dtype selector, K scale, alternate cache path, or
-retained compatibility backend. The production Text weights are `qwen3.8-27b/r9700-lq4` (profile
+Qwen3.8-27B. Its growing Text/MTP cache uses one startup-selected codec. The default has exactly
+three planes: FP8 E4M3FN keys, signed INT4 values, and FP16 value scales. Opt-in `--kv-cache nvfp4`
+stores E2M1 keys and values with one E4M3 scale per 16 features of each, supports every feature of
+the default, and is not yet the default. There is no per-request cache selector or retained
+compatibility backend. The production Text weights are `qwen3.8-27b/r9700-lq4` (profile
 `R9700Lq4`): GPTQ-rounded LQ4 Text projections and output head with 21 row-scaled FP8
 protections (2026-09-30), admitted by the BF16-source PPL, NIAH, exact-token, and whole-inference
 gates. The weight-precision bar is no worse than the 5090 NVFP4 build on every BF16-source cell
@@ -213,8 +215,9 @@ every numerical task.
 
 ## Performance work
 
-CLI, serve, PPL, Engine A/Bs, and decode-speed work use the one fixed FP8-K/INT4-V cache. There is
-no cache dtype flag or alternate production cache path. Independent BF16-reference runs are
+CLI, serve, PPL, Engine A/Bs, and decode-speed work use the default FP8-K/INT4-V cache unless the
+task concerns opt-in NVFP4 (`--kv-cache nvfp4`); a change to either cache's shared route kernels is
+checked on both. Independent BF16-reference runs are
 separate executables/artifacts used for numerical comparison, not a mutable Engine option.
 
 Kernel speed work follows [`docs/maintainer/kernel-iteration.md`](docs/maintainer/kernel-iteration.md),
@@ -266,8 +269,8 @@ never delete it or stop another owner's job. Builds need no GPU lock. Run one bu
 per agent with at most 8 jobs; reduce concurrency under memory or I/O pressure.
 
 The normal HIP build is `build-r9700/`, with ROCm selected under `/opt/rocm`.
-Generated evidence belongs under ignored `profiles/`. Product inference always uses
-the fixed FP8-K/INT4-V/FP16-scale cache. `DeviceContext` sets
+Generated evidence belongs under ignored `profiles/`. Product inference defaults to
+the FP8-K/INT4-V/FP16-scale cache. `DeviceContext` sets
 `HSA_USERPTR_FOR_PAGED_MEM=0` and `HSA_USE_SVM=1` before HIP initialization. Pinned
 arenas use HIP/GTT backing and direct reads use ordinary-RAM staging. Runtime,
 checkpoints and RAM prefixes share the driver GTT budget; an unavailable requested

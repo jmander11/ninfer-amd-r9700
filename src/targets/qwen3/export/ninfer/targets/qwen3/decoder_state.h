@@ -19,8 +19,8 @@ namespace ninfer::targets::qwen3 {
 
 // The sole Qwen3.8 growing-cache identity. K is direct OCP E4M3FN, V is canonical signed INT4,
 // and each V group owns one FP16 scale. Text and MTP have distinct physical pools/layouts while
-// sharing one statically selected V group. There is no dtype, K scale, K mean, sparsity policy,
-// keep-fraction, or alternate growing-cache branch.
+// sharing one statically selected V group and one startup-selected codec (kv_cache_format). There
+// is no K mean, sparsity policy or keep-fraction.
 struct DecoderStateSpec {
     std::uint32_t full_attention_layers = 0;
     std::uint32_t mtp_layers            = 0;
@@ -28,6 +28,7 @@ struct DecoderStateSpec {
     std::int32_t kv_heads               = 0;
     std::int32_t attention_head_dim     = 0;
     std::int32_t value_group            = 0;
+    KvCacheFormat kv_cache_format       = KvCacheFormat::Fp8KInt4V;
     Fp8KInt4VPlaneLayouts text_plane_layouts;
     Fp8KInt4VPlaneLayouts mtp_plane_layouts;
     bool enable_mtp                         = false;

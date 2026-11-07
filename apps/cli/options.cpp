@@ -92,6 +92,12 @@ std::size_t parse_kv_disk_capacity_bytes(const char* text) {
     return static_cast<std::size_t>(bytes);
 }
 
+KvCacheFormat parse_kv_cache(const char* text) {
+    if (std::string_view(text) == "fp8-int4") { return KvCacheFormat::Fp8KInt4V; }
+    if (std::string_view(text) == "nvfp4") { return KvCacheFormat::Nvfp4; }
+    throw std::invalid_argument("--kv-cache must be fp8-int4 or nvfp4");
+}
+
 KvDiskCompress parse_kv_disk_compress(const char* text) {
     if (text == nullptr || std::string_view(text) == "off") { return KvDiskCompress::Off; }
     if (std::string_view(text) == "zstd") { return KvDiskCompress::Zstd; }
@@ -110,7 +116,8 @@ ReasoningEffort parse_reasoning_effort(std::string_view text) {
 std::string usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> (--prompt <text>|--messages <messages.json>)\n"
-           "       [--max-context N] [--kv-capacity N|auto] [--kv-capacity-headroom MiB]\n"
+           "       [--max-context N] [--kv-cache fp8-int4|nvfp4] [--kv-capacity N|auto]\n"
+           "       [--kv-capacity-headroom MiB]\n"
            "       [--kv-ram-capacity off|N] [--kv-ram-system-prompts N] [--kv-disk-capacity "
            "off|N] [--kv-disk-location PATH]\n"
            "       [--kv-disk-compress off|zstd] [--prefill-chunk N] [--max-new N]\n"
@@ -134,6 +141,8 @@ std::string usage_text(const char* argv0) {
            "Structured message content accepts text, image/image_url, and video/video_url parts;\n"
            "media sources may be local paths, HTTP(S) URLs, or base64 data URIs.\n"
            "--vision enables image/video input and loads the fixed Vision GPU allocations.\n"
+           "--kv-cache selects the growing Text/MTP KV codec: fp8-int4 (default) or nvfp4, which\n"
+           "stores about 1.44x the context in the same memory at somewhat higher key error.\n"
            "--kv-capacity auto sizes the KV pool from all free GPU memory except\n"
            "--kv-capacity-headroom MiB (default " +
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +
@@ -196,6 +205,8 @@ Options parse_options(int argc, char** argv) {
             options.max_new = parse_u32(value(arg), "max-new");
         } else if (arg == "--max-context") {
             options.max_context = parse_u32(value(arg), "max-context");
+        } else if (arg == "--kv-cache") {
+            options.kv_cache_format = parse_kv_cache(value(arg));
         } else if (arg == "--kv-capacity") {
             options.kv_capacity  = parse_kv_capacity(value(arg));
             kv_capacity_explicit = true;
