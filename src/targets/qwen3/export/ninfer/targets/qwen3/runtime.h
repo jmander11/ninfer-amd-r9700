@@ -280,6 +280,11 @@ public:
     [[nodiscard]] bool kv_disk_copies_ready() const;
     [[nodiscard]] bool kv_disk_restore_failed() const;
     [[nodiscard]] bool kv_copies_ready() const;
+    // A held admission's VRAM-resident checkpoint restore uploads from its pinned host image on
+    // the copy stream while other lanes decode; occupy then only orders compute after it.
+    [[nodiscard]] bool prestage_checkpoint_restore(std::uint32_t lane,
+                                                   const RequestPlan<Variant>& plan);
+    [[nodiscard]] bool checkpoint_restore_ready(std::uint32_t lane) const;
     void wait_kv_ram_copies_on_compute();
     void wait_kv_ram_copies();
     void wait_kv_disk_copies();

@@ -1511,6 +1511,9 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(
         request.pending = {};
         request.restored_context_checkpoint_tokens =
             qwen3::detail::is_staged_checkpoint_restore(request_plan.reuse) ? base : 0;
+        if (sequence.prestaged_restore) {
+            throw std::logic_error("prestaged checkpoint restore was not consumed by occupy");
+        }
         sequence.tier_unpacked_context_base = 0;
         sequence.tier_unpacked_context_hash = {};
         sequence.mtp_draft_count            = 0;
@@ -1573,9 +1576,11 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(
         }
         staged.elapsed_seconds = std::chrono::duration<double>(Clock::now() - started).count();
         request.lifecycle      = Lifecycle::Prefilling;
-        if (decode_waiting && mixed_forward != 0 && prefill_mixable(lane)) {
+        if (decode_waiting &&
+            ((mixed_forward != 0 && prefill_mixable(lane)) || !checkpoint_restore_ready(lane))) {
             // The first slice joins the next decode round's target forward (mixed round)
-            // instead of running alone while the decode lanes wait.
+            // instead of running alone while the decode lanes wait. A first step that would
+            // wait for this admission's checkpoint upload is likewise left to a later round.
             sequence.use_tick = next_use_tick_++;
             return runtime::PrefillStepResult{};
         }
@@ -2010,6 +2015,12 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
 
 void ProgramImplCore::abort_lane(std::uint32_t lane) noexcept {
     if (lane >= max_concurrency) { return; }
+    // A prestaged upload still writing this lane's state lands before the lane can be reused,
+    // and before clear_lane recycles the images it reads. The stream, not the image fence,
+    // also covers uploads queued before an enqueue failure.
+    if (sequences[lane].prestaged_restore_done != nullptr) {
+        (void)hipStreamSynchronize(device.copy_stream);
+    }
     clear_lane(sequences[lane], requests[lane]);
 }
 
@@ -2067,6 +2078,8 @@ bool ProgramImplCore::revert_cancelled_prefill_lane(std::uint32_t lane) {
     flush_deferred_gdn_fold(lane);
     SequenceState& sequence = sequences[lane];
     RequestControl& request = requests[lane];
+    // A cancel before the first step: the revert's restore overwrites the uploaded state.
+    order_after_prestaged_restore(sequence);
     if (request.lifecycle != Lifecycle::Prefilling || !sequence.kv) { return false; }
 
     const auto in_bounds = [&](std::uint32_t frontier) {
@@ -2912,6 +2925,16 @@ void ProgramImplCore::restore_context_checkpoint_state(SequenceState& sequence,
     if (head == sequence.context_checkpoints.end()) {
         throw std::logic_error("context checkpoint head is missing at restore");
     }
+    if (consume_prestaged_restore(sequence, base)) {
+        // Admission uploaded the GDN, hidden and DFlash cyclic images on copy_stream.
+        if (head->hidden) { sequence.tail_hidden_valid = true; }
+        if (speculative_backend == SpeculativeBackend::DFlash) {
+            sequence.dflash_context_frontier = head->frontier;
+        }
+        // The uploads' copy_stream record stays the head's fence: compute has not yet been
+        // ordered after them, so a compute record here could signal before they land.
+        return;
+    }
     const std::int32_t current =
         LinearStateSlots::current_state_slot(sequence.lane, max_concurrency);
     if (qwen3::detail::restore_may_d2d_staging(staging_holds(sequence.lane, head->hash, base),
@@ -3003,11 +3026,134 @@ void ProgramImplCore::capture_rewrite_image(SequenceState& sequence) {
     staging_.lane               = sequence.lane;
 }
 
+bool ProgramImplCore::prestage_checkpoint_restore(std::uint32_t lane, const RequestPlan& plan) {
+    if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
+    if (plan.impl_ == nullptr) { throw std::invalid_argument("request plan is empty"); }
+    const RequestPlanImpl& request_plan = *plan.impl_;
+    SequenceState& sequence             = sequences[lane];
+    // Only the retained lane's own VRAM-resident restore from a host image; tier and fork
+    // admissions restore in their own copy-hold steps. Anything occupy would reject, or restore
+    // by a device copy from staging, is left to occupy unchanged.
+    // An exact hit (nothing left to prefill) has no prefill owner to defer, so it keeps the
+    // in-occupy restore. So does a DFlash mixed-forward owner: its first slice rides the next
+    // mixed round, and deferring it a round costs the admission pipeline more than the upload
+    // stall it saves (measured on staggered multi-turn serving; MTP and prefill-first gain).
+    if (sequence.prestaged_restore || !sequence.retained || sequence.fork_initialized ||
+        request_plan.reuse_source != PrefixReuseSource::VramResident ||
+        request_plan.reuse_base >= request_plan.summary.prompt_tokens ||
+        (speculative_backend == SpeculativeBackend::DFlash && mixed_forward != 0)) {
+        return false;
+    }
+    const std::uint32_t base     = request_plan.reuse_base;
+    ContextCheckpointHead* image = nullptr;
+    bool context_head            = false;
+    if (is_rewrite_checkpoint_restore(request_plan.reuse)) {
+        if (!sequence.rewrite_checkpoint.valid || sequence.rewrite_checkpoint.frontier != base ||
+            request_plan.reuse != restore_path(sequence.rewrite_checkpoint.kind)) {
+            return false;
+        }
+        if (staging_.rewrite && staging_.lane == sequence.lane &&
+            staging_.rewrite_generation == sequence.rewrite_image_generation) {
+            return false;
+        }
+        if (dflash && !sequence.rewrite_image.dflash) { return false; }
+        image = &sequence.rewrite_image;
+    } else if (qwen3::detail::is_staged_checkpoint_restore(request_plan.reuse)) {
+        const auto head = std::find_if(
+            sequence.context_checkpoints.begin(), sequence.context_checkpoints.end(),
+            [base](const ContextCheckpointHead& candidate) { return candidate.frontier == base; });
+        if (head == sequence.context_checkpoints.end() ||
+            sequence.tier_unpacked_context_base == base ||
+            (head->kind == qwen3::detail::ContextCheckpointKind::TurnRollback) !=
+                (request_plan.reuse == ReusePath::RestoreTurnRollback)) {
+            return false;
+        }
+        const bool images = static_cast<bool>(head->conv) && static_cast<bool>(head->recurrent);
+        if (!images || (qwen3::detail::restore_may_d2d_staging(
+                            staging_holds(sequence.lane, head->hash, base), images) &&
+                        staging_.kind == head->kind && staging_hidden.data != nullptr)) {
+            return false;
+        }
+        if ((sequence.tail_hidden.bytes() != 0 && !head->hidden) ||
+            (head->hidden && head->hidden.size() != sequence.tail_hidden.bytes())) {
+            return false;
+        }
+        if (speculative_backend == SpeculativeBackend::DFlash &&
+            (!dflash || !head->dflash || head->dflash.size() != dflash->local.lane_host_bytes())) {
+            return false;
+        }
+        image        = &*head;
+        context_head = true;
+    } else {
+        return false;
+    }
+    // The lane's queued compute work and any deferred fold precede the upload that replaces its
+    // current state; the image's last D2H or host-copy writer precedes reading it.
+    flush_deferred_gdn_fold(lane);
+    device.order_copy_after_compute();
+    HIP_CHECK(hipStreamWaitEvent(device.copy_stream, image->copies_done, 0));
+    // Published before the first upload so an abort during enqueue synchronizes copy_stream.
+    sequence.prestaged_restore      = true;
+    sequence.prestaged_restore_base = base;
+    sequence.prestaged_restore_done = image->copies_done;
+    const std::int32_t current      = LinearStateSlots::current_state_slot(lane, max_concurrency);
+    decoder->linear_attention.unpack_slot_from_host(current, image->conv.data(),
+                                                    image->recurrent.data(), device.copy_stream);
+    if (context_head) {
+        if (image->hidden) {
+            HIP_CHECK(hipMemcpyAsync(sequence.tail_hidden.data, image->hidden.data(),
+                                     sequence.tail_hidden.bytes(), hipMemcpyHostToDevice,
+                                     device.copy_stream));
+        }
+        if (speculative_backend == SpeculativeBackend::DFlash && dflash) {
+            dflash->local.copy_lane_from_host(image->dflash.data(), static_cast<std::int32_t>(lane),
+                                              device.copy_stream);
+        }
+    } else if (dflash) {
+        dflash->local.copy_lane_from_host(image->dflash.data(), static_cast<std::int32_t>(lane),
+                                          device.copy_stream);
+    }
+    record_context_checkpoint_head_use(*image, device.copy_stream);
+    return true;
+}
+
+bool ProgramImplCore::checkpoint_restore_ready(std::uint32_t lane) const {
+    if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
+    const SequenceState& sequence = sequences[lane];
+    if (sequence.prestaged_restore_done == nullptr) { return true; }
+    const hipError_t ready = hipEventQuery(sequence.prestaged_restore_done);
+    if (ready == hipErrorNotReady) { return false; }
+    HIP_CHECK(ready);
+    return true;
+}
+
+bool ProgramImplCore::consume_prestaged_restore(SequenceState& sequence, std::uint32_t base) {
+    if (!sequence.prestaged_restore) { return false; }
+    if (sequence.prestaged_restore_base != base) {
+        throw std::logic_error("prestaged checkpoint restore does not match the occupied plan");
+    }
+    // Compute is ordered after the uploads lazily, by the lane's first reader of the restored
+    // state (order_after_prestaged_restore), so occupy itself does not wait for them.
+    sequence.prestaged_restore      = false;
+    sequence.prestaged_restore_base = 0;
+    return true;
+}
+
+void ProgramImplCore::order_after_prestaged_restore(SequenceState& sequence) {
+    if (sequence.prestaged_restore_done == nullptr) { return; }
+    HIP_CHECK(hipStreamWaitEvent(device.stream, sequence.prestaged_restore_done, 0));
+    sequence.prestaged_restore_done = nullptr;
+}
+
 void ProgramImplCore::restore_rewrite_checkpoint_state(SequenceState& sequence) {
     ContextCheckpointHead& image = sequence.rewrite_image;
     const auto lane              = static_cast<std::int32_t>(sequence.lane);
     const std::int32_t current =
         LinearStateSlots::current_state_slot(sequence.lane, max_concurrency);
+    if (consume_prestaged_restore(sequence, sequence.rewrite_checkpoint.frontier)) {
+        // The uploads already re-recorded the image fence on copy_stream.
+        return;
+    }
     if (staging_.rewrite && staging_.lane == sequence.lane &&
         staging_.rewrite_generation == sequence.rewrite_image_generation) {
         // Staging still holds this image's snapshot (written on this stream): copy it on device.
@@ -3089,6 +3235,8 @@ void ProgramImplCore::maybe_capture_turn_rollback(SequenceState& sequence, Reque
     // Earlier copy-stream reads of staging (a drain or rollback reload) finish before it is
     // overwritten; the compute stream itself wrote d2d_done.
     HIP_CHECK(hipStreamWaitEvent(device.stream, staging_.copies_done, 0));
+    // An exact-hit pin copies the state an admission upload restored.
+    order_after_prestaged_restore(sequence);
     unoccupy_staging();
     const std::int32_t current =
         LinearStateSlots::current_state_slot(sequence.lane, max_concurrency);
@@ -3892,6 +4040,9 @@ void ProgramImplCore::clear_lane(SequenceState& sequence, RequestControl& reques
     sequence.rewrite_checkpoint         = {};
     sequence.tier_unpacked_context_base = 0;
     sequence.tier_unpacked_context_hash = {};
+    sequence.prestaged_restore          = false;
+    sequence.prestaged_restore_base     = 0;
+    sequence.prestaged_restore_done     = nullptr;
     clear_context_checkpoints(sequence);
     sequence.deferred_fold_columns  = 0;
     request.pending                 = {};
@@ -4891,6 +5042,8 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
     if (request.lifecycle != Lifecycle::Prefilling || !request.prefill) {
         throw std::logic_error("staged prefill step requires an active concurrent request");
     }
+    // The first step reads the GDN, hidden and DFlash state an admission upload restored.
+    order_after_prestaged_restore(sequence);
 
     RequestControl::Prefill& staged = *request.prefill;
     const runtime::BeginSummary summary{.prompt_tokens        = staged.prompt_tokens,

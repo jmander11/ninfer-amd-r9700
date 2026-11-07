@@ -749,6 +749,8 @@ private:
         bool victims_evicted     = false;
         bool restored            = false;
         bool needs_prefill       = false;
+        // The resident checkpoint restore was offered to the copy stream (at most once).
+        bool checkpoint_prestaged = false;
         // Set for a generation-recovery retry: its lane and output stay with the retry,
         // so a failed host restore replans or cold-prefills this lane from the base plan.
         std::optional<BasePlan> recovery_base;
@@ -3427,6 +3429,13 @@ private:
             }
             instance_.program->pump_disk_restore();
 
+            // A VRAM-resident checkpoint restore uploads its pinned host image on the copy
+            // stream. Admission completes now; the owner joins rounds once the upload lands.
+            if (!hold.restored && !hold.checkpoint_prestaged) {
+                (void)instance_.program->prestage_checkpoint_restore(lane, hold.plan);
+                hold.checkpoint_prestaged = true;
+            }
+
             if (instance_.program->kv_disk_restore_failed()) {
                 instance_.program->wait_kv_disk_copies();
             }
@@ -4364,6 +4373,13 @@ private:
                     // mixed_forward_rounds_-th decode round, or bounds its own step after that
                     // many decode rounds; without one the owner's prefill runs to completion.
                     const std::uint32_t owner = *prefill_lane_;
+                    // Decoding members keep running while the owner's admission upload of its
+                    // checkpoint state is still in flight.
+                    if (!membership.empty() && !membership_contains(membership, owner) &&
+                        !instance_.program->checkpoint_restore_ready(owner)) {
+                        run_membership_decode();
+                        continue;
+                    }
                     if (mixed_forward_ != 0 && !membership.empty() &&
                         !membership_contains(membership, owner) &&
                         instance_.program->prefill_mixable(owner)) {

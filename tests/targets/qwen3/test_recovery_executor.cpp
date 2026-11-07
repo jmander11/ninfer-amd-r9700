@@ -874,6 +874,12 @@ public:
 
     [[nodiscard]] bool disk_restore_ready(std::uint64_t) const { return true; }
 
+    [[nodiscard]] bool prestage_checkpoint_restore(std::uint32_t, const ProbePlan&) {
+        return false;
+    }
+
+    [[nodiscard]] bool checkpoint_restore_ready(std::uint32_t) const { return true; }
+
     [[nodiscard]] virtual bool kv_ram_reclaim_pending() const { return false; }
 
     void restore_disk_entry(std::uint32_t, std::uint64_t, const ProbePlan&) {
