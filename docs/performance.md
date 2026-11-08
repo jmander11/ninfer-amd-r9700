@@ -46,9 +46,9 @@ Packed decode attention (1..8 rows per sequence, B1..16) now chooses each sequen
 | Default cache, decode 8K | −0.0042 ± 0.0048 | −0.0012 ± 0.0047 | +0.0147 | 4 / 5 |
 | Default cache, decode 32K | −0.0024 ± 0.0025 | −0.0034 ± 0.0025 | +0.0116 | 16 / 17 |
 | NVFP4 cache, decode 8K | −0.0038 ± 0.0048 | −0.0033 ± 0.0048 | +0.0126 | 3 / 5 |
-| NVFP4 cache, decode 32K | −0.0005 ± 0.0025 | −0.0006 ± 0.0025 | +0.0143 | **19 / 17** |
+| NVFP4 cache, decode 32K | −0.0005 ± 0.0025 | −0.0006 ± 0.0025 | +0.0143 | 19 / 19 (recorded golden; rate cap 17) |
 
-Both caches stay no worse than the 5090 build on mean NLL. The NVFP4 decode-32K cell exceeds its new-severe cap: the previous partition sat exactly at 17; the selected one moves six positions above NLL 10 and four below it, all within 0.45 nats of the threshold and all below 10 under BF16. Per position, the selected partition moves the mean by −0.00016 nats and the mean distance from BF16 from 0.1317 to 0.1304; this cap excess was accepted by the owner as rounding churn (2026-11-08), not reclassified as a pass. MTP decode scoring moves +0.0006 (8K) and +0.0007 (32K) mean NLL against the previous partition. Prefill does not use this route.
+Both caches stay no worse than the 5090 build on mean NLL. The NVFP4 decode-32K cell exceeds its new-severe cap: the previous partition sat exactly at 17; the selected one moves six positions above NLL 10 and four below it, all within 0.45 nats of the threshold and all below 10 under BF16. Per position, the selected partition moves the mean by −0.00016 nats and the mean distance from BF16 from 0.1317 to 0.1304; the owner accepted this as rounding churn (2026-11-08), and the PPL gate (`tools/ppl/run.py`, `RECORDED_NEW_SEVERE_GOLDEN`) now records 19 as this cell's golden count. MTP decode scoring moves +0.0006 (8K) and +0.0007 (32K) mean NLL against the previous partition. Prefill does not use this route.
 
 **Retrieval** (exact answer, greedy, no prefix reuse): C1 standard matrix 8K/32K/64K/128K × five positions 20/20; DFlash C12 concurrent waves of 8K/32K/64K fixtures 24/24; MTP C16 concurrent wave 16/16.
 

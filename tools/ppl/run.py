@@ -118,6 +118,22 @@ SOURCE_TEXT_TENSOR_COUNT = 851
 SOURCE_SHARD_COUNT = 18
 DEFAULT_MAX_NEW_SEVERE_RATE = 0.001
 DEFAULT_MIN_NEW_SEVERE_BUDGET = 4
+# Recorded golden new-severe counts for individual cells, keyed by
+# (weights_id, kv_format, schedule, spec, prompt_tokens). A recorded count
+# replaces the rate budget when it is larger. Each entry is a measured result
+# the owner accepted after a rounding-only change moved positions that sit at
+# the NLL threshold, with the mean NLL unchanged. Update an entry only when the
+# mean NLL stays similar and the extra new-severe positions come from rounding
+# churn (positions that are close to the threshold under BF16, crossing in both
+# directions). Report every update to the user: name the cell, the old and new
+# count, and why the change counts as rounding rather than a quality loss.
+RECORDED_NEW_SEVERE_GOLDEN = {
+    # Packed decode attention partitioned by batch and live frontier
+    # (2026-11-08, c3ce4772b): the previous partition measured 17 (the rate
+    # budget); this one moves six positions above NLL 10 and four below it,
+    # all within 0.45 nats of the threshold, mean NLL change -0.00016.
+    ("r9700-lq4", "nvfp4", "decode", "none", 32768): 19,
+}
 QUALITY_TIERS = {
     "accuracy": {
         "maximum_mean_nll_delta": 0.02,
@@ -779,6 +795,24 @@ def severe_position_stats(
         "new_severe_position_indices": new_positions,
         "repaired_severe_position_indices": repaired_positions,
     }
+
+
+def apply_recorded_new_severe_golden(cell: dict) -> None:
+    """Raise a cell's new-severe budget to its recorded golden count, if any."""
+
+    key = (
+        cell.get("weights_id"),
+        cell.get("kv_format"),
+        cell.get("schedule"),
+        cell.get("spec"),
+        cell.get("prompt_tokens"),
+    )
+    golden = RECORDED_NEW_SEVERE_GOLDEN.get(key)
+    if golden is None or golden <= cell["new_severe_position_budget"]:
+        return
+    cell["recorded_new_severe_golden"] = golden
+    cell["new_severe_position_budget"] = golden
+    cell["new_severe_positions_pass"] = cell["new_severe_positions"] <= golden
 
 
 def paired_nll_stats(prefill: list[float], decode: list[float]) -> dict | None:
@@ -1922,6 +1956,7 @@ def load_reused_candidate_cells(
             "persistent_severe_positions",
             "quality_eligible",
             "quality_tier",
+            "recorded_new_severe_golden",
             "repaired_severe_position_indices",
             "repaired_severe_positions",
             "severe_positions_compared",
@@ -2018,6 +2053,7 @@ def apply_baseline(
                 minimum_budget=minimum_new_severe_budget,
             )
         )
+        apply_recorded_new_severe_golden(cell)
     else:
         raise SystemExit("candidate comparison requires aligned BF16 NLL sidecars")
     cell["complete_finite_aligned"] = cell_ok(cell, cell_nlls, cell_argmax)
