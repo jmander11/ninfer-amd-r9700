@@ -2822,10 +2822,12 @@ int test_constrained_output() {
     failures += check(visible == answer && output.tool_calls().empty(),
                       "constrained publication changed literal framing bytes");
 
-    xgrammar::GrammarMatcher compact(grammar->compiled);
-    failures +=
-        check(compact.AcceptString(answer) && compact.IsCompleted() && !compact.AcceptString("\n"),
-              "completed compact JSON can extend with formatting whitespace");
+    // JSON whitespace is allowed at the document boundary; other trailing content is not.
+    xgrammar::GrammarMatcher completed(grammar->compiled);
+    failures += check(completed.AcceptString(answer) && completed.IsCompleted() &&
+                          completed.AcceptString("\n") && completed.IsCompleted() &&
+                          !completed.AcceptString("x"),
+                      "completed JSON rejected trailing whitespace or accepted trailing content");
 
     auto thinking_input                    = input;
     thinking_input.options.enable_thinking = true;
