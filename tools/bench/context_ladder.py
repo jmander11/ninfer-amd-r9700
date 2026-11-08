@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serial C1 prefill speed / matched-token PPL ladders for dense and XAttention.
+"""Serial C1 prefill speed / matched-token PPL ladders: dense vs XAttention, default vs NVFP4 KV.
 
 This is measurement tooling, not XAttention admission or a runtime route selector.
 Explicit binaries own the attention profile. See context_ladder.md.
@@ -15,6 +15,7 @@ import statistics
 import struct
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -29,6 +30,9 @@ if __package__ in (None, ""):
 
 ROOT = Path(__file__).resolve().parents[2]
 POWER = power_profile_path()
+VRAM_USED = POWER.parent / "mem_info_vram_used"
+VRAM_SLACK_BYTES = 256 << 20
+VRAM_RELEASE_SECONDS = 120
 PRECISION = (
     "q4_activation_bits",
     "q4_activation_profile",
@@ -190,6 +194,19 @@ def ppl_cell(raw, report_path, context, contract, attention):
     return result, {k: raw[k] for k in PRECISION}, raw["weights_id"]
 
 
+def vram_used():
+    return int(VRAM_USED.read_text())
+
+
+def wait_for_vram(baseline):
+    # A finished cell's process can exit before the driver returns its VRAM; started at once,
+    # the next cell's startup reservation sees too little free memory and fails.
+    deadline = time.monotonic() + VRAM_RELEASE_SECONDS
+    while vram_used() > baseline + VRAM_SLACK_BYTES:
+        require(time.monotonic() < deadline, "previous cell's VRAM was not released")
+        time.sleep(0.5)
+
+
 def command_for(args, context, report):
     command = [str(args.binary), "--weights", str(args.weights)]
     if args.kv_cache != DEFAULT_KV_CACHE:
@@ -330,7 +347,7 @@ def run(args):
     else:
         write(manifest_path, manifest)
     results = []
-    precision = weights_id = environment = None
+    precision = weights_id = environment = vram_baseline = None
     for context in args.contexts:
         report = args.out / f"p{context}.json"
         command = command_for(args, context, report)
@@ -353,6 +370,10 @@ def run(args):
                 f"previous cell did not complete: {receipt}; retain it and use a fresh directory",
             )
             require(POWER.read_text().strip() == "auto", "R9700 power must already be auto")
+            if vram_baseline is None:
+                vram_baseline = vram_used()
+            else:
+                wait_for_vram(vram_baseline)
             write(receipt, command)
             print(f"RUN {args.kind} {args.attention} P{context}", flush=True)
             with report.with_suffix(".log").open("x") as log:
@@ -401,26 +422,47 @@ def run(args):
         print(json.dumps(row), flush=True)
 
 
-def compare(dense_path, candidate_path):
-    dense, candidate = read(dense_path), read(candidate_path)
-    require(
-        dense["attention"] == "dense" and candidate["attention"] != "dense",
-        "expected a dense control and an XAttention candidate",
+def compare(control_path, candidate_path):
+    # The candidate changes exactly one axis: dense -> XAttention at one cache, or the
+    # default cache -> opt-in NVFP4 at one attention profile. Everything else must match.
+    control, candidate = read(control_path), read(candidate_path)
+    control_cache, candidate_cache = (
+        cache_format(control["contract"]),
+        cache_format(candidate["contract"]),
     )
-    for key in ("schema", "contract", "precision", "weights_id", "environment"):
-        require(dense[key] == candidate[key], f"unmatched comparison: {key}")
+    if control["attention"] != candidate["attention"]:
+        require(
+            control["attention"] == "dense" and control_cache == candidate_cache,
+            "expected a dense control and an XAttention candidate on one KV cache",
+        )
+    else:
+        require(
+            control_cache == KV_CACHE_FORMATS[DEFAULT_KV_CACHE]
+            and candidate_cache != control_cache,
+            "expected a default-cache control and an opt-in cache candidate",
+        )
+
+    def unchanged(contract):
+        return {key: value for key, value in contract.items() if key != "kv_cache"}
+
     require(
-        [r["context"] for r in dense["cells"]] == dense["contract"]["contexts"]
+        unchanged(control["contract"]) == unchanged(candidate["contract"]),
+        "unmatched comparison: contract",
+    )
+    for key in ("schema", "precision", "weights_id", "environment"):
+        require(control[key] == candidate[key], f"unmatched comparison: {key}")
+    require(
+        [r["context"] for r in control["cells"]] == control["contract"]["contexts"]
         and [r["context"] for r in candidate["cells"]] == candidate["contract"]["contexts"],
         "cannot compare incomplete ladders",
     )
     rows = []
-    for left, right in zip(dense["cells"], candidate["cells"], strict=True):
+    for left, right in zip(control["cells"], candidate["cells"], strict=True):
         # Revalidate the retained raw reports and PPL sidecars, not just summaries.
-        for cell, ladder in ((left, dense), (right, candidate)):
+        for cell, ladder in ((left, control), (right, candidate)):
             path = Path(cell["report"])
             raw = read(path)
-            if dense["contract"]["kind"] == "speed":
+            if control["contract"]["kind"] == "speed":
                 row, precision, weights_id = speed_cell(
                     raw, cell["context"], ladder["contract"], ladder["attention"]
                 )
@@ -436,7 +478,7 @@ def compare(dense_path, candidate_path):
                 "retained report differs from ladder",
             )
         row = dict(context=left["context"])
-        if dense["contract"]["kind"] == "speed":
+        if control["contract"]["kind"] == "speed":
             row.update(
                 average_speedup=right["average_tok_s"] / left["average_tok_s"],
                 tail_speedup=right["tail_tok_s"] / left["tail_tok_s"],
@@ -457,10 +499,11 @@ def compare(dense_path, candidate_path):
             )
         rows.append(row)
     return dict(
-        dense=str(dense_path),
+        control=str(control_path),
         candidate=str(candidate_path),
-        kind=dense["contract"]["kind"],
+        kind=control["contract"]["kind"],
         attention=candidate["attention"],
+        kv_cache=dict(control=control_cache, candidate=candidate_cache),
         cells=rows,
         admission="measurement only; no automatic quality gate or production promotion",
     )
@@ -498,7 +541,9 @@ def main():
         help="never launch; validate existing reports/commands",
     )
     compare_parser = sub.add_parser("compare")
-    compare_parser.add_argument("--dense", type=Path, required=True)
+    compare_parser.add_argument(
+        "--control", type=Path, required=True, help="dense, default-cache ladder"
+    )
     compare_parser.add_argument("--candidate", type=Path, required=True)
     compare_parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
@@ -506,7 +551,7 @@ def main():
         run(args)
     else:
         require(not args.out.exists(), "comparison output exists; choose a fresh path")
-        write(args.out, compare(args.dense, args.candidate))
+        write(args.out, compare(args.control, args.candidate))
 
 
 if __name__ == "__main__":

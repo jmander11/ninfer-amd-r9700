@@ -116,6 +116,25 @@ class ContextLadderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "precision"):
             ladder.compare(dense, candidate)
 
+    def test_cache_comparison_changes_only_the_cache(self):
+        control = self.retain("control", self.raw)
+        saved = self.contract
+        self.contract = dict(saved, kv_cache="nvfp4")
+        other = copy.deepcopy(self.raw)
+        other["config"]["kv_cache_format"] = "nvfp4"
+        other["tests"][0]["prefill_active_tok_s_mean"] = 1100
+        candidate = self.retain("nvfp4", other)
+        result = ladder.compare(control, candidate)
+        self.assertEqual(result["kv_cache"], dict(control="fp8-k-int4-v", candidate="nvfp4"))
+        self.assertAlmostEqual(result["cells"][0]["average_speedup"], 1.1)
+        with self.assertRaisesRegex(ValueError, "default-cache control"):
+            ladder.compare(candidate, control)
+        other["config"].update(xattention_qualification=True, xattention_profile="b128-s16-tau900")
+        both = self.retain("both", other)
+        self.contract = saved
+        with self.assertRaisesRegex(ValueError, "one KV cache"):
+            ladder.compare(control, both)
+
     def test_missing_tail_and_wrong_route_rejected(self):
         with self.assertRaisesRegex(ValueError, "attention profile"):
             ladder.speed_cell(self.raw, 8192, self.contract, "b128-s16-tau900")
@@ -228,6 +247,8 @@ class ContextLadderTests(unittest.TestCase):
         weights.write_bytes(b"x" * 123)
         power = self.root / "power"
         power.write_text("auto")
+        vram = self.root / "vram"
+        vram.write_text("1000")
         args = argparse.Namespace(
             binary=binary,
             weights=weights,
@@ -257,6 +278,7 @@ class ContextLadderTests(unittest.TestCase):
 
         with (
             patch.object(ladder, "POWER", power),
+            patch.object(ladder, "VRAM_USED", vram),
             patch.object(ladder.subprocess, "run", side_effect=execute) as proc,
         ):
             with patch("builtins.print"):
@@ -268,6 +290,26 @@ class ContextLadderTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "prior cell did not complete"):
                 ladder.run(args)
             self.assertEqual(proc.call_count, 1)
+
+    def test_next_cell_waits_for_previous_vram(self):
+        vram = self.root / "vram"
+        vram.write_text(str(1000 + ladder.VRAM_SLACK_BYTES + 1))
+        polls = []
+
+        def released(_seconds):
+            polls.append(vram.read_text())
+            vram.write_text("1000")
+
+        with patch.object(ladder, "VRAM_USED", vram), patch.object(ladder.time, "sleep", released):
+            ladder.wait_for_vram(1000)
+        self.assertEqual(len(polls), 1)
+        vram.write_text(str(1000 + ladder.VRAM_SLACK_BYTES + 1))
+        with (
+            patch.object(ladder, "VRAM_USED", vram),
+            patch.object(ladder, "VRAM_RELEASE_SECONDS", 0),
+            self.assertRaisesRegex(ValueError, "VRAM was not released"),
+        ):
+            ladder.wait_for_vram(1000)
 
     def test_matched_ppl_comparison(self):
         contract = dict(

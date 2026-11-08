@@ -2,7 +2,7 @@
 
 `context_ladder.py` runs **serial C1** prefill measurements with explicit binary, artifact, corpus, chunk and compiled attention profile. It supports arbitrary increasing context lengths, retains each command/log/report, and resumes completed matching cells. A failed/incomplete cell is preserved: inspect it, then use a fresh directory rather than overwriting it. `--collect-only` validates existing reports without executing anything; imported binary/power provenance remains the responsibility of the original package. `manifest.json` records the workload; `ladder.json` contains completed cells. `--kv-cache nvfp4` (G16 build only) passes the opt-in cache to the binary, records it in the contract, and requires every report to name it; the default `fp8-int4` keeps the unchanged command and contract. Model path, size and reported identity are retained without re-reading a large weight payload to hash it. Keep artifacts immutable during a campaign.
 
-Coordinate a server shutdown before benchmarking and hold the shared GPU lock through the run. The runner requires power mode `auto` and does not change it, stop GPU applications or restart the server. Builds may overlap inference, with at most eight jobs; reduce concurrency under memory or I/O pressure.
+Coordinate a server shutdown before benchmarking and hold the shared GPU lock through the run. Before each cell after the first, the runner waits up to 120 s for device VRAM (`mem_info_vram_used` beside the power file) to return within 256 MiB of its level at the first cell, because the driver can release a finished cell's memory after its process exits. The runner requires power mode `auto` and does not change it, stop GPU applications or restart the server. Builds may overlap inference, with at most eight jobs; reduce concurrency under memory or I/O pressure.
 
 ## Speed
 
@@ -18,7 +18,7 @@ python3.11 tools/bench/context_ladder.py run --kind speed \
   --allow-cyclic-speed-corpus --out profiles/bench/context-dense
 ```
 
-This matches the deployment's loaded DFlash backend, but `-p` measures prefill only: no speculative round is executed. Default warmup 0/repetitions 1 is a screening measurement, not a statistical ceiling claim. Use identical `--warmup` and `--repetitions` on both sides when confirming a win. The retained 128K dense attempt was aborted by the user after >46 minutes. Do not repeat that unchanged run; start with 8K/32K when testing a new candidate. The September 25 baseline is retained at `profiles/bench/r9700-prefill-context-sweep-20260925`; use that as `--out` with `--collect-only --contexts 8192 16384 32768 65536` and otherwise identical arguments to collect the four completed points without rerunning.
+This matches the deployment's loaded DFlash backend, but `-p` measures prefill only: no speculative round is executed. Default warmup 0/repetitions 1 is a screening measurement, not a statistical ceiling claim. Use identical `--warmup` and `--repetitions` on both sides when confirming a win. Dense 128K/240K prefill takes about 68/180 s. Start with 8K/32K when testing a new candidate. The September 25 baseline is retained at `profiles/bench/r9700-prefill-context-sweep-20260925`; use that as `--out` with `--collect-only --contexts 8192 16384 32768 65536` and otherwise identical arguments to collect the four completed points without rerunning.
 
 Average rate is active request prefill tokens/second, excluding model loading. Tail rate comes from the Engine's existing last-second window: completed chunk work is prorated over that window and the token count is rounded. It approximates late-context rate, not an instantaneous kernel measurement. Every repetition's rate/window is retained; the summary averages repetition rates.
 
@@ -40,12 +40,12 @@ Repeat the speed command with the qualification binary, `--attention b128-s16-ta
 
 ```bash
 python3.11 tools/bench/context_ladder.py compare \
-  --dense profiles/bench/context-dense/ladder.json \
+  --control profiles/bench/context-dense/ladder.json \
   --candidate profiles/bench/context-xattention/ladder.json \
   --out profiles/bench/context-speed-comparison.json
 ```
 
-Comparison requires matching complete workloads, corpus content, weight identity, activation/cache profiles, hardware and runtime. It rechecks retained reports and reports average and tail speedup. If a future kernel/compiler change invalidates the old control, run a fresh matched pair; a preserved historical baseline does not become a same-source A/B simply because the harness can read it.
+A comparison changes exactly one axis against its control: the attention profile (dense control, XAttention candidate, one cache) or the KV cache (default-cache control, `--kv-cache nvfp4` candidate, one attention profile). For the cache axis, run the same ladder twice into fresh directories, adding `--kv-cache nvfp4` to the second, then compare them the same way; the output's `kv_cache` names both codecs. Comparison requires matching complete workloads, corpus content, weight identity, activation profile, hardware and runtime. It rechecks retained reports and reports average and tail speedup. If a future kernel/compiler change invalidates the old control, run a fresh matched pair; a preserved historical baseline does not become a same-source A/B simply because the harness can read it.
 
 ## Matched PPL
 
@@ -62,7 +62,7 @@ python3.11 tools/bench/context_ladder.py run --kind ppl \
   --attention b128-s16-tau900 --weights "$model" --ids "$quality_ids" \
   --contexts 8192 32768 --chunk 2048 --skip half --out profiles/ppl/context-xattention
 python3.11 tools/bench/context_ladder.py compare \
-  --dense profiles/ppl/context-dense/ladder.json \
+  --control profiles/ppl/context-dense/ladder.json \
   --candidate profiles/ppl/context-xattention/ladder.json \
   --out profiles/ppl/context-quality-comparison.json
 ```
