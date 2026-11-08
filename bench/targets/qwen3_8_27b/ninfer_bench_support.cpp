@@ -293,7 +293,7 @@ std::string usage_text(std::string_view program) {
         << "  --max-ctx <tokens>          override auto-sized context capacity\n"
         << "  --kv-cache <fp8-int4|nvfp4> growing Text/MTP KV codec (default: fp8-int4)\n"
         << "  --kv-capacity <workload|auto> exact workload capacity or maximum capacity with\n"
-        << "                              the default 64 MiB headroom (default: workload)\n"
+        << "                              the default 32 MiB headroom (default: workload)\n"
         << "  --prefill-chunk <tokens>    multiple of " << kPrefillChunkAlignment
         << " (default: " << kDefaultPrefillChunk << ")\n"
         << "  --mixed-forward auto|<N>    prefill-step forward width (multiple of 256) while\n"

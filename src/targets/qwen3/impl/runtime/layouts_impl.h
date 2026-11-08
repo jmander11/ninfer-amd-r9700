@@ -991,7 +991,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
                     checked_add(Variant::runtime_allocation_overhead_bound(impl->weights_profile),
                                 Variant::runtime_driver_reservation_bytes(
                                     impl->weights_profile, impl->max_concurrency,
-                                    impl->kv_disk_capacity_bytes != 0U),
+                                    impl->kv_disk_capacity_bytes != 0U, impl->kv_cache_format),
                                 "sequence driver and physical allocation bounds"),
                     "sequence physical allocation bound"),
         "sequence graph allowance");

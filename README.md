@@ -28,30 +28,30 @@ This port combines NInfer features with AMD-specific kernels, weight/cache forma
 
 Each request can use up to **262,144 tokens** for prompt and answer combined, subject to the shared GPU cache capacity below.
 
-Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to seven drafts, MTP up to three), optimized proposal heads, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333), measured 2026-11-07 for both caches. The default cache is FP8 keys with INT4 values; the opt-in NVFP4 cache (`--kv-cache nvfp4`: E2M1 keys and values with E4M3 scales per 16 features) stores about 1.44x as many tokens:
+Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to seven drafts, MTP up to three), optimized proposal heads, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333), measured 2026-11-08 for both caches at the default 32 MiB headroom. The default cache is FP8 keys with INT4 values; the opt-in NVFP4 cache (`--kv-cache nvfp4`: E2M1 keys and values with E4M3 scales per 16 features) stores about 1.44x as many tokens:
 
 | Concurrent requests (C) | DFlash K7, default | DFlash K7, NVFP4 | MTP K3, default | MTP K3, NVFP4 |
 |---:|---:|---:|---:|---:|
 | 1 | 262,144 | 262,144 | 262,144 | 262,144 |
 | 2 | 524,288 | 524,288 | 524,288 | 524,288 |
-| 3 | 632,256 | 786,432 | 633,600 | 786,432 |
-| 4 | 624,128 | 901,568 | 626,176 | 904,448 |
-| 5 | 616,000 | 889,856 | 618,752 | 893,760 |
-| 6 | 607,808 | 878,016 | 611,200 | 882,880 |
-| 7 | 599,744 | 866,304 | 603,776 | 872,128 |
-| 8 | 591,552 | 854,464 | 596,224 | 861,248 |
-| 9 | 581,888 | 840,576 | 587,776 | 849,088 |
-| 10 | 573,120 | 827,904 | 580,352 | 838,272 |
-| 11 | 564,352 | 815,232 | 572,864 | 827,520 |
-| 12 | 555,520 | 802,432 | 565,312 | 816,640 |
-| 13 | Unsupported | Unsupported | 557,888 | 805,824 |
-| 14 | Unsupported | Unsupported | 550,400 | 795,072 |
-| 15 | Unsupported | Unsupported | 542,976 | 784,320 |
-| 16 | Unsupported | Unsupported | 535,488 | 773,504 |
+| 3 | 633,536 | 786,432 | 647,424 | 786,432 |
+| 4 | 625,408 | 902,656 | 639,936 | 923,776 |
+| 5 | 617,280 | 890,944 | 632,576 | 913,088 |
+| 6 | 609,088 | 879,232 | 625,024 | 902,336 |
+| 7 | 600,960 | 867,520 | 617,536 | 891,520 |
+| 8 | 592,768 | 855,808 | 610,048 | 880,768 |
+| 9 | 583,168 | 842,368 | 601,600 | 868,992 |
+| 10 | 574,400 | 829,696 | 594,112 | 858,240 |
+| 11 | 565,632 | 817,024 | 586,688 | 847,424 |
+| 12 | 556,800 | 804,288 | 579,136 | 836,544 |
+| 13 | Unsupported | Unsupported | 571,648 | 825,792 |
+| 14 | Unsupported | Unsupported | 564,224 | 815,040 |
+| 15 | Unsupported | Unsupported | 556,736 | 804,224 |
+| 16 | Unsupported | Unsupported | 549,312 | 793,472 |
 
 NVFP4 passes the same BF16-source PPL gate as the default (no worse than the 5090 NVFP4 build on every cell) and 108/108 needle retrievals from 8K to 260K; its README workload throughput is on par with the default (geometric mean +0.8% DFlash, +1.2% MTP; 32K summaries +3–6%) with equal draft acceptance. Default remains `fp8-int4`; see `docs/performance.md`.
 
-Capacity depends on available VRAM and enabled features; automatic sizing leaves 64 MiB headroom by default. These are allocated shared capacities, checked at startup and with short decode, rather than an all-lane near-capacity qualification. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; startup summaries for every cell: `bench/results/shared-kv-20261107.json`.
+Capacity depends on available VRAM and enabled features; automatic sizing leaves 32 MiB headroom by default (raise `--kv-capacity-headroom` when a desktop or another process shares the GPU). These are allocated shared capacities, checked at startup and with short decode, rather than an all-lane near-capacity qualification; every cell kept the headroom physically free. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; startup summaries for every cell: `bench/results/shared-kv-20261108.json`.
 
 ## Performance and quality
 

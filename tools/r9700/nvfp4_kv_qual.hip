@@ -943,8 +943,9 @@ void qualify_packed_forms(ninfer::DeviceContext& device) {
         }
     }
 
-    // Each batched sequence's bytes equal its one-sequence launch: 16 sequences of this context
-    // exceed 128 groups (five loader waves); a single sequence stays below (six).
+    // Every batched sequence meets the FP64 oracle; its context partition depends on the batch
+    // size, so it need not reproduce the one-sequence bytes. 16 sequences of this context exceed
+    // 128 groups (five loader waves); a single sequence stays below (six).
     buffers.row_positions.copy_from_host(positions.data(), rows * sizeof(std::int32_t));
     auto single = leaf_args(buffers, read, rows, workspace_bytes);
     HIP_CHECK(q27::r9700_qwen3_8_27b_full_attention(single, device.stream));
@@ -975,9 +976,7 @@ void qualify_packed_forms(ninfer::DeviceContext& device) {
         for (auto& sequence : batch) {
             std::vector<float> actual(reference.size());
             sequence->output.copy_to_host(actual.data(), actual.size() * sizeof(float));
-            if (std::memcmp(actual.data(), reference.data(), actual.size() * sizeof(float)) != 0) {
-                fail("batched packed sequence differs from its one-sequence launch");
-            }
+            compare(actual, expected, kStagedTolerance, "batched packed sequence");
         }
     }
     std::cout << "packed_forms device_counts/sequence_batches six_and_five_loader_waves=PASS\n";

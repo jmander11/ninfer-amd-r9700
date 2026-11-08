@@ -649,15 +649,22 @@ struct Variant {
     // NInfer-owned runtime overhead beyond logical arenas, HIP graph residency and the
     // physical allocation bound. The C-specific bound includes lazy kernel residency and
     // the measured physical-counter residual; SSD scatter adds its own residency.
-    // Keep the 2-MiB startup component separate from the main-stream bound.
+    // Keep the 2-MiB startup component separate from the main-stream bound. The NVFP4 cache's
+    // additional kernels raised the C4..8 residual (adaptive DFlash K7, 262,144-token context:
+    // 11.0/11.2/9.1/9.3/7.3 MiB physical-counter deficits, 2026-11-08); C9..16 bounds cover it.
     [[nodiscard]] static constexpr std::size_t
     runtime_driver_reservation_bytes(WeightsProfile profile, std::uint32_t concurrency,
-                                     bool disk_cache_enabled) noexcept {
+                                     bool disk_cache_enabled, KvCacheFormat cache) noexcept {
         if (!is_lq4_text_profile(profile) || concurrency == 0U || concurrency > kMaximumConcurrency)
             return 0U;
         constexpr std::array<std::size_t, kMaximumConcurrency> main_mib{
             6, 6, 4, 4, 2, 4, 4, 6, 32, 32, 32, 34, 34, 34, 34, 34};
-        return (2U + main_mib[concurrency - 1U] + (disk_cache_enabled ? 2U : 0U)) << 20U;
+        constexpr std::array<std::size_t, kMaximumConcurrency> nvfp4_mib{
+            0, 0, 0, 12, 12, 10, 10, 8, 0, 0, 0, 0, 0, 0, 0, 0};
+        const std::size_t codec_mib =
+            cache == KvCacheFormat::Nvfp4 ? nvfp4_mib[concurrency - 1U] : 0U;
+        return (2U + main_mib[concurrency - 1U] + codec_mib + (disk_cache_enabled ? 2U : 0U))
+               << 20U;
     }
 
     [[nodiscard]] static std::vector<GraphExecutionProfile>

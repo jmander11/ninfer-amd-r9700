@@ -19,7 +19,7 @@ Device startup selects driver-backed HIP/GTT host memory before HIP initializati
 
 Compose selects bulk packet replay with `DEBUG_HIP_GRAPH_CLASSIC_PATH=0`, `ROC_ENABLE_LARGE_BAR=0`, `ROC_SKIP_KERNEL_ARG_COPY=0`, `HSA_DISABLE_FRAGMENT_ALLOCATOR=1`, and `DEBUG_HIP_GRAPH_BATCH_SIZE=16384` on the selected HIP 7.15 runtime. The runtime places immutable graph arguments in pinned host memory and submits cached dispatch packets in bulk. Normal argument copying is required: skipping it failed the large-graph exact-output check. Disabling ROCr's fragment allocator prevents the reproduced startup allocation failure at the qualified capacity. The low-residency budget requires the first four settings and the qualified production preset; the batch cap controls submission cost. Other settings retain the conservative inventory bound. See `docs/performance.md` for residency, capacity and speed evidence. Requalify when the HIP toolchain or captured kernels change.
 
-Automatic sizing also reads the matching PCI device's amdgpu VRAM counters under `/sys` and uses the smaller of physical and HIP availability. The counters must remain readable inside the container so the external 64-MiB headroom is backed by physical availability.
+Automatic sizing also reads the matching PCI device's amdgpu VRAM counters under `/sys` and uses the smaller of physical and HIP availability. The counters must remain readable inside the container so the external 32-MiB default headroom is backed by physical availability.
 
 ### First run on localhost
 

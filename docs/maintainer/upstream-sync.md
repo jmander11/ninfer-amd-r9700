@@ -4,7 +4,24 @@ Upstream is the RTX 5090/CUDA `dylanbrodiefafard/ninfer` repository’s `experim
 
 ## Baseline
 
-Reconciled through upstream `c88d194f51c52e6e1e1fff00da0f47c9f3f0c03b` (2026-11-03), with the 2026-11-04 AMD port below. The next sync reviews upstream changes after `c88d194f` against current AMD behavior. Upstream previously rewrote the history containing the former `7142d4280123d9df507f863c1ae3d16f50e6476e` baseline; the 2026-10-28 reconciliation below maps its dispositions onto the current history without an ancestry merge.
+Reconciled through upstream `4d5c4f22bf146eeadbfb7d42ed3f141f5bf6131b` (2026-11-07), with the 2026-11-08 AMD ports below. The next sync reviews upstream changes after `4d5c4f22` against current AMD behavior. The fetched `experimental` history was force-updated after the previous `c88d194f` baseline, which remains its ancestor. Upstream previously rewrote the history containing the former `7142d4280123d9df507f863c1ae3d16f50e6476e` baseline; the 2026-10-28 reconciliation below maps its dispositions onto the current history without an ancestry merge.
+
+## Batch-sized attention partitions, headroom and documentation (2026-11-08)
+
+The fetched `experimental` tip is `4d5c4f22bf146eeadbfb7d42ed3f141f5bf6131b`. Every commit after `c88d194f` is dispositioned:
+
+| Source | AMD disposition |
+|---|---|
+| `61275549` | Already equivalent: native `432f112f` and `dc50c301` concatenate optional JSON whitespace around the schema grammar and cover reasoning boundaries and speculative masks. |
+| `ae835571` | Ported as a native design. Packed decode attention sizes each sequence's context partition on the device from the batch size, row class and live frontier with a measured gfx1201 target table; frontier envelopes still bound the grid and workspace. Exclude the CUDA NVFP4 split-launch code and RTX 5090 constants. Op time falls to a 0.887× geometric mean over 702 verified cells; MTP C16 document summaries gain 4.7–9.3% and DFlash README workloads +0.6%. One opt-in NVFP4 decode-32K new-severe count exceeds its cap by two positions (`docs/performance.md`, 2026-11-08 packed attention partitions). |
+| `8d839952` | Excluded: tunes upstream's accepted-history GDN ring, which `f0d3922e` did not adopt; AMD retains raw-record and deferred-chain Fold. |
+| `f96f6751`, `0489853c` | Excluded: CUDA NVFP4 W4A8 tiles for 49–64 tokens. AMD Text weights are LQ4 with their own qualified width coverage. |
+| `574e6e52` | Ported: `qwen3.8-27b-model.md` §13 states the batch-size consistency rule (precision profile independent of batch, co-scheduled requests and live frontier; rounding may vary under oracle, NLL and retrieval gates). |
+| `21f8750a` | Headroom ported: the automatic-KV default is 32 MiB. The R9700 drives no display, and NInfer's own driver residency is budgeted separately. The DFlash graph allowance is already calibrated per C on gfx1201; upstream's formula and RTX 5090 tables are excluded. README capacities are remeasured at the new default with physical free-VRAM sampling; that measurement exposed and corrected a 7–11 MiB NVFP4 C4..8 driver-residency shortfall. |
+| `cc8826cb` | Ported as native translations of this repository's `concurrent-inference-architecture.md` and `replayssm-gdn.md`, not upstream text. Stale source names were corrected (`mixed_forward=N`, 48 GDN layers/value heads, DFlash2 T≤8, matrix-instruction precision). |
+| `4d5c4f22` | Not applicable: ROCm reserves no scratch from `hipLimitStackSize` (416 B to 16 KiB measured identical on gfx1201); scratch is sized lazily per launched kernel. No compiled gfx1201 kernel uses a dynamic stack; the largest production frame is 240 B. The 1308-B `qk_vector_kernel` runs only in `kv_op_qual`. |
+
+Verification: gfx1201 Release build with warnings as errors, 65 host tests, changed-line clang-tidy over 162 translation units with zero diagnostics, pinned formatting and lint hooks. The attention FP64-oracle qualifiers, graph/eager token parity, paired NLL against the frozen 5090 cells, retrieval and serving A/Bs are recorded in `docs/performance.md`. Evidence: `profiles/upstream-sync/20261107/` and `profiles/upstream-sync/20261108/`.
 
 ## Request JSON member order (2026-11-04)
 
