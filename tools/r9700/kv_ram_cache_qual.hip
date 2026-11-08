@@ -307,6 +307,41 @@ void system_prompt_lru(ninfer::DeviceContext& device, const ninfer::Fp8KInt4VPag
                 pinned.is_claimed(held.entry_id),
             "LRU evicted an in-flight restore source");
     pinned.release(held.entry_id);
+
+    // A live credit takes ordinary FIFO images before a retained system prefix, and the
+    // prefix only when nothing else can make room.
+    q3::detail::KVRamCache live(8ULL << 20, 2);
+    require(live.capture(a.source).status == q3::detail::RamCaptureStatus::Captured,
+            "live-credit fixture could not capture its system prefix");
+    std::vector<std::unique_ptr<HiddenCapture>> ordinary;
+    std::size_t ordinary_bytes = 0;
+    for (std::int32_t token = 4001;; token += 1000) {
+        ordinary.push_back(std::make_unique<HiddenCapture>(fixture, allocation, token, tensor,
+                                                           device.copy_stream));
+        const auto before   = live.snapshot().used_bytes;
+        const auto captured = live.capture(ordinary.back()->source);
+        if (captured.status != q3::detail::RamCaptureStatus::Captured) { break; }
+        ordinary_bytes = live.snapshot().used_bytes - before;
+    }
+    device.synchronize_all();
+    const auto ordinary_entries = live.fifo_ids().size();
+    require(ordinary_entries > 0, "live-credit fixture captured no ordinary image");
+    require(live.reserve_live_credit(1, ordinary_bytes) &&
+                live.fifo_ids().size() < ordinary_entries &&
+                live.snapshot().system_prompt_entries == 1 &&
+                live.plan_match(a.prompt, q3::detail::prefix_hash_chain(a.prompt)),
+            "live credit evicted a system prefix while ordinary images remained");
+    // Credit 1 stays fixed, so a full-arena probe can never fit: it must fail before evicting.
+    const auto remaining = live.fifo_ids().size();
+    require(!live.reserve_live_credit(3, live.snapshot().capacity_bytes) &&
+                live.fifo_ids().size() == remaining && live.snapshot().system_prompt_entries == 1,
+            "an infeasible live credit evicted retained entries");
+    live.release_live_credit(1);
+    require(live.reserve_live_credit(2, live.snapshot().capacity_bytes) &&
+                live.snapshot().system_prompt_entries == 0 &&
+                live.snapshot().system_prompt_evictions == 1,
+            "live credit could not reclaim a system prefix as the last resort");
+    live.release_live_credit(2);
 }
 
 // All three cache planes may use different physical page orders. Forked pages must be

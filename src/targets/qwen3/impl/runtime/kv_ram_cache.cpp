@@ -1285,17 +1285,54 @@ bool KVRamCache::reserve_live_credit(std::uint64_t owner, std::size_t bytes) try
         return true;
     }
     void* block = arena_.try_alloc(bytes, kDeviceAlign);
+    if (!block) {
+        // Evict nothing for a credit that cannot fit even after every evictable entry is gone:
+        // callers probe shrinking grants, and a failed probe must not cost retained prefixes.
+        // Credits, claimed or I/O-pinned entries and retired blocks still under a copy fence stay.
+        std::vector<std::pair<std::size_t, std::size_t>> fixed;
+        const auto* base = static_cast<const std::uint8_t*>(arena_.base());
+        const auto keep  = [&](const void* at, std::size_t size) {
+            fixed.emplace_back(
+                static_cast<std::size_t>(static_cast<const std::uint8_t*>(at) - base), size);
+        };
+        for (const auto& [owner_id, credit] : live_credits_) { keep(credit.block, credit.bytes); }
+        for (const auto& [id, record] : records_) {
+            if (record.live_owner == 0 &&
+                (record.retired || record.pinned || record.io_pins != 0)) {
+                keep(record.block, record.bytes);
+            }
+        }
+        std::sort(fixed.begin(), fixed.end());
+        std::size_t begin = 0, largest = 0;
+        for (const auto& [offset, size] : fixed) {
+            largest = std::max(largest, offset - std::min(offset, begin));
+            begin   = std::max(begin, offset + size);
+        }
+        largest = std::max(largest, arena_.capacity() - std::min(arena_.capacity(), begin));
+        if (bytes > largest) { return false; }
+    }
+    // Ordinary FIFO images go first; a retained system prefix is taken, least recently used,
+    // only when no ordinary image remains and no retired block is still waiting for its copy.
     while (!block) {
         std::uint64_t victim = 0;
         for (auto id : fifo_) {
             const auto& r = require(id);
-            if (!r.pinned && r.io_pins == 0) {
+            if (!r.system_prompt && !r.pinned && r.io_pins == 0) {
                 victim = id;
                 break;
             }
         }
-        if (!victim) { return false; }
-        retire_locked(victim);
+        if (victim != 0) {
+            ++evictions_;
+            retire_locked(victim);
+        } else {
+            reap_retired_locked();
+            const bool fenced =
+                std::any_of(records_.begin(), records_.end(), [&](const auto& entry) {
+                    return entry.second.retired && !retired_free_locked(entry.second);
+                });
+            if (fenced || !evict_system_prompt_locked()) { return false; }
+        }
         reap_retired_locked();
         block = arena_.try_alloc(bytes, kDeviceAlign);
     }

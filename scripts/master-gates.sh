@@ -90,6 +90,10 @@ require_no_skips "$report_dir/04-python.xml"
 ctest_gate 05-real "$build_dir" -L real
 gate 05-cache-cancel flock --exclusive "$gpu_lock" \
   "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
+for backend in none mtp dflash; do
+  gate "05-system-prompts-$backend" flock --exclusive "$gpu_lock" \
+    "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact" --system-prompts "$backend"
+done
 gate 05-recovery-mtp flock --exclusive "$gpu_lock" \
   "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" mtp
 gate 05-recovery-dflash flock --exclusive "$gpu_lock" \
@@ -102,6 +106,9 @@ done
 gate 05-cache-cancel-nvfp4 flock --exclusive "$gpu_lock" \
   env NINFER_QUAL_KV_CACHE=nvfp4 "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
 for backend in none mtp dflash; do
+  gate "05-system-prompts-$backend-nvfp4" flock --exclusive "$gpu_lock" \
+    env NINFER_QUAL_KV_CACHE=nvfp4 "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact" \
+    --system-prompts "$backend"
   gate "05-recovery-$backend-nvfp4" flock --exclusive "$gpu_lock" \
     env NINFER_QUAL_KV_CACHE=nvfp4 "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" "$backend"
   gate "05-graph-recovery-$backend-nvfp4" flock --exclusive "$gpu_lock" \
