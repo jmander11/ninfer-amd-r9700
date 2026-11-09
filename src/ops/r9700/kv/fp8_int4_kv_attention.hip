@@ -775,7 +775,8 @@ struct DenseVerifyShared {
     std::uint32_t row_context[kDensePrefillRows];
     std::uint32_t invalid_rows, inactive_rows, maximum_context, page_fault_from;
     std::uint32_t full_context[6];
-    std::uint32_t block_valid[2]; // the buffer's page is resident
+    std::uint32_t block_valid[2];               // the buffer's page is resident
+    std::uint32_t plan_chunk_keys, plan_chunks; // the sequence's partition
     std::size_t table_offset;
 };
 
@@ -785,6 +786,21 @@ struct DenseVerifyShared {
 inline constexpr std::uint32_t kDenseVerifyPartialStride    = kHeadDim + 2U;
 inline constexpr std::uint32_t kDenseVerifyMaximumChunks    = 64U;
 inline constexpr std::uint32_t kDenseVerifyMinimumChunkKeys = 256U;
+
+// Largest packed-decode partition of a `context`-key envelope; it sizes the partial workspace,
+// whose word after the last partial slot holds the chunk count the split chose for the merge.
+__host__ __device__ constexpr std::uint32_t dense_verify_chunk_capacity(std::size_t context) {
+    const std::size_t chunks =
+        (context + kDenseVerifyMinimumChunkKeys - 1U) / kDenseVerifyMinimumChunkKeys;
+    return static_cast<std::uint32_t>(
+        chunks < kDenseVerifyMaximumChunks ? chunks : kDenseVerifyMaximumChunks);
+}
+
+__host__ __device__ constexpr std::size_t dense_verify_plan_word(std::size_t context,
+                                                                 std::uint32_t rows) {
+    return static_cast<std::size_t>(dense_verify_chunk_capacity(context)) * rows * 24U *
+           kDenseVerifyPartialStride;
+}
 
 __device__ __forceinline__ void dense_prefill_barrier() {
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
@@ -1536,8 +1552,9 @@ struct DenseVerifyPlan {
 
 // Measured gfx1201 partition targets for one sequence of a `batch`-sequence launch (index
 // batch - 1), by row class (1..4 and 5..8 query rows). A sequence whose live frontier is at most
-// `short_live` uses `short_chunks`, otherwise `long_chunks`; zero keeps the frontier-envelope
-// partition (its chunk size, over the live keys only). The batch grid fills the 64 compute units
+// `short_live` uses `short_chunks`, otherwise `long_chunks`; a zero `long_chunks` keeps the
+// frontier-envelope partition for every frontier of an envelope above `short_live` (the host
+// launches that sequence with its fixed envelope plan). The batch grid fills the 64 compute units
 // with about 4 * batch * chunks ~ 64 workgroups where that tiles evenly; wide rows at long
 // frontiers with large batches keep the envelope partition, which the per-batch counts did not
 // beat (docs/performance.md, 2026-11-08 packed attention partitions).
@@ -1582,9 +1599,8 @@ inline constexpr DenseVerifyTarget kDenseVerifyTargets[2][kPackedDecodeMaximumSe
      {1U, 0U, 16384U}},
 };
 
-__host__ __device__ constexpr std::uint32_t
-dense_verify_target_chunks(std::uint32_t batch, std::uint32_t rows, std::uint32_t live) {
-    const DenseVerifyTarget target = kDenseVerifyTargets[rows >= 5U ? 1U : 0U][batch - 1U];
+__host__ __device__ constexpr std::uint32_t dense_verify_target_chunks(DenseVerifyTarget target,
+                                                                       std::uint32_t live) {
     return live <= target.short_live ? target.short_chunks : target.long_chunks;
 }
 
@@ -1601,16 +1617,16 @@ dense_verify_plan(std::uint32_t live, std::uint32_t target, std::uint32_t upper)
     return {keys, (live + keys - 1U) / keys};
 }
 
-// Visible keys of a sequence's active rows: the largest valid causal position plus one. Rows the
-// tile setup rejects (invalid table row, poisoned rows) only make this an over-estimate, so the
-// partition still covers every key the setup admits.
+// Visible keys of a sequence's active rows: the largest valid causal position plus one, zero for
+// an out-of-range active-row count (every row poisoned). An invalid table row only makes this an
+// over-estimate, so the partition still covers every key the setup admits.
 __device__ __forceinline__ std::uint32_t
 dense_verify_live_context(const Fp8Int4KvAttentionArgs& a) {
     std::uint32_t rows = a.query_rows;
     if (a.active_query_rows != nullptr) {
         const std::int32_t active = *a.active_query_rows;
-        if (active >= 0 && static_cast<std::uint32_t>(active) <= rows)
-            rows = static_cast<std::uint32_t>(active);
+        if (active < 0 || static_cast<std::uint32_t>(active) > rows) return 0U;
+        rows = static_cast<std::uint32_t>(active);
     }
     std::uint32_t live = 0U;
     for (std::uint32_t row = 0U; row < rows; ++row) {
@@ -1632,29 +1648,31 @@ struct DenseVerifySequences {
     std::uint32_t chunks[kPackedDecodeMaximumSequences];
     // Chunk size of the frontier-envelope partition, used where the target table keeps it.
     std::uint32_t envelope_chunk_keys[kPackedDecodeMaximumSequences];
-    // Bit s: no live frontier changes sequence s's partition from the envelope one, so its CTAs
-    // skip the live-frontier read and run the envelope plan unchanged.
+    // kDenseVerifyTargets entry of the sequence's batch size and row class, passed as an argument
+    // so no workgroup waits on a table load after its setup.
+    DenseVerifyTarget target[kPackedDecodeMaximumSequences];
+    // Bit s: sequence s keeps its envelope partition (envelope_chunk_keys, chunks) at every live
+    // frontier; a launch whose sequences all keep it runs without live-frontier code.
     std::uint32_t envelope_plan_mask;
 };
 
 static_assert(sizeof(DenseVerifySequences) <= 4096U,
               "dense verify sequences must fit the kernarg segment");
 
-__device__ __forceinline__ DenseVerifyPlan dense_verify_sequence_plan(
-    const DenseVerifySequences& sequences, std::uint32_t sequence, std::uint32_t batch) {
-    if (((sequences.envelope_plan_mask >> sequence) & 1U) != 0U)
+__device__ __forceinline__ bool dense_verify_envelope_plan(const DenseVerifySequences& sequences,
+                                                           std::uint32_t sequence) {
+    return ((sequences.envelope_plan_mask >> sequence) & 1U) != 0U;
+}
+
+// Partition of sequence `sequence` at its live frontier. A zero long target makes the host keep
+// the envelope plan, so any target reached here is nonzero.
+__device__ __forceinline__ DenseVerifyPlan
+dense_verify_sequence_plan(const DenseVerifySequences& sequences, std::uint32_t sequence) {
+    if (dense_verify_envelope_plan(sequences, sequence))
         return {sequences.envelope_chunk_keys[sequence], sequences.chunks[sequence]};
-    const Fp8Int4KvAttentionArgs& a = sequences.sequence[sequence];
-    const std::uint32_t live        = dense_verify_live_context(a);
-    const std::uint32_t target      = dense_verify_target_chunks(batch, a.query_rows, live);
-    if (target == 0U) {
-        // Envelope partition over the live keys: the chunks past the frontier it no longer
-        // launches would only contribute zero-weight empty partials to the merge.
-        const std::uint32_t keys   = sequences.envelope_chunk_keys[sequence];
-        const std::uint32_t chunks = live == 0U ? 1U : (live + keys - 1U) / keys;
-        return {keys, chunks < sequences.chunks[sequence] ? chunks : sequences.chunks[sequence]};
-    }
-    return dense_verify_plan(live, target, sequences.chunks[sequence]);
+    const std::uint32_t live = dense_verify_live_context(sequences.sequence[sequence]);
+    return dense_verify_plan(live, dense_verify_target_chunks(sequences.target[sequence], live),
+                             sequences.chunks[sequence]);
 }
 
 // NVFP4 loader waves: its keys cost more than its values, so the K+K wave above would be the
@@ -1663,16 +1681,18 @@ __device__ __forceinline__ DenseVerifyPlan dense_verify_sequence_plan(
 // compute units free.
 inline constexpr std::uint32_t kNvfp4MaximumGroupsForSixLoaderWaves = 128U;
 
-template <class Codec, std::uint32_t Group, std::uint32_t LoaderWaves>
+// LivePlan false: every sequence keeps its envelope partition (chunk size and count from the
+// kernel arguments), with no live-frontier code on the workgroup's critical path.
+template <class Codec, std::uint32_t Group, std::uint32_t LoaderWaves, bool LivePlan>
 __global__ __launch_bounds__((kDenseVerifyComputeWaves + LoaderWaves) *
                              32U) void dense_verify_kernel(DenseVerifySequences sequences) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     // Interleave sequences within each chunk so a long final sequence starts promptly.
     const std::uint32_t sequence = blockIdx.y, chunk = blockIdx.z;
-    const DenseVerifyPlan plan = dense_verify_sequence_plan(sequences, sequence, gridDim.y);
-    if (chunk >= plan.chunks) return;
+    // The host bound covers every live partition.
+    if (chunk >= sequences.chunks[sequence]) return;
+    std::uint32_t chunk_keys        = sequences.envelope_chunk_keys[sequence];
     const Fp8Int4KvAttentionArgs& a = sequences.sequence[sequence];
-    const std::uint32_t chunk_keys  = plan.chunk_keys;
     float* const partial            = a.score_workspace;
     __shared__ DenseVerifyShared shared;
     const std::uint32_t tid = threadIdx.x, lane = tid % 32U;
@@ -1682,8 +1702,29 @@ __global__ __launch_bounds__((kDenseVerifyComputeWaves + LoaderWaves) *
     const std::uint32_t tile_rows    = a.query_rows;
     const std::size_t physical_pages = a.physical_tokens / kPageSize;
 
-    if (tid == 0U) dense_attention_setup(shared, a, 0U, tile_rows, true);
-    dense_prefill_barrier();
+    if constexpr (LivePlan) {
+        // The second wave forms the partition (frontier read and integer divisions) while
+        // thread 0 runs the serial tile setup, so neither latency delays the other.
+        if (tid == 0U) {
+            dense_attention_setup(shared, a, 0U, tile_rows, true);
+        } else if (tid == 32U) {
+            const DenseVerifyPlan plan = dense_verify_sequence_plan(sequences, sequence);
+            shared.plan_chunk_keys     = plan.chunk_keys;
+            shared.plan_chunks         = plan.chunks;
+            if (kv_head == 0U && chunk == 0U)
+                reinterpret_cast<std::uint32_t*>(
+                    partial)[dense_verify_plan_word(a.context, a.query_rows)] = plan.chunks;
+        }
+        dense_prefill_barrier();
+        const auto chunks =
+            static_cast<std::uint32_t>(__builtin_amdgcn_readfirstlane(shared.plan_chunks));
+        if (chunk >= chunks) return;
+        chunk_keys =
+            static_cast<std::uint32_t>(__builtin_amdgcn_readfirstlane(shared.plan_chunk_keys));
+    } else {
+        if (tid == 0U) dense_attention_setup(shared, a, 0U, tile_rows, true);
+        dense_prefill_barrier();
+    }
     const std::uint32_t maximum_context = __builtin_amdgcn_readfirstlane(shared.maximum_context);
     const std::size_t table_offset =
         static_cast<std::size_t>(
@@ -1836,18 +1877,34 @@ __global__ __launch_bounds__((kDenseVerifyComputeWaves + LoaderWaves) *
 // Stable FP32 merge of the split partials: O = sum_c n_c 2^(m_c - M), L = sum_c l_c 2^(m_c - M),
 // output = O * (8 / L), restoring the V/8 staging factor as the one-pass kernel does. Grid z is
 // the sequence and grid y covers the batch's widest row panel; a narrower sequence's surplus rows
-// exit. LivePlan recomputes the packed-decode partition from the same device inputs as the
-// partial kernel; otherwise `chunks` is the host-fixed count.
+// exit. LivePlan reads the chunk count the split recorded in the workspace's plan word (clamped to
+// the host bound); otherwise `chunks` is the host-fixed count.
 template <bool LivePlan>
 __global__
 __launch_bounds__(kHeadDim) void dense_verify_merge_kernel(DenseVerifySequences sequences) {
     const Fp8Int4KvAttentionArgs& a = sequences.sequence[blockIdx.z];
     const std::uint32_t head = blockIdx.x, row = blockIdx.y, feature = threadIdx.x;
     if (row >= a.query_rows) return;
-    std::uint32_t chunks = sequences.chunks[blockIdx.z];
-    if constexpr (LivePlan)
-        chunks = dense_verify_sequence_plan(sequences, blockIdx.z, gridDim.z).chunks;
     const float* const partial = a.score_workspace;
+    const auto slot            = [&](std::uint32_t chunk) {
+        return partial + ((static_cast<std::size_t>(chunk) * a.query_rows + row) * 24U + head) *
+                             kDenseVerifyPartialStride;
+    };
+    // Chunk origins and denominators up to the host bound (inside the sized workspace) load
+    // together with the chunk count the live split recorded; chunks past that count are discarded.
+    const std::uint32_t upper = sequences.chunks[blockIdx.z];
+    float chunk_origin = -INFINITY, chunk_denominator = 0.0F;
+    if (feature < upper) {
+        chunk_origin      = slot(feature)[kHeadDim];
+        chunk_denominator = slot(feature)[kHeadDim + 1U];
+    }
+    std::uint32_t chunks = upper;
+    if constexpr (LivePlan) {
+        const std::uint32_t recorded =
+            __builtin_amdgcn_readfirstlane(reinterpret_cast<const std::uint32_t*>(
+                partial)[dense_verify_plan_word(a.context, a.query_rows)]);
+        chunks = recorded < upper ? recorded : upper;
+    }
     float* output = a.output + (static_cast<std::size_t>(row) * 24U + head) * kHeadDim + feature;
     if (a.active_query_rows != nullptr) {
         const std::int32_t active = *a.active_query_rows;
@@ -1860,17 +1917,13 @@ __launch_bounds__(kHeadDim) void dense_verify_merge_kernel(DenseVerifySequences 
             return;
         }
     }
-    const auto slot = [&](std::uint32_t chunk) {
-        return partial + ((static_cast<std::size_t>(chunk) * a.query_rows + row) * 24U + head) *
-                             kDenseVerifyPartialStride;
-    };
     // Chunk origins and denominators are read once, in parallel; each chunk's weight is formed
     // once. Every thread then accumulates in ascending chunk order exactly as a serial merge.
     __shared__ float origins[kDenseVerifyMaximumChunks], denominators[kDenseVerifyMaximumChunks];
     __shared__ float weights[kDenseVerifyMaximumChunks];
     if (feature < chunks) {
-        origins[feature]      = slot(feature)[kHeadDim];
-        denominators[feature] = slot(feature)[kHeadDim + 1U];
+        origins[feature]      = chunk_origin;
+        denominators[feature] = chunk_denominator;
     }
     __syncthreads();
     float origin = -INFINITY;
@@ -2166,9 +2219,7 @@ namespace {
 // The bound is monotonic in the context, so the workspace sized at a frontier envelope covers
 // every smaller context.
 std::uint32_t dense_verify_chunk_bound(std::size_t context) noexcept {
-    const std::size_t chunks =
-        (context + kDenseVerifyMinimumChunkKeys - 1U) / kDenseVerifyMinimumChunkKeys;
-    return static_cast<std::uint32_t>(std::min<std::size_t>(chunks, kDenseVerifyMaximumChunks));
+    return dense_verify_chunk_capacity(context);
 }
 
 std::uint32_t dense_verify_chunk_keys(std::size_t context, std::uint32_t rows) noexcept {
@@ -2281,8 +2332,7 @@ std::size_t fp8_int4_kv_attention_packed_decode_workspace_bytes(std::size_t cont
     if (context == 0U || rows == 0U ||
         context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
         return 0U;
-    return static_cast<std::size_t>(dense_verify_chunk_bound(context)) * rows * 24U *
-           kDenseVerifyPartialStride * sizeof(float);
+    return (dense_verify_plan_word(context, rows) + 1U) * sizeof(float);
 }
 
 hipError_t fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentionArgs> sequences,
@@ -2319,53 +2369,61 @@ hipError_t fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentio
         // Largest partition any live frontier in [1, envelope] can select: the grid extent.
         const std::uint32_t bound = dense_verify_chunk_bound(a.context);
         const auto reachable      = [&](std::uint32_t target, std::uint32_t live) {
-            if (target == 0U) return (live + envelope_keys - 1U) / envelope_keys;
             const std::uint32_t minimum =
                 (live + kDenseVerifyMinimumChunkKeys - 1U) / kDenseVerifyMinimumChunkKeys;
             return std::max(1U, std::min({target, minimum, bound}));
         };
         const DenseVerifyTarget target =
             kDenseVerifyTargets[a.query_rows >= 5U ? 1U : 0U][sequences.size() - 1U];
-        const bool has_long = envelope > target.short_live;
-        std::uint32_t upper =
-            reachable(target.short_chunks, std::min<std::uint32_t>(envelope, target.short_live));
-        if (has_long) upper = std::max(upper, reachable(target.long_chunks, envelope));
-        batch.chunks[sequence] = std::min(upper, bound);
-        // Minimum-size envelope chunks with a target that never binds below the envelope: a live
-        // plan would only rebalance the same number of at most 256-key chunks, so the sequence
-        // keeps the envelope partition and its workgroups skip the live read.
+        batch.target[sequence] = target;
+        const bool has_long    = envelope > target.short_live;
+        // The sequence keeps the envelope partition when (a) its envelope reaches a zero long
+        // target (the envelope plan was not beaten there), or (b) its envelope chunks already
+        // have the minimum size and the target never binds below the envelope, where a live plan
+        // would only rebalance the same number of at most 256-key chunks.
         const std::uint32_t smallest =
             has_long ? std::min(target.short_chunks, target.long_chunks) : target.short_chunks;
-        if (envelope_keys == kDenseVerifyMinimumChunkKeys && smallest != 0U &&
-            smallest * kDenseVerifyMinimumChunkKeys >= envelope) {
+        if ((has_long && target.long_chunks == 0U) ||
+            (envelope_keys == kDenseVerifyMinimumChunkKeys &&
+             smallest * kDenseVerifyMinimumChunkKeys >= envelope)) {
             batch.envelope_plan_mask |= 1U << sequence;
             batch.chunks[sequence] = (envelope + envelope_keys - 1U) / envelope_keys;
+        } else {
+            std::uint32_t upper = reachable(target.short_chunks,
+                                            std::min<std::uint32_t>(envelope, target.short_live));
+            if (has_long) upper = std::max(upper, reachable(target.long_chunks, envelope));
+            batch.chunks[sequence] = std::min(upper, bound);
         }
         grid_chunks = std::max(grid_chunks, batch.chunks[sequence]);
         grid_rows   = std::max(grid_rows, a.query_rows);
     }
 #if defined(__HIPCC__)
-    const auto count = static_cast<std::uint32_t>(sequences.size());
-    if (sequences.front().codec == KvCodec::Nvfp4) {
-        if (4U * count * grid_chunks <= kNvfp4MaximumGroupsForSixLoaderWaves) {
-            hipLaunchKernelGGL((dense_verify_kernel<Nvfp4DenseCodec, 16U, 6U>),
-                               dim3(4U, count, grid_chunks),
-                               dim3((kDenseVerifyComputeWaves + 6U) * 32U), 0, stream, batch);
+    const auto count  = static_cast<std::uint32_t>(sequences.size());
+    const auto launch = [&]<bool LivePlan>() {
+        if (sequences.front().codec == KvCodec::Nvfp4) {
+            if (4U * count * grid_chunks <= kNvfp4MaximumGroupsForSixLoaderWaves) {
+                hipLaunchKernelGGL((dense_verify_kernel<Nvfp4DenseCodec, 16U, 6U, LivePlan>),
+                                   dim3(4U, count, grid_chunks),
+                                   dim3((kDenseVerifyComputeWaves + 6U) * 32U), 0, stream, batch);
+            } else {
+                hipLaunchKernelGGL((dense_verify_kernel<Nvfp4DenseCodec, 16U, 5U, LivePlan>),
+                                   dim3(4U, count, grid_chunks),
+                                   dim3((kDenseVerifyComputeWaves + 5U) * 32U), 0, stream, batch);
+            }
         } else {
-            hipLaunchKernelGGL((dense_verify_kernel<Nvfp4DenseCodec, 16U, 5U>),
-                               dim3(4U, count, grid_chunks),
-                               dim3((kDenseVerifyComputeWaves + 5U) * 32U), 0, stream, batch);
+            hipLaunchKernelGGL((dense_verify_kernel<Fp8Int4DenseCodec, 16U, 3U, LivePlan>),
+                               dim3(4U, count, grid_chunks), dim3(kDenseVerifyThreads), 0, stream,
+                               batch);
         }
-    } else {
-        hipLaunchKernelGGL((dense_verify_kernel<Fp8Int4DenseCodec, 16U, 3U>),
-                           dim3(4U, count, grid_chunks), dim3(kDenseVerifyThreads), 0, stream,
-                           batch);
-    }
-    const hipError_t error = hipGetLastError();
-    if (error != hipSuccess) return error;
-    hipLaunchKernelGGL(dense_verify_merge_kernel<true>, dim3(24U, grid_rows, count), dim3(kHeadDim),
-                       0, stream, batch);
-    return hipGetLastError();
+        const hipError_t error = hipGetLastError();
+        if (error != hipSuccess) return error;
+        hipLaunchKernelGGL(dense_verify_merge_kernel<LivePlan>, dim3(24U, grid_rows, count),
+                           dim3(kHeadDim), 0, stream, batch);
+        return hipGetLastError();
+    };
+    // Every sequence on its envelope plan: the launch is the fixed-partition one.
+    if (batch.envelope_plan_mask == (1U << count) - 1U) return launch.template operator()<false>();
+    return launch.template operator()<true>();
 #else
     (void)stream;
     return hipErrorNotSupported;

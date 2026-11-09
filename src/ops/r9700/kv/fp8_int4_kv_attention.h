@@ -182,9 +182,10 @@ fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(std::size_t context,
 // the dependent rows with NaN.
 // One launch pair serves up to kMaximumConcurrency sequences of a compact decode batch (split
 // grid y = sequence, z = chunk; merge grid z = sequence), each with its own arguments, rows,
-// frontier and caller-owned score_workspace partials;
-// every sequence's output bytes equal those of its one-sequence launch. Sequences must not share
-// output or workspace storage.
+// frontier and caller-owned score_workspace partials (plus one word holding the chunk count the
+// split chose for the merge). A sequence's partition depends on the batch size and its live
+// frontier, so batched and one-sequence outputs agree to rounding, each meeting the oracle.
+// Sequences must not share output or workspace storage.
 inline constexpr std::size_t kPackedDecodeMaximumSequences = kMaximumConcurrency;
 [[nodiscard]] std::size_t
 fp8_int4_kv_attention_packed_decode_workspace_bytes(std::size_t context,

@@ -219,10 +219,12 @@ void qualify_host_attention_parity_routing() {
     namespace kv  = ninfer::ops::r9700::kv;
     namespace q27 = ninfer::targets::qwen3_8_27b::detail;
     // Split verify partials: min(64, ceil(context/256)) chunks x rows x 24 heads x (256 numerator
-    // + origin + denominator) FP32.
+    // + origin + denominator) FP32, then the one 32-bit chunk count the split records for the
+    // merge.
     const auto verify_bytes = [](std::uint32_t rows, std::size_t context) {
         return std::min<std::size_t>(64U, (context + 255U) / 256U) * rows * 24U * 258U *
-               sizeof(float);
+                   sizeof(float) +
+               sizeof(std::uint32_t);
     };
     const std::size_t kW5C134Bytes = verify_bytes(5U, 134U);
     const std::size_t kW5C140Bytes = verify_bytes(5U, 140U);
