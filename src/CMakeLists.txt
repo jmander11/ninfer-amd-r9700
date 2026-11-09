@@ -660,6 +660,7 @@ target_link_libraries(ninfer_r9700_nvfp4_kv_qual PRIVATE ninfer_r9700_core hip::
 add_executable(ninfer_r9700_dflash_attention_route_discriminator
   ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_attention_route_discriminator.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_dflash_attention_route_discriminator)
+target_include_directories(ninfer_r9700_dflash_attention_route_discriminator PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 set_target_properties(ninfer_r9700_dflash_attention_route_discriminator PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_dflash_attention_route_discriminator PRIVATE ninfer_r9700_core hip::host)
