@@ -2071,9 +2071,7 @@ private:
                                      (!live_transfer_ || live_transfer_->request->id != request.id),
                 .useful_chunk_since_resume =
                     request.suspension_count == 0 ||
-                    window_consumed(request) - request.resumed_at_output >= 8192,
-                .suspension_bytes = request.suspension_bytes,
-                .suspension_count = request.suspension_count};
+                    window_consumed(request) - request.resumed_at_output >= 8192};
     }
 
     [[nodiscard]] std::vector<KvPressureRequest> pressure_snapshot() const {
@@ -2336,7 +2334,19 @@ private:
                                      ? request->window_output_tokens
                                      : std::max(request->window_output_tokens, consumed + grant);
             const auto window  = instance_.program->plan_suspended_window(request->id, desired);
-            if (!post_release_fits(window.admission, nullptr, {})) continue;
+            // Beside other residents, a resume must also leave room for its next growth grant,
+            // up to its lifetime output, or that grant suspends it again at once.
+            const bool others_resident =
+                std::any_of(slots_.begin(), slots_.begin() + max_concurrency_,
+                            [](const auto& slot) { return slot != nullptr; });
+            const std::uint32_t headroom_end =
+                std::max(desired, std::min(desired + kResumeMarginTokens,
+                                           consumed + request->budget->remaining()));
+            const auto required =
+                others_resident
+                    ? instance_.program->plan_suspended_window(request->id, headroom_end).admission
+                    : window.admission;
+            if (!post_release_fits(required, nullptr, {})) continue;
             if (!joins_cohort &&
                 !instance_.program->reserve_suspension_credit(request->id, window.suspension_bytes))
                 continue;
@@ -2449,12 +2459,11 @@ private:
                 const auto progress =
                     admit_planned_request(request, *choice, BackfillClass::None, 0);
                 // A finalization token may immediately complete the request and release its
-                // lane. The original admission still spends its finite fairness allowance.
+                // lane; it still counts as admitted.
                 const bool was_admitted = request->budget.has_value() ||
                                           request->begin.has_value() ||
                                           (copy_hold_ && copy_hold_->request == request);
                 if (was_admitted) {
-                    if (!replacement_admission) kv_pressure_.record_ingress();
                     if (request->id != window_head_id_ && window_head_bypass_ != 0)
                         --window_head_bypass_;
                     if (replacement_ == request) replacement_.reset();
@@ -2601,9 +2610,6 @@ private:
             growth_priority_ = recipient->id;
             return true;
         }
-        // Shrinking can change victim transfer costs, but never snapshot membership/order.
-        for (std::size_t i = 0; i < requests.size(); ++i)
-            resident[i] = pressure_snapshot(*requests[i]);
         const auto victim_order = kv_pressure_.ranked_victims(resident, reason);
         if (recipient) replacement_options.push_back(nullptr);
         for (const auto& option : replacement_options) {
@@ -2622,15 +2628,9 @@ private:
                     continue;
                 }
             }
-            for (const auto& candidate : victim_order.candidates()) {
-                std::vector<std::shared_ptr<Request>> victims;
-                bool contains_recipient = false;
-                for (std::size_t i = 0; i < requests.size(); ++i) {
-                    if ((candidate.mask & (1U << i)) == 0) continue;
-                    victims.push_back(requests[i]);
-                    contains_recipient = contains_recipient || requests[i] == recipient;
-                }
-                if (contains_recipient) continue;
+            for (const std::size_t index : victim_order) {
+                if (requests[index] == recipient) continue;
+                const std::vector<std::shared_ptr<Request>> victims{requests[index]};
                 bool fits = post_release_fits(needed, recipient.get(), victims);
                 if (!fits && !recipient) {
                     fits = reclaim_unused_windows(needed, nullptr, victims);
@@ -2654,10 +2654,9 @@ private:
                 }
                 if (!fits) continue;
                 for (const auto& victim : victims) pressure_victims_.push_back(victim);
-                if (replacement) {
+                if (replacement)
                     replacement_ = std::move(replacement);
-                    kv_pressure_.record_ingress();
-                } else
+                else
                     growth_priority_ = recipient->id;
                 const auto victim = pressure_victims_.front();
                 pressure_victims_.pop_front();
@@ -4476,6 +4475,7 @@ private:
     };
 
     const bool chunked_execution_;
+    static constexpr std::uint32_t kResumeMarginTokens = 8192;
     KvPressurePolicy kv_pressure_;
     std::vector<std::shared_ptr<Request>> completion_cohort_;
     std::deque<std::shared_ptr<Request>> suspended_;

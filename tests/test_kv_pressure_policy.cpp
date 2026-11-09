@@ -1,5 +1,6 @@
 #include "runtime/engine/kv_pressure_policy.h"
 
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <vector>
@@ -13,12 +14,11 @@ int check(bool condition, const char* message) {
 }
 
 ninfer::runtime::KvPressureRequest request(std::uint64_t id, bool blocked = false) {
-    return {.id               = id,
-            .queue_order      = id,
-            .resident         = true,
-            .growth_blocked   = blocked,
-            .suspend_ready    = true,
-            .suspension_bytes = 100};
+    return {.id             = id,
+            .queue_order    = id,
+            .resident       = true,
+            .growth_blocked = blocked,
+            .suspend_ready  = true};
 }
 
 } // namespace
@@ -29,82 +29,57 @@ int main() {
     using ninfer::runtime::KvPressureRequest;
     int failures = 0;
 
+    // One blocked lane beside other residents opens pressure; victims are single residents,
+    // latest admitted first, and never a completion member.
     KvPressurePolicy policy(4, 12);
-    std::vector<KvPressureRequest> active{request(1, true), request(2), request(3)};
-    active[1].completion_member = true;
+    std::vector<KvPressureRequest> active{request(1, true), request(2), request(3), request(4)};
+    active[2].completion_member = true;
     policy.observe(active, true);
-    failures += check(!policy.pressure_needed() && !policy.draining(),
-                      "single blocked lane disturbed runnable peers");
-    failures += check(policy.ranked_victims(active, KvPressureReason::Growth).sets.empty(),
-                      "single blocked lane triggered growth eviction");
-    auto victims = policy.ranked_victims(active, KvPressureReason::WaitingReplacement);
-    failures += check(victims.sets.size() == 1 && victims.sets[0].mask == 1,
+    failures +=
+        check(policy.pressure_needed(), "a blocked lane beside residents opened no pressure");
+    auto victims = policy.ranked_victims(active, KvPressureReason::Growth);
+    failures += check(victims == std::vector<std::size_t>{3, 1, 0},
+                      "growth victims were not the eligible residents, latest first");
+
+    // A queued replacement may only take a blocked lane.
+    victims = policy.ranked_victims(active, KvPressureReason::WaitingReplacement);
+    failures += check(victims == std::vector<std::size_t>{0},
                       "queued replacement evicted an unblocked or completion member");
-    failures += check(policy.oldest_incumbent() == 1 && policy.incumbent_ids().size() == 3,
-                      "pressure did not freeze original incumbent identities");
 
-    // Early completion of bypassed work must not refund the finite allowance. Removing a
-    // nonoldest incumbent also cannot reset the epoch while fresh work continues arriving.
-    for (std::uint64_t id = 4; id < 7; ++id) {
-        failures += check(policy.allows_ingress(active.size(), false),
-                          "finite replacement allowance ended prematurely");
-        policy.record_ingress();
-        active.push_back(request(id));
-        policy.observe(active, true);
-        active.pop_back();
-        policy.observe(active, true);
-    }
-    failures += check(policy.draining() && policy.bypass_remaining() == 0 &&
-                          !policy.allows_ingress(active.size(), false),
-                      "fresh ingress renewed exhausted pressure credit");
-    active.erase(active.begin() + 2);
+    // No blocked lane: growth needs no victim, and fresh ingress stays open.
+    active[0].growth_blocked = false;
     policy.observe(active, true);
-    failures += check(policy.draining() && policy.oldest_incumbent() == 1,
-                      "nonoldest completion cleared pressure drain");
-    active.erase(active.begin());
-    policy.observe(active, true);
-    failures += check(!policy.draining() && !policy.oldest_incumbent(),
-                      "oldest completion did not release pressure epoch");
+    failures += check(!policy.pressure_needed() &&
+                          policy.ranked_victims(active, KvPressureReason::Growth).empty() &&
+                          policy.allows_ingress(active.size(), false),
+                      "an unblocked batch suspended work or stopped ingress");
 
+    // A lone resident grows into the whole pool instead of being suspended.
+    KvPressurePolicy alone(1, 2);
+    std::array single{request(1, true)};
+    alone.observe(single, true);
+    failures += check(!alone.pressure_needed() &&
+                          alone.ranked_victims(single, KvPressureReason::Growth).empty(),
+                      "a lone resident was suspended for its own growth");
+
+    // A recent resume is protected until it advances a useful chunk, unless nothing can run.
+    std::array rows{request(1, true), request(2), request(3)};
+    rows[2].useful_chunk_since_resume = false;
     KvPressurePolicy pressure(4, 12);
-    std::array rows{request(1, true), request(2, true), request(3), request(4)};
-    rows[3].completion_member = true;
-    rows[0].suspension_bytes  = 300;
     pressure.observe(rows, true);
-    failures += check(pressure.draining() && pressure.pressure_needed(),
-                      "second blocked request did not open evacuation drain");
-    victims = pressure.ranked_victims(rows, KvPressureReason::Growth);
-    failures += check(victims.sets.size() == 7 && victims.sets[0].mask == 2 &&
-                          victims.sets[1].mask == 1 && victims.sets[2].mask == 4,
-                      "victims did not prefer minimal blocked captures by transfer cost");
-    // Exact geometry is deliberately external. Simulate only a two-victim post-transition
-    // fit: the first feasible ranked set must remain minimal and exclude protected members.
-    const auto feasible = std::find_if(victims.candidates().begin(), victims.candidates().end(),
-                                       [](const auto& set) { return set.mask == 3; });
-    failures += check(feasible != victims.candidates().end() && feasible->count == 2,
-                      "multi-victim pressure candidate was omitted");
-    failures += check(std::all_of(victims.candidates().begin(), victims.candidates().end(),
-                                  [](const auto& set) { return (set.mask & 8U) == 0; }),
-                      "completion member became a suspension victim");
-
-    rows[0].useful_chunk_since_resume = false;
-    victims                           = pressure.ranked_victims(rows, KvPressureReason::Growth);
-    failures += check(std::all_of(victims.candidates().begin(), victims.candidates().end(),
-                                  [](const auto& set) { return (set.mask & 1U) == 0; }),
+    failures += check(pressure.ranked_victims(rows, KvPressureReason::Growth) ==
+                          std::vector<std::size_t>{1, 0},
                       "recent resume was suspended before useful progress");
     pressure.observe(rows, false);
-    victims = pressure.ranked_victims(rows, KvPressureReason::Growth);
-    failures += check(std::any_of(victims.candidates().begin(), victims.candidates().end(),
-                                  [](const auto& set) { return set.mask == 1; }),
+    failures += check(pressure.ranked_victims(rows, KvPressureReason::Growth).front() == 2,
                       "no-runnable emergency could not evacuate a recent resume");
     rows[1].suspend_ready = false;
     victims               = pressure.ranked_victims(rows, KvPressureReason::Growth);
-    failures += check(std::all_of(victims.candidates().begin(), victims.candidates().end(),
-                                  [](const auto& set) { return (set.mask & 2U) == 0; }),
-                      "unfunded or unsettled request became an evacuation victim");
+    failures += check(std::find(victims.begin(), victims.end(), 1) == victims.end(),
+                      "unfunded or unsettled request became a suspension victim");
 
-    // Suspended identities retain original arrival precedence and consume logical admission
-    // capacity although they no longer occupy a physical lane.
+    // Suspended identities keep their arrival order, resume before fresh ingress, and count
+    // against the logical admission bound although they hold no lane.
     std::array waiting{request(10), request(2), request(6)};
     waiting[0].resident = false;
     waiting[1].resident = false;
@@ -112,35 +87,22 @@ int main() {
                       "resume order lost original request age");
     KvPressurePolicy bounded(2, 5);
     bounded.observe(waiting, true);
-    failures += check(!bounded.allows_ingress(3, true) && !bounded.allows_ingress(5, false),
-                      "new ingress bypassed suspended work or logical admission bound");
-    waiting[1].resident = true;
-    bounded.observe(waiting, true);
-    failures +=
-        check(bounded.oldest_incumbent() == 2 && KvPressurePolicy::oldest_suspended(waiting) == 10,
-              "physical resume reset the incumbent's logical identity");
+    failures += check(!bounded.allows_ingress(3, true) && !bounded.allows_ingress(5, false) &&
+                          bounded.allows_ingress(3, false),
+                      "ingress ignored suspended work or the logical admission bound");
 
-    KvPressurePolicy alone(1, 2);
-    std::array single{request(1, true)};
-    single[0].completion_member = true;
-    alone.observe(single, false);
-    failures += check(alone.draining() && !alone.allows_ingress(1, false) &&
-                          alone.ranked_victims(single, KvPressureReason::Growth).sets.empty(),
-                      "single protected member tried to spill instead of using exclusive growth");
-
-    // Every resident of a full C16 batch is addressable by a victim mask bit.
+    // Every resident of a full batch can be a victim, the latest first.
     KvPressurePolicy full(ninfer::kMaximumConcurrency, ninfer::kMaximumConcurrency);
     std::vector<KvPressureRequest> residents;
     for (std::uint64_t id = 1; id <= ninfer::kMaximumConcurrency; ++id) {
         residents.push_back(request(id, true));
-        residents.back().suspension_bytes = 1000U - id;
     }
     full.observe(residents, true);
     victims = full.ranked_victims(residents, KvPressureReason::Growth);
-    failures += check(victims.sets.size() == (std::size_t{1} << ninfer::kMaximumConcurrency) - 1U &&
-                          victims.sets[0].count == 1 &&
-                          victims.sets[0].mask == 1U << (ninfer::kMaximumConcurrency - 1U),
-                      "C16 pressure ranking omitted a resident or a minimal victim");
+    failures +=
+        check(victims.size() == ninfer::kMaximumConcurrency &&
+                  victims.front() == ninfer::kMaximumConcurrency - 1U && victims.back() == 0,
+              "full-batch ranking omitted a resident or was not latest first");
 
     return failures == 0 ? 0 : 1;
 }

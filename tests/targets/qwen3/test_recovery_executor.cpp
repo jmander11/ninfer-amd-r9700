@@ -3268,7 +3268,7 @@ class ChunkedProgram : public ProbeProgram {
 public:
     enum class HoldPhase { None, Capture, Restore, Parked };
     HoldPhase hold_phase = HoldPhase::None;
-    enum class MetricHold { None, Extension, SingleBlocked };
+    enum class MetricHold { None, Extension, SuspendedPeer };
     MetricHold metric_hold = MetricHold::None;
 
     void release_held_decode() {
@@ -3324,6 +3324,7 @@ public:
     std::uint32_t resumes                  = 0;
     std::uint32_t extensions               = 0;
     std::uint32_t blocked_single_rounds    = 0;
+    std::uint32_t suspended_single_rounds  = 0;
     std::uint32_t paired_rounds            = 0;
     std::uint32_t credit_rejections        = 0;
     std::uint32_t smallest_admitted_window = std::numeric_limits<std::uint32_t>::max();
@@ -3420,7 +3421,11 @@ public:
     }
 
     [[nodiscard]] ninfer::runtime::ExecutionWindow
-    plan_suspended_window(std::uint64_t, std::uint32_t end) const override {
+    plan_suspended_window(std::uint64_t id, std::uint32_t end) const override {
+        // The target rejects a suspended window beyond the request's lifetime output.
+        if (!saved_ || saved_->id != id || end > saved_->lifetime) {
+            throw std::logic_error("chunked probe planned a window beyond the suspended lifetime");
+        }
         return plan_window(0, end);
     }
 
@@ -3611,9 +3616,12 @@ public:
         if (require_peer && starts == 2 && lanes.size() == 1 && suspensions == 0) {
             ++blocked_single_rounds;
         }
+        if (require_peer && starts == 2 && lanes.size() == 1 && suspensions == 1 && resumes == 0) {
+            ++suspended_single_rounds;
+        }
         if (!metric_hold_entered_ &&
             ((metric_hold == MetricHold::Extension && extensions != 0) ||
-             (metric_hold == MetricHold::SingleBlocked && blocked_single_rounds != 0))) {
+             (metric_hold == MetricHold::SuspendedPeer && suspended_single_rounds != 0))) {
             std::unique_lock lock(phase_mutex_);
             metric_hold_entered_ = true;
             phase_entered_       = true;
@@ -4222,7 +4230,7 @@ int run_chunked_continuation(Frontend& frontend, bool paired, bool initial_ram_p
         const auto b = second->wait(nullptr, cancellation);
         if (b.finish_reason != FinishReason::OutputLimit ||
             b.generated_token_ids != ChunkedProgram::expected() || program.suspensions != 1 ||
-            program.resumes != 1 || program.blocked_single_rounds == 0) {
+            program.resumes != 1 || (!initial_ram_pressure && program.blocked_single_rounds != 0)) {
             std::cerr << "chunked diagnostic ram_pressure=" << initial_ram_pressure
                       << " starts=" << program.starts << " suspended=" << program.suspensions
                       << " resumed=" << program.resumes << " extensions=" << program.extensions
@@ -4236,8 +4244,10 @@ int run_chunked_continuation(Frontend& frontend, bool paired, bool initial_ram_p
                           "chunked: resumed continuation lost or replayed output");
         failures += check(program.suspensions == 1 && program.resumes == 1 && program.starts == 2,
                           "chunked: pressure did not suspend/resume directly without prefill");
-        failures += check(program.blocked_single_rounds != 0,
-                          "chunked: a single blocked lane prevented its peer from advancing");
+        // Without RAM pressure the latest peer's image is funded, so the blocked lane never
+        // waits a round for it.
+        failures += check(initial_ram_pressure || program.blocked_single_rounds == 0,
+                          "chunked: a blocked lane waited instead of suspending the latest peer");
         if (initial_ram_pressure) {
             failures +=
                 check(program.credit_rejections != 0 && program.smallest_admitted_window == 1,
@@ -4493,8 +4503,8 @@ int run_cohort_replacement_without_spare_ram(Frontend& frontend) {
     return check(a.generated_token_ids == ChunkedProgram::expected() &&
                      b.generated_token_ids == ChunkedProgram::expected() &&
                      c.generated_token_ids == std::vector<TokenId>({15, 22}) &&
-                     program.replacement_started_beside_peer && program.suspensions == 1 &&
-                     program.resumes == 1 && program.credit_attempts[3] == 0 &&
+                     program.replacement_started_beside_peer &&
+                     program.suspensions == program.resumes && program.credit_attempts[3] == 0 &&
                      program.no_live_image() &&
                      std::all_of(program.live_credits.begin(), program.live_credits.end(),
                                  [](auto bytes) { return bytes == 0; }),
@@ -4506,7 +4516,7 @@ int run_chunked_active_window_metrics(Frontend& frontend) {
     for (const bool paired : {false, true}) {
         ChunkedProgram program;
         program.require_peer = paired;
-        program.metric_hold  = paired ? ChunkedProgram::MetricHold::SingleBlocked
+        program.metric_hold  = paired ? ChunkedProgram::MetricHold::SuspendedPeer
                                       : ChunkedProgram::MetricHold::Extension;
         ProbeLoaded loaded{frontend};
         ChunkedProbe instance{.program = &program, .loaded = &loaded};
@@ -4535,13 +4545,13 @@ int run_chunked_active_window_metrics(Frontend& frontend) {
         const auto active             = executor.runtime_stats();
         const auto granted_extensions = program.extensions;
         program.release_held_decode();
-        failures += check(reached && active.running_requests == (paired ? 2U : 1U),
+        failures += check(reached && active.running_requests == 1U,
                           "chunked metrics: observation did not hold an active continuation");
         if (paired) {
-            failures += check(
-                active.kv_growth_blocked_requests == 1 && active.decode_ready_requests == 1 &&
-                    active.kv_live_suspensions == 0,
-                "chunked metrics: growth-blocked transition was stale while a peer still decoded");
+            failures +=
+                check(active.kv_growth_blocked_requests == 0 && active.decode_ready_requests == 1 &&
+                          active.kv_suspended_requests == 1 && active.kv_live_suspensions == 1,
+                      "chunked metrics: suspension was stale while the older peer decoded alone");
         } else {
             failures += check(
                 active.kv_window_extensions == granted_extensions &&
