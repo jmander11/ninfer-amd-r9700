@@ -195,8 +195,8 @@ HttpServer::HttpServer(ServeOptions options)
     // reserve keeps control routes, 429 rejections and idle keep-alive connections served.
     constexpr std::size_t kConnectionReserve = 32;
     const std::size_t worker_count           = static_cast<std::size_t>(options_.max_concurrency) +
-                                     options_.max_pending_requests + kConnectionReserve;
-    server_.new_task_queue = [worker_count] {
+                                               options_.max_pending_requests + kConnectionReserve;
+    server_.new_task_queue                   = [worker_count] {
         return new httplib::ThreadPool(worker_count, worker_count);
     };
     server_.set_payload_max_length(options_.max_request_bytes);
