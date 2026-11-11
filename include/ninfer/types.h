@@ -475,6 +475,7 @@ enum class RequestErrorKind : std::uint8_t {
     QueueTimeout,
     Unavailable,
     RecoveryExhausted,
+    Cancelled,
 };
 
 struct PromptSummary {

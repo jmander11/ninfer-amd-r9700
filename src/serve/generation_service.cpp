@@ -132,6 +132,12 @@ ApiError request_error_to_api_error(const ninfer::RequestError& exception,
         error.type   = "server_error";
         error.code   = "generation_recovery_exhausted";
         break;
+    case ninfer::RequestErrorKind::Cancelled:
+        error.param.clear();
+        error.status = 499;
+        error.type   = "request_cancelled";
+        error.code   = "client_disconnected";
+        break;
     }
     if (exception.location()) {
         const auto& location = *exception.location();
