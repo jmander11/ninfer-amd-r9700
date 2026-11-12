@@ -168,6 +168,19 @@ bool Program<Variant>::can_admit_lane_after_releasing(
 }
 
 template <>
+bool Program<Variant>::kv_fits_after_releasing(
+    std::uint32_t lane, const runtime::AdmissionResources& resources,
+    std::span<const std::uint32_t> release_lanes) const noexcept {
+    return impl_->kv_fits_after_releasing(lane, resources, release_lanes);
+}
+
+template <>
+bool Program<Variant>::retained_lane_extended_by(std::uint32_t lane,
+                                                 const RequestPlan<Variant>& plan) noexcept {
+    return impl_->retained_lane_extended_by(lane, plan);
+}
+
+template <>
 bool Program<Variant>::chunked_execution_enabled() const noexcept {
     return impl_->chunked_execution_enabled();
 }

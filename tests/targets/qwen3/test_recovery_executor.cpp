@@ -602,6 +602,16 @@ public:
         return can_admit_lane(lane, plan);
     }
 
+    [[nodiscard]] virtual bool
+    kv_fits_after_releasing(std::uint32_t, const AdmissionResources&,
+                            std::span<const std::uint32_t>) const noexcept {
+        return true;
+    }
+
+    [[nodiscard]] bool retained_lane_extended_by(std::uint32_t, const ProbePlan& plan) noexcept {
+        return plan.fields.reusable_prompt_tokens != 0;
+    }
+
     [[nodiscard]] ninfer::GenerationTimings generation_timings_lane(std::uint32_t) const noexcept {
         return {};
     }
@@ -3239,13 +3249,7 @@ int run_integrity_failure(Frontend& frontend) {
               "integrity: failed Engine did not abort both active slots or admitted queued work");
     failures += check(program.resolved_rounds.load() == resolved_before,
                       "integrity: failed decode round reached the publication commit");
-    bool unavailable = false;
-    try {
-        (void)submit(executor, 2);
-    } catch (const ninfer::RequestError& error) {
-        unavailable = error.kind() == ninfer::RequestErrorKind::Unavailable;
-    }
-    failures += check(unavailable, "integrity: failed Engine accepted another request");
+    failures += check(executor.available(), "integrity: recovered Engine refused new requests");
 
     IntegrityFailureProgram clean;
     clean.lifecycle_retries = true;
@@ -3422,6 +3426,16 @@ public:
     [[nodiscard]] ninfer::runtime::ExecutionWindow
     plan_suspended_window(std::uint64_t, std::uint32_t end) const override {
         return plan_window(0, end);
+    }
+
+    [[nodiscard]] bool
+    kv_fits_after_releasing(std::uint32_t lane, const AdmissionResources& resources,
+                            std::span<const std::uint32_t> release) const noexcept override {
+        std::uint32_t used = used_pages() - pages_[lane];
+        for (const std::uint32_t other : release) {
+            if (other != lane && retained_[other]) used -= pages_[other];
+        }
+        return used + resources.main_kv_pages <= physical_pages;
     }
 
     [[nodiscard]] bool grant_window(std::uint32_t lane,
@@ -3631,6 +3645,9 @@ public:
                  cursor_[lane] >=
                      (partial_tool_probe ? tool_sequence().size() : sequence_.size()))) {
                 throw std::logic_error("chunked probe decoded outside funded lifetime");
+            }
+            if (cursor_[lane] + budgets[row].generated_tokens_remaining + 1 > pages_[lane]) {
+                throw std::logic_error("chunked probe decode budget exceeds its granted window");
             }
             if (pending_recovery_probe && lifetime_[lane] < 6) {
                 if (output_[lane]->in_reasoning())
@@ -4862,7 +4879,10 @@ public:
 
     bool wait_for_prefill() { return wait_for(prefill_entered_); }
 
-    bool wait_for_shutdown() { return wait_for(shutdown_entered_); }
+    bool shutdown_entered() {
+        std::lock_guard lock(mutex_);
+        return shutdown_entered_;
+    }
 
     void release_prefill() { release(release_prefill_); }
 
@@ -4922,19 +4942,7 @@ int run_executor_availability(Frontend& frontend) {
         if (fault != Fault::StableDecodeAllocation) { queued.emplace(submit()); }
         failures += check(executor.available(), "busy executor was unavailable");
         program.release_prefill();
-        if (fault != Fault::RequestLocal) {
-            failures += check(program.wait_for_shutdown(), "fatal worker did not clean up tiers");
-            failures +=
-                check(!executor.available(), "fatal worker stayed available during cleanup");
-            bool rejected = false;
-            try {
-                auto unexpected = submit();
-            } catch (const ninfer::RequestError& error) {
-                rejected = error.kind() == ninfer::RequestErrorKind::Unavailable;
-            }
-            failures += check(rejected, "failed worker accepted a request during tier cleanup");
-            program.release_shutdown();
-        }
+        program.release_shutdown();
         bool primary_preserved = false;
         try {
             (void)first.wait(nullptr, {});
@@ -4969,8 +4977,15 @@ int run_executor_availability(Frontend& frontend) {
             failures += check(program.decode_calls == 2,
                               "stable decode fault did not follow a successful round");
         }
-        failures += check(executor.available() == (fault == Fault::RequestLocal),
-                          "terminal worker availability did not match error ownership");
+        failures += check(executor.available() && !program.shutdown_entered(),
+                          "worker failure took the Engine down or shut its KV tiers");
+        if (fault == Fault::PrefillAllocation || fault == Fault::PrefillInvariant) {
+            bool served = false;
+            try {
+                served = submit().wait(nullptr, {}).finish_reason == FinishReason::StopToken;
+            } catch (...) {}
+            failures += check(served, "recovered worker did not serve a later request");
+        }
     }
     return failures;
 }

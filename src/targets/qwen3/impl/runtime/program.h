@@ -352,6 +352,11 @@ public:
     [[nodiscard]] bool
     can_admit_lane_after_releasing(std::uint32_t lane, const RequestPlan& plan,
                                    std::span<const std::uint32_t> release_lanes) const noexcept;
+    [[nodiscard]] bool
+    kv_fits_after_releasing(std::uint32_t lane, const runtime::AdmissionResources& resources,
+                            std::span<const std::uint32_t> release_lanes) const noexcept;
+    [[nodiscard]] bool retained_lane_extended_by(std::uint32_t lane,
+                                                 const RequestPlan& plan) noexcept;
     [[nodiscard]] runtime::AdmissionResources admission_capacity() const noexcept;
     [[nodiscard]] bool chunked_execution_enabled() const noexcept;
     [[nodiscard]] runtime::AdmissionResources
