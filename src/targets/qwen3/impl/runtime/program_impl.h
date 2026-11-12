@@ -1164,7 +1164,17 @@ bool ProgramImplCore::can_admit_lane_after_releasing(
         request.lifecycle == Lifecycle::Pending) {
         return false;
     }
+    return kv_fits_after_releasing(lane,
+                                   {.active_lanes     = 1,
+                                    .main_kv_pages    = plan.impl_->text_kv_page_entitlement,
+                                    .backend_kv_pages = plan.impl_->backend_kv_page_entitlement},
+                                   release_lanes);
+}
 
+bool ProgramImplCore::kv_fits_after_releasing(
+    std::uint32_t lane, const runtime::AdmissionResources& resources,
+    std::span<const std::uint32_t> release_lanes) const noexcept {
+    if (lane >= max_concurrency) { return false; }
     std::uint32_t reclaimable_text    = 0;
     std::uint32_t reclaimable_backend = 0;
     for (const std::uint32_t other : release_lanes) {
@@ -1191,16 +1201,36 @@ bool ProgramImplCore::can_admit_lane_after_releasing(
     const SequenceState& sequence = sequences[lane];
     const std::uint32_t old_text  = sequence.kv ? sequence.kv->text.page_entitlement() : 0;
     if (!can_replace(decoder->text_kv.pool(), old_text, reclaimable_text,
-                     plan.impl_->text_kv_page_entitlement)) {
+                     resources.main_kv_pages)) {
         return false;
     }
 
     const PagedKVPool* backend = backend_kv_pool();
-    if (backend == nullptr) { return plan.impl_->backend_kv_page_entitlement == 0; }
+    if (backend == nullptr) { return resources.backend_kv_pages == 0; }
     const std::uint32_t old_backend =
         sequence.kv && sequence.kv->backend ? sequence.kv->backend->page_entitlement() : 0;
-    return can_replace(*backend, old_backend, reclaimable_backend,
-                       plan.impl_->backend_kv_page_entitlement);
+    return can_replace(*backend, old_backend, reclaimable_backend, resources.backend_kv_pages);
+}
+
+bool ProgramImplCore::retained_lane_extended_by(std::uint32_t lane,
+                                                const RequestPlan& plan) noexcept {
+    if (!has_retained_lane(lane) || plan.impl_ == nullptr || !plan.impl_->prompt_hashes) {
+        return false;
+    }
+    SequenceState& sequence = sequences[lane];
+    const std::uint32_t previous =
+        sequence.closure_frontier != 0
+            ? std::min(requests[lane].prompt_tokens, sequence.closure_frontier)
+            : requests[lane].prompt_tokens;
+    const auto& hashes = *plan.impl_->prompt_hashes;
+    if (previous == 0 || previous >= hashes.size() || previous > sequence.ledger.size() ||
+        previous > sequence.prefix_identity.size()) {
+        return false;
+    }
+    try {
+        return hashes[previous] ==
+               sequence.prefix_hashes.at(sequence.ledger, sequence.prefix_identity, previous);
+    } catch (...) { return false; }
 }
 
 runtime::AdmissionResources ProgramImplCore::admission_capacity() const noexcept {
