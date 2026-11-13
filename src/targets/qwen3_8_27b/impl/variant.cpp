@@ -36,6 +36,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -1819,6 +1820,27 @@ std::vector<GraphExecutionProfile> Variant::mtp_graph_profiles(std::uint32_t cap
                                                                                              : 0U);
     }
     return profiles;
+}
+
+std::size_t Variant::mtp_graph_allowance_bytes(std::uint32_t capacity,
+                                               std::span<const std::uint32_t> captured_ks,
+                                               std::uint32_t concurrency) {
+    constexpr std::size_t kMiB    = std::size_t{1} << 20U;
+    constexpr std::uint32_t never = kMaximumConcurrency + 1U;
+    constexpr std::array<std::uint32_t, maximum_mtp_draft_tokens> wide_executable_batch{
+        never, never, 12, 9, 8};
+    std::size_t bytes = 60U * kMiB;
+    for (const std::uint32_t k : captured_ks) {
+        if (k == 0U || k > maximum_mtp_draft_tokens) {
+            throw std::invalid_argument(
+                "MTP graph allowance has no calibration for this draft length");
+        }
+        const std::size_t profiles = mtp_graph_profiles(capacity, k).size();
+        for (std::uint32_t batch = 1; batch <= concurrency; ++batch) {
+            bytes += profiles * (batch >= wide_executable_batch[k - 1U] ? 6U : 4U) * kMiB;
+        }
+    }
+    return bytes;
 }
 
 std::vector<GraphExecutionProfile> Variant::dflash_graph_profiles(std::uint32_t capacity,

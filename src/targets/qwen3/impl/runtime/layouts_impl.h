@@ -955,33 +955,36 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         }
         impl->graph_definition_count = definitions;
         impl->graph_executable_count = definitions;
-        // Ordinary C1/capacity256 preparation measured 44 MiB on gfx1201 with eligible-logit
-        // reporting (2026-10-18). Its two profiles reserve 20 MiB below; the remaining 24 MiB
-        // is family residency. Reporting adds no captured graph nodes.
-        const std::size_t family_bytes =
-            (impl->speculative_backend == SpeculativeBackend::None  ? 24U
-             : impl->speculative_backend == SpeculativeBackend::Mtp ? 46U
-                                                                    : 48U) *
-            kMiB;
-        impl->graph_allowance_bytes =
-            checked_add(checked_add(family_bytes,
-                                    checked_mul(definitions, kR9700GraphExecutableBytes,
-                                                "immutable graph executable allowance"),
-                                    "graph family allowance"),
-                        checked_mul(lowered_definitions, kR9700PersistentDecodeDefinitionBytes,
-                                    "persistent decode allowance"),
-                        "graph allowance with persistent decode");
-        if (const auto calibrated = Variant::calibrated_dflash_graph_allowance_bytes(
-                impl->weights_profile, impl->features, impl->capacity, impl->max_concurrency,
-                impl->prefill_chunk, impl->draft_window, impl->adaptive_draft)) {
-            impl->graph_allowance_bytes = std::min(impl->graph_allowance_bytes, *calibrated);
-        }
-        if (lowered_definitions != 0U) {
-            // Cooperative graph dispatch adds shared runtime residency, not a new argument pool
-            // per definition. C6 bulk preparation measured 80 MiB against the previous
-            // 62-MiB inventory (2026-10-19); reserve 20 MiB for the additional graph residency.
-            impl->graph_allowance_bytes = checked_add(impl->graph_allowance_bytes, 20U * kMiB,
-                                                      "cooperative decode dispatch residency");
+        if (impl->speculative_backend == SpeculativeBackend::Mtp) {
+            impl->graph_allowance_bytes = Variant::mtp_graph_allowance_bytes(
+                impl->capacity, impl->captured_ks, impl->max_concurrency);
+        } else {
+            // Ordinary C1/capacity256 preparation measured 44 MiB on gfx1201 with eligible-logit
+            // reporting (2026-10-18). Its two profiles reserve 20 MiB below; the remaining 24 MiB
+            // is family residency. Reporting adds no captured graph nodes.
+            const std::size_t family_bytes =
+                (impl->speculative_backend == SpeculativeBackend::None ? 24U : 48U) * kMiB;
+            impl->graph_allowance_bytes =
+                checked_add(checked_add(family_bytes,
+                                        checked_mul(definitions, kR9700GraphExecutableBytes,
+                                                    "immutable graph executable allowance"),
+                                        "graph family allowance"),
+                            checked_mul(lowered_definitions, kR9700PersistentDecodeDefinitionBytes,
+                                        "persistent decode allowance"),
+                            "graph allowance with persistent decode");
+            if (const auto calibrated = Variant::calibrated_dflash_graph_allowance_bytes(
+                    impl->weights_profile, impl->features, impl->capacity, impl->max_concurrency,
+                    impl->prefill_chunk, impl->draft_window, impl->adaptive_draft)) {
+                impl->graph_allowance_bytes = std::min(impl->graph_allowance_bytes, *calibrated);
+            }
+            if (lowered_definitions != 0U) {
+                // Cooperative graph dispatch adds shared runtime residency, not a new argument
+                // pool per definition. C6 bulk preparation measured 80 MiB against the previous
+                // 62-MiB inventory (2026-10-19); reserve 20 MiB for the additional graph
+                // residency.
+                impl->graph_allowance_bytes = checked_add(impl->graph_allowance_bytes, 20U * kMiB,
+                                                          "cooperative decode dispatch residency");
+            }
         }
     }
     impl->device_reservation_bytes = checked_add(
