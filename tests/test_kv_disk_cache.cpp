@@ -222,6 +222,17 @@ void run_roundtrip(ninfer::DeviceContext& device, ninfer::KvDiskCompress compres
     // Logical codec identity and packed disk bytes must remain reusable.
     Pool destination_pool(12);
     cache::KVDiskCache reopened(config(directory.path, destination_pool, ram, compression));
+    const auto duplicate_open_error = [&] {
+        try {
+            cache::KVDiskCache duplicate(
+                config(directory.path, destination_pool, ram, compression));
+        } catch (const std::runtime_error& error) { return std::string(error.what()); }
+        return std::string();
+    };
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        require(duplicate_open_error() == "KV disk cache location is already open in this process",
+                "a rejected duplicate open unregistered the live disk cache location");
+    }
     const auto chain = cache::prefix_hash_chain(retained);
     const auto match = reopened.plan_match(retained, chain);
     require(match && match.value().reuse_base == 129, "durable vision prefix missing after reopen");
