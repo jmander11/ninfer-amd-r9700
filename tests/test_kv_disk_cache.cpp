@@ -380,13 +380,15 @@ std::uint64_t restore_with_submitted_join_check(cache::KVDiskCache& disk, std::u
     }
 }
 
-// Blocks a stream behind a host callback until released, so copies enqueued after it stay pending.
+// Keeps following work on a stream incomplete until release(), independently of DMA size or
+// hardware speed. Destruction releases and joins the callback before its state dies.
 struct StreamGate {
     std::mutex mutex;
     std::condition_variable cv;
-    bool released = false;
-    bool finished = false;
-    bool launched = false;
+    bool released                  = false;
+    bool finished                  = false;
+    bool launched                  = false;
+    cache::KVRamCache* armed_cache = nullptr;
 
     static void callback(void* pointer) {
         auto& gate = *static_cast<StreamGate*>(pointer);
@@ -401,6 +403,19 @@ struct StreamGate {
         launched = true;
     }
 
+    // Gates the next RAM capture's copy completion rather than its copy submission, so only that
+    // capture stays pending. The cache must outlive this gate until its one-shot callback has run.
+    void arm(cache::KVRamCache& cache) {
+        armed_cache = &cache;
+        cache.test_before_copy_completion(
+            [](void* state, hipStream_t stream) {
+                auto& gate       = *static_cast<StreamGate*>(state);
+                gate.armed_cache = nullptr;
+                gate.launch(stream);
+            },
+            this);
+    }
+
     void release() {
         std::lock_guard lock(mutex);
         released = true;
@@ -408,6 +423,7 @@ struct StreamGate {
     }
 
     ~StreamGate() {
+        if (armed_cache != nullptr) { armed_cache->test_before_copy_completion(nullptr, nullptr); }
         release();
         if (launched) {
             std::unique_lock lock(mutex);
@@ -765,24 +781,19 @@ void spill_pin_waits_only_its_entry(ninfer::DeviceContext& device) {
         config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
     hipStream_t side = nullptr;
     HIP_CHECK(hipStreamCreateWithFlags(&side, hipStreamNonBlocking));
-    constexpr std::size_t kDelayBytes = 256ULL << 20;
-    ninfer::DeviceBuffer delay_source(kDelayBytes);
-    ninfer::PinnedHostBuffer delay_destination(kDelayBytes);
     bool captured_both = false;
     bool prompt        = false;
     bool spilled       = false;
     {
         StreamGate gate;
-        gate.launch(side);
+        TextCapture own(std::vector<ninfer::TokenId>(64, 24), allocation, pool, device.copy_stream);
+        const auto captured = ram.capture(own.source);
+        // Only the unrelated capture's copy completion is gated; its submission is not.
+        gate.arm(ram);
         TextCapture unrelated(std::vector<ninfer::TokenId>(64, 23), allocation, pool, side);
         const bool gated =
             ram.capture(unrelated.source).status == cache::RamCaptureStatus::Captured;
-        // Keep the spilled entry's own D2H in flight briefly behind a large copy.
-        HIP_CHECK(hipMemcpyAsync(delay_destination.data(), delay_source.data(), kDelayBytes,
-                                 hipMemcpyDeviceToHost, device.copy_stream));
-        TextCapture own(std::vector<ninfer::TokenId>(64, 24), allocation, pool, device.copy_stream);
-        const auto captured = ram.capture(own.source);
-        captured_both       = gated && captured.status == cache::RamCaptureStatus::Captured;
+        captured_both = gated && captured.status == cache::RamCaptureStatus::Captured;
         if (captured_both) {
             disk.note_ram_resident(captured.entry_id, 0);
             std::atomic<bool> result{false};
