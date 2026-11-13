@@ -4947,12 +4947,13 @@ int run_executor_availability(Frontend& frontend) {
         try {
             (void)first.wait(nullptr, {});
         } catch (const std::bad_alloc&) {
-            primary_preserved = fault == Fault::PrefillAllocation ||
-                                fault == Fault::DecodeAllocation ||
-                                fault == Fault::StableDecodeAllocation;
+            primary_preserved =
+                fault == Fault::DecodeAllocation || fault == Fault::StableDecodeAllocation;
         } catch (const ninfer::RequestError& error) {
-            primary_preserved = fault == Fault::RequestLocal &&
-                                error.kind() == ninfer::RequestErrorKind::ContextLengthExceeded;
+            primary_preserved = (fault == Fault::RequestLocal &&
+                                 error.kind() == ninfer::RequestErrorKind::ContextLengthExceeded) ||
+                                (fault == Fault::PrefillAllocation &&
+                                 error.kind() == ninfer::RequestErrorKind::Overloaded);
         } catch (const std::logic_error& error) {
             primary_preserved = fault == Fault::PrefillInvariant &&
                                 std::string(error.what()) == "availability invariant failure";
@@ -4963,10 +4964,10 @@ int run_executor_availability(Frontend& frontend) {
             try {
                 const auto result = queued->wait(nullptr, {});
                 queued_completed =
-                    fault == Fault::RequestLocal && result.finish_reason == FinishReason::StopToken;
+                    (fault == Fault::RequestLocal || fault == Fault::PrefillAllocation) &&
+                    result.finish_reason == FinishReason::StopToken;
             } catch (const std::bad_alloc&) {
-                queued_completed =
-                    fault == Fault::PrefillAllocation || fault == Fault::DecodeAllocation;
+                queued_completed = fault == Fault::DecodeAllocation;
             } catch (const std::logic_error& error) {
                 queued_completed = fault == Fault::PrefillInvariant &&
                                    std::string(error.what()) == "availability invariant failure";

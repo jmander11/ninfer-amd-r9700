@@ -3462,6 +3462,20 @@ private:
                 hold.victims_evicted = true;
             }
 
+            for (;;) {
+                const auto reclaim =
+                    reclaim_retained_kv(lane, hold.plan.summary().admission, false);
+                if (reclaim == RetainedReclaim::Fits) break;
+                if (reclaim == RetainedReclaim::Short) {
+                    return fail_host_restore(membership_empty,
+                                             std::make_exception_ptr(CacheRestoreFailure(
+                                                 "admission KV entitlement no longer fits",
+                                                 CacheRestoreFailureKind::StalePlan)));
+                }
+                if (!membership_empty) { return AdmissionProgress::CopyHold; }
+                instance_.program->wait_kv_ram_copies();
+            }
+
             if (hold.fork_source && !hold.restored) {
                 if (lane_plan_versions_[*hold.fork_source] != hold.fork_source_version) {
                     throw std::logic_error(
@@ -3570,6 +3584,12 @@ private:
                     [&] { instance_.program->release_disk_entry(disk_entry_id); });
             }
         }
+        try {
+            std::rethrow_exception(error);
+        } catch (const std::bad_alloc&) {
+            error = std::make_exception_ptr(RequestError(
+                RequestErrorKind::Overloaded, "memory for this request's KV state is unavailable"));
+        } catch (...) {}
         if (!fail_admitted_request(request, lane, error)) { std::rethrow_exception(error); }
         return AdmissionProgress::ControlProgress;
     }
