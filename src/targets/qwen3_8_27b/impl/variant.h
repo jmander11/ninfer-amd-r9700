@@ -669,6 +669,9 @@ struct Variant {
 
     [[nodiscard]] static std::vector<GraphExecutionProfile>
     mtp_graph_profiles(std::uint32_t capacity, std::uint32_t draft_window);
+    [[nodiscard]] static std::size_t
+    mtp_graph_allowance_bytes(std::uint32_t capacity, std::span<const std::uint32_t> captured_ks,
+                              std::uint32_t concurrency);
     [[nodiscard]] static std::vector<GraphExecutionProfile>
     dflash_graph_profiles(std::uint32_t capacity, std::uint32_t draft_window,
                           std::uint32_t batch_size, std::uint32_t verify_width);
