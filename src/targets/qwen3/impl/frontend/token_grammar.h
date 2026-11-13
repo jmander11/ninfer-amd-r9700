@@ -28,13 +28,18 @@ struct TokenGrammarData {
     xgrammar::CompiledGrammar compiled;
     ConstraintStats constraint;
     bool starts_in_reasoning = false;
+    // A max_tokens/max_chars rule (user EBNF only) can rewrite parser state that Rollback does
+    // not restore; such grammars keep forked previews and draft-mask nodes.
+    bool budget_rules = false;
     [[nodiscard]] std::optional<ToolCall> decode_call(std::string_view text) const;
 };
 
 namespace frontend_internal {
 
-// The OutputSession owns this state. Draft-mask construction forks committed
-// state and never advances it; only a committed publication advances grammar.
+// The OutputSession owns this state. One matcher holds the committed parse; previews and
+// draft-mask walks advance it and roll back, so per-round work is independent of the
+// committed length. Forking copies the whole Earley history, so only grammars with budget
+// rules (TokenGrammarData::budget_rules) fork per preview and per draft node.
 class TokenGrammarState {
 public:
     static constexpr std::size_t mask_words = (248077 + 31) / 32;
@@ -52,17 +57,29 @@ public:
     // node consumes its draft token from an earlier parent. Output is node-major,
     // including the final bonus column. Unreachable nodes have an unrestricted
     // mask, not an empty sampling domain: their parent forbids their acceptance.
+    // The tree is walked depth-first on the committed matcher, which is restored on return;
+    // callers must not preview, commit or fill concurrently on the same state.
     void fill_masks(std::span<const TokenId> tokens, std::span<const std::int32_t> parents,
                     std::span<std::uint32_t> words, TokenId replay_close = -1,
                     std::span<const std::uint8_t> replay_close_allowed    = {},
-                    std::span<const std::uint8_t> reasoning_close_allowed = {}) const;
+                    std::span<const std::uint8_t> reasoning_close_allowed = {});
 
 private:
-    bool accept(xgrammar::GrammarMatcher& matcher, TokenId token) const;
+    // Commit replays `tokens` on committed_, or moves in `replacement`: the matcher a reasoning
+    // close restarted, or the validated fork of a budget-rule grammar.
+    struct Preview {
+        std::vector<TokenId> tokens;
+        std::optional<xgrammar::GrammarMatcher> replacement;
+    };
+
+    // An ignored model stop is validated and leaves the matcher unchanged.
+    bool advance(xgrammar::GrammarMatcher& matcher, TokenId token, int& history) const;
     std::shared_ptr<const TokenGrammarData> grammar_;
     std::vector<TokenId> ignored_model_stops_;
     xgrammar::GrammarMatcher committed_;
-    std::optional<xgrammar::GrammarMatcher> preview_;
+    std::optional<Preview> preview_;
+    bool committed_complete_   = false;
+    bool committed_terminated_ = false;
     mutable ConstraintStats work_;
 };
 

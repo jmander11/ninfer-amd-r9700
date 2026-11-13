@@ -143,6 +143,9 @@ ninfer_add_r9700_test(ninfer_grammar_tokenizer_test
 ninfer_add_r9700_test(ninfer_token_grammar_test
   SOURCES targets/qwen3/test_token_grammar.cpp
   LIBRARIES ninfer_engine)
+ninfer_add_r9700_test(ninfer_token_grammar_rounds_test
+  SOURCES targets/qwen3/test_token_grammar_rounds.cpp
+  LIBRARIES ninfer_engine)
 ninfer_add_r9700_test(ninfer_token_mask_exchange_test
   SOURCES targets/qwen3/test_token_mask_exchange.cpp
   LIBRARIES ninfer_engine ninfer_r9700_core)
