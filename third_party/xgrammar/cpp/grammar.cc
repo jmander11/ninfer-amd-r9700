@@ -40,6 +40,16 @@ std::size_t MemorySize(const Grammar::Impl& impl) {
 
 std::string Grammar::ToString() const { return GrammarPrinter(*this).ToString(); }
 
+bool Grammar::HasBudgetRules() const {
+  for (int32_t i = 0; i < (*this)->NumRules(); ++i) {
+    const auto& rule = (*this)->GetRule(i);
+    if (rule.max_tokens >= 0 || rule.max_chars >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 Grammar Grammar::FromEBNF(const std::string& ebnf_string, const std::string& root_rule_name) {
   auto grammar = ParseEBNF(ebnf_string, root_rule_name);
   grammar = GrammarNormalizer().Apply(grammar);

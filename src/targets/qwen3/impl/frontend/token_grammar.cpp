@@ -87,15 +87,20 @@ TokenGrammarState::TokenGrammarState(std::shared_ptr<const TokenGrammarData> gra
 
 bool TokenGrammarState::advance(xgrammar::GrammarMatcher& matcher, TokenId token,
                                 int& history) const {
-    if (!matcher.AcceptToken(token)) { return false; }
     if (std::find(ignored_model_stops_.begin(), ignored_model_stops_.end(), token) !=
         ignored_model_stops_.end()) {
         // Preserve the caller's disabled model-stop semantics. Such a token is
         // still forbidden inside an incomplete envelope, but an eligible EOS
         // must not permanently terminate the grammar while generation continues.
+        if (grammar_->budget_rules) {
+            auto probe = matcher.Fork();
+            return probe.AcceptToken(token);
+        }
+        if (!matcher.AcceptToken(token)) { return false; }
         matcher.Rollback(1);
         return true;
     }
+    if (!matcher.AcceptToken(token)) { return false; }
     ++history;
     return true;
 }
@@ -125,6 +130,27 @@ void TokenGrammarState::preview(std::span<const TokenId> tokens,
         throw std::invalid_argument("token grammar reasoning-close shape mismatch");
     }
     Preview result;
+    if (grammar_->budget_rules) {
+        // Budget enforcement may rewrite the state before an accepted token, which Rollback does
+        // not undo: validate on a fork that replaces committed_ at commit.
+        auto candidate = committed_.Fork();
+        for (std::size_t i = 0; i < tokens.size(); ++i) {
+            if (!ignored_framing.empty() && ignored_framing[i]) { continue; }
+            if (!reasoning_closes.empty() && reasoning_closes[i]) {
+                if (!grammar_->starts_in_reasoning) {
+                    throw std::logic_error("reasoning close requires an initial reasoning grammar");
+                }
+                candidate = xgrammar::GrammarMatcher(grammar_->compiled);
+            }
+            int history = 0;
+            if (!advance(candidate, tokens[i], history)) {
+                throw std::logic_error("generated token violates the declared token grammar");
+            }
+        }
+        result.replacement.emplace(std::move(candidate));
+        preview_.emplace(std::move(result));
+        return;
+    }
     MatcherRollback validated{committed_};
     for (std::size_t i = 0; i < tokens.size(); ++i) {
         if (!ignored_framing.empty() && ignored_framing[i]) { continue; }
@@ -134,14 +160,14 @@ void TokenGrammarState::preview(std::span<const TokenId> tokens,
             }
             // The already qualified any_text body may end in a byte/marker prefix.
             // Finish that semantic phase with the actual committed close token.
-            result.restarted.emplace(grammar_->compiled);
+            result.replacement.emplace(grammar_->compiled);
             result.tokens.clear();
         }
         int history = 0;
-        if (!advance(result.restarted ? *result.restarted : committed_, tokens[i], history)) {
+        if (!advance(result.replacement ? *result.replacement : committed_, tokens[i], history)) {
             throw std::logic_error("generated token violates the declared token grammar");
         }
-        if (!result.restarted) {
+        if (!result.replacement) {
             validated.tokens += history;
             result.tokens.push_back(tokens[i]);
         }
@@ -151,8 +177,8 @@ void TokenGrammarState::preview(std::span<const TokenId> tokens,
 
 void TokenGrammarState::commit_preview() noexcept {
     if (!preview_) { std::terminate(); }
-    if (preview_->restarted) {
-        committed_ = std::move(*preview_->restarted);
+    if (preview_->replacement) {
+        committed_ = std::move(*preview_->replacement);
     } else {
         for (const auto token : preview_->tokens) {
             int history = 0;
@@ -264,7 +290,30 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
             if (!matcher.IsTerminated()) { self(self, child, matcher); }
         }
     };
-    visit(visit, 0, committed_);
+    if (grammar_->budget_rules) {
+        // Fork every node from its filled parent: a rolled-back accept could leave the parent
+        // rewritten by budget enforcement.
+        std::vector<std::optional<xgrammar::GrammarMatcher>> nodes(tokens.size());
+        nodes[0].emplace(committed_.Fork());
+        fill(0, *nodes[0]);
+        for (std::size_t node = 1; node < tokens.size(); ++node) {
+            const auto parent = static_cast<std::size_t>(parents[node]);
+            if (!nodes[parent]) { continue; }
+            const bool framing = !replay_close_allowed.empty() && replay_close_allowed[parent] &&
+                                 tokens[node] == replay_close;
+            auto child  = !reasoning_close_allowed.empty() && reasoning_close_allowed[parent] &&
+                                  tokens[node] == replay_close
+                              ? xgrammar::GrammarMatcher(grammar_->compiled)
+                              : nodes[parent]->Fork();
+            int history = 0;
+            if ((framing || advance(child, tokens[node], history)) && !child.IsTerminated()) {
+                nodes[node].emplace(std::move(child));
+                fill(node, *nodes[node]);
+            }
+        }
+    } else {
+        visit(visit, 0, committed_);
+    }
     for (std::size_t node = 0; node < tokens.size(); ++node) {
         if (!reached[node]) {
             std::fill_n(words.begin() + node * mask_words, mask_words, ~std::uint32_t{0});
@@ -550,8 +599,10 @@ TokenGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in
             std::chrono::duration<double>(std::chrono::steady_clock::now() - compile_started)
                 .count();
         stats.compile_wait_seconds = compile_wait_seconds;
-        return std::make_shared<const TokenGrammarData>(TokenGrammarData{
-            std::move(completed_definitions), std::move(compiled), stats, starts_in_reasoning});
+        const bool budget_rules    = compiled.GetGrammar().HasBudgetRules();
+        return std::make_shared<const TokenGrammarData>(
+            TokenGrammarData{std::move(completed_definitions), std::move(compiled), stats,
+                             starts_in_reasoning, budget_rules});
     } catch (const xgrammar::JSONSchemaCompileError& error) {
         if (constraint && prepared_constraint) {
             const auto pointer = prepared_constraint->source_pointer(error.pointer);

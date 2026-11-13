@@ -90,6 +90,12 @@ class Grammar {
   std::string ToString() const;
 
   /*!
+   * \brief Whether any rule carries a max_tokens or max_chars budget. Accepting a token under
+   * such a budget may rewrite the parser state before that token, which Rollback does not undo.
+   */
+  bool HasBudgetRules() const;
+
+  /*!
    * \brief Construct a BNF grammar with a EBNF-formatted string. The grammar will be normalized
    * (simplified) by default.
    * \param ebnf_string The EBNF-formatted string.

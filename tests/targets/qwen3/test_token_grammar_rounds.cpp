@@ -1,6 +1,6 @@
 // Per-round tool-grammar masks after a long free-text output: the rolled-back single matcher
-// must produce the same masks and acceptance as forking the committed parser per node, and its
-// per-round host time must not grow with the committed output. `--bench` prints the timings.
+// must produce the same masks and acceptance as forking the committed parser per node; budget
+// grammars keep forking. Completed-call decoding must match the forking decoder.
 #include "targets/qwen3/impl/frontend/token_grammar.h"
 #include "targets/qwen3/official_tokenizer_dir.h"
 
@@ -8,8 +8,6 @@
 #include <ninfer/targets/qwen3/frontend_resources.h>
 
 #include <algorithm>
-#include <chrono>
-#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -318,62 +316,92 @@ int check_reasoning_close(const Fixture& fixture) {
     return failures;
 }
 
-template <typename Round>
-double median_ms(int rounds, Round&& round) {
-    std::vector<double> samples;
-    for (int i = 0; i < rounds; ++i) {
-        const auto begin = std::chrono::steady_clock::now();
-        round(i);
-        samples.push_back(
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin)
-                .count());
+// A max_tokens rule makes an accept depend on the budget decision of the mask computed at its
+// parent and may rewrite that parent's state; such a grammar must keep the forking masks,
+// previews and commits while the budget expires, through sibling branches and rejections.
+int check_budget_grammar(const Fixture& fixture) {
+    if (fixture.grammar->budget_rules) {
+        std::cerr << "the tool grammar unexpectedly has budget rules\n";
+        return 1;
     }
-    std::nth_element(samples.begin(), samples.begin() + samples.size() / 2, samples.end());
-    return samples[samples.size() / 2];
-}
-
-// One decode round per lane at --draft-tokens 3: commit one token, then fill a 4-node chain.
-void bench(const Fixture& fixture, bool in_call) {
-    std::mt19937 random(5);
-    std::printf("| %s before round | forking ms/round | rollback ms/round |\n",
-                in_call ? "reasoning + tool-call string" : "free text");
-    std::printf("|---|---|---|\n");
-    const std::string open = "</think>\n\n<tool_call>\n<function=bash>\n<parameter=command>\n";
-    for (const std::size_t bytes : {1024u, 8192u, 32768u}) {
-        const auto ids     = fixture.tokenizer->encode(in_call ? free_text(256, random) + open +
-                                                                     free_text(bytes + 4096, random)
-                                                               : free_text(bytes + 4096, random));
-        std::size_t prefix = 0, prefix_bytes = 0;
-        while (prefix_bytes < bytes + (in_call ? 256 + open.size() : 0)) {
-            prefix_bytes += fixture.tokenizer->decode_token_bytes(ids[prefix]).size();
-            ++prefix;
+    const ninfer::OutputConstraint constraint{ninfer::OutputConstraintKind::Grammar,
+                                              "root ::= body \"\\n\" tail\n"
+                                              "body[max_tokens=4] ::= [a-z ]+\n"
+                                              "tail[max_tokens=3] ::= [A-Z]+ \"!\"\n"};
+    const auto grammar = fixture.compiler->compile({}, false, false, constraint);
+    if (!grammar->budget_rules) {
+        std::cerr << "max_tokens grammar is not marked as having budget rules\n";
+        return 1;
+    }
+    std::vector<TokenId> letters, capitals;
+    for (const char* word : {" the", " cat", "s", " a", "dog", " run", "x"}) {
+        letters.push_back(fixture.tokenizer->encode(word).at(0));
+    }
+    for (const char* word : {"AB", "C", "XYZ", "Q"}) {
+        capitals.push_back(fixture.tokenizer->encode(word).at(0));
+    }
+    const TokenId newline = fixture.tokenizer->encode("\n").at(0);
+    const TokenId bang    = fixture.tokenizer->encode("!").at(0);
+    const TokenId stop    = fixture.tokenizer->default_stop_token_ids().at(0);
+    fi::TokenGrammarState state(grammar);
+    ForkingState oracle(grammar, {});
+    std::vector<TokenId> preference = letters;
+    preference.insert(preference.end(), capitals.begin(), capitals.end());
+    preference.push_back(newline);
+    preference.push_back(bang);
+    preference.push_back(stop);
+    const auto allowed = [](std::span<const std::uint32_t> mask, TokenId token) {
+        return ((mask[static_cast<std::size_t>(token) / 32] >> (token % 32)) & 1U) != 0;
+    };
+    int failures = 0;
+    std::vector<std::uint32_t> expected, actual;
+    for (int round = 0; round < 24; ++round) {
+        // Root and three siblings, each with a child. The later siblings, which an exhausted
+        // budget rejects, follow a walk of the newline that a rolled-back matcher must undo.
+        Tree tree{{0}, {-1}};
+        for (const auto token :
+             {newline, letters[round % letters.size()], capitals[round % capitals.size()]}) {
+            tree.tokens.push_back(token);
+            tree.parents.push_back(0);
+            tree.tokens.push_back(round % 2 == 0 ? letters[(round + 1) % letters.size()] : bang);
+            tree.parents.push_back(static_cast<std::int32_t>(tree.tokens.size() - 2));
         }
-        fi::TokenGrammarState state(fixture.grammar);
-        ForkingState oracle(fixture.grammar, {});
-        const std::span<const TokenId> head(ids.data(), prefix);
-        oracle.preview(head);
-        oracle.commit();
-        state.preview(head);
+        expected.assign(tree.tokens.size() * kWords, 0);
+        actual.assign(tree.tokens.size() * kWords, 0x5a5a5a5a);
+        oracle.fill_masks(tree.tokens, tree.parents, expected, -1, {}, {});
+        state.fill_masks(tree.tokens, tree.parents, actual, -1, {}, {});
+        if (expected != actual) {
+            std::cerr << "budget grammar mask mismatch in round " << round << '\n';
+            ++failures;
+        }
+        const std::span<const std::uint32_t> root(expected.data(), kWords);
+        TokenId next = -1;
+        for (const auto token : preference) {
+            if (allowed(root, token)) {
+                next = token;
+                break;
+            }
+        }
+        if (next < 0) break;
+        const std::vector<TokenId> accepted{next};
+        bool threw = false;
+        try {
+            state.preview(accepted);
+        } catch (const std::logic_error&) { threw = true; }
+        ForkingState probe = oracle;
+        if (threw == probe.preview(accepted)) {
+            std::cerr << "budget grammar preview acceptance differs in round " << round << '\n';
+            ++failures;
+            break;
+        }
+        if (threw) break;
         state.commit_preview();
-        const std::vector<std::int32_t> parents{-1, 0, 1, 2};
-        std::vector<std::uint32_t> words(parents.size() * kWords);
-        constexpr int kRounds = 64;
-        const double forking  = median_ms(kRounds, [&](int i) {
-            const std::span<const TokenId> one(ids.data() + prefix + i, 1);
-            oracle.preview(one);
-            oracle.commit();
-            const std::span<const TokenId> tree(ids.data() + prefix + i, 4);
-            oracle.fill_masks(tree, parents, words, -1, {}, {});
-        });
-        const double rollback = median_ms(kRounds, [&](int i) {
-            const std::span<const TokenId> one(ids.data() + prefix + kRounds + i, 1);
-            state.preview(one);
-            state.commit_preview();
-            const std::span<const TokenId> tree(ids.data() + prefix + kRounds + i, 4);
-            state.fill_masks(tree, parents, words);
-        });
-        std::printf("| %zu B | %.3f | %.3f |\n", prefix_bytes, forking, rollback);
+        oracle.preview(accepted);
+        oracle.commit();
+        if (next == stop) break;
     }
+    std::cout << "budget grammar: " << failures << " failures\n";
+    return failures;
 }
 
 using Json = nlohmann::ordered_json;
@@ -637,43 +665,6 @@ int check_decode(const Fixture& fixture) {
     return failures;
 }
 
-// One round of the tool filter while a call is pending: before, every `</tool_call>` candidate of
-// the call was decoded again each round; now only a new candidate is decoded, once.
-void bench_decode(const Fixture& fixture) {
-    std::printf(
-        "| call bytes | candidates | forking: decode all, ms/round | new: decode newest, ms |\n");
-    std::printf("|---|---|---|---|\n");
-    const std::string unit = "y = 2\n</parameter> z\n# </tool_call>\n";
-    for (const std::size_t bytes : {1024u, 4096u, 8192u, 32768u}) {
-        std::string content;
-        while (content.size() < bytes) content += unit;
-        const auto text = "<tool_call>\n<function=write>\n<parameter=content>\n" + content;
-        std::vector<std::size_t> ends;
-        for (auto close = text.find("</tool_call>"); close != std::string::npos;
-             close      = text.find("</tool_call>", close + 1)) {
-            ends.push_back(close + std::string_view("</tool_call>").size());
-        }
-        double forking = -1;
-        if (bytes <= 8192) {
-            const auto begin = std::chrono::steady_clock::now();
-            for (const auto end : ends) (void)forking_decode(*fixture.grammar, text.substr(0, end));
-            forking =
-                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin)
-                    .count();
-        }
-        const auto begin = std::chrono::steady_clock::now();
-        (void)fixture.grammar->decode_call(std::string_view(text).substr(0, ends.back()));
-        const double newest =
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin)
-                .count();
-        if (forking < 0) {
-            std::printf("| %zu | %zu | not run | %.3f |\n", text.size(), ends.size(), newest);
-        } else {
-            std::printf("| %zu | %zu | %.1f | %.3f |\n", text.size(), ends.size(), forking, newest);
-        }
-    }
-}
-
 // An OpenCode-shaped request: six tools, thinking on.
 struct Session {
     ninfer::targets::qwen3::Frontend frontend;
@@ -735,80 +726,45 @@ std::string write_call(const std::string& unit, std::size_t bytes) {
            "</tool_call>";
 }
 
-struct StreamResult {
-    std::vector<double> round_ms;
-    std::vector<ninfer::ToolCall> calls;
-};
-
-// Commits the text three tokens per round, as at --draft-tokens 3 with full acceptance.
-StreamResult stream(const Session& session, const Fixture& fixture, const std::string& text) {
+// Commits the text three tokens per round, as at --draft-tokens 3 with full acceptance, and
+// returns the published calls.
+std::vector<ninfer::ToolCall> stream(const Session& session, const Fixture& fixture,
+                                     const std::string& text) {
     const auto ids = fixture.tokenizer->encode(text);
     auto output    = session.frontend.make_output_session(session.prompt,
                                                           session.frontend.default_stop_policy());
-    StreamResult result;
     for (std::size_t position = 0; position < ids.size();) {
         const auto take     = std::min<std::size_t>(3, ids.size() - position);
-        const auto begin    = std::chrono::steady_clock::now();
         const auto decision = output.preview(std::span<const TokenId>(ids.data() + position, take),
                                              1u << 20, ninfer::FinishReason::OutputLimit);
         (void)output.commit_preview();
-        result.round_ms.push_back(
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin)
-                .count());
         position += decision.accepted_tokens;
         if (decision.finished()) break;
     }
-    result.calls.assign(output.tool_calls().begin(), output.tool_calls().end());
-    return result;
+    return {output.tool_calls().begin(), output.tool_calls().end()};
 }
 
 // A call whose content holds `</tool_call>` and `</parameter>` lookalikes is published once,
 // with the arguments decode_call gives for the complete call.
 int check_tool_stream(const Session& session, const Fixture& fixture) {
     const auto text     = write_call("y = 2\n</parameter> z\n# </tool_call> <parameter=k>\n", 2048);
-    const auto result   = stream(session, fixture, text);
+    const auto calls    = stream(session, fixture, text);
     const auto expected = fixture.grammar->decode_call(text.substr(text.find("<tool_call>")));
-    const bool ok       = result.calls.size() == 1 && expected &&
-                          result.calls[0].arguments_json == expected->arguments_json;
+    const bool ok =
+        calls.size() == 1 && expected && calls[0].arguments_json == expected->arguments_json;
     if (!ok) std::cerr << "tool stream did not publish the decoded call once\n";
     return ok ? 0 : 1;
 }
 
-// Host time of one output round while a long write call streams.
-void bench_tool_stream(const Session& session, const Fixture& fixture) {
-    std::printf("| write content | rounds | mean ms/round, last 10%% | max ms/round |\n");
-    std::printf("|---|---|---|---|\n");
-    for (const auto& [label, unit] : std::vector<std::pair<std::string, std::string>>{
-             {"code", "def f(x):\n    return [b ^ 0xae for b in x]  # xor chain\n"},
-             {"code + </tool_call>", "x = 1  # </tool_call>\n"},
-             {"code + </parameter> + </tool_call>", "y = 2\n</parameter> z\n# </tool_call>\n"}}) {
-        for (const std::size_t bytes : {8192u, 32768u}) {
-            const auto result = stream(session, fixture, write_call(unit, bytes));
-            const auto& ms    = result.round_ms;
-            const auto tail   = ms.size() / 10;
-            double mean       = 0;
-            for (auto i = ms.size() - tail - 1; i + 1 < ms.size(); ++i) mean += ms[i];
-            std::printf("| %s, %zu B | %zu | %.3f | %.3f |\n", label.c_str(), bytes, ms.size(),
-                        mean / static_cast<double>(tail), *std::max_element(ms.begin(), ms.end()));
-        }
-    }
-}
-
 } // namespace
 
-int main(int argc, char** argv) {
+int main() {
     if (skip_without_official_tokenizer("token grammar rounds")) { return 0; }
     const auto fixture = make_fixture(*official_tokenizer_dir());
-    if (argc == 2 && std::string_view(argv[1]) == "--bench") {
-        bench(fixture, false);
-        bench(fixture, true);
-        bench_decode(fixture);
-        bench_tool_stream(make_session(*official_tokenizer_dir()), fixture);
-        return 0;
-    }
-    int failures = check_equivalence(fixture, false);
+    int failures       = check_equivalence(fixture, false);
     failures += check_equivalence(fixture, true);
     failures += check_reasoning_close(fixture);
+    failures += check_budget_grammar(fixture);
     failures += check_decode(fixture);
     failures += check_tool_stream(make_session(*official_tokenizer_dir()), fixture);
     if (failures != 0) {
