@@ -448,8 +448,9 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     if (options.max_request_bytes == 0) {
         throw std::invalid_argument("--max-request-mib must be positive");
     }
-    if (options.prefill_chunk == 0 || options.prefill_chunk % 128 != 0) {
-        throw std::invalid_argument("--prefill-chunk must be a positive multiple of 128");
+    if (options.prefill_chunk == 0 || options.prefill_chunk % 128 != 0 ||
+        options.prefill_chunk > ninfer::kMaximumPrefillChunk) {
+        throw std::invalid_argument("--prefill-chunk must be a multiple of 128 in [128,8192]");
     }
     if (options.mixed_forward && *options.mixed_forward % 256 != 0) {
         throw std::invalid_argument("--mixed-forward must be auto or a multiple of 256");

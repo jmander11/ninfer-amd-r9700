@@ -29,6 +29,9 @@ inline constexpr std::size_t kMaxContextCheckpointMarks = 16;
 // Chunks 2048 and 4096 prefill at the same rate (8K/32K/128K within 0.2%, docs/performance.md);
 // 2048 needs half the transient workspace.
 inline constexpr std::uint32_t kDefaultPrefillChunk = 2048;
+// Largest selectable chunk: the measured range ends at 8192 (2048 is fastest), and token-major
+// prefill launches keep their token extent within the 65535-CTA grid.y limit of gfx1201.
+inline constexpr std::uint32_t kMaximumPrefillChunk = 8192;
 
 [[nodiscard]] inline std::vector<std::uint32_t>
 parse_context_checkpoint_marks_flag(std::string_view raw,

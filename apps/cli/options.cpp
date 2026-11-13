@@ -339,8 +339,9 @@ Options parse_options(int argc, char** argv) {
     if (has_prompt == has_messages) {
         throw std::invalid_argument("pass exactly one of --prompt or --messages");
     }
-    if (options.prefill_chunk % 128 != 0) {
-        throw std::invalid_argument("--prefill-chunk must be a multiple of 128");
+    if (options.prefill_chunk == 0 || options.prefill_chunk % 128 != 0 ||
+        options.prefill_chunk > ninfer::kMaximumPrefillChunk) {
+        throw std::invalid_argument("--prefill-chunk must be a multiple of 128 in [128,8192]");
     }
     if (options.kv_capacity.mode == KvCapacityMode::Explicit &&
         options.kv_capacity.explicit_tokens < options.max_context) {

@@ -1307,8 +1307,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise CampaignError("--port must be in [1, 65535]")
     if args.device < 0:
         raise CampaignError("--device must be nonnegative")
-    if args.prefill_chunk <= 0 or args.prefill_chunk % 128 != 0:
-        raise CampaignError("--prefill-chunk must be a positive multiple of 128")
+    if args.prefill_chunk <= 0 or args.prefill_chunk % 128 != 0 or args.prefill_chunk > 8192:
+        raise CampaignError("--prefill-chunk must be a multiple of 128 in [128,8192]")
 
     serve = args.serve.expanduser().resolve()
     if not serve.is_file():
