@@ -2088,13 +2088,54 @@ private:
         return requests;
     }
 
-    void reclaim_completed_gpu_cache() {
-        for (std::uint32_t lane = 0; lane < max_concurrency_; ++lane) {
-            if (!slots_[lane] && instance_.program->has_retained_lane(lane)) {
-                instance_.program->evict_retained_lane(lane);
-                invalidate_lane_plans(lane);
+    enum class RetainedReclaim : std::uint8_t { Fits, Pending, Short };
+
+    [[nodiscard]] bool held_by_copy_hold(std::uint32_t lane) const noexcept {
+        if (!copy_hold_) return false;
+        const CopyHold& hold = *copy_hold_;
+        if (hold.fork_source == lane) return true;
+        if (hold.victims_evicted) return false;
+        const auto victims = std::span(hold.victim_lanes).first(hold.victim_count);
+        return std::find(victims.begin(), victims.end(), lane) != victims.end();
+    }
+
+    RetainedReclaim reclaim_retained_kv(std::uint32_t lane, const AdmissionResources& resources,
+                                        bool vacate) {
+        std::array<std::uint32_t, kMaximumConcurrency> victims{};
+        std::size_t count = 0;
+        if (vacate && instance_.program->has_retained_lane(lane)) victims[count++] = lane;
+        while (!instance_.program->kv_fits_after_releasing(lane, resources,
+                                                           std::span(victims).first(count))) {
+            std::optional<std::uint32_t> victim;
+            for (std::uint32_t other = 0; other < max_concurrency_; ++other) {
+                if (other == lane || slots_[other] || held_by_copy_hold(other) ||
+                    !instance_.program->has_retained_lane(other) ||
+                    std::find(victims.begin(), victims.begin() + count, other) !=
+                        victims.begin() + count)
+                    continue;
+                if (!victim || instance_.program->retained_lane_precedes(other, *victim))
+                    victim = other;
             }
+            if (!victim) return RetainedReclaim::Short;
+            victims[count++] = *victim;
         }
+        bool captured = true;
+        for (const std::uint32_t victim : std::span(victims).first(count)) {
+            if (reclaim_capture_versions_[victim] == lane_plan_versions_[victim] + 1) continue;
+            bool deferred = false;
+            (void)instance_.program->capture_retained_lane(victim, nullptr, false, &deferred, {});
+            if (deferred) {
+                captured = false;
+                continue;
+            }
+            reclaim_capture_versions_[victim] = lane_plan_versions_[victim] + 1;
+        }
+        if (!captured || !instance_.program->kv_ram_copies_ready()) return RetainedReclaim::Pending;
+        for (const std::uint32_t victim : std::span(victims).first(count)) {
+            instance_.program->evict_retained_lane(victim);
+            invalidate_lane_plans(victim);
+        }
+        return RetainedReclaim::Fits;
     }
 
     // Window growth is committed before decode membership is built. Live transfer plans hold
@@ -2128,8 +2169,16 @@ private:
                 }
                 bool granted = instance_.program->grant_window(lane, window);
                 if (!granted) {
-                    reclaim_completed_gpu_cache();
-                    granted = instance_.program->grant_window(lane, window);
+                    const auto reclaim = reclaim_retained_kv(lane, window.admission, false);
+                    if (reclaim == RetainedReclaim::Pending) {
+                        if (!request->completion_member) {
+                            (void)instance_.program->reserve_suspension_credit(
+                                request->id, request->suspension_bytes);
+                        }
+                        return;
+                    }
+                    if (reclaim == RetainedReclaim::Fits)
+                        granted = instance_.program->grant_window(lane, window);
                 }
                 if (granted) {
                     request->window_output_tokens = window.output_tokens;
@@ -2342,25 +2391,38 @@ private:
             if (!joins_cohort &&
                 !instance_.program->reserve_suspension_credit(request->id, window.suspension_bytes))
                 continue;
+            std::optional<std::uint32_t> target;
+            std::optional<std::uint32_t> empty;
             for (std::uint32_t lane = 0; lane < max_concurrency_; ++lane) {
-                if (slots_[lane]) continue;
-                if (instance_.program->has_retained_lane(lane)) {
-                    instance_.program->evict_retained_lane(lane);
-                    invalidate_lane_plans(lane);
+                if (slots_[lane] || held_by_copy_hold(lane)) continue;
+                if (!instance_.program->has_retained_lane(lane)) {
+                    if (instance_.program->kv_fits_after_releasing(lane, window.admission, {})) {
+                        target = lane;
+                        break;
+                    }
+                    if (!empty) empty = lane;
+                } else if (!target || instance_.program->retained_lane_precedes(lane, *target)) {
+                    target = lane;
                 }
-                const bool claimed = joins_cohort && !request->completion_member;
-                if (claimed && !claim_completion(request)) continue;
-                if (!instance_.program->start_resume(lane, request->id, window)) {
-                    if (claimed) release_completion_claim(request);
-                    continue;
-                }
-                suspended_.erase(position);
-                request->lane = lane;
-                slots_[lane]  = request;
-                invalidate_lane_plans(lane);
-                live_transfer_.emplace(LiveTransfer{request, lane, true, window});
-                return true;
             }
+            if (!target) target = empty;
+            if (!target) return false;
+            const auto lane    = *target;
+            const auto reclaim = reclaim_retained_kv(lane, window.admission, true);
+            if (reclaim == RetainedReclaim::Pending) return false;
+            if (reclaim == RetainedReclaim::Short) continue;
+            const bool claimed = joins_cohort && !request->completion_member;
+            if (claimed && !claim_completion(request)) continue;
+            if (!instance_.program->start_resume(lane, request->id, window)) {
+                if (claimed) release_completion_claim(request);
+                continue;
+            }
+            suspended_.erase(position);
+            request->lane = lane;
+            slots_[lane]  = request;
+            invalidate_lane_plans(lane);
+            live_transfer_.emplace(LiveTransfer{request, lane, true, window});
+            return true;
         }
         return false;
     }
@@ -2598,7 +2660,6 @@ private:
         } else
             return false;
 
-        reclaim_completed_gpu_cache();
         if (recipient && reclaim_unused_windows(needed, recipient.get())) {
             growth_priority_ = recipient->id;
             return true;
@@ -3401,6 +3462,20 @@ private:
                 hold.victims_evicted = true;
             }
 
+            for (;;) {
+                const auto reclaim =
+                    reclaim_retained_kv(lane, hold.plan.summary().admission, false);
+                if (reclaim == RetainedReclaim::Fits) break;
+                if (reclaim == RetainedReclaim::Short) {
+                    return fail_host_restore(membership_empty,
+                                             std::make_exception_ptr(CacheRestoreFailure(
+                                                 "admission KV entitlement no longer fits",
+                                                 CacheRestoreFailureKind::StalePlan)));
+                }
+                if (!membership_empty) { return AdmissionProgress::CopyHold; }
+                instance_.program->wait_kv_ram_copies();
+            }
+
             if (hold.fork_source && !hold.restored) {
                 if (lane_plan_versions_[*hold.fork_source] != hold.fork_source_version) {
                     throw std::logic_error(
@@ -3509,6 +3584,12 @@ private:
                     [&] { instance_.program->release_disk_entry(disk_entry_id); });
             }
         }
+        try {
+            std::rethrow_exception(error);
+        } catch (const std::bad_alloc&) {
+            error = std::make_exception_ptr(RequestError(
+                RequestErrorKind::Overloaded, "memory for this request's KV state is unavailable"));
+        } catch (...) {}
         if (!fail_admitted_request(request, lane, error)) { std::rethrow_exception(error); }
         return AdmissionProgress::ControlProgress;
     }
@@ -3590,9 +3671,10 @@ private:
         for (std::uint32_t other = 0; other < max_concurrency_; ++other) {
             others_decoding = others_decoding || (other != lane && slots_[other] != nullptr);
         }
-        const bool captures_lane = instance_.program->has_retained_lane(lane) &&
-                                   (ram_hit || disk_hit || choice.fork_source ||
-                                    winning_plan.summary().reusable_prompt_tokens == 0);
+        const bool captures_lane =
+            instance_.program->has_retained_lane(lane) &&
+            (ram_hit || disk_hit || choice.fork_source ||
+             !instance_.program->retained_lane_extended_by(lane, winning_plan));
         // A full RAM tier is spilling an entry on the disk worker so that this
         // admission's captures can evict it instead of dropping it unsaved.
         // Keep decoding until the spill lands; nothing is claimed or captured yet.
@@ -3706,8 +3788,10 @@ private:
                     std::span<const std::uint64_t>(captured_ram_ids).first(captured_ram_count));
                 if (deferred) { return defer_for_reclaim(); }
                 if (ram_id != 0) { captured_ram_ids[captured_ram_count++] = ram_id; }
-                if (std::find(victims.begin(), victims.begin() + victim_count, lane) ==
-                    victims.begin() + victim_count) {
+                const bool reuses_lane = !ram_hit && !disk_hit && !choice.fork_source &&
+                                         winning_plan.summary().reusable_prompt_tokens != 0;
+                if (!reuses_lane && std::find(victims.begin(), victims.begin() + victim_count,
+                                              lane) == victims.begin() + victim_count) {
                     victims[victim_count++] = lane;
                 }
             }
@@ -4154,12 +4238,40 @@ private:
         fail_all(error);
     }
 
-    void fail_all(const std::exception_ptr& error) noexcept {
+    bool recover_executor(const std::exception_ptr& error) noexcept {
+        fail_all(error, false);
+        bool clean = false;
+        {
+            std::scoped_lock execution_lock(execution_mutex_);
+            detail::run_secondary_cleanup([&] { instance_.program->synchronize_all(); });
+            for (std::uint32_t lane = 0; lane < max_concurrency_; ++lane) {
+                instance_.program->evict_retained_lane(lane);
+                invalidate_lane_plans(lane);
+            }
+            completion_cohort_.clear();
+            recovery_queue_.clear();
+            growth_priority_    = 0;
+            window_head_id_     = 0;
+            window_head_bypass_ = 0;
+            const auto pools    = instance_.program->kv_gpu_snapshot();
+            clean               = pools.main.entitled_pages == 0 && pools.main.mapped_pages == 0 &&
+                                  pools.spec.entitled_pages == 0 && pools.spec.mapped_pages == 0;
+            detail::run_secondary_cleanup([&] { publish_runtime_stats(); });
+        }
+        if (!clean) {
+            fail_executor(error);
+            return false;
+        }
+        signal_control();
+        return true;
+    }
+
+    void fail_all(const std::exception_ptr& error, bool permanent = true) noexcept {
         std::scoped_lock execution_lock(execution_mutex_);
         std::vector<std::shared_ptr<Request>> pending;
         {
             std::lock_guard lock(queue_mutex_);
-            failed_ = true;
+            failed_ = failed_ || permanent;
             pending.assign(pending_.begin(), pending_.end());
             pending_.clear();
             published_waiting_requests_.store(0, std::memory_order_relaxed);
@@ -4239,8 +4351,9 @@ private:
                     }
                     stable_decode_epoch = false;
                 } catch (...) {
-                    fail_executor(std::current_exception());
-                    return;
+                    if (!recover_executor(std::current_exception())) return;
+                    stable_decode_epoch = false;
+                    continue;
                 }
             }
             stable_decode_epoch = false;
@@ -4334,7 +4447,9 @@ private:
 
                 const auto run_membership_decode = [&](std::optional<std::uint32_t> mixed_owner =
                                                            std::nullopt) {
-                    run_decode_round(membership, mixed_owner);
+                    const RoundMembership current = build_round_membership();
+                    if (current.empty()) return;
+                    run_decode_round(current, mixed_owner);
                     decode_admission_burst.complete_decode();
                 };
 
@@ -4435,8 +4550,8 @@ private:
                     continue;
                 }
             } catch (...) {
-                fail_executor(std::current_exception());
-                return;
+                if (!recover_executor(std::current_exception())) return;
+                continue;
             }
         }
     }
@@ -4488,6 +4603,7 @@ private:
     std::uint64_t window_head_id_     = 0;
     std::uint32_t window_head_bypass_ = 0;
     std::array<std::uint64_t, kMaximumConcurrency> lane_plan_versions_{};
+    std::array<std::uint64_t, kMaximumConcurrency> reclaim_capture_versions_{};
     std::optional<AdmissionProtection> protection_;
     std::uint64_t next_protection_epoch_ = 1;
     RuntimeStats cumulative_stats_;
