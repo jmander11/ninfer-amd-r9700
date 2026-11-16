@@ -71,9 +71,8 @@ or will be changed, proportionately and without performative apology or praise.
 
 ## Completion discipline
 
-Do not emit a final response while any user-assigned implementation task remains incomplete. The
-live R9700 execution ledger's unchecked items are assigned work unless the user explicitly narrows
-or cancels them. Continue autonomous in-scope work and use commentary only for progress updates.
+Do not emit a final response while any user-assigned implementation task remains incomplete.
+Continue autonomous in-scope work and use commentary only for progress updates.
 Emit a final response only after every assigned task is complete and verified, or when an external
 action, missing authority, or user decision genuinely blocks all further progress; state that
 specific blocker plainly.

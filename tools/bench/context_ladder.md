@@ -67,7 +67,7 @@ python3.11 tools/bench/context_ladder.py compare \
   --out profiles/ppl/context-quality-comparison.json
 ```
 
-PPL runs teacher-forced **prefill, speculation off**, retaining JSON, per-position `.nllf32` and `.argmaxi32`. Collection checks lengths, finiteness and summary consistency. Comparison reports mean-NLL delta, relative PPL, worst per-position delta and newly severe positions at the scorer's reported threshold. It deliberately does not invent a quality threshold or admission decision; the live ledger owns those gates, including long-context retrieval before production cutover.
+PPL runs teacher-forced **prefill, speculation off**, retaining JSON, per-position `.nllf32` and `.argmaxi32`. Collection checks lengths, finiteness and summary consistency. Comparison reports mean-NLL delta, relative PPL, worst per-position delta and newly severe positions at the scorer's reported threshold. It deliberately does not invent a quality threshold or admission decision; admission thresholds, including long-context retrieval, belong to the PPL and needle gates in [`docs/performance.md`](../../docs/performance.md).
 
 The frozen 5090 reference remains under `tools/ppl/fixtures/nvfp4-5090-20260922/`, with corpus IDs, scores and provenance. Its 4K prefill/decode spans are not 8K–128K quality references. Do not compare PPL across different inputs, score windows or schedules. The legacy `tools/ppl/compare_xattention.py` still owns the distinct fixed 8K/32K BF16-source G16/G32 admission campaign; this exploratory ladder does not replace or manufacture its gate artifacts.
 

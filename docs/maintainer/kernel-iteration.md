@@ -6,6 +6,30 @@ Op admission, numerical oracles, candidate ownership, and public-Op measurement 
 
 Do not select a kernel from a datasheet peak, simulator, compiler output, or profiler-intercepted duration. Those inputs can reject an impossible idea or explain a measured result, but only an unprofiled event timing on the selected physical R9700 can choose a route.
 
+## R9700 hardware facts
+
+| Property | Radeon AI PRO R9700 target |
+|---|---|
+| GPU architecture | RDNA 4, Navi 48 |
+| LLVM/HIP target | `gfx1201` (`amdgpu12.01`) |
+| Compute units / stream processors | 64 / 4,096 |
+| AI accelerators | 128 |
+| Native wavefront | wave32; wave64 is optional |
+| VRAM | 32 GB GDDR6; this host reports 32,624 MiB |
+| Memory interface / advertised bandwidth | 256-bit / 640 GB/s |
+| Infinity Cache / L2 | 64 MiB / 8 MiB |
+| LDS | 128 KiB per CU |
+| Vector/scalar register files | 768 KiB VGPR / 32 KiB SGPR per CU |
+| Other per-CU caches | 32 KiB L0 vector, 16 KiB scalar, 32 KiB instruction |
+| Boost clock / board power | up to 2.92 GHz / 300 W |
+| Host interface | PCIe 5.0 x16 |
+| FP32 vector | 47.8 TFLOP/s dense |
+| FP16/BF16 matrix | about 191 TFLOP/s dense |
+| FP8 matrix / INT8 matrix | about 383 TFLOP/s / 383 TOPS dense |
+| INT4 matrix | about 766 TOPS dense |
+
+Peaks are classification inputs for the Layer 0 bound hypothesis, not performance claims. gfx12 WMMA fragment layouts are not compatible with NVIDIA MMA or RDNA 3 WMMA.
+
 ## Layer 0 — contract and bound hypothesis
 
 Before writing a candidate, record:

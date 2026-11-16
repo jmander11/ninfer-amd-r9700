@@ -38,7 +38,6 @@ Artifacts and model implementation:
 ## Maintainer workflow and evidence
 
 - `maintainer/local-development.md`: private host paths, GPU coordination and test prerequisites.
-- `../plans/r9700-autonomous-todos.md`: maintainer work ledger, separate from installation.
 - `maintainer/upstream-sync.md`: upstream baseline and port dispositions.
 - `maintainer/merging-to-master.md`: full AMD promotion gates for experimental-to-master merges.
 - `maintainer/code-quality.md`: static gates and the gfx1201 device checks (memcheck, initcheck, racecheck).
@@ -46,7 +45,3 @@ Artifacts and model implementation:
 - `../tools/r9700/README.md`: target-specific oracle, ISA/resource, and physical admission commands.
 
 Use current references for production measurements and artifact choices; superseded backend documentation is historical.
-
-## Historical migration record
-
-`maintainer/r9700-overhaul-plan.md` records the migration's original decisions and acceptance background. It is not an active implementation, option, artifact, or performance authority.
