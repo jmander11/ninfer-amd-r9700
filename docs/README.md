@@ -38,7 +38,6 @@ Artifacts and model implementation:
 ## Maintainer workflow and evidence
 
 - `maintainer/local-development.md`: private host paths, GPU coordination and test prerequisites.
-- `../plans/r9700-autonomous-todos.md`: maintainer work ledger, separate from installation.
 - `maintainer/upstream-sync.md`: upstream baseline and port dispositions.
 - `maintainer/merging-to-master.md`: full AMD promotion gates for experimental-to-master merges.
 - `maintainer/code-quality.md`: static gates and the gfx1201 device checks (memcheck, initcheck, racecheck).
