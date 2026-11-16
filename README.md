@@ -6,19 +6,19 @@ An AMD port of [Neroued/NInfer](https://github.com/Neroued/ninfer), distributed 
 
 ## What it does
 
-- **Works with chat clients.** Run from the terminal or connect a client that uses OpenAI Chat Completions, Responses or Anthropic Messages. Answers stream as they are generated, with reasoning kept separate from the answer.
-- **Calls tools and returns structured answers.** Let the model choose a tool or require a specific one, with incremental tool-call streams. Constrain answers to JSON, a JSON Schema, an EBNF grammar, a full-match regex or literal choices.
-- **Reads images and video.** Add `--vision` at startup to accept media alongside text.
+- **Chat interfaces.** Run from the terminal or connect a client that uses OpenAI Chat Completions, Responses or Anthropic Messages. Answers stream as they are generated, with reasoning kept separate from the answer.
+- **Tools and structured answers.** Let the model choose a tool or require a specific one, with incremental tool-call streams. Constrain answers to JSON, a JSON Schema, an EBNF grammar, a full-match regex or literal choices.
+- **Images and video.** Add `--vision` at startup to accept media alongside text.
 - **Speculative decoding.** DFlash2 proposes tokens for the main model to check together, adapting up to seven drafts. It is the default for up to twelve requests; MTP supports up to sixteen.
-- **Reuses conversation history.** Cached prefixes avoid processing the same text again. Keep them in GPU memory, add a RAM cache, or save them to SSD for reuse after a restart.
-- **Controls generation and scores text.** Adjust sampling, choose greedy decoding, inspect token probabilities or compare candidate answers. `ninfer-ppl` measures how well the model predicts text.
-- **Reports server activity.** Prometheus metrics, JSON statistics and request logs report throughput, memory use, cache hits and draft acceptance.
+- **Conversation history.** Cached prefixes avoid processing the same text again. Keep them in GPU memory, add a RAM cache, or save them to SSD for reuse after a restart.
+- **Generation controls and scoring.** Adjust sampling, choose greedy decoding, inspect token probabilities or compare candidate answers. `ninfer-ppl` measures how well the model predicts text.
+- **Server activity.** Prometheus metrics, JSON statistics and request logs report throughput, memory use, cache hits and draft acceptance.
 
 ## Built for the R9700
 
-HIP kernels and Device Graphs are tuned for `gfx1201` (wave32). The engine batches up to sixteen requests with MTP or without speculation, and up to twelve with DFlash, where it can process a new prompt while other requests generate. GPU memory is planned at startup, with workspace shared between execution phases.
+HIP kernels and Device Graphs are tuned for `gfx1201` (wave32). The engine batches up to sixteen requests with MTP or without speculation, and up to twelve with DFlash. With DFlash, it can process a new prompt while other requests generate. GPU memory is planned at startup, with workspace shared between execution phases.
 
-**LQ4: 4-bit codebook weights decoded to FP8 for computation.** Most Text projections and the output head use LQ4; 21 sensitive projections stay in FP8. The DFlash-enabled artifact is **16.75 GB** on disk (decimal; this is not a VRAM requirement), with identity `qwen3.8-27b/r9700-lq4`. The default paged KV cache uses NVFP4 E2M1 keys and values with E4M3 scales per 16 features. FP8 keys with INT4 values and FP16 scales remain opt-in (`--kv-cache fp8-int4`), as does TQ-K4-V3 (`--kv-cache tq-k4-v3`). DFlash keeps its own BF16 state.
+**LQ4: 4-bit codebook weights decoded to FP8 for computation.** Most Text projections and the output head use LQ4; 21 sensitive projections stay in FP8. The DFlash-enabled artifact, `qwen3.8-27b/r9700-lq4`, is **16.75 GB** on disk. This is a decimal size, not a VRAM requirement. The default paged KV cache uses NVFP4 E2M1 keys and values with E4M3 scales per 16 features. FP8 keys with INT4 values and FP16 scales remain opt-in (`--kv-cache fp8-int4`), as does TQ-K4-V3 (`--kv-cache tq-k4-v3`). DFlash keeps its own BF16 state.
 
 For image/video inference, select the **17.42 GB** `qwen3.8-27b/r9700-lq4-vision-bf16` artifact and add `--vision`. It keeps the admitted Text weights byte-exact and uses original BF16 Vision matrices, adding about 640 MiB to storage and Vision-enabled weight memory. Vision-off loading has the same memory plan. Conversion and accuracy/performance evidence are in `docs/maintainer/qwen3.8-27b-artifact.md`.
 
@@ -28,7 +28,11 @@ This port combines NInfer features with AMD-specific kernels, weight/cache forma
 
 Each request can use up to **262,144 tokens** for prompt and answer combined, subject to the shared GPU cache capacity below.
 
-Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to seven drafts, MTP up to three), optimized proposal heads, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333), measured 2026-11-16 at the default 32 MiB headroom. NVFP4 (E2M1 keys and values with E4M3 scales per 16 features, 288 bytes per head-token) is the production default. The opt-in `--kv-cache tq-k4-v3` cache stores Hadamard-rotated 4-bit keys and 3-bit values in 228 bytes per head-token, about 1.26x as many tokens once shared capacity rather than the 262,144-token request ceiling is the limit:
+We recommend enabling the RAM cache, for example `--kv-ram-capacity 8192` (MiB). Without it, each request reserves GPU cache for its entire possible answer up front. With it, each request reserves its prompt plus up to 8,192 answer tokens at a time, then extends the reservation as needed. This lets more requests start sooner. If active requests together outgrow the GPU cache, the engine moves some to RAM at a safe point and resumes them when space is available. The same RAM keeps finished conversation prefixes for reuse.
+
+The default cache is **NVFP4**: 4-bit floating-point keys and values with one 8-bit scale per 16 features, using 288 bytes per token per KV head. **TurboQuant** is the opt-in `--kv-cache tq-k4-v3` cache, called "TQ" below. It rotates each key and value vector with a Hadamard transform, then stores 4-bit keys and 3-bit values (228 bytes). From five requests up, where shared cache capacity rather than the 262,144-token request limit is the constraint, TurboQuant holds about **1.26x** as many tokens. At four requests it already reaches the full 4 × 262,144.
+
+Shared cache capacity in tokens, measured 2026-11-16. Settings: automatic sizing, the default 32 MiB headroom, RAM/SSD and Vision off. Adaptive drafting uses up to seven drafts for DFlash and up to three for MTP:
 
 | Concurrent requests (C) | DFlash K7, NVFP4 | DFlash K7, TQ | MTP K3, NVFP4 | MTP K3, TQ |
 |---:|---:|---:|---:|---:|
@@ -49,15 +53,13 @@ Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to sev
 | 15 | Unsupported | Unsupported | 785,984 | 992,896 |
 | 16 | Unsupported | Unsupported | 775,168 | 979,200 |
 
-TQ costs some quality and a little speed. Against NVFP4 on the engine PPL cells it raises perplexity 0.5% / 0.3% (prefill 8K / 32K) and 0.6% / 0.2% (decode 8K / 32K); in the cache-only comparison with BF16 it adds 0.59% (32K WikiText) and 1.13% (64K natural text) where NVFP4 adds 0.18% and 0.30%. Needle retrieval on a TQ server passed 59 of 60 cases from 8K to 260K (the miss, a multi-value needle at the start of a 260K prompt, also misses on the 5090 NVFP4 build). NVFP4 passes the BF16-source PPL gate (no worse than the 5090 NVFP4 build on every cell) and 108/108 needle retrievals from 8K to 260K. `--kv-cache fp8-int4` (FP8 keys, INT4 values) remains selectable at about 0.69x NVFP4 capacity; its tables are in `docs/performance.md`.
-
-Capacity depends on available VRAM and enabled features; automatic sizing leaves 32 MiB headroom by default (raise `--kv-capacity-headroom` when a desktop or another process shares the GPU). These are allocated shared capacities, checked at startup and with one short request per lane; every cell kept the headroom physically free, although some repeated startups used up to about 20 MiB more device memory (see `docs/performance.md`). Filling the lanes does not raise device memory use: NVFP4 DFlash C4 with 4 x 222.6K-token prompts (98.6% of capacity) and TQ DFlash C12 with 12 x 82K-token prompts (97.2%) kept the same physical free memory from startup through prefill and decode. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; startup summaries for every cell: `bench/results/shared-kv-20261116.json`.
+**TurboQuant trade-offs.** It raises perplexity by 0.2–0.6% against NVFP4 on the 8K and 32K test cells. With only the cache quantized against a BF16 reference, it adds 0.6% (32K) and 1.1% (64K), where NVFP4 adds 0.2% and 0.3%. On a 60-case long-context retrieval suite (32K to 260K), NVFP4 finds all 60 and TurboQuant 59. Its one miss, a multi-value needle at the start of a 260K prompt, also fails on the 5090 NVFP4 build. Speed is about the same; see below. The older `--kv-cache fp8-int4` (FP8 keys, INT4 values) remains available with about 0.69x NVFP4's capacity.
 
 ## Performance and quality
 
-One R9700, Release build, Device Graphs, power `auto`, chunk 2048 and optimized proposal heads, measured 2026-11-16.
+Measured 2026-11-16 on one R9700, using the same build for both caches. Settings: Release build, Device Graphs, power `auto`, chunk 2048 and optimized proposal heads. Each cell shows NVFP4 / TQ.
 
-**Prompt processing (prefill), one request (NVFP4 / TQ cache):**
+**Prompt processing (prefill), one request:**
 
 | Prompt tokens | Average tokens/s |
 |---:|---:|
@@ -67,7 +69,11 @@ One R9700, Release build, Device Graphs, power `auto`, chunk 2048 and optimized 
 | 131,072 | 1,923 / 1,897 |
 | 245,760 | 1,364 / 1,339 |
 
-**DFlash answer generation with the default sampling settings (NVFP4 / TQ cache):**
+**Answer generation.** Both tables use p-less sampling at the default temperature of 1.5 and 512 output tokens per request, including reasoning. Runs use a 65,536-token request limit, with RAM/SSD and Vision off. Rates exclude prompt processing. C>1 rates are totals across requests while all are generating; divide by C for the per-request rate. Each cell is the mean of three measured waves after a warmup; DFlash C1 uses twelve.
+
+TurboQuant is **0.1% slower** than NVFP4 on average, using the geometric mean over the 20 DFlash and 25 MTP cells. Individual cells differ by up to ±5% in either direction. This is sampling noise: each run accepts a different number of drafted tokens. Draft acceptance is the same for both caches.
+
+**DFlash, adaptive up to seven drafts:**
 
 | Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s | C12 aggregate tokens/s |
 |---|---:|---:|---:|---:|---:|
@@ -77,9 +83,7 @@ One R9700, Release build, Device Graphs, power `auto`, chunk 2048 and optimized 
 | Document summary 8K | 8,194 | 98 / 95 | 380 / 384 | 467 / 456 | 612 / 610 |
 | Document summary 32K | 32,778 | 90 / 92 | 329 / 338 | 378 / 391 | 487 / 487 |
 
-P-less temperature 1.5, adaptive DFlash up to seven drafts, 512 output tokens per request (including reasoning). Means of three measured waves after one warmup; C1 uses twelve waves per cache.
-
-**MTP answer generation (NVFP4 / TQ cache):**
+**MTP, adaptive up to three drafts:**
 
 | Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s | C12 aggregate tokens/s | C16 aggregate tokens/s |
 |---|---:|---:|---:|---:|---:|---:|
@@ -89,11 +93,9 @@ P-less temperature 1.5, adaptive DFlash up to seven drafts, 512 output tokens pe
 | Document summary 8K | 8,194 | 87 / 83 | 369 / 369 | 451 / 441 | 596 / 590 | 694 / 663 |
 | Document summary 32K | 32,778 | 80 / 83 | 315 / 317 | 364 / 374 | 464 / 464 | 501 / 503 |
 
-Adaptive MTP up to three drafts, otherwise the same settings with three measured waves per cell.
+Prompt content and sampling affect draft acceptance and speed. Answer quality is not scored. The prefill table uses a separate greedy token-corpus workload. See `docs/performance.md` for methodology and `bench/results/readme-workloads-kv-cache-20261116.json` for per-cell results and acceptance.
 
-Both tables were measured 2026-11-16 on one build for both caches, with a 65,536-token per-request ceiling, automatic shared KV sizing, and RAM/SSD and Vision off. Rates exclude prompt processing: each prompt is cached before timing, and C>1 counts only intervals in which every request is decoding. Divide an aggregate rate by concurrency for the average per active request. TQ throughput matches NVFP4 within sampling noise (geometric mean 0.999 for DFlash and for MTP; single cells 0.95–1.05), and pooled first-draft acceptance is equal (0.75–0.77 for both caches at every concurrency). Prompt content and sampling affect draft acceptance and speed, and answer quality is not scored. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results, including per-cell acceptance: `bench/results/readme-workloads-kv-cache-20261116.json`.
-
-The stored weight recipe’s original standard 8K/32K prefill and ordinary-decode admission cells measured smaller prediction-loss increases over BF16 than the fixed 5090 NVFP4 reference. The updated verification partitioning changes floating-point rounding; its separate NLL measurements and 103/103 exact retrieval answers are recorded in `docs/performance.md`. Historical standard and multikey needle retrieval passed through 240K; multikey also passed at 260K. These are prediction-loss and retrieval measurements; test conditions and limitations are documented with the results.
+The stored weight recipe’s original admission cells covered standard 8K/32K prefill and ordinary decode. They measured smaller prediction-loss increases over BF16 than the fixed 5090 NVFP4 reference. The updated verification partitioning changes floating-point rounding. Its separate NLL measurements and 103/103 exact retrieval answers are recorded in `docs/performance.md`. Historical standard and multikey needle retrieval passed through 240K; multikey also passed at 260K. These measurements cover prediction loss and retrieval. Test conditions and limitations are documented with the results.
 
 ## Build
 
@@ -108,7 +110,7 @@ git clone https://github.com/jmander11/ninfer-amd-r9700.git
 cd ninfer-amd-r9700
 ```
 
-Requires 64-bit Linux, the R9700, ROCm 10 with `gfx1201` and rocprofiler SDK ROCTx, CMake ≥3.28, Ninja, C++20, Python 3, pkg-config, and FFmpeg, libcurl and zstd development libraries. CMake fetches a pinned XGrammar dependency. Python conversion/reference tools additionally need Python 3.11, PyTorch and safetensors.
+The build requires 64-bit Linux, the R9700, ROCm 10 with `gfx1201` and rocprofiler SDK ROCTx, CMake ≥3.28, Ninja, C++20, Python 3, pkg-config, and FFmpeg, libcurl and zstd development libraries. CMake fetches a pinned XGrammar dependency. Python conversion/reference tools additionally need Python 3.11, PyTorch and safetensors.
 
 ```sh
 cmake -S . -B build-r9700 -G Ninja \
@@ -132,7 +134,7 @@ build-r9700/apps/ninfer /path/to/qwen3.8-27b-r9700-lq4.ninfer \
 
 build-r9700/apps/ninfer-serve /path/to/qwen3.8-27b-r9700-lq4.ninfer \
   --host 127.0.0.1 --port 8080 \
-  --max-context 262144 --max-concurrency 6
+  --max-context 262144 --max-concurrency 6 --kv-ram-capacity 8192
 ```
 
 CLI and server default to DFlash with the optimized draft head and adaptive drafting up to seven tokens. `--spec none` disables speculation; `--no-lm-head-draft` selects the full proposal head. Server KV capacity defaults to `auto`. Use `--draft-tokens N --no-adaptive-draft` for a fixed length.
@@ -157,7 +159,7 @@ mkdir -p .cache/ninfer
 docker compose -f compose.yaml -f compose.local.yaml up -d --wait
 ```
 
-This publishes `127.0.0.1:8080` and needs Compose ≥2.24.4. Defaults: C6, adaptive DFlash up to K7, temperature 1.5, 262,144-token context, 8 GiB RAM prefix cache and 25 GiB persistent disk cache. `docs/containers.md` covers prerequisites and the separate external-proxy deployment.
+This publishes `127.0.0.1:8080` and requires Compose ≥2.24.4. Defaults: C6, adaptive DFlash up to K7, temperature 1.5, 262,144-token context, 8 GiB RAM prefix cache and 25 GiB persistent disk cache. `docs/containers.md` covers prerequisites and the separate external-proxy deployment.
 
 ## Documentation
 
