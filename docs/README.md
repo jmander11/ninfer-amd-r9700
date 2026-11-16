@@ -46,7 +46,3 @@ Artifacts and model implementation:
 - `../tools/r9700/README.md`: target-specific oracle, ISA/resource, and physical admission commands.
 
 Use current references for production measurements and artifact choices; superseded backend documentation is historical.
-
-## Historical migration record
-
-`maintainer/r9700-overhaul-plan.md` records the migration's original decisions and acceptance background. It is not an active implementation, option, artifact, or performance authority.
