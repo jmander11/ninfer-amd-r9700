@@ -22,7 +22,9 @@ void validate_spec(const Fp8KInt4VPagedKVSpec& spec) {
     }
     if ((spec.format == KvCacheFormat::Nvfp4 || spec.format == KvCacheFormat::TqK4V3) &&
         spec.value_group != 16) {
-        throw std::invalid_argument("NVFP4 and TQ-K4-V3 caches require the G16 build");
+        throw std::invalid_argument(
+            "NVFP4 and TQ-K4-V3 caches require NINFER_R9700_KV_VALUE_GROUP=16; "
+            "rebuild with G16 or explicitly select --kv-cache fp8-int4 for G32 evaluation");
     }
     if (spec.format != KvCacheFormat::Fp8KInt4V && spec.format != KvCacheFormat::Nvfp4 &&
         spec.format != KvCacheFormat::TqK4V3) {

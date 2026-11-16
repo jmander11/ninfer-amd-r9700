@@ -295,7 +295,7 @@ class CompiledProfileIdentityTest(unittest.TestCase):
         w8_activation_bits: int = 8,
         fp8_qk_wmma: bool = True,
         xattention: bool = False,
-        kv_format: str = "fp8-k-int4-v",
+        kv_format: str = "nvfp4",
     ) -> None:
         path.write_text(
             json.dumps(
@@ -429,14 +429,18 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             with mock.patch.object(run.subprocess, "run", side_effect=publish):
                 cell = score("nvfp4")
                 command = cell["command"]
-                self.assertEqual(command[command.index("--kv-cache") + 1], "nvfp4")
-                self.assertLess(command.index("--kv-cache"), command.index("--out-json"))
+                self.assertNotIn("--kv-cache", command)
                 with self.assertRaisesRegex(SystemExit, "kv_format='nvfp4'"):
                     score("fp8-int4")
                 reported = "fp8-k-int4-v"
-                self.assertNotIn("--kv-cache", score("fp8-int4")["command"])
+                command = score("fp8-int4")["command"]
+                self.assertEqual(command[command.index("--kv-cache") + 1], "fp8-int4")
+                self.assertLess(command.index("--kv-cache"), command.index("--out-json"))
                 with self.assertRaisesRegex(SystemExit, "kv_format='fp8-k-int4-v'"):
                     score("nvfp4")
+                reported = "tq-k4-v3"
+                command = score("tq-k4-v3")["command"]
+                self.assertEqual(command[command.index("--kv-cache") + 1], "tq-k4-v3")
 
     def test_python_scorer_subprocess_uses_runner_interpreter(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1828,6 +1832,10 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 str(scorer),
                 "--g32-ppl-bin",
                 str(scorer),
+                "--kv-cache",
+                "fp8-int4",
+                "--profiles",
+                "bf16-reference,r9700-g16,r9700-g32",
                 "--g16-weights",
                 str(candidate),
                 "--g32-weights",

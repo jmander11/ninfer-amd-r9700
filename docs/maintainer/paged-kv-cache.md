@@ -1,21 +1,21 @@
-# Paged context store: FP8-K/INT4-V and opt-in NVFP4 and TQ-K4-V3
+# Paged context store: default NVFP4 and opt-in FP8-K/INT4-V and TQ-K4-V3
 
 This document defines growing key/value storage and publication for Qwen3.8-27B on R9700, including attention access, retained prefixes, host-RAM spill and SSD storage. The attention and Op references define kernel arithmetic; `concurrent-inference-architecture.md` defines scheduling.
 
 ## 1. Product contract
 
-The Text and MTP growing caches use one startup-selected codec (`--kv-cache`, `EngineOptions::kv_cache_format`). The default FP8-K/INT4-V codec has exactly three persistent planes:
+The Text and MTP growing caches use one startup-selected codec (`--kv-cache`, `EngineOptions::kv_cache_format`). NVFP4 is the production default and the comparison baseline for KV-cache work. The opt-in FP8-K/INT4-V codec (`--kv-cache fp8-int4`) has exactly three persistent planes:
 
 - K: one OCP FP8 E4M3FN byte per feature;
 - V: signed canonical INT4, two codes per byte; and
 - V scale: one IEEE FP16 scale for each fixed feature group.
 
-The opt-in NVFP4 codec has exactly four, in the order K, V, V scale, K scale, and stores 288 instead of 416 bytes per head-token, so the same memory holds about 1.44x the context:
+The default NVFP4 codec has exactly four planes, in the order K, V, V scale, K scale, and stores 288 instead of 416 bytes per head-token, so the same memory holds about 1.44x the context:
 
 - K and V: E2M1, two codes per byte; and
 - K scale and V scale: one E4M3FN byte per 16 features: `E4M3_satfinite_rn(FP32_rn(max|x| / 6))`, with codes `E2M1_rn(FP32_rn(x / decoded scale))` and zero codes under a zero scale.
 
-The opt-in TQ-K4-V3 codec (TurboQuant MSE variant with norm correction, `ops/r9700/kv/tq_k4v3_codec.h`) has the same four planes in the same order and stores 228 bytes per head-token, about 1.82x the default's context and 1.26x NVFP4's:
+The opt-in TQ-K4-V3 codec (TurboQuant MSE variant with norm correction, `ops/r9700/kv/tq_k4v3_codec.h`) has the same four planes in the same order and stores 228 bytes per head-token, about 1.82x FP8-K/INT4-V's context and 1.26x the NVFP4 default's:
 
 - rotation: every 256-feature K and V head vector is stored in the basis `y = H diag(s) x / 16` (Sylvester-Hadamard `H`, fixed signs `s`); attention rotates represented Q into that basis after RoPE and rotates its FP32 output back before the output gate;
 - K: four bits per feature (sign plus a 3-bit magnitude index), two codes per byte;
@@ -24,7 +24,7 @@ The opt-in TQ-K4-V3 codec (TurboQuant MSE variant with norm correction, `ops/r97
 
 Its qualifier is `ninfer_r9700_tq_kv_qual` against the oracle in `tests/ops/tq_kv_oracle.h`. Quality evidence (BF16-source scorer, cache-only arms) is in `profiles/ppl/kv-codec-eval-20261115/`.
 
-The codec is fixed for an Engine's lifetime and requests cannot select it. NVFP4 uses no global scales or K mean, and both four-plane codecs qualify only G16 in their one plane order below. Sections below that name the three-plane format apply to both codecs unless they say otherwise.
+The codec is fixed for an Engine's lifetime and requests cannot select it. NVFP4 uses no global scales or K mean, and both four-plane codecs qualify only G16 in their one plane order below. G16 (`NINFER_R9700_KV_VALUE_GROUP=16`) is the CMake default; a G32 evaluation build must explicitly select `--kv-cache fp8-int4` or fail with that fix, never silently fall back. Codec-independent ownership and publication rules below apply to all three codecs.
 
 There is no K mean, homogeneous cache dtype, or per-request cache-format selector. Represented BF16 K/V inputs are quantized only when appended. Attention reads the stored representation directly; it never gathers the cache into a request-contiguous buffer.
 
@@ -56,7 +56,7 @@ Text page_group_bytes     = 64 * 26624 = 1.625 MiB
 MTP page_group_bytes      = 64 * 1664  = 0.1015625 MiB
 ```
 
-`G=16` is the current whole-attention timing leader, not a finalized public artifact decision. The real paired quality, capacity, and whole-inference Pareto gate must compare G16 and G32 before the losing branch is deleted.
+`G=16` is the production build profile required by default NVFP4 and opt-in TQ. `G=32` remains an FP8-K/INT4-V evaluation profile, selected explicitly rather than as a fallback.
 
 ## 3. Pools
 
@@ -64,11 +64,11 @@ Startup constructs a fixed set of typed pools:
 
 ```text
 ordinary or DFlash Engine:
-    Text FP8-K/INT4-V pool
+    Text startup-selected codec pool
 
 MTP Engine:
-    Text FP8-K/INT4-V pool
-    MTP FP8-K/INT4-V pool
+    Text startup-selected codec pool
+    MTP startup-selected codec pool
 ```
 
 Text and MTP are physically separate because they have different layer counts and publication frontiers. Each pool nevertheless uses the same allocator semantics and current codec profile.
@@ -105,7 +105,7 @@ Enabled SSD caching reserves its device restore window and per-pool scatter desc
 
 For the measured production `R9700Lq4` build at `S=262144`, adaptive DFlash K7 with the optimized proposal head, no Vision, and prefill chunk 2048, the target bounds complete immutable Device Graph residency by its measured inventory: C1..12 with the bulk host-argument graph settings and C1..8 with classic graphs. This includes one executable for every captured profile and the lowered persistent decode definitions. The C9..12 bulk inventories each observed 64 MiB; the plan adds its existing 20-MiB persistent-decode allowance, for 84 MiB total. Classic C9..12, other startup selectors and qualification builds use the conservative immutable-executable inventory bound.
 
-The target separately reserves 2 MiB for startup driver residency and a C-specific main-stream bound of 6/6/4/4/2/4/4/6 MiB at C1..8, plus 2 MiB for the SSD scatter kernel when enabled. The main-stream bound covers both lazy kernel residency and the measured aggregate physical residual beyond logical arenas, HIP graph accounting and the separate 4-MiB arena allocation bound. The C6/C7/C8 physical-counter correction is owned by NInfer, not external headroom; its attribution and qualification are recorded in the 2026-10-16 GDN follow-up in `docs/performance.md`. Physical and HIP graph deltas differ, so the residual is not claimed to identify an exact driver allocation. The opt-in NVFP4 cache adds 12/12/10/10/8 MiB at C4..8 for its additional kernel residency (adaptive DFlash K7 at 262,144 tokens left 20.8..24.7 MiB free against the 32-MiB headroom without it, 2026-11-08). C9..16 reserves 32/32/32/34/34/34/34/34 MiB, measured on the MTP and ordinary routes; DFlash C9..12 retains the same bounds and passes rebuilt native-ceiling startup/decode checks with the calibrated graph allowance (2026-11-04 concurrency measurements in `docs/performance.md`).
+The target separately reserves 2 MiB for startup driver residency and a C-specific main-stream bound of 6/6/4/4/2/4/4/6 MiB at C1..8, plus 2 MiB for the SSD scatter kernel when enabled. The main-stream bound covers both lazy kernel residency and the measured aggregate physical residual beyond logical arenas, HIP graph accounting and the separate 4-MiB arena allocation bound. The C6/C7/C8 physical-counter correction is owned by NInfer, not external headroom; its attribution and qualification are recorded in the 2026-10-16 GDN follow-up in `docs/performance.md`. Physical and HIP graph deltas differ, so the residual is not claimed to identify an exact driver allocation. The NVFP4 cache adds 12/12/10/10/8 MiB at C4..8 for its additional kernel residency (adaptive DFlash K7 at 262,144 tokens left 20.8..24.7 MiB free against the 32-MiB headroom without it, 2026-11-08). C9..16 reserves 32/32/32/34/34/34/34/34 MiB, measured on the MTP and ordinary routes; DFlash C9..12 retains the same bounds and passes rebuilt native-ceiling startup/decode checks with the calibrated graph allowance (2026-11-04 concurrency measurements in `docs/performance.md`).
 
 The low-residency calibration requires `DEBUG_HIP_GRAPH_CLASSIC_PATH=0`, `ROC_ENABLE_LARGE_BAR=0`, `ROC_SKIP_KERNEL_ARG_COPY=0`, and `HSA_DISABLE_FRAGMENT_ALLOCATOR=1`, as set by Compose. Immutable graph arguments reside in pinned host memory and cached packets replay in bulk; the same preset without those settings retains the conservative device-argument-pool reservation. Other presets use the full inventory bound.
 
@@ -155,7 +155,7 @@ The startup profile fixes all three orders. Requests and runtime modes cannot se
 
 NVFP4 fixes one profile: K codes and K scales token-fastest, head-major; V codes and V scales feature-fastest, page-major.
 
-The generic pool records plane extents, element type, alignment, slab order, and intra-page order. The typed wrapper validates exact K/V/scale geometry before exposing a layer view. The default codec has exactly three planes; NVFP4 adds its key-scale plane as a fourth, and no codec has optional planes.
+The generic pool records plane extents, element type, alignment, slab order, and intra-page order. The typed wrapper validates exact K/V/scale geometry before exposing a layer view. The opt-in FP8-K/INT4-V codec has exactly three planes; default NVFP4 and opt-in TQ have four including key scale, and no codec has optional planes.
 
 For a logical position `p`:
 
@@ -226,7 +226,7 @@ A committed read is valid only while publication remains closed with the same ge
 
 Mapping materialize/trim/bind/unbind, a new transaction, commit, abort, compaction, or row rebinding invalidates older capabilities. Cross-stream pending reads and capabilities from another allocation are rejected before dispatch.
 
-The attention leaf traverses logical positions, translates each page once per shared work unit, decodes FP8 K and signed INT4 V with FP16 scales, and evaluates causal or packed-tree visibility. Malformed device positions/table rows make only the affected output row conspicuously NaN. A cached-only read never writes cache storage.
+The attention leaf traverses logical positions, translates each page once per shared work unit, decodes the selected codec's K/V codes and scales, and evaluates causal or packed-tree visibility. Malformed device positions/table rows make only the affected output row conspicuously NaN. A cached-only read never writes cache storage.
 
 ## 9. Compaction and speculative rollback
 
@@ -252,7 +252,7 @@ RAM and disk restore read only the state sets retained by the planned reuse path
 
 Resident and RAM reuse candidates must satisfy the selected backend's readiness requirements before longest-prefix ranking; an unusable longer candidate cannot hide a usable shorter one. An exact ordinary hit requires valid tail hidden state. Each staged checkpoint's lifetime event covers both its capture and subsequent H2D readers, so releasing the head waits for its last use, not just its initial D2H capture. Retired RAM storage transfers ownership only after its retirement record is allocated. Pinned-arena allocation failure leaves existing allocations/free space intact; releasing valid blocks requires no metadata allocation.
 
-The RAM image version binds an FP8-K/INT4-V semantic fingerprint containing codec version, page size, physical/logical capacity, layer/head geometry, value group, and all plane orders. A mismatch rejects before any destination byte changes. Text and MTP fingerprints are independent.
+The RAM image version binds a codec-specific semantic fingerprint containing codec version, page size, physical/logical capacity, layer/head geometry, value group, and all plane orders. A mismatch rejects before any destination byte changes. Text and MTP fingerprints are independent.
 
 `--kv-ram-system-prompts N` enables retained snapshots of the exact leading system-prefix frontier inside the same arena. The frontend marks the boundary before any first-user content, and the tokenizer verifies that its encoding is an exact prefix of the full prompt without changing input tokens. Prefill splits at the boundary; capture stores only its leading mapped KV pages and current GDN/backend state, with no stale later checkpoint. Ordinary and DFlash snapshots omit the tail hidden; their strict suffix prefill supplies it. MTP retains the last normalized Text hidden and only MTP validity through F−1: the bridge column at F−1 depends on lookahead token F and is regenerated from the new user token before suffix prefill. The copy stream waits for the producing compute, and subsequent compute waits for that entry's D2H event before mutating its partial page or recurrent/cyclic state. All claims, H2D readers and retired blocks retain the existing event lifetime rules.
 
@@ -401,7 +401,7 @@ The complete BF16 source checkpoint and supported Python environment are present
 
 Fixed architecture:
 
-- default FP8 E4M3FN K, signed INT4 V, FP16 V scale in three planes; opt-in NVFP4 E2M1 K/V with E4M3 G16 K and V scales in four planes;
+- default NVFP4 E2M1 K/V with E4M3 G16 K and V scales in four planes; opt-in FP8 E4M3FN K, signed INT4 V, FP16 V scale in three planes; opt-in TQ rotated 4-bit K / 3-bit V with FP16 head-vector scales in four planes;
 - `P=64`, pool-local I32 page-group IDs, one allocation-owned block-table row;
 - Text/MTP physical separation and target-derived capacity coupling;
 - generation-bound read capabilities and transaction-only publication;
@@ -411,7 +411,7 @@ Fixed architecture:
 Currently tunable until the real-model gate:
 
 - G16 versus G32;
-- the three plane orders;
+- the selected codec's plane orders;
 - attention tile/split/vector/LDS staging and wave assignment; and
 - append workgroup geometry, provided it preserves one writer per packed destination.
 

@@ -525,7 +525,7 @@ def main():
         "--kv-cache",
         choices=tuple(KV_CACHE_FORMATS),
         default=DEFAULT_KV_CACHE,
-        help="startup-selected Text/MTP KV codec passed to the binary (default: fp8-int4)",
+        help="startup-selected Text/MTP KV codec passed to the binary (default: nvfp4)",
     )
     run_parser.add_argument("--max-context", type=int, default=131200)
     run_parser.add_argument("--spec", choices=("none", "dflash"), default="none")

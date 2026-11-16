@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded, matched-text AMD recipe comparison against the local 5090 NVFP4 model.
 
+This historical protocol pins AMD --kv-cache fp8-int4, not the production NVFP4 default.
 This is an evaluation report, not the terminal production/capacity selection campaign.
 All outputs are create-only; successful cells may be resumed without rerunning them.
 """
@@ -222,6 +223,8 @@ def quality(out, platform, schedule="prefill", only=None, binary_override=None, 
             ]
             if a is None:
                 command += ["--kv-dtype", "nvfp4"]
+            else:
+                command += ["--kv-cache", "fp8-int4"]
             run(command, cell)
             report = json.loads((cell / "report.json").read_text())
             assert report["non_finite"] == 0 and report["tokens_scored"] == (
@@ -259,6 +262,8 @@ def speed(out, only=None, binary_override=None, tag=None):
                     binary,
                     "--weights",
                     ARTIFACTS[recipe],
+                    "--kv-cache",
+                    "fp8-int4",
                     "--corpus",
                     out / f"{sample}.ids",
                     "--device",

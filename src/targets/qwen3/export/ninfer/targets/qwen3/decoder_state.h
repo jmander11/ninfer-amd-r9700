@@ -28,7 +28,7 @@ struct DecoderStateSpec {
     std::int32_t kv_heads               = 0;
     std::int32_t attention_head_dim     = 0;
     std::int32_t value_group            = 0;
-    KvCacheFormat kv_cache_format       = KvCacheFormat::Fp8KInt4V;
+    KvCacheFormat kv_cache_format       = KvCacheFormat::Nvfp4;
     Fp8KInt4VPlaneLayouts text_plane_layouts;
     Fp8KInt4VPlaneLayouts mtp_plane_layouts;
     bool enable_mtp                         = false;

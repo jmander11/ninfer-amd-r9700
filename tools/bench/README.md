@@ -21,7 +21,7 @@ flock --exclusive "$NINFER_GPU_LOCK" \
     --output profiles/bench/readme-workloads
 ```
 
-The server defaults to adaptive DFlash up to K7. Select `--spec mtp` for adaptive MTP up to K3; `--draft-tokens N` changes the adaptive maximum (MTP: 1–5, DFlash: 1–7). DFlash accepts C1..12; MTP accepts C1..16. For the MTP matrix use `--spec mtp --concurrency 1 6 8 12 16` and a separate output directory. Both backends use the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. `--kv-cache nvfp4` (G16 build only) launches the opt-in cache instead of the default `fp8-int4`; startup must report the matching `kv_cache_format`, which `provenance.json` and every summary row record. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
+The server defaults to adaptive DFlash up to K7. Select `--spec mtp` for adaptive MTP up to K3; `--draft-tokens N` changes the adaptive maximum (MTP: 1–5, DFlash: 1–7). DFlash accepts C1..12; MTP accepts C1..16. For the MTP matrix use `--spec mtp --concurrency 1 6 8 12 16` and a separate output directory. Both backends use the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. NVFP4 is the default cache and KV comparison baseline (G16 build only); `--kv-cache fp8-int4` and `--kv-cache tq-k4-v3` select the opt-in codecs (TQ also requires G16); startup must report the matching `kv_cache_format`, which `provenance.json` and every summary row record. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
 
 Each lane first runs a one-token request to seed its prompt cache. A synchronized wave then generates up to the output budget per lane; natural stop tokens remain enabled. One warmup wave precedes three measured waves per cell. Only complete 100-ms server intervals with no prefill and exactly C active decode lanes count. The reported rate is total committed decode tokens divided by those intervals' wall time, including host scheduling between rounds. It excludes prefill, startup, and intervals where some lanes have finished. Missing full-batch intervals fail the run rather than substitute an end-to-end or per-request rate. C>1 is aggregate; divide by the concurrency for the average rate per active request in those intervals.
 
@@ -112,11 +112,13 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset full \
   --weights /absolute/path/to/selected.ninfer \
   --expected-kv-value-group 16
 
-# Opt-in NVFP4 cache (G16 build only): every bench command gets --kv-cache nvfp4 and every
-# report must name kv_cache_format=nvfp4 (recorded as the manifest's expected_kv_cache_format).
-# The default fp8-int4 commands carry no --kv-cache; fixed admission protocols stay default-only.
+# Opt-in FP8-K/INT4-V cache: commands explicitly pass --kv-cache fp8-int4.
+# Default NVFP4 commands need no selector; every report must name its actual codec.
+# Fixed historical admission protocols pin fp8-int4 explicitly, not the production default:
+# low-context-prefill, ordinary-diagnostic, --require-fp8-hybrid, --require-post-chunk-capacity.
+# TQ is selectable with --kv-cache tq-k4-v3; NVFP4 and TQ require the G16 build.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset core \
-  --weights /absolute/path/to/selected.ninfer --kv-cache nvfp4
+  --weights /absolute/path/to/selected.ninfer --kv-cache fp8-int4
 
 # Longer run that adds 32k/64k prompt and context-decode points.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset full \
@@ -993,7 +995,7 @@ The recipe above is illustrative, not a selected winner. Admission reopens the c
 
 The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its prefill cases submit `C` Engine requests concurrently. Pure and context decode cases exclude their seed prefills and report aggregate batched-decode throughput. Use the serving benchmark below for the end-to-end request makespan and request throughput claim.
 
-`run_serve_corpus.py` runs the selected target and published MTP0/MTP3 suites. Pass the sole Qwen3.8 R9700 `--artifact` and `--mode mtp0` or `--mode mtp3` to run only that suite. The existing `--mode dflash7` is retained historical regression support and is not an active production-selection command; the replacement DFlash campaign uses K4/W5 and K5/W6. Add `--sampling greedy` to force exact argmax while retaining the same fixtures and repetition count. Its schema-v7 result and flattened summaries retain the canonical `weights_id` received from the schema-v20 serving startup record and the validated `kv_cache_format`; `--kv-cache nvfp4` (G16 build only) selects the opt-in cache instead of the default `fp8-int4`. The stochastic route pins its complete temperature/top-p/top-k/min-p/presence/frequency profile explicitly, so model-default changes do not alter the measurement method.
+`run_serve_corpus.py` runs the selected target and published MTP0/MTP3 suites. Pass the sole Qwen3.8 R9700 `--artifact` and `--mode mtp0` or `--mode mtp3` to run only that suite. The existing `--mode dflash7` is retained historical regression support and is not an active production-selection command; the replacement DFlash campaign uses K4/W5 and K5/W6. Add `--sampling greedy` to force exact argmax while retaining the same fixtures and repetition count. Its schema-v7 result and flattened summaries retain the canonical `weights_id` received from the schema-v20 serving startup record and the validated `kv_cache_format`; NVFP4 is the default; `--kv-cache fp8-int4` or `--kv-cache tq-k4-v3` selects an opt-in codec. NVFP4 and TQ require G16; G32 evaluation requires explicit `--kv-cache fp8-int4`. The stochastic route pins its complete temperature/top-p/top-k/min-p/presence/frequency profile explicitly, so model-default changes do not alter the measurement method.
 
 The serving-corpus runner has no chunk default: pass the value from the validated schema-v2 selection explicitly. Schema-v7 request records retain it and the KV cache format, and resume rejects records produced with another chunk or cache. This corpus-quality workflow explicitly launches and validates `--max-concurrency 1`; concurrency evidence belongs to the separate C=1..4 runner below.
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare the selected schema-v7 winner's exact same-route token campaign."""
+"""Prepare the selected schema-v7 winner's exact same-route token campaign.
+
+This fixed historical admission protocol pins --kv-cache fp8-int4, not default NVFP4.
+"""
 
 from __future__ import annotations
 
@@ -154,6 +157,8 @@ def prepare(
     command = [
         str(python),
         str(RUNNER),
+        "--kv-cache",
+        "fp8-int4",
         "--bf16-reference-ppl-bin",
         str(BF16_SCORER),
         "--bf16-reference-weights",

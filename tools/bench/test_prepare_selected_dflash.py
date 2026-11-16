@@ -53,6 +53,7 @@ class PreparationTest(unittest.TestCase):
             ["1", "3"],
         )
         self.assertEqual(command[command.index("--prefill-chunk") + 1], "2048")
+        self.assertEqual(command[command.index("--kv-cache") + 1], "fp8-int4")
         with self.assertRaises(ValueError):
             prep._common(plan, prep.RECIPES[0], "dflash-pareto", Path("/out"), 4, 6, [1])
         followup = prep._common(plan, prep.RECIPES[0], "dflash-pareto", Path("/out"), 4, 5, [2])

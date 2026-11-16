@@ -654,6 +654,8 @@ struct Variant {
     // Keep the 2-MiB startup component separate from the main-stream bound. The NVFP4 cache's
     // additional kernels raised the C4..8 residual (adaptive DFlash K7, 262,144-token context:
     // 11.0/11.2/9.1/9.3/7.3 MiB physical-counter deficits, 2026-11-08); C9..16 bounds cover it.
+    // TQ-K4-V3's rotation kernels add to the NVFP4 C5..8 residual (adaptive DFlash K7 at the
+    // NVFP4 bound: 32.24/31.90/31.57/32.13 MiB minimum free, 2026-11-16); C9..16 bounds cover it.
     [[nodiscard]] static constexpr std::size_t
     runtime_driver_reservation_bytes(WeightsProfile profile, std::uint32_t concurrency,
                                      bool disk_cache_enabled, KvCacheFormat cache) noexcept {
@@ -663,9 +665,12 @@ struct Variant {
             6, 6, 4, 4, 2, 4, 4, 6, 32, 32, 32, 34, 34, 34, 34, 34};
         constexpr std::array<std::size_t, kMaximumConcurrency> nvfp4_mib{
             0, 0, 0, 12, 12, 10, 10, 8, 0, 0, 0, 0, 0, 0, 0, 0};
-        // TQ-K4-V3 starts from the NVFP4 bound (same four-plane route family plus rotation).
-        const std::size_t codec_mib =
-            cache == KvCacheFormat::Fp8KInt4V ? 0U : nvfp4_mib[concurrency - 1U];
+        constexpr std::array<std::size_t, kMaximumConcurrency> tq_mib{0, 0, 0, 2, 2, 2, 2, 2,
+                                                                      0, 0, 0, 0, 0, 0, 0, 0};
+        const std::size_t codec_mib = cache == KvCacheFormat::Fp8KInt4V ? 0U
+                                      : cache == KvCacheFormat::Nvfp4
+                                          ? nvfp4_mib[concurrency - 1U]
+                                          : nvfp4_mib[concurrency - 1U] + tq_mib[concurrency - 1U];
         return (2U + main_mib[concurrency - 1U] + codec_mib + (disk_cache_enabled ? 2U : 0U))
                << 20U;
     }

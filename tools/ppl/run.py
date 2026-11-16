@@ -990,8 +990,8 @@ def _extra_value(extra: list[str], flag: str) -> str | None:
 def candidate_kv_cache_args(profile_name: str, kv_cache: str) -> list[str]:
     """Name an opt-in candidate codec on ninfer-ppl; the BF16 reference has no lossy cache.
 
-    The default codec keeps the established command shape that retained campaigns and
-    exact-token admission bind; every cell report still names its measured kv_format.
+    NVFP4 follows the scorer default. Historical FP8-K/INT4-V campaigns must select
+    fp8-int4 explicitly; every cell report names its measured kv_format.
     """
 
     if PROFILES[profile_name].reference or kv_cache == DEFAULT_KV_CACHE:
@@ -2203,8 +2203,11 @@ def main() -> int:
     parser.add_argument("--long", action="store_true", help=f"only {LONG_TOKENS} tokens")
     parser.add_argument(
         "--profiles",
-        default=None,
-        help="comma-separated profiles; default: bf16-reference,r9700-g16,r9700-g32",
+        default="bf16-reference,r9700-g16",
+        help=(
+            "comma-separated profiles (default: bf16-reference,r9700-g16); "
+            "r9700-g32 is explicit FP8-K/INT4-V evaluation only"
+        ),
     )
     parser.add_argument(
         "--schedule",
@@ -2248,8 +2251,9 @@ def main() -> int:
         default=DEFAULT_KV_CACHE,
         help=(
             f"candidate growing-KV codec (default: {DEFAULT_KV_CACHE}, the scorer default); "
-            "nvfp4 and tq-k4-v3 are named on every candidate ninfer-ppl command and "
-            "require the G16 build only; the BF16 reference has no lossy cache and ignores it"
+            "historical FP8-K/INT4-V campaigns and G32 evaluation must select fp8-int4; "
+            "opt-in codecs are named on every candidate ninfer-ppl command; "
+            "nvfp4 and tq-k4-v3 require G16; the BF16 reference has no lossy cache and ignores it"
         ),
     )
     parser.add_argument(
@@ -2425,10 +2429,13 @@ def main() -> int:
         for name in profiles
     }
     selected_candidates = [name for name in profiles if name != BASELINE]
-    if args.kv_cache != DEFAULT_KV_CACHE and any(
+    if args.kv_cache != "fp8-int4" and any(
         PROFILES[name].value_group != 16 for name in selected_candidates
     ):
-        raise SystemExit(f"--kv-cache {args.kv_cache} requires the G16 value-group build only")
+        raise SystemExit(
+            f"--kv-cache {args.kv_cache} requires the G16 value-group build; "
+            "rebuild with G16 or explicitly select --kv-cache fp8-int4 for G32 evaluation"
+        )
     missing_gates = [name for name in selected_candidates if name not in gates]
     if missing_gates and not args.allow_ungated:
         raise SystemExit(

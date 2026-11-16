@@ -142,9 +142,9 @@ std::string usage_text(const char* argv0) {
            "Structured message content accepts text, image/image_url, and video/video_url parts;\n"
            "media sources may be local paths, HTTP(S) URLs, or base64 data URIs.\n"
            "--vision enables image/video input and loads the fixed Vision GPU allocations.\n"
-           "--kv-cache selects the growing Text/MTP KV codec: fp8-int4 (default), nvfp4 (about\n"
-           "1.44x the context in the same memory at somewhat higher key error) or tq-k4-v3\n"
-           "(rotated 4-bit K / 3-bit V, about 1.82x the context at higher value error).\n"
+           "--kv-cache selects the growing Text/MTP KV codec: nvfp4 (default), fp8-int4\n"
+           "(opt-in), or tq-k4-v3 (opt-in rotated 4-bit K / 3-bit V). NVFP4 and TQ require\n"
+           "a G16 build; with a G32 evaluation build select --kv-cache fp8-int4 explicitly.\n"
            "--kv-capacity auto sizes the KV pool from all free GPU memory except\n"
            "--kv-capacity-headroom MiB (default " +
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +

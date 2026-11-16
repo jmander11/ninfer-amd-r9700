@@ -1,4 +1,5 @@
 #include "ninfer/engine.h"
+#include "qual_kv_format.h"
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -22,6 +23,7 @@ int main(int argc, char** argv) {
         options.max_context                = 4096;
         options.kv_capacity                = ninfer::KvCapacityPolicy::automatic();
         options.max_concurrency            = concurrency;
+        options.kv_cache_format            = ninfer::qual::kv_cache_format_from_environment();
         options.prefill_chunk              = 2048;
         options.mixed_forward              = 0;
         options.use_device_graph           = std::string_view(argv[2]) == "graph";

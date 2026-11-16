@@ -26,14 +26,14 @@ int main() {
         const std::string schema_field =
             "\"schema_version\":" + std::to_string(ninfer::serve::kRequestLogSchemaVersion);
         if (server_record.find(schema_field) == std::string::npos ||
-            server_record.find("\"kv_cache_format\":\"fp8-k-int4-v\"") == std::string::npos) {
+            server_record.find("\"kv_cache_format\":\"nvfp4\"") == std::string::npos) {
             throw std::runtime_error("server-start JSON does not expose the fixed HIP contract");
         }
         std::cout << "serve_environment: PASS gpu=" << environment.gpu_name
                   << " arch=" << environment.architecture_name
                   << " hip_compile=" << environment.hip_compile_version
                   << " hip_runtime=" << environment.hip_runtime_version
-                  << " hip_driver=" << environment.hip_driver_version << " fixed_kv=fp8-k-int4-v\n";
+                  << " hip_driver=" << environment.hip_driver_version << " default_kv=nvfp4\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "serve_environment: FAIL: " << error.what() << '\n';

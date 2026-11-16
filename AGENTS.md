@@ -82,13 +82,14 @@ specific blocker plainly.
 
 NInfer is a from-scratch C++/HIP inference engine for maximum single-GPU inference performance,
 compiled only for `gfx1201` and tuned on one AMD Radeon AI PRO R9700. The sole supported model is
-Qwen3.8-27B. Its growing Text/MTP cache uses one startup-selected codec. The default has exactly
-three planes: FP8 E4M3FN keys, signed INT4 values, and FP16 value scales. Opt-in `--kv-cache nvfp4`
-stores E2M1 keys and values with one E4M3 scale per 16 features of each, supports every feature of
-the default, and is not yet the default. Opt-in `--kv-cache tq-k4-v3` stores Hadamard-rotated 4-bit
-keys and 3-bit values with one FP16 norm-corrected scale per head vector of each (228 bytes per
-head-token); it is under qualification. There is no per-request cache selector or retained
-compatibility backend. The production Text weights are `qwen3.8-27b/r9700-lq4` (profile
+Qwen3.8-27B. Its growing Text/MTP cache uses one startup-selected codec. The production default
+is NVFP4: E2M1 keys and values with one E4M3 scale per 16 features of each, in four planes.
+Opt-in `--kv-cache fp8-int4` retains three planes: FP8 E4M3FN keys, signed INT4 values, and FP16
+value scales. NVFP4 is the comparison baseline for KV-cache work. Opt-in `--kv-cache tq-k4-v3`
+stores Hadamard-rotated 4-bit keys and 3-bit values with one FP16 norm-corrected scale per head vector of each (228 bytes per
+head-token); it is being qualified for the full master suite alongside NVFP4. NVFP4 and TQ
+require the G16 value-group build; G32 evaluation must explicitly select `--kv-cache fp8-int4`.
+There is no per-request cache selector or retained compatibility backend. The production Text weights are `qwen3.8-27b/r9700-lq4` (profile
 `R9700Lq4`): GPTQ-rounded LQ4 Text projections and output head with 21 row-scaled FP8
 protections (2026-09-30), admitted by the BF16-source PPL, NIAH, exact-token, and whole-inference
 gates. The weight-precision bar is no worse than the 5090 NVFP4 build on every BF16-source cell
@@ -211,15 +212,15 @@ directly against the same oracle with a criterion appropriate to its output and 
 profile; pairwise implementation parity is supplementary evidence only.
 
 Where relevant to the changed behavior, account for numeric-format decode, BF16 fusion order, FP32
-GDN state, the typed FP8-K/INT4-V/FP16-scale cache, private DFlash2 BF16 state, MTP accept/commit
-state, arena lifetime, and Device Graph address stability. This is a risk map, not a checklist for
+GDN state, the typed NVFP4 cache (or the selected opt-in FP8-K/INT4-V/FP16-scale or TQ cache),
+private DFlash2 BF16 state, MTP accept/commit state, arena lifetime, and Device Graph address stability. This is a risk map, not a checklist for
 every numerical task.
 
 ## Performance work
 
-CLI, serve, PPL, Engine A/Bs, and decode-speed work use the default FP8-K/INT4-V cache unless the
-task concerns opt-in NVFP4 (`--kv-cache nvfp4`); a change to either cache's shared route kernels is
-checked on both. Independent BF16-reference runs are
+CLI, serve, PPL, Engine A/Bs, and decode-speed work use the default NVFP4 cache unless the
+task concerns an opt-in codec (`--kv-cache fp8-int4` or `--kv-cache tq-k4-v3`). NVFP4 is the
+comparison baseline for KV-cache work; a change to shared route kernels is checked on all three. Independent BF16-reference runs are
 separate executables/artifacts used for numerical comparison, not a mutable Engine option.
 
 Kernel speed work follows [`docs/maintainer/kernel-iteration.md`](docs/maintainer/kernel-iteration.md),
@@ -272,7 +273,7 @@ per agent with at most 8 jobs; reduce concurrency under memory or I/O pressure.
 
 The normal HIP build is `build-r9700/`, with ROCm selected under `/opt/rocm`.
 Generated evidence belongs under ignored `profiles/`. Product inference defaults to
-the FP8-K/INT4-V/FP16-scale cache. `DeviceContext` sets
+the NVFP4 cache. `DeviceContext` sets
 `HSA_USERPTR_FOR_PAGED_MEM=0` and `HSA_USE_SVM=1` before HIP initialization. Pinned
 arenas use HIP/GTT backing and direct reads use ordinary-RAM staging. Runtime,
 checkpoints and RAM prefixes share the driver GTT budget; an unavailable requested

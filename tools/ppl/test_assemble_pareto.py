@@ -810,6 +810,8 @@ class AssembleParetoTest(unittest.TestCase):
                             "concurrency": concurrency,
                             "command": [
                                 "bench",
+                                "--kv-cache",
+                                "fp8-int4",
                                 "--weights",
                                 "/model.ninfer",
                                 "--max-ctx",

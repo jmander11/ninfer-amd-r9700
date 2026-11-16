@@ -370,6 +370,8 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
                 stderr = root / "logs" / f"{stem}.stderr.txt"
                 command = [
                     *common,
+                    "--kv-cache",
+                    "fp8-int4",
                     "--weights",
                     "model.ninfer",
                     "--concurrency",

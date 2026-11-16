@@ -10,4 +10,4 @@ R9700_KV_PLANE_LAYOUTS = {
 }
 # Startup-selected Text/MTP KV codec: CLI `--kv-cache` value -> report `kv_cache_format` name.
 KV_CACHE_FORMATS = {"fp8-int4": "fp8-k-int4-v", "nvfp4": "nvfp4", "tq-k4-v3": "tq-k4-v3"}
-DEFAULT_KV_CACHE = "fp8-int4"
+DEFAULT_KV_CACHE = "nvfp4"

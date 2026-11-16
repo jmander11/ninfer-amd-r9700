@@ -244,6 +244,8 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
         plan["command"] = [
             str(python),
             str(validator_module.RUNNER),
+            "--kv-cache",
+            "fp8-int4",
             "--bf16-reference-ppl-bin",
             str(bf16_scorer),
             "--bf16-reference-weights",
@@ -327,6 +329,8 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
                 "2048",
                 "--device",
                 "0",
+                "--kv-cache",
+                "fp8-int4",
                 "--out-json",
                 str(raw),
             ]
@@ -432,6 +436,8 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
                 "2048",
                 "--device",
                 "0",
+                "--kv-cache",
+                "fp8-int4",
                 "--out-json",
                 str(raw),
                 *flags,

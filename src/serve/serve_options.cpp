@@ -143,9 +143,9 @@ std::string serve_usage_text(const char* argv0) {
            "       --max-concurrency accepts 1..16 with --spec none or mtp; DFlash: 1..12\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
-           "       --kv-cache selects the growing Text/MTP KV codec: fp8-int4 (default), nvfp4\n"
-           "       (about 1.44x the context at somewhat higher key error) or tq-k4-v3 (rotated\n"
-           "       4-bit K / 3-bit V, about 1.82x the context at higher value error).\n"
+           "       --kv-cache selects the growing Text/MTP KV codec: nvfp4 (default), fp8-int4\n"
+           "       (opt-in), or tq-k4-v3 (opt-in rotated 4-bit K / 3-bit V). NVFP4 and TQ require\n"
+           "       a G16 build; with G32 select --kv-cache fp8-int4 explicitly.\n"
            "       --kv-capacity defaults to auto: sizes KV from all free GPU memory except "
            "--kv-capacity-headroom "
            "MiB (default " +

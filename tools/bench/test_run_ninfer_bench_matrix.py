@@ -1167,6 +1167,10 @@ class CompiledKvGroupTest(unittest.TestCase):
             )
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual((manifest["case_count"], manifest["point_count"]), (5, 5))
+            self.assertEqual(manifest["expected_kv_cache_format"], "fp8-k-int4-v")
+            for record in manifest["commands"]:
+                command = record["command"]
+                self.assertEqual(command[command.index("--kv-cache") + 1], "fp8-int4")
             self.assertEqual(manifest["selected_prefill_chunk"], 2048)
             self.assertEqual(manifest["concurrency"], [1])
             self.assertEqual(manifest["expected_xattention_profile"], "dense")
@@ -1185,6 +1189,9 @@ class CompiledKvGroupTest(unittest.TestCase):
                 "2048",
                 "--dry-run",
             ]
+            for codec in ("nvfp4", "tq-k4-v3"):
+                with self.assertRaisesRegex(SystemExit, "historical admission protocols"):
+                    main([*common, "--kv-cache", codec, "--output-dir", str(root / codec)])
             with self.assertRaisesRegex(SystemExit, "requires --expected-kv-value-group"):
                 main(common)
             with self.assertRaisesRegex(SystemExit, "dense attention profile"):
@@ -1528,16 +1535,22 @@ class CompiledKvGroupTest(unittest.TestCase):
                 "4096",
                 "--dry-run",
             ]
-            self.assertEqual(main([*argv, "--output-dir", str(output), "--kv-cache", "nvfp4"]), 0)
-            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["expected_kv_cache_format"], "nvfp4")
-            for record in manifest["commands"]:
-                command = record["command"]
-                self.assertEqual(command[command.index("--kv-cache") + 1], "nvfp4")
+            for codec, reported in (("fp8-int4", "fp8-k-int4-v"), ("tq-k4-v3", "tq-k4-v3")):
+                selected = output / codec
+                self.assertEqual(
+                    main([*argv, "--output-dir", str(selected), "--kv-cache", codec]), 0
+                )
+                manifest = json.loads((selected / "manifest.json").read_text(encoding="utf-8"))
+                self.assertEqual(manifest["expected_kv_cache_format"], reported)
+                for record in manifest["commands"]:
+                    command = record["command"]
+                    self.assertEqual(command[command.index("--kv-cache") + 1], codec)
+            with self.assertRaisesRegex(SystemExit, "explicitly select --kv-cache fp8-int4"):
+                main([*argv, "--output-dir", str(root / "g32"), "--expected-kv-value-group", "32"])
             default = root / "default"
             self.assertEqual(main([*argv, "--output-dir", str(default)]), 0)
             manifest = json.loads((default / "manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["expected_kv_cache_format"], "fp8-k-int4-v")
+            self.assertEqual(manifest["expected_kv_cache_format"], "nvfp4")
             self.assertTrue(all("--kv-cache" not in row["command"] for row in manifest["commands"]))
 
             report = root / "report.json"

@@ -66,7 +66,7 @@ struct Pool {
             .layer_count           = 2,
             .head_dim              = 128,
             .num_kv_heads          = 2,
-            .value_group           = format == ninfer::KvCacheFormat::Nvfp4 ? 16 : 32,
+            .value_group           = format == ninfer::KvCacheFormat::Fp8KInt4V ? 32 : 16,
             .plane_layouts = {.key         = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
                               .value       = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
                               .value_scale = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor}};

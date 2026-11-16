@@ -2,6 +2,7 @@
 
 The preserved NVFP4 inputs/NLLs are the quality reference. Cost vectors are byte
 and matrix-work proxies, not measured latency or a tok/s prediction.
+This historical protocol pins --kv-cache fp8-int4, not the production NVFP4 default.
 """
 
 from __future__ import annotations
@@ -138,6 +139,8 @@ def quality(out, recipe, profile, w8_bits):
                         binary,
                         "--weights",
                         artifact,
+                        "--kv-cache",
+                        "fp8-int4",
                         "--ids",
                         out / f"{sample}.ids",
                         "--tokens",

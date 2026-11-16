@@ -156,15 +156,14 @@ int main() {
     failures += check(contains(text, "model_id=\"id \\\"quoted\\\"\\nline\""),
                       "label escaping dropped quote or newline");
     failures += check(
-        contains(text, "kv_cache_format=\"fp8-k-int4-v\"") &&
-            contains(text, "gpu_arch=\"gfx1201\"") &&
+        contains(text, "kv_cache_format=\"nvfp4\"") && contains(text, "gpu_arch=\"gfx1201\"") &&
             contains(text, "ninfer_device_graph_observed_bytes 3145728\n") &&
             contains(text, "ninfer_device_memory_bytes{kind=\"total\"} 34359738368\n") &&
             contains(text,
                      "ninfer_device_memory_bytes{kind=\"available_after_startup\"} 5242880\n"),
         "AMD engine identity or startup device memory missing");
-    failures += check(!contains(text, "cuda") && !contains(text, "nvfp4") &&
-                          !contains(text, "xattn_tau") && !contains(text, "keep_frac"),
+    failures += check(!contains(text, "cuda") && !contains(text, "xattn_tau") &&
+                          !contains(text, "keep_frac"),
                       "exposition names an NVIDIA-only concept");
     failures += check(text.find(',') == std::string::npos || contains(text, "le=\"0.005\""),
                       "locale changed a histogram bound");

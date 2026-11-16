@@ -3653,8 +3653,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--kv-cache",
         choices=tuple(KV_CACHE_FORMATS),
-        default=DEFAULT_KV_CACHE,
-        help="startup-selected Text/MTP KV codec passed to ninfer_bench (default: fp8-int4)",
+        default=None,
+        help=(
+            "startup-selected Text/MTP KV codec (default: nvfp4; fixed historical admission "
+            "protocols pin fp8-int4: low-context-prefill, ordinary-diagnostic, "
+            "--require-fp8-hybrid and --require-post-chunk-capacity)"
+        ),
     )
     parser.add_argument(
         "--expected-kv-value-group",
@@ -3769,15 +3773,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("duplicate --concurrency value")
     if any(concurrency not in PRODUCT_CONCURRENCIES for concurrency in args.concurrency):
         raise SystemExit("--concurrency must be in [1, 4]")
-    if args.kv_cache != DEFAULT_KV_CACHE:
-        if args.expected_kv_value_group == 32:
-            raise SystemExit("--kv-cache nvfp4 requires the G16 value-group build")
-        if (
-            args.preset in ("low-context-prefill", "ordinary-diagnostic")
-            or args.require_fp8_hybrid
-            or args.require_post_chunk_capacity
-        ):
-            raise SystemExit("fixed admission protocols are bound to the default fp8-int4 cache")
+    fixed_cache_protocol = (
+        args.preset in ("low-context-prefill", "ordinary-diagnostic")
+        or args.require_fp8_hybrid
+        or args.require_post_chunk_capacity
+    )
+    if args.kv_cache is None:
+        args.kv_cache = "fp8-int4" if fixed_cache_protocol else DEFAULT_KV_CACHE
+    if fixed_cache_protocol and args.kv_cache != "fp8-int4":
+        raise SystemExit("fixed historical admission protocols require --kv-cache fp8-int4")
+    if args.kv_cache != "fp8-int4" and args.expected_kv_value_group == 32:
+        raise SystemExit(
+            f"--kv-cache {args.kv_cache} requires the G16 value-group build; "
+            "rebuild with G16 or explicitly select --kv-cache fp8-int4 for G32 evaluation"
+        )
     validate_fp8_hybrid_performance_contract(args)
     validate_post_chunk_capacity_contract(args)
     if args.preset == "dflash-shortlist":
@@ -4004,8 +4013,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         for concurrency in args.concurrency
         if not case.concurrency_one_only or concurrency == 1
     ]
-    # The default codec keeps the established fixed-protocol command shape; an opt-in codec is
-    # named explicitly on every benchmark invocation.
+    # NVFP4 follows the executable default. Opt-ins, including historical fixed protocols,
+    # are named explicitly on every benchmark invocation.
     kv_cache_args = [] if args.kv_cache == DEFAULT_KV_CACHE else ["--kv-cache", args.kv_cache]
     for case, concurrency in points:
         report_path = json_dir / case.suite / f"c{concurrency}" / f"{case.name}.json"

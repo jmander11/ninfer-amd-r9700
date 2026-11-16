@@ -18,7 +18,7 @@ An AMD port of [Neroued/NInfer](https://github.com/Neroued/ninfer), distributed 
 
 HIP kernels and Device Graphs are tuned for `gfx1201` (wave32). The engine batches up to sixteen requests with MTP or without speculation, and up to twelve with DFlash, where it can process a new prompt while other requests generate. GPU memory is planned at startup, with workspace shared between execution phases.
 
-**LQ4: 4-bit codebook weights decoded to FP8 for computation.** Most Text projections and the output head use LQ4; 21 sensitive projections stay in FP8. The DFlash-enabled artifact is **16.75 GB** on disk (decimal; this is not a VRAM requirement), with identity `qwen3.8-27b/r9700-lq4`. The paged KV cache stores FP8 keys, INT4 values and FP16 scales. DFlash keeps its own BF16 state.
+**LQ4: 4-bit codebook weights decoded to FP8 for computation.** Most Text projections and the output head use LQ4; 21 sensitive projections stay in FP8. The DFlash-enabled artifact is **16.75 GB** on disk (decimal; this is not a VRAM requirement), with identity `qwen3.8-27b/r9700-lq4`. The default paged KV cache uses NVFP4 E2M1 keys and values with E4M3 scales per 16 features. FP8 keys with INT4 values and FP16 scales remain opt-in (`--kv-cache fp8-int4`), as does TQ-K4-V3 (`--kv-cache tq-k4-v3`). DFlash keeps its own BF16 state.
 
 For image/video inference, select the **17.42 GB** `qwen3.8-27b/r9700-lq4-vision-bf16` artifact and add `--vision`. It keeps the admitted Text weights byte-exact and uses original BF16 Vision matrices, adding about 640 MiB to storage and Vision-enabled weight memory. Vision-off loading has the same memory plan. Conversion and accuracy/performance evidence are in `docs/maintainer/qwen3.8-27b-artifact.md`.
 
@@ -28,9 +28,9 @@ This port combines NInfer features with AMD-specific kernels, weight/cache forma
 
 Each request can use up to **262,144 tokens** for prompt and answer combined, subject to the shared GPU cache capacity below.
 
-Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to seven drafts, MTP up to three), optimized proposal heads, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333), measured 2026-11-08 for both caches at the default 32 MiB headroom. The default cache is FP8 keys with INT4 values; the opt-in NVFP4 cache (`--kv-cache nvfp4`: E2M1 keys and values with E4M3 scales per 16 features) stores about 1.44x as many tokens:
+Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to seven drafts, MTP up to three), optimized proposal heads, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333), measured 2026-11-08 for both caches at the default 32 MiB headroom. These measurements compare `fp8-int4` (FP8 keys with INT4 values) with NVFP4 (E2M1 keys and values with E4M3 scales per 16 features), now the production default. NVFP4 stores about 1.44x as many tokens:
 
-| Concurrent requests (C) | DFlash K7, default | DFlash K7, NVFP4 | MTP K3, default | MTP K3, NVFP4 |
+| Concurrent requests (C) | DFlash K7, fp8-int4 | DFlash K7, NVFP4 | MTP K3, fp8-int4 | MTP K3, NVFP4 |
 |---:|---:|---:|---:|---:|
 | 1 | 262,144 | 262,144 | 262,144 | 262,144 |
 | 2 | 524,288 | 524,288 | 524,288 | 524,288 |
@@ -49,7 +49,7 @@ Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to sev
 | 15 | Unsupported | Unsupported | 556,736 | 804,224 |
 | 16 | Unsupported | Unsupported | 549,312 | 793,472 |
 
-NVFP4 passes the same BF16-source PPL gate as the default (no worse than the 5090 NVFP4 build on every cell) and 108/108 needle retrievals from 8K to 260K; its README workload throughput is on par with the default (geometric mean +0.8% DFlash, +1.2% MTP; 32K summaries +3–6%) with equal draft acceptance. Default remains `fp8-int4`; see `docs/performance.md`.
+NVFP4 passes the same BF16-source PPL gate as `fp8-int4` (no worse than the 5090 NVFP4 build on every cell) and 108/108 needle retrievals from 8K to 260K; its README workload throughput is on par with `fp8-int4` (geometric mean +0.8% DFlash, +1.2% MTP; 32K summaries +3–6%) with equal draft acceptance. NVFP4 is now the production default and the KV-cache comparison baseline; see `docs/performance.md` for the unchanged historical measurements.
 
 Capacity depends on available VRAM and enabled features; automatic sizing leaves 32 MiB headroom by default (raise `--kv-capacity-headroom` when a desktop or another process shares the GPU). These are allocated shared capacities, checked at startup and with short decode, rather than an all-lane near-capacity qualification; every cell kept the headroom physically free. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; startup summaries for every cell: `bench/results/shared-kv-20261108.json`.
 
@@ -67,7 +67,7 @@ One R9700, Release build, Device Graphs, power `auto`, chunk 2048 and optimized 
 | 131,072 | 1,907 |
 | 245,760 | 1,354 |
 
-**DFlash answer generation with the default sampling settings (default / NVFP4 cache):**
+**DFlash answer generation with the default sampling settings (fp8-int4 / NVFP4 cache):**
 
 | Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s | C12 aggregate tokens/s |
 |---|---:|---:|---:|---:|---:|
@@ -79,7 +79,7 @@ One R9700, Release build, Device Graphs, power `auto`, chunk 2048 and optimized 
 
 P-less temperature 1.5, adaptive DFlash up to seven drafts, 512 output tokens per request (including reasoning). Means of three measured waves after one warmup; C1 uses twelve waves per cache.
 
-**MTP answer generation (default / NVFP4 cache):**
+**MTP answer generation (fp8-int4 / NVFP4 cache):**
 
 | Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s | C12 aggregate tokens/s | C16 aggregate tokens/s |
 |---|---:|---:|---:|---:|---:|---:|

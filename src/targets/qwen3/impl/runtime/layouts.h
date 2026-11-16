@@ -108,7 +108,7 @@ struct SequencePlanningInputs {
     std::size_t kv_disk_capacity_bytes  = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
-    KvCacheFormat kv_cache_format   = KvCacheFormat::Fp8KInt4V;
+    KvCacheFormat kv_cache_format   = KvCacheFormat::Nvfp4;
     std::string model_id;
     std::string weights_id;
     std::string artifact_tensor_identity;
@@ -143,7 +143,7 @@ struct SequencePlanImpl<NINFER_QWEN3_VARIANT> {
     std::size_t kv_disk_capacity_bytes  = 0;
     std::filesystem::path kv_disk_location;
     KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
-    KvCacheFormat kv_cache_format   = KvCacheFormat::Fp8KInt4V;
+    KvCacheFormat kv_cache_format   = KvCacheFormat::Nvfp4;
     std::string model_id;
     std::string weights_id;
     std::string artifact_tensor_identity;

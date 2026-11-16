@@ -1,5 +1,18 @@
 # R9700 codec and gfx12 qualification
 
+NVFP4 is the production default and KV-cache comparison baseline. Engine cache/cancel,
+recovery (including Device Graph recovery), live continuation, concurrent long-prompt, DFlash
+concurrency, real cache-write, and disk-cache tests use
+`qual_kv_format.h`: unset `NINFER_QUAL_KV_CACHE` follows `EngineOptions`; explicit
+`fp8-int4`, `nvfp4`, and `tq-k4-v3` are accepted. Both opt-ins run the same Engine-level
+master gates for none/MTP/DFlash. NVFP4 and TQ require the CMake-default G16 build;
+G32 evaluation must explicitly select FP8-K/INT4-V, never silently fall back.
+`ninfer_r9700_nvfp4_kv_qual` and `ninfer_r9700_tq_kv_qual` run in the non-real CTest
+and memcheck/racecheck/initcheck sets against their independent codec/attention oracles.
+The low-level FP8-K/INT4-V leaf/state fixtures below remain codec-specific; the route
+discriminator's `--sequence-cell` selector supports only `fp8-int4` and `nvfp4` and
+rejects TQ rather than treating it as either. It does not use the Engine qualifier selector.
+
 Host-fixed 1..8-row decode (ordinary T=1, MTP verification, DFlash chain verification W2..8; contexts 64..262144) uses the packed split-context dense route: one 192-thread CTA per KV head and context chunk. Widths 5..8 use at most 16 chunks through a 65,536-token host envelope, retain up to 64 through 131,072, and use at most 32 above 131,072; widths 1..4 retain at most 64. The chunk count is bounded by ceil(context/256), and the monotonic workspace bound retains 64 partials. The six query heads' (row, head) pairs are packed into sixteen-lane tiles, so three compute waves cover W8, while three loader waves convert the next 16-key block into the second of two LDS buffers (one barrier per block).
 
 Every pair runs the dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K, online FP32 Softmax with FP16 probabilities, FP16 V/8 PV) and writes per-row numerator/origin/denominator partials; a stable FP32 merge normalizes. The public oracle is BF16-Q attention with exact decoded cache planes and the dense criterion |error| <= 2e-3 absolute or relative.

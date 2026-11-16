@@ -31,6 +31,8 @@ def capacity_failure(concurrency: int) -> dict:
     stderr_path = f"/campaign/logs/c{concurrency}.stderr.txt"
     command = [
         "bench",
+        "--kv-cache",
+        "fp8-int4",
         "--weights",
         "/model.ninfer",
         "--max-ctx",

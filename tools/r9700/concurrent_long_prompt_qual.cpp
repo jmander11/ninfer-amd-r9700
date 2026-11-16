@@ -1,4 +1,5 @@
 #include "ninfer/engine.h"
+#include "qual_kv_format.h"
 #include <nlohmann/json.hpp>
 #include <array>
 #include <barrier>
@@ -28,6 +29,7 @@ int main(int argc, char** argv) {
         config.artifact_path              = argv[1];
         config.max_context                = 262144;
         config.max_concurrency            = 6;
+        config.kv_cache_format            = ninfer::qual::kv_cache_format_from_environment();
         config.kv_capacity                = ninfer::KvCapacityPolicy::automatic();
         config.prefill_chunk              = 2048;
         config.kv_ram_capacity_bytes      = 12ULL << 30;
