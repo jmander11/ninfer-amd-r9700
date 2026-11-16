@@ -275,6 +275,9 @@ public:
     // count remains device-owned until commit() resolves it.
     [[nodiscard]] std::size_t position_count() const noexcept { return position_count_; }
 
+    // The cache's startup-fixed codec (selects, e.g., the TQ-K4-V3 basis-change ownership).
+    [[nodiscard]] KvCacheFormat cache_format() const noexcept { return cache_->spec().format; }
+
     [[nodiscard]] PagedKVLayerRead pending_layer_read(std::uint32_t layer) const;
     [[nodiscard]] std::uint32_t commit();
     void abort() noexcept;

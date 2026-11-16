@@ -1,4 +1,5 @@
 #include "fp8_int4_kv_compact.h"
+#include "tq_k4v3_codec.h"
 
 namespace ninfer::ops::r9700::kv {
 namespace {
@@ -141,6 +142,56 @@ __global__ void nvfp4_compact_kernel(std::size_t prefix, const std::uint32_t* se
     }
 }
 
+// Exact copy of all four TQ-K4-V3 planes: 128 K bytes (head-major, token-fastest), 96 V bytes
+// (page-major rows), and one binary16 scale each. The barrier orders overlapping tokens.
+__global__ void tq_compact_kernel(std::size_t prefix, const std::uint32_t* selected_path,
+                                  std::size_t selected_count, const std::uint32_t* page_table,
+                                  std::uint32_t table_pages, std::size_t physical_tokens,
+                                  std::uint8_t* keys, std::uint16_t* key_scales,
+                                  std::uint8_t* values, std::uint16_t* value_scales,
+                                  std::uint32_t* status) {
+    const std::uint32_t head = blockIdx.x, index = threadIdx.x;
+    const std::size_t pages = physical_tokens / kPageSize;
+    for (std::size_t selected = 0; selected < selected_count; ++selected) {
+        const std::size_t source_logical      = prefix + selected_path[selected];
+        const std::size_t destination_logical = prefix + selected;
+        if (source_logical / kPageSize >= table_pages ||
+            destination_logical / kPageSize >= table_pages) {
+            if (index == 0) atomicOr(status, Fp8Int4KvAppendInvalidAddress);
+            return;
+        }
+        const std::size_t source_page      = page_table[source_logical / kPageSize];
+        const std::size_t destination_page = page_table[destination_logical / kPageSize];
+        if (source_page >= pages || destination_page >= pages) {
+            if (index == 0) atomicOr(status, Fp8Int4KvAppendInvalidAddress);
+            return;
+        }
+        const std::size_t source_in_page        = source_logical % kPageSize;
+        const std::size_t destination_in_page   = destination_logical % kPageSize;
+        const std::size_t source_head_page      = source_page + pages * head;
+        const std::size_t destination_head_page = destination_page + pages * head;
+        const std::size_t source_row =
+            source_in_page + kPageSize * (head + gridDim.x * source_page);
+        const std::size_t destination_row =
+            destination_in_page + kPageSize * (head + gridDim.x * destination_page);
+        if (index < tq::kKeyBytes) {
+            keys[destination_in_page +
+                 kPageSize * (index + tq::kKeyBytes * destination_head_page)] =
+                keys[source_in_page + kPageSize * (index + tq::kKeyBytes * source_head_page)];
+        }
+        if (index < tq::kValueBytes) {
+            values[index + tq::kValueBytes * destination_row] =
+                values[index + tq::kValueBytes * source_row];
+        }
+        if (index == 0U) {
+            key_scales[destination_in_page + kPageSize * destination_head_page] =
+                key_scales[source_in_page + kPageSize * source_head_page];
+            value_scales[destination_row] = value_scales[source_row];
+        }
+        __syncthreads();
+    }
+}
+
 template <std::uint32_t G, bool K, bool V, bool S>
 hipError_t launch(const Fp8Int4KvCompactArgs& a, hipStream_t stream) {
     hipLaunchKernelGGL((compact_kernel<G, K, V, S>), dim3(a.kv_heads), dim3(kHeadDim), 0, stream,
@@ -192,6 +243,18 @@ hipError_t fp8_int4_kv_compact(const Fp8Int4KvCompactArgs& a, hipStream_t stream
                            a.prefix, a.selected_path, a.selected_count, a.page_table,
                            a.page_table_pages, a.physical_tokens, a.key_codes, a.key_scale_codes,
                            a.value_codes, a.value_scale_codes, a.status);
+        return hipGetLastError();
+    }
+    if (a.codec == KvCodec::TqK4V3) {
+        if (!a.key_scale_bits || !a.value_scale_bits ||
+            a.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
+            a.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+            a.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest)
+            return hipErrorInvalidValue;
+        hipLaunchKernelGGL(tq_compact_kernel, dim3(a.kv_heads), dim3(kHeadDim), 0, stream, a.prefix,
+                           a.selected_path, a.selected_count, a.page_table, a.page_table_pages,
+                           a.physical_tokens, a.key_codes, a.key_scale_bits, a.value_codes,
+                           a.value_scale_bits, a.status);
         return hipGetLastError();
     }
     if (!a.value_scale_bits) return hipErrorInvalidValue;

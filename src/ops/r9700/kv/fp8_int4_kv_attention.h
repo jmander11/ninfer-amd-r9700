@@ -124,6 +124,11 @@ struct Fp8Int4KvAttentionArgs {
     KvCodec codec                         = KvCodec::Fp8Int4;
     const std::uint8_t* key_scale_codes   = nullptr;
     const std::uint8_t* value_scale_codes = nullptr;
+    // TqK4V3 cache: key_codes and value_codes hold the rotated 4-bit K and 3-bit V codes,
+    // key_scale_codes addresses the binary16 K-scale plane (one per head vector, token-fastest
+    // head-major) and value_scale_bits the binary16 V scales (one per row); value_scale_codes is
+    // unused. Q and the output are in the rotated basis (see tq_rotation.h). Every route but the
+    // Fp8Int4-only raw-WMMA tail takes it; staging matches Nvfp4 (FP16 Q, round-toward-zero).
 };
 
 [[nodiscard]] hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,

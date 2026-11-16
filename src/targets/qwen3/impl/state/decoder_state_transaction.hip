@@ -16,8 +16,22 @@ namespace ninfer::targets::qwen3 {
 namespace {
 
 ops::r9700::kv::KvCodec raw_codec(KvCacheFormat format) noexcept {
-    return format == KvCacheFormat::Nvfp4 ? ops::r9700::kv::KvCodec::Nvfp4
-                                          : ops::r9700::kv::KvCodec::Fp8Int4;
+    switch (format) {
+    case KvCacheFormat::Nvfp4:
+        return ops::r9700::kv::KvCodec::Nvfp4;
+    case KvCacheFormat::TqK4V3:
+        return ops::r9700::kv::KvCodec::TqK4V3;
+    case KvCacheFormat::Fp8KInt4V:
+        break;
+    }
+    return ops::r9700::kv::KvCodec::Fp8Int4;
+}
+
+// The binary16 K-scale plane of TqK4V3 (null for the other codecs).
+std::uint16_t* key_scale_bits(const Fp8KInt4VPagedKVLayerView& view) noexcept {
+    return view.format == KvCacheFormat::TqK4V3
+               ? static_cast<std::uint16_t*>(view.key_scale_pages.data)
+               : nullptr;
 }
 
 ops::r9700::kv::Fp8Int4KvPlaneLayout raw_layout(Fp8KInt4VPlaneLayout layout) {
@@ -399,6 +413,7 @@ PagedKVTransaction::prepare_append_layer(std::uint32_t layer, const hip_bfloat16
         .codec                 = raw_codec(binding.cache.format),
         .key_scale_codes       = static_cast<std::uint8_t*>(binding.cache.key_scale_pages.data),
         .value_scale_codes     = static_cast<std::uint8_t*>(binding.cache.value_scale_pages.data),
+        .key_scale_bits        = key_scale_bits(binding.cache),
     };
     launched_ = true;
     return args;
@@ -517,6 +532,7 @@ void PagedKVTransaction::launch_compact_layer(std::uint32_t layer, std::uint32_t
         .codec              = raw_codec(view.format),
         .key_scale_codes    = static_cast<std::uint8_t*>(view.key_scale_pages.data),
         .value_scale_codes  = static_cast<std::uint8_t*>(view.value_scale_pages.data),
+        .key_scale_bits     = key_scale_bits(view),
     };
     launched_ = true;
     HIP_CHECK(ops::r9700::kv::fp8_int4_kv_compact(args, stream));

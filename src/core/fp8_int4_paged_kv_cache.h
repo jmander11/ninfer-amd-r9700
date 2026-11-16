@@ -10,9 +10,11 @@ namespace ninfer {
 
 // Growing-cache storage. Fp8KInt4V: one OCP E4M3FN byte per K feature, two signed INT4 V codes per
 // byte, and one IEEE binary16 scale per V group, with no K scale, K mean or fourth plane. Nvfp4:
-// two E2M1 codes per byte for K and for V, and one E4M3FN scale per G16 group of each. Planes of a
-// layer are ordered K, V, V scale, then the Nvfp4 K scale, which shares K's layout. Target code
-// selects the model geometry and codec profile.
+// two E2M1 codes per byte for K and for V, and one E4M3FN scale per G16 group of each. TqK4V3: two
+// rotated 4-bit K codes per byte, 3-bit V codes as twelve bytes per 32 features (two 2-bit
+// magnitude words and one sign word), and one binary16 scale per head vector of each; its value
+// group is unused. Planes of a layer are ordered K, V, V scale, then the K scale of the four-plane
+// codecs, which shares K's layout. Target code selects the model geometry and codec profile.
 enum class Fp8KInt4VPlaneLayout : std::uint8_t {
     FeatureFastestPageMajor,
     TokenFastestHeadMajor,
@@ -27,7 +29,7 @@ struct Fp8KInt4VPlaneLayouts {
 };
 
 [[nodiscard]] constexpr std::size_t kv_planes_per_layer(KvCacheFormat format) noexcept {
-    return format == KvCacheFormat::Nvfp4 ? 4U : 3U;
+    return format == KvCacheFormat::Fp8KInt4V ? 3U : 4U;
 }
 
 struct Fp8KInt4VPagedKVSpec {
@@ -72,9 +74,9 @@ void require_fp8_k_int4_v_semantic_fingerprint(const Fp8KInt4VSemanticFingerprin
                                                const Fp8KInt4VSemanticFingerprint& expected);
 
 // A semantic view for one Qwen text or MTP layer. Every field of the format is a required
-// persistent plane (key_scale_pages only for Nvfp4); append status and position uniqueness are
-// transaction inputs owned by the calling Op, not persistent cache planes. block_table is the
-// allocation-owned row selected for this sequence.
+// persistent plane (key_scale_pages only for the four-plane codecs); append status and position
+// uniqueness are transaction inputs owned by the calling Op, not persistent cache planes.
+// block_table is the allocation-owned row selected for this sequence.
 struct Fp8KInt4VPagedKVLayerView {
     KvCacheFormat format = KvCacheFormat::Fp8KInt4V;
     Tensor key_pages;

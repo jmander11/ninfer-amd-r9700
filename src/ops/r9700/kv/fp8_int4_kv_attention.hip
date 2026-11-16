@@ -1,5 +1,6 @@
 #include "fp8_int4_kv_attention.h"
 #include "r9700_attention_profile.h"
+#include "tq_k4v3_device.h"
 
 #include <hip/hip_fp8.h>
 
@@ -30,6 +31,12 @@ inline constexpr std::uint32_t kSplitTokens  = 512;
 // G16.
 [[nodiscard]] constexpr bool valid_codec_planes(const Fp8Int4KvAttentionArgs& a) noexcept {
     if (a.codec == KvCodec::Fp8Int4) return a.value_scale_bits != nullptr;
+    if (a.codec == KvCodec::TqK4V3) {
+        return a.key_scale_codes != nullptr && a.value_scale_bits != nullptr &&
+               a.key_layout == Fp8Int4KvPlaneLayout::TokenFastest &&
+               a.value_layout == Fp8Int4KvPlaneLayout::FeatureFastest &&
+               a.value_scale_layout == Fp8Int4KvPlaneLayout::FeatureFastest;
+    }
     return a.codec == KvCodec::Nvfp4 && a.key_scale_codes != nullptr &&
            a.value_scale_codes != nullptr && a.value_group == 16U &&
            a.key_layout == Fp8Int4KvPlaneLayout::TokenFastest &&
@@ -477,6 +484,51 @@ struct Nvfp4ElementCodec {
         const std::uint32_t scale  = scales[int4_offset<Group, VToken, SToken>(
             physical, kvh, feature, heads, physical_tokens, true)];
         return {e2m1_float((packed >> ((feature & 1U) * 4U)) & 0x0fU), e4m3_float(scale)};
+    }
+};
+
+// TQ-K4-V3 element access (rotated basis; see tq_k4v3_codec.h). key_scales addresses the binary16
+// K-scale plane; one scale per head vector of K and of V.
+struct TqElementCodec {
+    using ValueScale = std::uint16_t;
+
+    struct Value {
+        float code, scale;
+    };
+
+    [[nodiscard]] static const ValueScale* value_scales(const Fp8Int4KvAttentionArgs& a) {
+        return a.value_scale_bits;
+    }
+
+    template <bool KToken>
+    __device__ static __forceinline__ float
+    key(const std::uint8_t* keys, const std::uint8_t* key_scales, std::size_t physical,
+        std::uint32_t kvh, std::uint32_t feature, std::uint32_t, std::size_t physical_tokens) {
+        static_assert(KToken);
+        const std::size_t in_page   = physical % kPageSize;
+        const std::size_t head_page = physical / kPageSize + physical_tokens / kPageSize * kvh;
+        const std::uint32_t packed =
+            keys[in_page + kPageSize * (feature / 2U + tq::kKeyBytes * head_page)];
+        const std::uint16_t scale =
+            reinterpret_cast<const std::uint16_t*>(key_scales)[in_page + kPageSize * head_page];
+        return tq::key_level(packed >> ((feature & 1U) * 4U)) *
+               __half2float(__ushort_as_half(scale));
+    }
+
+    template <std::uint32_t Group, bool VToken, bool SToken>
+    __device__ static __forceinline__ Value value(const std::uint8_t* values,
+                                                  const ValueScale* scales, std::size_t physical,
+                                                  std::uint32_t kvh, std::uint32_t feature,
+                                                  std::uint32_t heads, std::size_t) {
+        static_assert(!VToken && !SToken);
+        const std::size_t row =
+            physical % kPageSize + kPageSize * (kvh + heads * (physical / kPageSize));
+        const std::uint8_t* vector = values + row * tq::kValueBytes;
+        const std::uint32_t magnitude =
+            vector[tq::value_magnitude_byte(feature)] >> tq::value_magnitude_shift(feature);
+        const std::uint32_t sign =
+            vector[tq::value_sign_byte(feature)] >> tq::value_sign_shift(feature);
+        return {tq::value_level(magnitude, sign), __half2float(__ushort_as_half(scales[row]))};
     }
 };
 
@@ -1229,6 +1281,137 @@ struct Nvfp4DenseCodec {
 
     __device__ static __forceinline__ F32x8 qk(I16x8 keys, I16x8 query, F32x8 scores) {
         return __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(keys, query, scores);
+    }
+};
+
+// TQ-K4-V3 staging: binary16 level tables replace E2M1 ones; each rotated key and V/8 is one FP16
+// product of an exact level and the vector's binary16 scale. Q staging and WMMA match Nvfp4.
+// Scales of unwritten value slots are masked to zero, so their (finite) levels stage as zero.
+struct TqDenseCodec {
+    struct KeyItem {
+        uint2 codes[2];
+        uint4 scales[2];
+    };
+
+    struct ValueItem {
+        std::uint32_t even[3], odd[3], scales;
+    };
+
+    __device__ static __forceinline__ KeyItem load_key(const Fp8Int4KvAttentionArgs& a,
+                                                       std::uint32_t loader, std::size_t page,
+                                                       std::size_t physical_pages,
+                                                       std::size_t in_page, std::uint32_t kv_head) {
+        const std::uint32_t byte = loader % 128U, key_half = loader / 128U;
+        const std::size_t head_page = page + physical_pages * kv_head;
+        const std::size_t token     = in_page + key_half * 16U;
+        const std::uint8_t* codes =
+            a.key_codes + token + kPageSize * (static_cast<std::size_t>(byte) + 128U * head_page);
+        const auto* scales = reinterpret_cast<const std::uint16_t*>(a.key_scale_codes) + token +
+                             kPageSize * head_page;
+        KeyItem item;
+#pragma unroll
+        for (std::uint32_t part = 0U; part < 2U; ++part) {
+            item.codes[part]  = *reinterpret_cast<const uint2*>(codes + part * 8U);
+            item.scales[part] = *reinterpret_cast<const uint4*>(scales + part * 8U);
+        }
+        return item;
+    }
+
+    __device__ static __forceinline__ void store_key(std::uint16_t* keys, std::uint32_t loader,
+                                                     const KeyItem& item) {
+        const std::uint32_t feature = (loader % 128U) * 2U, key_half = loader / 128U;
+#pragma unroll
+        for (std::uint32_t part = 0U; part < 2U; ++part) {
+            const std::uint32_t scale_words[4] = {item.scales[part].x, item.scales[part].y,
+                                                  item.scales[part].z, item.scales[part].w};
+#pragma unroll
+            for (std::uint32_t word = 0U; word < 2U; ++word) {
+                const std::uint32_t codes = word == 0U ? item.codes[part].x : item.codes[part].y;
+                const std::uint32_t low   = tq::key_f16_high_bytes(codes & 0x0f0f0f0fU);
+                const std::uint32_t high  = tq::key_f16_high_bytes((codes >> 4U) & 0x0f0f0f0fU);
+#pragma unroll
+                for (std::uint32_t token = 0U; token < 4U; ++token) {
+                    const std::uint32_t pair_bits = scale_words[word * 2U + token / 2U];
+                    const std::uint32_t scale_bits =
+                        (token & 1U) != 0U ? pair_bits >> 16U : pair_bits & 0xffffU;
+                    const std::uint32_t select =
+                        0x0cU | (token << 8U) | (0x0cU << 16U) | ((token + 4U) << 24U);
+                    const DenseF16x2 pair =
+                        __builtin_bit_cast(DenseF16x2, __builtin_amdgcn_perm(high, low, select)) *
+                        __builtin_bit_cast(DenseF16x2, scale_bits | (scale_bits << 16U));
+                    const std::uint32_t key = key_half * 16U + part * 8U + word * 4U + token;
+                    *reinterpret_cast<DenseF16x2*>(&keys[key * kDensePrefillKeyPitch + feature]) =
+                        pair;
+                }
+            }
+        }
+    }
+
+    template <std::uint32_t Group, std::uint32_t Keys>
+    __device__ static __forceinline__ ValueItem load_value(const Fp8Int4KvAttentionArgs& a,
+                                                           std::uint32_t item_index,
+                                                           std::size_t page, std::size_t in_page,
+                                                           std::uint32_t kv_head,
+                                                           std::uint32_t written) {
+        const std::uint32_t token_pair = item_index % (Keys / 2U), chunk = item_index / (Keys / 2U);
+        const std::size_t row  = in_page + 2U * token_pair + kPageSize * (kv_head + 4U * page);
+        const auto* even_codes = reinterpret_cast<const std::uint32_t*>(
+            a.value_codes + row * tq::kValueBytes + chunk * tq::kValueChunk);
+        const auto* odd_codes = reinterpret_cast<const std::uint32_t*>(
+            a.value_codes + (row + 1U) * tq::kValueBytes + chunk * tq::kValueChunk);
+        ValueItem item;
+#pragma unroll
+        for (std::uint32_t word = 0U; word < 3U; ++word) {
+            item.even[word] = even_codes[word];
+            item.odd[word]  = odd_codes[word];
+        }
+        const std::uint32_t even = 2U * token_pair < written ? a.value_scale_bits[row] : 0U;
+        const std::uint32_t odd =
+            2U * token_pair + 1U < written ? a.value_scale_bits[row + 1U] : 0U;
+        item.scales = even | (odd << 16U);
+        return item;
+    }
+
+    template <std::uint32_t Keys>
+    __device__ static __forceinline__ void
+    store_value(std::uint16_t* values, std::uint32_t item_index, const ValueItem& item) {
+        constexpr std::uint32_t pitch  = Keys + 8U;
+        const std::uint32_t token_pair = item_index % (Keys / 2U), chunk = item_index / (Keys / 2U);
+        const DenseF16x2 scales = __builtin_bit_cast(DenseF16x2, item.scales);
+#pragma unroll
+        for (std::uint32_t half = 0U; half < 2U; ++half) {
+#pragma unroll
+            for (std::uint32_t quarter = 0U; quarter < 4U; ++quarter) {
+                const std::uint32_t sign_bit = 4U * half + quarter;
+                const std::uint32_t even     = tq::value_f16_high_bytes(
+                    item.even[half] >> (2U * quarter), item.even[2] >> sign_bit, tq::kValueOver8);
+                const std::uint32_t odd = tq::value_f16_high_bytes(
+                    item.odd[half] >> (2U * quarter), item.odd[2] >> sign_bit, tq::kValueOver8);
+#pragma unroll
+                for (std::uint32_t lane = 0U; lane < 4U; ++lane) {
+                    // Low half: even token's high byte; high half: odd token's. Low bytes zero.
+                    const std::uint32_t select =
+                        0x0cU | (lane << 8U) | (0x0cU << 16U) | ((lane + 4U) << 24U);
+                    const DenseF16x2 pair =
+                        __builtin_bit_cast(DenseF16x2, __builtin_amdgcn_perm(odd, even, select)) *
+                        scales;
+                    const std::uint32_t target = chunk * 32U + 16U * half + 4U * quarter + lane;
+                    *reinterpret_cast<DenseF16x2*>(&values[target * pitch + token_pair * 2U]) =
+                        pair;
+                }
+            }
+        }
+    }
+
+    __device__ static __forceinline__ bool load_query(const Fp8Int4KvAttentionArgs& a,
+                                                      bool has_context, std::size_t query_row,
+                                                      std::uint32_t query_head, std::uint32_t half,
+                                                      I16x8 (&query)[16]) {
+        return Nvfp4DenseCodec::load_query(a, has_context, query_row, query_head, half, query);
+    }
+
+    __device__ static __forceinline__ F32x8 qk(I16x8 keys, I16x8 query, F32x8 scores) {
+        return Nvfp4DenseCodec::qk(keys, query, scores);
     }
 };
 
@@ -2098,6 +2281,9 @@ hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,
     if (a.codec == KvCodec::Nvfp4) {
         return fused_attention_launch<Nvfp4ElementCodec, 16U, true, false, false>(a, stream);
     }
+    if (a.codec == KvCodec::TqK4V3) {
+        return fused_attention_launch<TqElementCodec, 16U, true, false, false>(a, stream);
+    }
     return a.value_group == 16   ? fused_attention_dispatch<16>(a, stream)
            : a.value_group == 32 ? fused_attention_dispatch<32>(a, stream)
                                  : hipErrorInvalidValue;
@@ -2124,7 +2310,10 @@ hipError_t fp8_int4_kv_attention_dense_prefill(const Fp8Int4KvAttentionArgs& a,
     }
 #if defined(__HIPCC__)
     const dim3 grid(4U, (a.query_rows + kDensePrefillRows - 1U) / kDensePrefillRows);
-    if (a.codec == KvCodec::Nvfp4) {
+    if (a.codec == KvCodec::TqK4V3) {
+        hipLaunchKernelGGL((dense_prefill_kernel<TqDenseCodec, 16U>), grid,
+                           dim3(kDensePrefillThreads), 0, stream, a);
+    } else if (a.codec == KvCodec::Nvfp4) {
         hipLaunchKernelGGL((dense_prefill_kernel<Nvfp4DenseCodec, 16U>), grid,
                            dim3(kDensePrefillThreads), 0, stream, a);
     } else if (a.value_group == 16U) {
@@ -2300,7 +2489,11 @@ hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& a,
 #if defined(__HIPCC__)
     const MidRowsSplit split = mid_rows_split(a.context, a.query_rows);
     const dim3 grid(4U, (a.query_rows + kDensePrefillRows - 1U) / kDensePrefillRows, split.chunks);
-    if (a.codec == KvCodec::Nvfp4) {
+    if (a.codec == KvCodec::TqK4V3) {
+        hipLaunchKernelGGL((dense_prefill_split_kernel<TqDenseCodec, 16U>), grid,
+                           dim3(kDensePrefillThreads), 0, stream, a, split.chunk_keys,
+                           a.score_workspace);
+    } else if (a.codec == KvCodec::Nvfp4) {
         hipLaunchKernelGGL((dense_prefill_split_kernel<Nvfp4DenseCodec, 16U>), grid,
                            dim3(kDensePrefillThreads), 0, stream, a, split.chunk_keys,
                            a.score_workspace);
@@ -2400,7 +2593,17 @@ hipError_t fp8_int4_kv_attention_packed_decode(std::span<const Fp8Int4KvAttentio
 #if defined(__HIPCC__)
     const auto count  = static_cast<std::uint32_t>(sequences.size());
     const auto launch = [&]<bool LivePlan>() {
-        if (sequences.front().codec == KvCodec::Nvfp4) {
+        if (sequences.front().codec == KvCodec::TqK4V3) {
+            if (4U * count * grid_chunks <= kNvfp4MaximumGroupsForSixLoaderWaves) {
+                hipLaunchKernelGGL((dense_verify_kernel<TqDenseCodec, 16U, 6U, LivePlan>),
+                                   dim3(4U, count, grid_chunks),
+                                   dim3((kDenseVerifyComputeWaves + 6U) * 32U), 0, stream, batch);
+            } else {
+                hipLaunchKernelGGL((dense_verify_kernel<TqDenseCodec, 16U, 5U, LivePlan>),
+                                   dim3(4U, count, grid_chunks),
+                                   dim3((kDenseVerifyComputeWaves + 5U) * 32U), 0, stream, batch);
+            }
+        } else if (sequences.front().codec == KvCodec::Nvfp4) {
             if (4U * count * grid_chunks <= kNvfp4MaximumGroupsForSixLoaderWaves) {
                 hipLaunchKernelGGL((dense_verify_kernel<Nvfp4DenseCodec, 16U, 6U, LivePlan>),
                                    dim3(4U, count, grid_chunks),
@@ -3021,10 +3224,15 @@ hipError_t fp8_int4_kv_attention_split512(const Fp8Int4KvAttentionArgs& a, void*
         error = fp8_kv_qk_wmma(qk, stream);
     } else if (a.codec == KvCodec::Nvfp4) {
         error = split512_qk_launch<Nvfp4ElementCodec>(a, workspace, stream);
+    } else if (a.codec == KvCodec::TqK4V3) {
+        error = split512_qk_launch<TqElementCodec>(a, workspace, stream);
     } else {
         error = split512_qk_launch<Fp8Int4ElementCodec>(a, workspace, stream);
     }
     if (error != hipSuccess) return error;
+    if (a.codec == KvCodec::TqK4V3) {
+        return split512_metadata_dispatch<TqElementCodec, 16U>(a, workspace, stream);
+    }
     if (a.codec == KvCodec::Nvfp4) {
         return split512_metadata_dispatch<Nvfp4ElementCodec, 16U>(a, workspace, stream);
     }

@@ -52,10 +52,13 @@ void rope(const Tensor& positions, int rotary_dim, float theta, Tensor& x, hipSt
  * example planes of the projection output) with 16-byte aligned rows; outputs do not overlap
  * any input. The oracle evaluates both steps in FP64 from the represented inputs with the BF16
  * seam; the RMS reduction association is implementation-defined. No workspace.
+ * tq_rotate_query additionally takes each query head into the TQ-K4-V3 rotated basis
+ * (y = H diag(s) x / 16 of ops/r9700/kv/tq_k4v3_codec.h) in FP32 before its one BF16 store, so
+ * qn holds BF16(R RoPE(...)); kn is unchanged.
  */
 void qk_norm_rope(const Tensor& positions, int rotary_dim, float theta, const Tensor& q,
                   const Tensor& k, const Tensor& q_norm, const Tensor& k_norm, float eps,
-                  Tensor& qn, Tensor& kn, hipStream_t stream);
+                  Tensor& qn, Tensor& kn, hipStream_t stream, bool tq_rotate_query = false);
 
 /**
  * DFlash drafter attention front in one pass. `fused` holds each token's projection rows

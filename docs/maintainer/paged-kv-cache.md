@@ -1,4 +1,4 @@
-# Paged context store: FP8-K/INT4-V and opt-in NVFP4
+# Paged context store: FP8-K/INT4-V and opt-in NVFP4 and TQ-K4-V3
 
 This document defines growing key/value storage and publication for Qwen3.8-27B on R9700, including attention access, retained prefixes, host-RAM spill and SSD storage. The attention and Op references define kernel arithmetic; `concurrent-inference-architecture.md` defines scheduling.
 
@@ -15,7 +15,16 @@ The opt-in NVFP4 codec has exactly four, in the order K, V, V scale, K scale, an
 - K and V: E2M1, two codes per byte; and
 - K scale and V scale: one E4M3FN byte per 16 features: `E4M3_satfinite_rn(FP32_rn(max|x| / 6))`, with codes `E2M1_rn(FP32_rn(x / decoded scale))` and zero codes under a zero scale.
 
-The codec is fixed for an Engine's lifetime and requests cannot select it. NVFP4 uses no global scales or K mean, and qualifies only G16 in its one plane order below. Sections below that name the three-plane format apply to both codecs unless they say otherwise.
+The opt-in TQ-K4-V3 codec (TurboQuant MSE variant with norm correction, `ops/r9700/kv/tq_k4v3_codec.h`) has the same four planes in the same order and stores 228 bytes per head-token, about 1.82x the default's context and 1.26x NVFP4's:
+
+- rotation: every 256-feature K and V head vector is stored in the basis `y = H diag(s) x / 16` (Sylvester-Hadamard `H`, fixed signs `s`); attention rotates represented Q into that basis after RoPE and rotates its FP32 output back before the output gate;
+- K: four bits per feature (sign plus a 3-bit magnitude index), two codes per byte;
+- V: three bits per feature (sign plus a 2-bit magnitude index), as 12 bytes per 32 features (two magnitude words and one sign word);
+- K scale and V scale: one binary16 `FP16_rn(||x|| / ||c||)` per head vector (norm correction), where `c` is the signed level vector. Levels are exact binary16 high bytes, chosen from the Gaussian Lloyd-Max codebooks with a fixed level-domain scale (3/4 for K, 24/25 for V); a K scale above 32752 is rejected at append so every staged product stays finite.
+
+Its qualifier is `ninfer_r9700_tq_kv_qual` against the oracle in `tests/ops/tq_kv_oracle.h`. Quality evidence (BF16-source scorer, cache-only arms) is in `profiles/ppl/kv-codec-eval-20261115/`.
+
+The codec is fixed for an Engine's lifetime and requests cannot select it. NVFP4 uses no global scales or K mean, and both four-plane codecs qualify only G16 in their one plane order below. Sections below that name the three-plane format apply to both codecs unless they say otherwise.
 
 There is no K mean, homogeneous cache dtype, or per-request cache-format selector. Represented BF16 K/V inputs are quantized only when appended. Attention reads the stored representation directly; it never gathers the cache into a request-contiguous buffer.
 

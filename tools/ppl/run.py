@@ -2248,8 +2248,8 @@ def main() -> int:
         default=DEFAULT_KV_CACHE,
         help=(
             f"candidate growing-KV codec (default: {DEFAULT_KV_CACHE}, the scorer default); "
-            "nvfp4 is named on every candidate ninfer-ppl command and requires the G16 "
-            "build only; the BF16 reference has no lossy cache and ignores it"
+            "nvfp4 and tq-k4-v3 are named on every candidate ninfer-ppl command and "
+            "require the G16 build only; the BF16 reference has no lossy cache and ignores it"
         ),
     )
     parser.add_argument(
@@ -2425,10 +2425,10 @@ def main() -> int:
         for name in profiles
     }
     selected_candidates = [name for name in profiles if name != BASELINE]
-    if args.kv_cache == "nvfp4" and any(
+    if args.kv_cache != DEFAULT_KV_CACHE and any(
         PROFILES[name].value_group != 16 for name in selected_candidates
     ):
-        raise SystemExit("--kv-cache nvfp4 requires the G16 value-group build only")
+        raise SystemExit(f"--kv-cache {args.kv_cache} requires the G16 value-group build only")
     missing_gates = [name for name in selected_candidates if name not in gates]
     if missing_gates and not args.allow_ungated:
         raise SystemExit(

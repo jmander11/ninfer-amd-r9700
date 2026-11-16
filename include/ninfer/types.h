@@ -137,14 +137,25 @@ struct LoadProgress {
 // Startup-fixed growing Text/MTP cache codec. Fp8KInt4V (default): FP8 E4M3FN K, signed INT4 V and
 // FP16 V-group scales, 416 bytes per head-token. Nvfp4 (opt-in): E2M1 K and V with one E4M3FN scale
 // per 16 features of each, 288 bytes per head-token, so automatic capacity holds about 1.44x the
-// context at somewhat higher K error. Retained RAM and SSD images bind their format.
+// context at somewhat higher K error. TqK4V3 (opt-in): TurboQuant-style rotated codes, 4-bit K and
+// 3-bit V with one FP16 scale per head vector of each, 228 bytes per head-token (about 1.26x the
+// NVFP4 context). Retained RAM and SSD images bind their format.
 enum class KvCacheFormat : std::uint8_t {
     Fp8KInt4V,
     Nvfp4,
+    TqK4V3,
 };
 
 [[nodiscard]] constexpr const char* kv_cache_format_name(KvCacheFormat format) noexcept {
-    return format == KvCacheFormat::Nvfp4 ? "nvfp4" : "fp8-k-int4-v";
+    switch (format) {
+    case KvCacheFormat::Nvfp4:
+        return "nvfp4";
+    case KvCacheFormat::TqK4V3:
+        return "tq-k4-v3";
+    case KvCacheFormat::Fp8KInt4V:
+        break;
+    }
+    return "fp8-k-int4-v";
 }
 
 struct EngineOptions {

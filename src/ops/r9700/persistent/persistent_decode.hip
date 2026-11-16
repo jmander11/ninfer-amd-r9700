@@ -293,17 +293,19 @@ struct QuantizeNormalized : WorkGrid<9> {
     }
 };
 
+template <bool TqUnrotate>
 struct QuantizeGated : WorkGrid<6> {
     static constexpr std::uint32_t kVectors = 768U;
     static constexpr auto kernel =
-        &linear::fp8_activation_kernels::fp8_quantize_gated_kernel<kVectors>;
+        &linear::fp8_activation_kernels::fp8_quantize_gated_kernel<kVectors, TqUnrotate>;
     static constexpr std::uint32_t launch_threads = kVectors;
     static constexpr std::uint32_t threads        = kBlockThreads;
     using Shared                                  = linear::fp8_encode::EncodeShared<threads>;
 
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
-        linear::fp8_activation_kernels::quantize_gated_body<kVectors, threads>(cta, shared, a...);
+        linear::fp8_activation_kernels::quantize_gated_body<kVectors, threads, TqUnrotate>(
+            cta, shared, a...);
     }
 };
 
@@ -399,31 +401,36 @@ struct GdnRecord {
     }
 };
 
-template <rope_kernels::Profile P>
+template <rope_kernels::Profile P, bool TqRotateQuery>
 struct QkNormRope : CapturedGrid {
-    static constexpr bool lds_reuse_safe          = true; // no LDS
-    static constexpr auto kernel                  = &rope_kernels::qk_norm_rope_kernel<P>;
+    static constexpr bool lds_reuse_safe = true; // no LDS
+    static constexpr auto kernel         = &rope_kernels::qk_norm_rope_kernel<P, TqRotateQuery>;
     static constexpr std::uint32_t launch_threads = rope_kernels::kQkNormRopeWaves * kWaveSize;
     static constexpr std::uint32_t threads        = launch_threads;
     using Shared                                  = NoShared;
 
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared&, const A&... a) {
-        rope_kernels::qk_norm_rope_body<P>(cta, a...);
+        rope_kernels::qk_norm_rope_body<P, TqRotateQuery>(cta, a...);
     }
 };
 
 using linear::fp8_small_t_kernels::Epilogue;
-// The kernels of a single-sequence decode graph (verification width at most 8).
+// The kernels of a single-sequence decode graph (verification width at most 8). The TQ-K4-V3
+// basis-change instantiations sit before the last default entry: the dispatch lowers to a
+// compare tree whose last entry's body is placed first, so this order keeps the default-cache
+// bodies' code layout.
 using Entries =
     std::tuple<Lq4T1<false, false>, Lq4T1<true, false>, Lq4T1<false, true>, Lq4SmallT<false, false>,
                Lq4SmallT<true, false>, Lq4SmallT<false, true>, Fp8SmallT<Epilogue::Store>,
                Fp8SmallT<Epilogue::PairSplit>, Fp8SmallT<Epilogue::Residual>, QuantizeActivation,
-               QuantizeNormalized, QuantizeGated, QuantizeGatedRmsNorm, GdnNormalizedFront,
+               QuantizeNormalized, QuantizeGated<false>, QuantizeGatedRmsNorm, GdnNormalizedFront,
                GdnPairConvRecord<4U>, GdnPairConvRecord<5U>, GdnPairConvRecord<6U>,
-               GdnPairConvRecord<7U>, GdnPairConvRecord<8U>, GdnRecord,
-               QkNormRope<rope_kernels::Profile::Text1D>,
-               QkNormRope<rope_kernels::Profile::TextMrope>>;
+               GdnPairConvRecord<7U>, GdnPairConvRecord<8U>, GdnRecord, QuantizeGated<true>,
+               QkNormRope<rope_kernels::Profile::Text1D, true>,
+               QkNormRope<rope_kernels::Profile::TextMrope, true>,
+               QkNormRope<rope_kernels::Profile::Text1D, false>,
+               QkNormRope<rope_kernels::Profile::TextMrope, false>>;
 constexpr std::size_t kEntryCount = std::tuple_size_v<Entries>;
 
 template <class E, std::size_t I = 0>

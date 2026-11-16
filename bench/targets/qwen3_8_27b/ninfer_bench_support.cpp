@@ -291,7 +291,7 @@ std::string usage_text(std::string_view program) {
         << "  --warmup <n>                discarded repetitions (default: " << kDefaultWarmup
         << ")\n"
         << "  --max-ctx <tokens>          override auto-sized context capacity\n"
-        << "  --kv-cache <fp8-int4|nvfp4> growing Text/MTP KV codec (default: fp8-int4)\n"
+        << "  --kv-cache <fp8-int4|nvfp4|tq-k4-v3> growing Text/MTP KV codec (default: fp8-int4)\n"
         << "  --kv-capacity <workload|auto> exact workload capacity or maximum capacity with\n"
         << "                              the default 32 MiB headroom (default: workload)\n"
         << "  --prefill-chunk <tokens>    multiple of " << kPrefillChunkAlignment
@@ -379,8 +379,10 @@ BenchOptions parse_args(int argc, char** argv) {
                 options.kv_cache_format = ninfer::KvCacheFormat::Fp8KInt4V;
             } else if (selected == "nvfp4") {
                 options.kv_cache_format = ninfer::KvCacheFormat::Nvfp4;
+            } else if (selected == "tq-k4-v3") {
+                options.kv_cache_format = ninfer::KvCacheFormat::TqK4V3;
             } else {
-                throw std::invalid_argument("--kv-cache must be fp8-int4 or nvfp4");
+                throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
             }
         } else if (arg == "--kv-capacity") {
             const std::string selected = value("--kv-capacity");

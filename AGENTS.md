@@ -85,7 +85,9 @@ compiled only for `gfx1201` and tuned on one AMD Radeon AI PRO R9700. The sole s
 Qwen3.8-27B. Its growing Text/MTP cache uses one startup-selected codec. The default has exactly
 three planes: FP8 E4M3FN keys, signed INT4 values, and FP16 value scales. Opt-in `--kv-cache nvfp4`
 stores E2M1 keys and values with one E4M3 scale per 16 features of each, supports every feature of
-the default, and is not yet the default. There is no per-request cache selector or retained
+the default, and is not yet the default. Opt-in `--kv-cache tq-k4-v3` stores Hadamard-rotated 4-bit
+keys and 3-bit values with one FP16 norm-corrected scale per head vector of each (228 bytes per
+head-token); it is under qualification. There is no per-request cache selector or retained
 compatibility backend. The production Text weights are `qwen3.8-27b/r9700-lq4` (profile
 `R9700Lq4`): GPTQ-rounded LQ4 Text projections and output head with 21 row-scaled FP8
 protections (2026-09-30), admitted by the BF16-source PPL, NIAH, exact-token, and whole-inference

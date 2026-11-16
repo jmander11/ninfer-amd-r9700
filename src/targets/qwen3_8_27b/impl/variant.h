@@ -110,9 +110,10 @@ struct Variant {
                                                       hipStream_t stream,
                                                       Tensor* normalized = nullptr);
         // - the attention output gate BF16(BF16(attention) * sigmoid(gate)) [6144, T];
+        //   with tq_unrotate, attention is in the TQ-K4-V3 basis and rotated back first.
         [[nodiscard]] bool lq4_gated_projections(const Tensor& gate, const Tensor& attention_fp32,
                                                  std::span<const Lq4Target> targets,
-                                                 hipStream_t stream);
+                                                 hipStream_t stream, bool tq_unrotate = false);
         // - the GDN gated per-head RMSNorm of `recurrent_output` with gate `z` [6144, T].
         [[nodiscard]] bool lq4_gated_rmsnorm_projections(const Tensor& recurrent_output,
                                                          const Tensor& norm, const Tensor& z,
@@ -392,17 +393,17 @@ struct Variant {
     [[nodiscard]] static bool
     attention_gated_output_projection(const Tensor& gate, const Tensor& attention_fp32,
                                       const Weight& weight, Tensor& residual, hipStream_t stream,
-                                      ExecutionState* execution, std::int32_t text_layer);
+                                      ExecutionState* execution, std::int32_t text_layer,
+                                      bool tq_unrotate = false);
     // The family schedule owns append/publication ordering and supplies the resulting typed read
     // capability. This target leaf owns the fixed Qwen3.8 full-attention geometry and R9700
     // implementation; it cannot manufacture a cache view or publish a frontier.
-    static void full_attention(const Tensor& normalized_query,
-                               const qwen3::PagedKVLayerRead& cache_read,
-                               const Tensor& cache_positions, Tensor& attention_fp32,
-                               WorkspaceArena& workspace, hipStream_t stream,
-                               const Tensor* ancestor_masks    = nullptr,
-                               const Tensor* prefix_lengths    = nullptr,
-                               const Tensor* active_query_rows = nullptr);
+    static void
+    full_attention(const Tensor& normalized_query, const qwen3::PagedKVLayerRead& cache_read,
+                   const Tensor& cache_positions, Tensor& attention_fp32, WorkspaceArena& workspace,
+                   hipStream_t stream, const Tensor* ancestor_masks = nullptr,
+                   const Tensor* prefix_lengths    = nullptr,
+                   const Tensor* active_query_rows = nullptr, bool tq_rotated_basis = false);
     [[nodiscard]] static std::size_t
     full_attention_workspace_capacity_bytes(std::int32_t maximum_query_rows,
                                             std::uint32_t maximum_visible_context,
@@ -422,7 +423,8 @@ struct Variant {
     // nothing, when some sequence is outside that route; the caller then attends one by one.
     [[nodiscard]] static bool
     full_attention_sequences(std::span<const FullAttentionSequence> sequences,
-                             WorkspaceArena& workspace, hipStream_t stream);
+                             WorkspaceArena& workspace, hipStream_t stream,
+                             bool tq_rotated_basis = false);
     [[nodiscard]] static std::size_t
     full_attention_sequences_workspace_capacity_bytes(std::int32_t sequences,
                                                       std::int32_t maximum_query_rows,
@@ -661,8 +663,9 @@ struct Variant {
             6, 6, 4, 4, 2, 4, 4, 6, 32, 32, 32, 34, 34, 34, 34, 34};
         constexpr std::array<std::size_t, kMaximumConcurrency> nvfp4_mib{
             0, 0, 0, 12, 12, 10, 10, 8, 0, 0, 0, 0, 0, 0, 0, 0};
+        // TQ-K4-V3 starts from the NVFP4 bound (same four-plane route family plus rotation).
         const std::size_t codec_mib =
-            cache == KvCacheFormat::Nvfp4 ? nvfp4_mib[concurrency - 1U] : 0U;
+            cache == KvCacheFormat::Fp8KInt4V ? 0U : nvfp4_mib[concurrency - 1U];
         return (2U + main_mib[concurrency - 1U] + codec_mib + (disk_cache_enabled ? 2U : 0U))
                << 20U;
     }

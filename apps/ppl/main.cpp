@@ -272,8 +272,10 @@ int main(int argc, char** argv) {
                 const std::string selected = value("--kv-cache");
                 if (selected == "nvfp4") {
                     kv_cache_format = ninfer::KvCacheFormat::Nvfp4;
+                } else if (selected == "tq-k4-v3") {
+                    kv_cache_format = ninfer::KvCacheFormat::TqK4V3;
                 } else if (selected != "fp8-int4") {
-                    throw std::invalid_argument("--kv-cache must be fp8-int4 or nvfp4");
+                    throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
                 }
             } else if (arg == "--max-context") {
                 max_context = static_cast<std::uint32_t>(std::stoul(value("--max-context")));
@@ -312,7 +314,7 @@ int main(int argc, char** argv) {
                 << "  --dflash-verify-width <n>   optional DFlash chain width K+1\n"
                 << "  --device-graph / --no-device-graph  default: graphs on (production decode)\n"
                 << "  --tokens <n>                score/encode the first n ids (default: all)\n"
-                << "  --kv-cache <fp8-int4|nvfp4> growing KV codec (default: fp8-int4)\n"
+                << "  --kv-cache <fp8-int4|nvfp4|tq-k4-v3> growing KV codec (default: fp8-int4)\n"
                 << "  --max-context <n>           message-input context ceiling (default: 4096)\n"
                 << "  --prefill-chunk <n>         default " << ninfer::kDefaultPrefillChunk << "\n"
                 << "  --device <id>\n"
