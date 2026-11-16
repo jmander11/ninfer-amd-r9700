@@ -378,7 +378,7 @@ void qualify_host_hybrid_allocation_bound() {
                 runtime::build_sequence_candidate_for_qualification(inputs, 4096U);
             // Default NVFP4: two packed E2M1 vectors plus one E4M3 scale per 16
             // features of each K/V head vector.
-            constexpr std::size_t head_bytes    = 2U * (256U / 2U + 256U / 16U);
+            constexpr std::size_t head_bytes    = std::size_t{2U} * (256U / 2U + 256U / 16U);
             constexpr std::size_t page_bytes    = std::size_t{16U} * 4U * head_bytes * 64U;
             constexpr std::size_t physical_unit = 2ULL * 1024ULL * 1024ULL;
             const std::size_t expected_disk =
@@ -515,7 +515,7 @@ void qualify_host_dflash_graph_allowance() {
             const auto logical               = plan->persistent.bytes + plan->workspace.capacity +
                                                plan->request_transient_capacity_bytes +
                                                plan->graph_allowance_bytes;
-            constexpr std::size_t head_bytes = 2U * (256U / 2U + 256U / 16U);
+            constexpr std::size_t head_bytes = std::size_t{2U} * (256U / 2U + 256U / 16U);
             constexpr std::size_t staging_bytes = std::size_t{16U} * 4U * head_bytes * 64U * 32U;
             const std::size_t disk_mib = (staging_bytes + (2U << 20U) - 1U) / (2U << 20U) * 2U + 2U;
             const std::size_t internal_mib = 4U + 2U + main_driver_mib[c - 1U] +

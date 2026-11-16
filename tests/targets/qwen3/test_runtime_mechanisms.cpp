@@ -167,7 +167,8 @@ void test_fp8_k_int4_v_decoder_layout() {
         ninfer::LayoutBuilder codec_builder;
         const auto codec_layout = q3::plan_decoder_state(codec_builder, four_plane);
         expect(codec_layout.text_kv.storage.storage.planes.size() == 8 &&
-                   codec_layout.mtp_kv->storage.storage.planes.size() == 4,
+                   codec_layout.mtp_kv.has_value() &&
+                   codec_layout.mtp_kv.value().storage.storage.planes.size() == 4,
                "default NVFP4 and opt-in TQ retain four planes per Text/MTP layer");
         four_plane.value_group = 32;
         try {

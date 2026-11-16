@@ -294,21 +294,20 @@ void TokenGrammarState::fill_masks(std::span<const TokenId> tokens,
         // Fork every node from its filled parent: a rolled-back accept could leave the parent
         // rewritten by budget enforcement.
         std::vector<std::optional<xgrammar::GrammarMatcher>> nodes(tokens.size());
-        nodes[0].emplace(committed_.Fork());
-        fill(0, *nodes[0]);
+        fill(0, nodes[0].emplace(committed_.Fork()));
         for (std::size_t node = 1; node < tokens.size(); ++node) {
             const auto parent = static_cast<std::size_t>(parents[node]);
-            if (!nodes[parent]) { continue; }
+            auto& parent_node = nodes[parent];
+            if (!parent_node.has_value()) { continue; }
             const bool framing = !replay_close_allowed.empty() && replay_close_allowed[parent] &&
                                  tokens[node] == replay_close;
             auto child  = !reasoning_close_allowed.empty() && reasoning_close_allowed[parent] &&
                                   tokens[node] == replay_close
                               ? xgrammar::GrammarMatcher(grammar_->compiled)
-                              : nodes[parent]->Fork();
+                              : parent_node.value().Fork();
             int history = 0;
             if ((framing || advance(child, tokens[node], history)) && !child.IsTerminated()) {
-                nodes[node].emplace(std::move(child));
-                fill(node, *nodes[node]);
+                fill(node, nodes[node].emplace(std::move(child)));
             }
         }
     } else {
@@ -779,8 +778,12 @@ std::optional<ToolCall> TokenGrammarData::decode_call(std::string_view text) con
                         escaped += chunk;
                         escaped_end = close - 1;
                         if (matcher.AcceptString("\"")) {
-                            if (auto call = self(self, matcher, rest,
-                                                 serialized + '"' + escaped + '"', count + 1)) {
+                            std::string quoted = serialized;
+                            quoted += '"';
+                            quoted += escaped;
+                            quoted += '"';
+                            if (auto call =
+                                    self(self, matcher, rest, std::move(quoted), count + 1)) {
                                 return call;
                             }
                             matcher.Rollback(1);
