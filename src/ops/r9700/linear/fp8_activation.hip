@@ -365,11 +365,13 @@ hipError_t fp8_quantize_gated_activation(const Fp8GatedQuantizeArgs& args,
                        status_bytes(workspace))) {
         return hipErrorInvalidValue;
     }
-    hipLaunchKernelGGL(
-        fp8_quantize_gated_kernel<kGatedColumns / 8U>,
-        dim3(workspace.tokens + cache_warm_ctas(args.warm, kGatedColumns / 8U, workspace.tokens)),
-        dim3(kGatedColumns / 8U), 0, stream, args.gate, args.attention, workspace.codes,
-        workspace.scales, workspace.status, args.warm, workspace.tokens);
+    constexpr std::uint32_t threads = kGatedColumns / 8U;
+    const dim3 grid(workspace.tokens + cache_warm_ctas(args.warm, threads, workspace.tokens));
+    const auto kernel = args.tq_unrotate ? fp8_quantize_gated_kernel<threads, true>
+                                         : fp8_quantize_gated_kernel<threads, false>;
+    hipLaunchKernelGGL(kernel, grid, dim3(threads), 0, stream, args.gate, args.attention,
+                       workspace.codes, workspace.scales, workspace.status, args.warm,
+                       workspace.tokens);
     return hipGetLastError();
 }
 

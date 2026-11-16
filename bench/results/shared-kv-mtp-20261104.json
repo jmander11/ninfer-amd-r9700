@@ -1,0 +1,143 @@
+{
+  "measured_on": "2026-11-04",
+  "hardware": {
+    "gpu": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "rocm": "10",
+    "hip": "7.15.26333",
+    "kernel": "7.0.0-38-generic",
+    "driver": "7.1.3.31500000"
+  },
+  "artifact_identity": "qwen3.8-27b/r9700-lq4",
+  "settings": {
+    "build": "Release",
+    "device_graphs": true,
+    "power": "auto",
+    "prefill_chunk": 2048,
+    "kv_capacity": "auto",
+    "vision": false,
+    "ram_prefix_cache": false,
+    "disk_prefix_cache": false,
+    "speculative_backend": "mtp",
+    "adaptive_draft": true,
+    "max_draft_tokens": 3,
+    "optimized_draft_head": true,
+    "max_context": 262144
+  },
+  "graph_environment": {
+    "DEBUG_HIP_GRAPH_CLASSIC_PATH": "0",
+    "ROC_ENABLE_LARGE_BAR": "0",
+    "ROC_SKIP_KERNEL_ARG_COPY": "0",
+    "HSA_DISABLE_FRAGMENT_ALLOCATOR": "1",
+    "DEBUG_HIP_GRAPH_BATCH_SIZE": "16384"
+  },
+  "method": "server startup capacity plus eight output tokens per concurrent request at every C1..16",
+  "notes": [
+    "Allocated shared capacity, not an all-lane near-capacity qualification.",
+    "Raw startup metadata and responses remain local under profiles/pr4-review/mtp-capacity/."
+  ],
+  "results": [
+    {
+      "concurrency": 1,
+      "kv_capacity": 262144,
+      "graph_allowance_bytes": 184549376,
+      "graph_observed_bytes": 54525952
+    },
+    {
+      "concurrency": 2,
+      "kv_capacity": 524288,
+      "graph_allowance_bytes": 230686720,
+      "graph_observed_bytes": 54525952
+    },
+    {
+      "concurrency": 3,
+      "kv_capacity": 633600,
+      "graph_allowance_bytes": 276824064,
+      "graph_observed_bytes": 54525952
+    },
+    {
+      "concurrency": 4,
+      "kv_capacity": 626176,
+      "graph_allowance_bytes": 322961408,
+      "graph_observed_bytes": 54525952
+    },
+    {
+      "concurrency": 5,
+      "kv_capacity": 618752,
+      "graph_allowance_bytes": 369098752,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 6,
+      "kv_capacity": 611200,
+      "graph_allowance_bytes": 415236096,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 7,
+      "kv_capacity": 603776,
+      "graph_allowance_bytes": 461373440,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 8,
+      "kv_capacity": 596224,
+      "graph_allowance_bytes": 507510784,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 9,
+      "kv_capacity": 587776,
+      "graph_allowance_bytes": 553648128,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 10,
+      "kv_capacity": 580352,
+      "graph_allowance_bytes": 599785472,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 11,
+      "kv_capacity": 572864,
+      "graph_allowance_bytes": 645922816,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 12,
+      "kv_capacity": 565312,
+      "graph_allowance_bytes": 692060160,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 13,
+      "kv_capacity": 557888,
+      "graph_allowance_bytes": 738197504,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 14,
+      "kv_capacity": 550400,
+      "graph_allowance_bytes": 784334848,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 15,
+      "kv_capacity": 542976,
+      "graph_allowance_bytes": 830472192,
+      "graph_observed_bytes": 58720256
+    },
+    {
+      "concurrency": 16,
+      "kv_capacity": 535488,
+      "graph_allowance_bytes": 876609536,
+      "graph_observed_bytes": 58720256
+    }
+  ],
+  "candidate": {
+    "experimental_base": "682ae41d",
+    "pull_request": 4,
+    "pull_request_head": "32a7aa0653da90493daf743bfc43492f768c025f",
+    "local_corrections": "pinned formatting; C16 attention qualification fixture; benchmark MTP support and code instruction placement"
+  }
+}

@@ -108,6 +108,7 @@ PersistentLayout persistent_layout(const SequencePlanImpl& plan) {
                      .kv_heads                  = TextConfig::kv_heads,
                      .attention_head_dim        = TextConfig::head_dim,
                      .value_group               = kR9700TextKVValueGroup,
+                     .kv_cache_format           = plan.kv_cache_format,
                      .text_plane_layouts        = kR9700TextKVPlaneLayouts,
                      .mtp_plane_layouts         = kR9700TextKVPlaneLayouts,
                      .enable_mtp                = plan.features.mtp(),
@@ -776,11 +777,12 @@ void validate_target_options(DeviceContext& device, const EngineOptions& options
     if (options.max_context == 0 || options.max_context > Variant::maximum_context) {
         throw std::invalid_argument("max_context exceeds the variant native context capacity");
     }
-    if (options.prefill_chunk == 0 || options.prefill_chunk % kPrefillChunkAlignment != 0) {
-        throw std::invalid_argument("prefill_chunk must be a nonzero multiple of 128");
+    if (options.prefill_chunk == 0 || options.prefill_chunk % kPrefillChunkAlignment != 0 ||
+        options.prefill_chunk > kMaximumPrefillChunk) {
+        throw std::invalid_argument("prefill_chunk must be a multiple of 128 in [128,8192]");
     }
     if (options.max_concurrency == 0 || options.max_concurrency > kMaximumConcurrency) {
-        throw std::invalid_argument("max_concurrency must be in [1,8]");
+        throw std::invalid_argument("max_concurrency must be in [1,16]");
     }
     const std::uint32_t logical_pages = page_count(options.max_context);
     const std::uint32_t minimum_pages = std::max(logical_pages, options.max_concurrency);
@@ -823,6 +825,10 @@ void validate_target_options(DeviceContext& device, const EngineOptions& options
     case SpeculativeBackend::DFlash:
         if (kMaximumDFlashDraftTokens == 0) {
             throw std::invalid_argument("DFlash is not supported by this target");
+        }
+        if (options.max_concurrency > kDFlashMaximumConcurrency) {
+            throw std::invalid_argument(
+                "DFlash supports max_concurrency 1..12; use MTP or no speculation above 12");
         }
         if (options.speculative.draft_tokens == 0 ||
             options.speculative.draft_tokens > kMaximumDFlashDraftTokens) {
@@ -912,6 +918,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
     impl->kv_disk_capacity_bytes   = inputs.kv_disk_capacity_bytes;
     impl->kv_disk_location         = inputs.kv_disk_location;
     impl->kv_disk_compress         = inputs.kv_disk_compress;
+    impl->kv_cache_format          = inputs.kv_cache_format;
     impl->model_id                 = inputs.model_id;
     impl->weights_id               = inputs.weights_id;
     impl->artifact_tensor_identity = inputs.artifact_tensor_identity;
@@ -985,7 +992,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
                     checked_add(Variant::runtime_allocation_overhead_bound(impl->weights_profile),
                                 Variant::runtime_driver_reservation_bytes(
                                     impl->weights_profile, impl->max_concurrency,
-                                    impl->kv_disk_capacity_bytes != 0U),
+                                    impl->kv_disk_capacity_bytes != 0U, impl->kv_cache_format),
                                 "sequence driver and physical allocation bounds"),
                     "sequence physical allocation bound"),
         "sequence graph allowance");
@@ -1040,6 +1047,7 @@ make_sequence_planner_impl(DeviceContext& device, const EngineOptions& options,
         .kv_disk_capacity_bytes   = options.kv_disk_capacity_bytes,
         .kv_disk_location         = options.kv_disk_location,
         .kv_disk_compress         = options.kv_disk_compress,
+        .kv_cache_format          = options.kv_cache_format,
         .model_id                 = options.model_id,
         .weights_id               = options.weights_id,
         .artifact_tensor_identity = options.artifact_tensor_identity,

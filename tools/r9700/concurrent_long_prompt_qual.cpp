@@ -1,4 +1,5 @@
 #include "ninfer/engine.h"
+#include "qual_kv_format.h"
 #include <nlohmann/json.hpp>
 #include <array>
 #include <barrier>
@@ -25,10 +26,14 @@ int main(int argc, char** argv) {
         if (!std::filesystem::create_directory(argv[2]))
             throw std::runtime_error("fresh cache directory required");
         ninfer::EngineOptions config;
-        config.artifact_path              = argv[1];
-        config.max_context                = 262144;
-        config.max_concurrency            = 6;
-        config.kv_capacity                = ninfer::KvCapacityPolicy::automatic();
+        config.artifact_path   = argv[1];
+        config.max_context     = 262144;
+        config.max_concurrency = 6;
+        config.kv_cache_format = ninfer::qual::kv_cache_format_from_environment();
+        // 1.75 full contexts: warm followups of resident clients still decode together, but the
+        // four clients' retained prefixes (about 515K-529K final-turn tokens) cannot all stay
+        // resident, so every codec spills to RAM and SSD and restores from them.
+        config.kv_capacity                = ninfer::KvCapacityPolicy::explicit_capacity(458752);
         config.prefill_chunk              = 2048;
         config.kv_ram_capacity_bytes      = 12ULL << 30;
         config.kv_disk_capacity_bytes     = 25ULL << 30;

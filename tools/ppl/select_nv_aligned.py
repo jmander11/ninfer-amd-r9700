@@ -2,6 +2,7 @@
 
 Uses the immutable three-text NVFP4 reference. It neither changes the default
 artifact nor selects a global optimum. Each output cell is create-only.
+This historical protocol pins AMD --kv-cache fp8-int4, not the production NVFP4 default.
 """
 
 from __future__ import annotations

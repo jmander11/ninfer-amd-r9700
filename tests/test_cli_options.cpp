@@ -147,6 +147,14 @@ int main() {
     failures += check(zero_drafts_rejected, "explicit zero drafts silently selected the default");
 
     const ninfer::cli::Options defaults = parse({"ninfer", "model.ninfer", "--prompt", "hi"});
+    failures += check(defaults.kv_cache_format == ninfer::KvCacheFormat::Nvfp4,
+                      "CLI must default to NVFP4");
+    failures +=
+        check(parse({"ninfer", "model.ninfer", "--prompt", "hi", "--kv-cache", "fp8-int4"})
+                          .kv_cache_format == ninfer::KvCacheFormat::Fp8KInt4V &&
+                  parse({"ninfer", "model.ninfer", "--prompt", "hi", "--kv-cache", "tq-k4-v3"})
+                          .kv_cache_format == ninfer::KvCacheFormat::TqK4V3,
+              "CLI must retain both opt-in codecs");
     failures += check(defaults.prefill_chunk == ninfer::kDefaultPrefillChunk,
                       "CLI prefill chunk diverges from the product default");
 

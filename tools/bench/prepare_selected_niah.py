@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare the exact post-terminal 64K NIAH admission campaign."""
+"""Prepare the exact post-terminal 64K NIAH admission campaign.
+
+This fixed historical admission protocol pins --kv-cache fp8-int4, not default NVFP4.
+"""
 
 from __future__ import annotations
 
@@ -122,7 +125,7 @@ def prepare(selection: Path, output: Path) -> dict:
             "done\n"
             'test -x "$serve"\n'
             '"$serve" "$artifact" --host 127.0.0.1 --port 18081 '
-            "--model-id qwen3.8-27b --max-context 262144 --kv-capacity 262144 "
+            "--model-id qwen3.8-27b --max-context 262144 --kv-capacity 262144 --kv-cache fp8-int4 "
             "--max-concurrency 1 --prefill-chunk " + str(route["selected_prefill_chunk"]) + " "
             '--no-prefix-reuse --no-thinking --request-log-jsonl "$root/server.requests.jsonl" '
             '>"$root/server.stdout.log" 2>"$root/server.stderr.log" &\n'

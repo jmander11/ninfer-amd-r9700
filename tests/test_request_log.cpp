@@ -174,8 +174,8 @@ int main() {
         check(server.at("engine").at("log_stats_interval_ms") == 2500, "stats interval missing");
     failures += check(server.at("server").at("request_log_jsonl") == "requests.jsonl",
                       "request log path missing");
-    failures += check(server.at("engine").at("kv_cache_format") == "fp8-k-int4-v",
-                      "fixed KV format missing");
+    failures +=
+        check(server.at("engine").at("kv_cache_format") == "nvfp4", "fixed KV format missing");
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
     failures += check(server.at("engine").at("xattention_qualification") == true &&
                           server.at("engine").at("xattention_profile") == "b128-s16-tau900" &&

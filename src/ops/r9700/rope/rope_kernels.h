@@ -2,6 +2,7 @@
 
 // RoPE coefficient profiles and the Qwen3.8 Text Q/K norm + RoPE kernel (ops::qk_norm_rope),
 // shared by the RoPE launcher (rope.hip) and the persistent decode kernel.
+#include "ops/r9700/kv/tq_k4v3_device.h"
 #include "ops/r9700/persistent/persistent_cta.h"
 
 #include <hip/hip_bfloat16.h>
@@ -100,12 +101,15 @@ __device__ __forceinline__ void coefficient(const std::int32_t* positions, int t
 
 // Qwen3.8 Text Q/K normalization and RoPE in one pass: one wave per (token, head), eight features
 // per lane. out = RoPE(BF16(x * rsqrt(mean(x^2) + eps) * (w + 1))) with the per-head [256] gain w;
-// only features [0,64) rotate (pair i with i + 32, lanes 0..3 with lanes 4..7).
+// only features [0,64) rotate (pair i with i + 32, lanes 0..3 with lanes 4..7). The TqRotateQuery
+// instantiation takes each query head's FP32 RoPE result into the TQ-K4-V3 basis (tq_k4v3_codec.h)
+// before its single BF16 store, qn = BF16(R RoPE(...)); keys are never rotated (the cache append
+// rotates them). A compile-time choice, so the default-cache bodies carry no FWHT code.
 constexpr int kQkNormRopeWaves  = 4;
 constexpr int kQkNormRopeGroups = (kTextQ + kTextK + kQkNormRopeWaves - 1) / kQkNormRopeWaves;
 static_assert((kTextQ + kTextK) % kQkNormRopeWaves == 0);
 
-template <Profile P, class Cta>
+template <Profile P, bool TqRotateQuery, class Cta>
 __device__ __forceinline__ void
 qk_norm_rope_body(const Cta& cta, const std::int32_t* positions, const hip_bfloat16* q,
                   const hip_bfloat16* k, std::int64_t q_stride, std::int64_t k_stride,
@@ -146,35 +150,44 @@ qk_norm_rope_body(const Cta& cta, const std::int32_t* positions, const hip_bfloa
     float partner[8];
 #pragma unroll
     for (int i = 0; i < 8; ++i) partner[i] = __shfl_xor(value[i], 4, 32);
-    std::uint32_t out[4];
-#pragma unroll
-    for (int i = 0; i < 8; i += 2) {
-        float pair_out[2];
-#pragma unroll
-        for (int j = 0; j < 2; ++j) {
-            const int feature = lane * 8 + i + j;
-            float result      = value[i + j];
-            if (feature < kTextR) {
-                float sine = 0.0F, cosine = 0.0F;
-                coefficient<P>(positions, tokens, token, feature % (kTextR / 2), &sine, &cosine);
-                result = feature < kTextR / 2 ? value[i + j] * cosine - partner[i + j] * sine
-                                              : value[i + j] * cosine + partner[i + j] * sine;
-            }
-            pair_out[j] = result;
+    const auto rope_feature = [&](int i) {
+        const int feature = lane * 8 + i;
+        float result      = value[i];
+        if (feature < kTextR) {
+            float sine = 0.0F, cosine = 0.0F;
+            coefficient<P>(positions, tokens, token, feature % (kTextR / 2), &sine, &cosine);
+            result = feature < kTextR / 2 ? value[i] * cosine - partner[i] * sine
+                                          : value[i] * cosine + partner[i] * sine;
         }
-        out[i / 2] = static_cast<std::uint32_t>(hip_bfloat16(pair_out[0]).data) |
-                     (static_cast<std::uint32_t>(hip_bfloat16(pair_out[1]).data) << 16);
+        return result;
+    };
+    const auto pack = [](float low, float high) {
+        return static_cast<std::uint32_t>(hip_bfloat16(low).data) |
+               (static_cast<std::uint32_t>(hip_bfloat16(high).data) << 16);
+    };
+    std::uint32_t out[4];
+    if constexpr (TqRotateQuery) {
+        float result[8];
+#pragma unroll
+        for (int i = 0; i < 8; ++i) result[i] = rope_feature(i);
+        // Wave-uniform: one head per wave.
+        if (is_query) r9700::kv::tq::rotate_wave(result, static_cast<std::uint32_t>(lane));
+#pragma unroll
+        for (int i = 0; i < 8; i += 2) out[i / 2] = pack(result[i], result[i + 1]);
+    } else {
+#pragma unroll
+        for (int i = 0; i < 8; i += 2) out[i / 2] = pack(rope_feature(i), rope_feature(i + 1));
     }
     reinterpret_cast<uint4*>(destination)[lane] = uint4{out[0], out[1], out[2], out[3]};
 }
 
-template <Profile P>
+template <Profile P, bool TqRotateQuery>
 __global__ __launch_bounds__(kQkNormRopeWaves * 32) void qk_norm_rope_kernel(
     const std::int32_t* positions, const hip_bfloat16* q, const hip_bfloat16* k,
     std::int64_t q_stride, std::int64_t k_stride, const hip_bfloat16* q_norm,
     const hip_bfloat16* k_norm, float eps, hip_bfloat16* qn, hip_bfloat16* kn, int tokens) {
-    qk_norm_rope_body<P>(r9700::persistent::LaunchCta{}, positions, q, k, q_stride, k_stride,
-                         q_norm, k_norm, eps, qn, kn, tokens);
+    qk_norm_rope_body<P, TqRotateQuery>(r9700::persistent::LaunchCta{}, positions, q, k, q_stride,
+                                        k_stride, q_norm, k_norm, eps, qn, kn, tokens);
 }
 
 } // namespace ninfer::ops::rope_kernels

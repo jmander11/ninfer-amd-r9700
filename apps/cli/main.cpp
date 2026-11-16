@@ -470,6 +470,7 @@ int main(int argc, char** argv) {
         engine_options.kv_disk_capacity_bytes   = cli.kv_disk_capacity_bytes;
         engine_options.kv_disk_location         = cli.kv_disk_location;
         engine_options.kv_disk_compress         = cli.kv_disk_compress;
+        engine_options.kv_cache_format          = cli.kv_cache_format;
         engine_options.context_checkpoint_marks = cli.context_checkpoint_marks;
         engine_options.prefill_chunk            = cli.prefill_chunk;
         engine_options.speculative              = cli.speculative;

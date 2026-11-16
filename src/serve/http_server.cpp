@@ -191,11 +191,13 @@ HttpServer::HttpServer(ServeOptions options)
       response_store_(options_.response_store_max_records, options_.response_store_max_bytes,
                       options_.response_store_location),
       request_jsonl_(options_.request_log_jsonl, options_.artifact_path) {
-    const std::size_t queued_requests =
-        static_cast<std::size_t>(options_.max_concurrency) + options_.max_pending_requests;
-    const std::size_t worker_count = queued_requests + 1;
-    server_.new_task_queue         = [queued_requests, worker_count] {
-        return new httplib::ThreadPool(worker_count, queued_requests);
+    // Generation lifetimes hold at most max_concurrency + max_pending_requests workers; the
+    // reserve keeps control routes, 429 rejections and idle keep-alive connections served.
+    constexpr std::size_t kConnectionReserve = 32;
+    const std::size_t worker_count           = static_cast<std::size_t>(options_.max_concurrency) +
+                                               options_.max_pending_requests + kConnectionReserve;
+    server_.new_task_queue                   = [worker_count] {
+        return new httplib::ThreadPool(worker_count, worker_count);
     };
     server_.set_payload_max_length(options_.max_request_bytes);
     register_routes();

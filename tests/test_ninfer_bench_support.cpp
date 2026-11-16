@@ -181,7 +181,7 @@ int test_cli_contract() {
     failures += expect(qb::usage_text("ninfer_bench").find("artifact.ninfer") != std::string::npos,
                        "help names native artifact");
     failures +=
-        expect(qb::usage_text("ninfer_bench").find("--concurrency <1..8>") != std::string::npos,
+        expect(qb::usage_text("ninfer_bench").find("--concurrency <1..16>") != std::string::npos,
                "help names the product concurrency range");
     failures += expect(parse_for_test({"ninfer_bench", "--help"}).help_requested, "help flag");
 
@@ -211,7 +211,7 @@ int test_cli_contract() {
     failures += expect_throws<std::invalid_argument>(
         [] {
             (void)parse_for_test(
-                {"ninfer_bench", "--weights", "model.ninfer", "--concurrency", "9"});
+                {"ninfer_bench", "--weights", "model.ninfer", "--concurrency", "17"});
         },
         "unsupported concurrency");
     failures += expect_throws<std::invalid_argument>(
@@ -575,8 +575,8 @@ int test_report_contract() {
     failures += expect(report.at("load").at("weights_id") == "fixture-weights", "load weights id");
     failures +=
         expect(report.at("load").at("host_to_device_bytes") == 17400000000ULL, "load H2D bytes");
-    failures += expect(report.at("memory").at("kv_cache_format") == "fp8-k-int4-v",
-                       "fixed memory KV format");
+    failures +=
+        expect(report.at("memory").at("kv_cache_format") == "nvfp4", "fixed memory KV format");
     failures += expect(report.at("memory").at("kv_capacity") == 8192, "memory KV capacity");
     failures += expect(report.at("memory").at("workspace").at("capacity_bytes") == 100000000ULL,
                        "workspace capacity");

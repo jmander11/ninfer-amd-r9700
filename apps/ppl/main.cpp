@@ -90,9 +90,10 @@ void write_sidecar(const std::string& json_path, std::string_view suffix,
 }
 
 void write_cell_json(const std::string& path, const std::string& scheme, const std::string& weights,
-                     const ninfer::LoadSummary& load, std::uint32_t prefill_chunk,
-                     bool use_device_graph, ninfer::SpeculativeBackend spec,
-                     std::uint32_t draft_tokens, const ninfer::ScoreResult& score) {
+                     const ninfer::LoadSummary& load, ninfer::KvCacheFormat kv_cache_format,
+                     std::uint32_t prefill_chunk, bool use_device_graph,
+                     ninfer::SpeculativeBackend spec, std::uint32_t draft_tokens,
+                     const ninfer::ScoreResult& score) {
     std::ostringstream body;
     body << std::setprecision(17);
     body << "{\n"
@@ -100,7 +101,7 @@ void write_cell_json(const std::string& path, const std::string& scheme, const s
          << "  \"weights\": " << json_escape(weights) << ",\n"
          << "  \"model_id\": " << json_escape(load.model_id) << ",\n"
          << "  \"weights_id\": " << json_escape(load.weights_id) << ",\n"
-         << "  \"kv_format\": \"fp8-k-int4-v\",\n"
+         << "  \"kv_format\": \"" << ninfer::kv_cache_format_name(kv_cache_format) << "\",\n"
          << "  \"kv_value_group\": " << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup
          << ",\n"
          << "  \"kv_plane_layouts\": {\"key\": \""
@@ -210,21 +211,22 @@ int main(int argc, char** argv) {
         std::string ids_path;
         std::string messages_path;
         std::string text_path;
-        std::string scheme = "r9700-fp8k-int4v";
+        std::string scheme = "r9700";
         std::string out_json;
         ninfer::ScoreOptions score_options;
         ninfer::SpeculativeOptions speculative;
-        std::uint32_t tokens        = 0;
-        std::uint32_t max_context   = 4096;
-        std::uint32_t prefill_chunk = ninfer::kDefaultPrefillChunk;
-        int device                  = 0;
-        bool help                   = false;
-        bool encode                 = false;
-        bool enable_vision          = false;
-        bool enable_thinking        = false;
-        bool score_last_message     = false;
-        bool skip_set               = false;
-        bool use_device_graph       = true;
+        std::uint32_t tokens                  = 0;
+        std::uint32_t max_context             = 4096;
+        ninfer::KvCacheFormat kv_cache_format = ninfer::KvCacheFormat::Nvfp4;
+        std::uint32_t prefill_chunk           = ninfer::kDefaultPrefillChunk;
+        int device                            = 0;
+        bool help                             = false;
+        bool encode                           = false;
+        bool enable_vision                    = false;
+        bool enable_thinking                  = false;
+        bool score_last_message               = false;
+        bool skip_set                         = false;
+        bool use_device_graph                 = true;
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg(argv[i]);
             auto value = [&](const char* flag) -> const char* {
@@ -266,6 +268,17 @@ int main(int argc, char** argv) {
                 use_device_graph = false;
             } else if (arg == "--tokens") {
                 tokens = static_cast<std::uint32_t>(std::stoul(value("--tokens")));
+            } else if (arg == "--kv-cache") {
+                const std::string selected = value("--kv-cache");
+                if (selected == "nvfp4") {
+                    kv_cache_format = ninfer::KvCacheFormat::Nvfp4;
+                } else if (selected == "tq-k4-v3") {
+                    kv_cache_format = ninfer::KvCacheFormat::TqK4V3;
+                } else if (selected == "fp8-int4") {
+                    kv_cache_format = ninfer::KvCacheFormat::Fp8KInt4V;
+                } else {
+                    throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
+                }
             } else if (arg == "--max-context") {
                 max_context = static_cast<std::uint32_t>(std::stoul(value("--max-context")));
             } else if (arg == "--prefill-chunk") {
@@ -293,7 +306,7 @@ int main(int argc, char** argv) {
                    "[--vision] [options]\n"
                 << "       ninfer-ppl --encode --weights <artifact.ninfer> --text <file> --ids "
                    "<out.ids>\n"
-                << "  --scheme <name>             cell name (default: r9700-fp8k-int4v)\n"
+                << "  --scheme <name>             cell name (default: r9700)\n"
                 << "  --schedule <prefill|decode> default prefill (causal Text attention)\n"
                 << "  --skip <half|n>             warmup tokens not scored (default: half)\n"
                 << "  --spec <none|mtp|dflash>    select a speculative backend (decode score: "
@@ -303,6 +316,7 @@ int main(int argc, char** argv) {
                 << "  --dflash-verify-width <n>   optional DFlash chain width K+1\n"
                 << "  --device-graph / --no-device-graph  default: graphs on (production decode)\n"
                 << "  --tokens <n>                score/encode the first n ids (default: all)\n"
+                << "  --kv-cache <fp8-int4|nvfp4|tq-k4-v3> growing KV codec (default: nvfp4)\n"
                 << "  --max-context <n>           message-input context ceiling (default: 4096)\n"
                 << "  --prefill-chunk <n>         default " << ninfer::kDefaultPrefillChunk << "\n"
                 << "  --device <id>\n"
@@ -345,7 +359,8 @@ int main(int argc, char** argv) {
         options.artifact_path = weights;
         options.device        = device;
         options.max_context   = ids.empty() ? max_context : static_cast<std::uint32_t>(ids.size());
-        options.kv_capacity   = ninfer::KvCapacityPolicy::explicit_capacity(options.max_context);
+        options.kv_cache_format  = kv_cache_format;
+        options.kv_capacity      = ninfer::KvCapacityPolicy::explicit_capacity(options.max_context);
         options.max_concurrency  = 1;
         options.prefill_chunk    = prefill_chunk;
         options.speculative      = speculative;
@@ -377,8 +392,9 @@ int main(int argc, char** argv) {
             }
         }
         const ninfer::ScoreResult score = engine.score(std::move(prompt), score_options);
-        write_cell_json(out_json, scheme, weights, engine.load_summary(), prefill_chunk,
-                        use_device_graph, speculative.backend, speculative.draft_tokens, score);
+        write_cell_json(out_json, scheme, weights, engine.load_summary(), kv_cache_format,
+                        prefill_chunk, use_device_graph, speculative.backend,
+                        speculative.draft_tokens, score);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "ninfer-ppl: " << error.what() << '\n';

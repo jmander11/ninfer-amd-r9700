@@ -8,6 +8,12 @@ Source private host settings from `.ninfer-local.env` before GPU work, and hold 
 
 ## Bounded NVFP4 comparison
 
+The fixed historical `compare_nvfp4`, `select_fp8_capped`, `select_nv_aligned`, and
+`endpoint_precision` protocols explicitly pin the AMD scorer/benchmark to `fp8-int4`.
+The post-terminal exact-token, NIAH and DFlash preparation tools likewise pin that
+admitted codec. Their help text distinguishes these protocols from default NVFP4 work;
+the frozen NVIDIA reference and dated evidence are unchanged.
+
 `compare_nvfp4.py` scores the same three 4096-token samples with the frozen NVIDIA checkout's NVFP4 scorer, then measures AMD C1 P4096/G128 ordinary inference. It evaluates all-Q4 and mixed Q4/W8 with Q4 A4/A8, plus selective and four-role A8 implementations. This diagnostic comparison does not replace BF16-source production admission. See `docs/performance.md` for results and limitations.
 
 The immutable 5090 reference is also Git-tracked in `fixtures/nvfp4-5090-20260922/`: exact token IDs, all six FP32 NLL sidecars, reports, commands, binary identity, source commit, and artifact path. Use this retained reference for subsequent recipe comparisons; do not replace it with results from a changed NVIDIA build or scoring span. The larger local campaign directory additionally retains the frozen scorer and original logs.
@@ -24,7 +30,7 @@ Use Python 3.11 and an explicit `--out` directory. Actions, in order, are `prepa
 
 ## BF16-source production gate
 
-This campaign measures the fixed Qwen3.8-27B FP8-K/INT4-V product against an independent BF16 reference. It does not expose a cache-format or attention-mode runtime switch. Before the persistent ABI is frozen, G16 and G32 are evaluated as separately configured executables over the same explicit R9700 candidate weight artifact; the losing executable profile and codec branch are deleted after selection.
+This campaign measures the Qwen3.8-27B product against an independent BF16 reference under one growing-cache codec. `run.py --kv-cache fp8-int4|nvfp4|tq-k4-v3` selects it for every candidate cell (production default `nvfp4`, also the KV-cache comparison baseline). NVFP4 and TQ require G16; a G32 evaluation must explicitly select `--kv-cache fp8-int4`, never silently fall back. Historical FP8-K/INT4-V admission campaigns must also pin `--kv-cache fp8-int4` explicitly; opt-in codecs are named on every candidate `ninfer-ppl` command. Each candidate report must name the selected `kv_format` (`fp8-k-int4-v`, `nvfp4` or `tq-k4-v3`), the campaign records it as `candidate_kv_format`, and campaign reuse cannot cross codecs. The BF16 reference has no lossy cache and ignores the option. There is no attention-mode runtime switch. G16 is the production profile; `--profiles` defaults to `bf16-reference,r9700-g16`. G32 remains an explicitly selected, separately configured FP8-K/INT4-V evaluation executable over the same explicit R9700 candidate weight artifact.
 
 `ninfer-ppl` computes teacher-forced next-token NLL:
 
@@ -120,6 +126,8 @@ Run both candidates:
 
 ```bash
 python3 tools/ppl/run.py \
+  --kv-cache fp8-int4 \
+  --profiles bf16-reference,r9700-g16,r9700-g32 \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
   --bf16-reference-weights /path/to/complete/Qwen3.8-27B-BF16 \
   --g16-ppl-bin build-r9700-g16/apps/ninfer-ppl \
@@ -340,6 +348,7 @@ export ALL_Q4_DENSE_QUALITY
 
 if [[ "$NINFER_SELECTED_PREFILL_CHUNK" != 4096 ]]; then
 python3.11 tools/ppl/run.py \
+  --kv-cache fp8-int4 \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
   --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --g16-ppl-bin build-r9700-dense-selection-g16/apps/ninfer-ppl \
@@ -361,6 +370,7 @@ python3.11 tools/ppl/run.py \
 fi
 
 python3.11 tools/ppl/run.py \
+  --kv-cache fp8-int4 \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
   --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --g16-ppl-bin build-r9700-xattention-model-s16-tau900/apps/ninfer-ppl \
@@ -385,6 +395,7 @@ python3.11 tools/ppl/run.py \
 run_mixed_xattention_ppl() {
   local route="$1" g16_bin="$2" g32_bin="$3" output="$4"
   python3.11 tools/ppl/run.py \
+    --kv-cache fp8-int4 \
     --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
     --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
     --g16-ppl-bin "$g16_bin" --g32-ppl-bin "$g32_bin" \
@@ -422,6 +433,7 @@ When the BF16 execution authority changes without changing an already measured d
 
 ```bash
 python3.11 tools/ppl/run.py \
+  --kv-cache fp8-int4 \
   --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
   --bf16-reference-weights /path/to/models/qwen3.8-27b-bf16 \
   --g16-ppl-bin build-r9700-xattention-ppl-dense-g16/apps/ninfer-ppl \
@@ -659,7 +671,7 @@ The validator reopens the exact hybrid artifact and adjacent conversion receipt,
 
 ## Candidate lifecycle
 
-The registry in `schemes.py` deliberately contains only the independent BF16 authority and the G16/G32 FP8-K/INT4-V candidates. A kernel implementation does not become another PPL profile: it first passes its complete Op oracle and then replaces the route inside the appropriate fixed candidate build. Do not add format flags, sparse-attention selectors, or placeholder profiles.
+The registry in `schemes.py` deliberately contains only the independent BF16 authority and the G16/G32 candidates; the cache codec is the campaign's `--kv-cache` option, not a profile. A kernel implementation does not become another PPL profile: it first passes its complete Op oracle and then replaces the route inside the appropriate fixed candidate build. Do not add other format flags, sparse-attention selectors, or placeholder profiles.
 
 Quality eligibility is not model selection. Pareto comparison requires complete matched 8K and 32K quality, resolved capacity, and whole-inference tokens/second for every required prefill/decode and C=1..4 workload. A quality-eligible candidate A dominates candidate B only when A is no worse in mean-NLL delta, new-severe-position rate, resolved capacity, and every required whole-inference speed cell, and is strictly better in at least one. Otherwise both remain retained frontier choices. Raw PPL `score_seconds` is never a speed objective. `pareto.py` applies this rule and rejects records missing any required whole-inference or capacity cell.
 
@@ -824,4 +836,4 @@ execution profile, and every cell must match the campaign's exact `reference_exe
   fixed `FLA_USE_FAST_OPS=0` exponent route, operand,
 output, final-state, scale, and state-format identity. The same object now requires disabled PyTorch TunableOp, highest matmul precision, canonical TF32/Triton/rocBLAS/launch/allocator environment controls, absence of architecture, Tensile-library, and custom-allocator overrides, actual gfx1201 identity, and the resolved Triton/AMD buffer, atomic, prefetch, async-copy, ping-pong, transpose, and packed-float lowering controls. Older v2 chunk-GDN results and earlier v3 results lacking this complete structured boundary are rejected. Candidate artifact identity, candidate cells, route, tier, gates, and campaign-wide pass are deliberately not BF16 reuse constraints.
 
-Each `--candidate` takes exactly six values. The assembler requires schema-v14 complete matrices, all C=1..4 points, the same exact benchmark bytes across that candidate's two matrices, and artifact bytes matching its 8K/32K quality rows. It reopens and validates every raw benchmark report before emitting 24 matched speed cells and exactly four resolved effective-capacity cells. Each spec-none ordinary fresh-request whole row owns prefill throughput, decode throughput, and end-to-end throughput from the same repetitions; its speculative counters must be disabled and zero. Separate pure-prefill and prefix-reuse-seeded decode matrices are diagnostic duplicates and are not selection inputs. The assembler emits `ninfer_r9700_pareto_input` schema v4; the classifier emits `ninfer_r9700_pareto_comparison` schema v7, retaining the full frontier, deterministic per-recipe static-profile selections, and the terminal artifact/cache/execution winner with normalized values and decisive stages. If native-context startup cannot satisfy its minimum reservation plus headroom, the missing capacity cell makes that candidate non-comparable. A missing report is accepted only when it has a unique matching entry in the matrix `failures.json`; the assembler binds that entry, exact command, stdout/stderr hashes, and stderr text as an unresolved capacity-measurement failure instead of inferring an OOM or inventing a capacity value. Any unrelated failure rejects the campaign. For a candidate already excluded by such a capacity failure, pass `-` for `WHOLE_DIR`; the assembler retains it as explicitly non-comparable without requiring wasteful speed campaigns.
+Each `--candidate` takes exactly six values. Every candidate of one assembly must share one KV codec: the assembler takes it from the measured PPL cells, requires every benchmark report and capacity-failure command to match, and records it as `kv_cache_format`. The assembler requires schema-v14 complete matrices, all C=1..4 points, the same exact benchmark bytes across that candidate's two matrices, and artifact bytes matching its 8K/32K quality rows. It reopens and validates every raw benchmark report before emitting 24 matched speed cells and exactly four resolved effective-capacity cells. Each spec-none ordinary fresh-request whole row owns prefill throughput, decode throughput, and end-to-end throughput from the same repetitions; its speculative counters must be disabled and zero. Separate pure-prefill and prefix-reuse-seeded decode matrices are diagnostic duplicates and are not selection inputs. The assembler emits `ninfer_r9700_pareto_input` schema v4; the classifier emits `ninfer_r9700_pareto_comparison` schema v7, retaining the full frontier, deterministic per-recipe static-profile selections, and the terminal artifact/cache/execution winner with normalized values and decisive stages. If native-context startup cannot satisfy its minimum reservation plus headroom, the missing capacity cell makes that candidate non-comparable. A missing report is accepted only when it has a unique matching entry in the matrix `failures.json`; the assembler binds that entry, exact command, stdout/stderr hashes, and stderr text as an unresolved capacity-measurement failure instead of inferring an OOM or inventing a capacity value. Any unrelated failure rejects the campaign. For a candidate already excluded by such a capacity failure, pass `-` for `WHOLE_DIR`; the assembler retains it as explicitly non-comparable without requiring wasteful speed campaigns.

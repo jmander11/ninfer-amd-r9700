@@ -21,6 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.bench.matrix_contract import (  # noqa: E402  after sys.path setup
+    DEFAULT_KV_CACHE,
+    KV_CACHE_FORMATS,
+)
 from tools.bench.prefill_chunk_authority import (  # noqa: E402  after sys.path setup
     validate_prefill_chunk_authority,
 )
@@ -123,6 +127,7 @@ def _reports(
     preset: str,
     prefill_chunk: int,
     *,
+    kv_cache_format: str,
     allow_missing: bool = False,
 ) -> dict[int, list[dict[str, Any]]]:
     campaign_root = root.resolve(strict=True)
@@ -180,6 +185,8 @@ def _reports(
             cases[key],
             manifest["expected_xattention_profile"],
         )
+        if report.get("config", {}).get("kv_cache_format") != kv_cache_format:
+            raise ValueError(f"{report_path} KV cache differs from quality codec {kv_cache_format}")
         reports.setdefault(concurrency, []).append(report)
     if not allow_missing and sorted(reports) != sorted(expected):
         raise ValueError(f"{root} has an incomplete concurrency set")
@@ -258,6 +265,17 @@ def _one_command_option(command: list[Any], option: str) -> str:
     return command[index + 1]
 
 
+def _command_kv_cache_format(command: list[Any]) -> str:
+    """Reported codec of a benchmark command; the default codec is not named on it."""
+
+    if "--kv-cache" not in command:
+        return KV_CACHE_FORMATS[DEFAULT_KV_CACHE]
+    value = _one_command_option(command, "--kv-cache")
+    if value not in KV_CACHE_FORMATS:
+        raise ValueError(f"capacity failure command has unsupported --kv-cache {value!r}")
+    return KV_CACHE_FORMATS[value]
+
+
 def _structured_memory_admission_failure(
     record: dict[str, Any],
     failure: dict[str, Any],
@@ -289,6 +307,7 @@ def _structured_memory_admission_failure(
     concurrency = _one_command_option(command, "--concurrency")
     kv_capacity = _one_command_option(command, "--kv-capacity")
     draft_tokens = _one_command_option(command, "--draft-tokens")
+    kv_cache_format = _command_kv_cache_format(command)
     if (
         max_context != "262144"
         or concurrency != str(record["concurrency"])
@@ -304,7 +323,7 @@ def _structured_memory_admission_failure(
     lines = stderr_text.splitlines()
     loading = (
         f"[ninfer_bench] loading {weights} (max_context=262144, "
-        f"concurrency={record['concurrency']}, kv_format=fp8-k-int4-v)"
+        f"concurrency={record['concurrency']}, kv_format={kv_cache_format})"
     )
     if len(lines) != 2 or lines[0] != loading or stderr_text != f"{loading}\n{lines[1]}\n":
         raise ValueError("missing capacity report stderr is not an exact startup admission failure")
@@ -582,6 +601,8 @@ def _quality_candidate(
         }
         sources[label] = {"path": str(cell_path), "sha256": row["sha256"]}
     return cells, {
+        # The final-quality v2 schema predates codec selection and measured only this cache.
+        "kv_cache_format": KV_CACHE_FORMATS["fp8-int4"],
         "weights_id": weights_id,
         "sha256": artifact["sha256"],
         "file_size_bytes": artifact["bytes"],
@@ -793,6 +814,7 @@ def _campaign_quality_candidate(
     campaign_cells = campaign.get("cells")
     if not isinstance(campaign_cells, list):
         raise ValueError("PPL campaign cells must be an array")
+    kv_cache_format: str | None = None
     for tokens, label in ((8192, "8k"), (32768, "32k")):
         matches = [
             cell
@@ -805,11 +827,16 @@ def _campaign_quality_candidate(
         if len(matches) != 1:
             raise ValueError(f"PPL campaign lacks unique {weights_id}/G{group}/{label}")
         cell = matches[0]
+        # The measured cell names its codec; every quality cell of one campaign must agree.
+        if kv_cache_format is None:
+            kv_cache_format = cell.get("kv_format")
+            if kv_cache_format not in KV_CACHE_FORMATS.values():
+                raise ValueError(f"PPL campaign {weights_id} has an unsupported KV cache")
         expected_cell_identity = {
             "scheme": f"r9700-g{group}",
             "model_id": "qwen3.8-27b",
             "weights_id": weights_id,
-            "kv_format": "fp8-k-int4-v",
+            "kv_format": kv_cache_format,
             "kv_value_group": group,
             "schedule": "prefill",
             "prompt_tokens": tokens,
@@ -912,6 +939,7 @@ def _campaign_quality_candidate(
             "new_severe_positions": cell["new_severe_positions"],
         }
     return cells, {
+        "kv_cache_format": kv_cache_format,
         "weights_id": weights_id,
         "sha256": artifact["sha256"],
         "file_size_bytes": artifact["bytes"],
@@ -965,7 +993,13 @@ def assemble_candidate(
     quality = json.loads(quality_path.read_text(encoding="utf-8"))
     quality_cells, quality_source = _quality_candidate(quality, weights_id, group, prefill_chunk)
     manifests = {"pareto-capacity": _manifest(capacity_root, "pareto-capacity")}
+    kv_cache_format = quality_source["kv_cache_format"]
     capacity_failures = _missing_capacity_provenance(capacity_root, manifests["pareto-capacity"])
+    if any(
+        _command_kv_cache_format(failure["command"]) != kv_cache_format
+        for failure in capacity_failures
+    ):
+        raise ValueError(f"capacity failure KV cache differs from quality codec {kv_cache_format}")
     quality_eligible = _quality_cells_eligible(quality_cells)
     if not capacity_failures and quality_eligible and whole_root is None:
         raise ValueError("capacity- and quality-eligible candidate requires a whole matrix")
@@ -1044,10 +1078,17 @@ def assemble_candidate(
         manifests["pareto-capacity"],
         "pareto-capacity",
         prefill_chunk,
+        kv_cache_format=kv_cache_format,
         allow_missing=True,
     )
     whole_reports = (
-        _reports(whole_root, manifests["pareto-whole"], "pareto-whole", prefill_chunk)
+        _reports(
+            whole_root,
+            manifests["pareto-whole"],
+            "pareto-whole",
+            prefill_chunk,
+            kv_cache_format=kv_cache_format,
+        )
         if whole_root is not None
         else {}
     )
@@ -1099,6 +1140,7 @@ def assemble_candidate(
         "candidate": name,
         "selected_prefill_chunk": prefill_chunk,
         "prefill_chunk_authority": prefill_chunk_authority,
+        "cache_kv_format": kv_cache_format,
         "cache_value_group": group,
         "artifact": identity,
         "benchmark_executable": manifests["pareto-capacity"]["bench"],
@@ -1461,6 +1503,12 @@ def main() -> int:
         )
         candidates.append(candidate)
         provenance.append(source)
+    # Candidates compete only within one startup-selected cache codec.
+    kv_cache_formats = {source["cache_kv_format"] for source in provenance}
+    if len(kv_cache_formats) != 1:
+        raise SystemExit(
+            "candidates use different KV caches: " + ", ".join(sorted(kv_cache_formats))
+        )
     if args.require_xattention_dense_controls:
         validate_xattention_dense_controls(candidates, provenance)
         validate_chunk_candidate_bindings(chunk_selection, provenance)
@@ -1502,6 +1550,7 @@ def main() -> int:
         "base_ranking_profile": "spec-none-ordinary",
         "base_capacity_profile": "spec-none-ordinary",
         "selected_prefill_chunk": prefill_chunk,
+        "kv_cache_format": next(iter(kv_cache_formats)),
         "prefill_chunk_selection": {
             "path": str(chunk_selection_path),
             "sha256": chunk_selection_sha256,

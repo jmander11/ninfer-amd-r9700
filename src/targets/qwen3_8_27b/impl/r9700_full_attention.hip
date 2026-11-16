@@ -2,6 +2,7 @@
 
 #include "ops/r9700/kv/fp8_int4_kv_attention.h"
 #include "ops/r9700/kv/r9700_attention_profile.h"
+#include "ops/r9700/kv/tq_rotation.h"
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
 #    include "ops/r9700/kv/fp8_int4_kv_xattention.h"
 #    if defined(NINFER_R9700_XATTENTION_KEEP_DIAGNOSTIC)
@@ -156,21 +157,32 @@ static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_
         return hipErrorInvalidValue;
     }
 
-    const std::uint64_t key_elements               = tensor_elements(cache.key_fp8_pages);
-    const std::uint64_t value_elements             = tensor_elements(cache.value_int4_pages);
-    const std::uint64_t scale_elements             = tensor_elements(cache.value_scale_fp16_pages);
-    constexpr std::uint64_t key_elements_per_token = kHeadDim * kKvHeads;
-    if (!contiguous_elements_at_least(cache.key_fp8_pages, DType::FP8_E4M3FN, 1U) ||
-        !contiguous_elements_at_least(cache.value_int4_pages, DType::U8, 1U) ||
-        !contiguous_elements_at_least(cache.value_scale_fp16_pages, DType::FP16, 1U) ||
+    const bool nvfp4                   = cache.format == KvCacheFormat::Nvfp4;
+    const bool tq                      = cache.format == KvCacheFormat::TqK4V3;
+    const bool four_planes             = nvfp4 || tq;
+    const DType key_dtype              = four_planes ? DType::U8 : DType::FP8_E4M3FN;
+    const DType scale_dtype            = nvfp4 ? DType::FP8_E4M3FN : DType::FP16;
+    const std::uint64_t key_elements   = tensor_elements(cache.key_pages);
+    const std::uint64_t value_elements = tensor_elements(cache.value_pages);
+    const std::uint64_t scale_elements = tensor_elements(cache.value_scale_pages);
+    const std::uint64_t key_elements_per_token =
+        (four_planes ? kHeadDim / 2U : kHeadDim) * kKvHeads;
+    if (!contiguous_elements_at_least(cache.key_pages, key_dtype, 1U) ||
+        !contiguous_elements_at_least(cache.value_pages, DType::U8, 1U) ||
+        !contiguous_elements_at_least(cache.value_scale_pages, scale_dtype, 1U) ||
+        (four_planes && !contiguous_elements_at_least(cache.key_scale_pages, scale_dtype, 1U)) ||
         key_elements == 0U || key_elements % key_elements_per_token != 0U) {
         return hipErrorInvalidValue;
     }
-    const std::uint64_t physical_tokens  = key_elements / key_elements_per_token;
-    const std::uint64_t groups_per_token = kHeadDim / static_cast<std::uint32_t>(cache.value_group);
+    const std::uint64_t physical_tokens = key_elements / key_elements_per_token;
+    // TQ stores one scale per head vector; the others one per value group.
+    const std::uint64_t groups_per_token =
+        tq ? 1U : kHeadDim / static_cast<std::uint32_t>(cache.value_group);
+    const std::uint64_t value_bytes_per_vector = tq ? kHeadDim * 3U / 8U : kHeadDim / 2U;
     if (physical_tokens == 0U || physical_tokens % kPageSize != 0U ||
-        value_elements != physical_tokens * kKvHeads * (kHeadDim / 2U) ||
+        value_elements != physical_tokens * kKvHeads * value_bytes_per_vector ||
         scale_elements != physical_tokens * kKvHeads * groups_per_token ||
+        (four_planes && tensor_elements(cache.key_scale_pages) != scale_elements) ||
         physical_tokens > std::numeric_limits<std::size_t>::max()) {
         return hipErrorInvalidValue;
     }
@@ -187,15 +199,16 @@ static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_
     }
 
     raw = ops::r9700::kv::Fp8Int4KvAttentionArgs{
-        .query            = static_cast<const hip_bfloat16*>(a.query.data),
-        .key_codes        = static_cast<const std::uint8_t*>(cache.key_fp8_pages.data),
-        .value_codes      = static_cast<const std::uint8_t*>(cache.value_int4_pages.data),
-        .value_scale_bits = static_cast<const std::uint16_t*>(cache.value_scale_fp16_pages.data),
-        .page_table       = a.cache_read.device_table_row() == nullptr
-                                ? static_cast<const std::uint32_t*>(cache.block_table.data)
-                                : a.cache_read.pool_block_tables(),
-        .page_table_pages = mapped_pages,
-        .page_table_row   = a.cache_read.device_table_row(),
+        .query       = static_cast<const hip_bfloat16*>(a.query.data),
+        .key_codes   = static_cast<const std::uint8_t*>(cache.key_pages.data),
+        .value_codes = static_cast<const std::uint8_t*>(cache.value_pages.data),
+        .value_scale_bits =
+            nvfp4 ? nullptr : static_cast<const std::uint16_t*>(cache.value_scale_pages.data),
+        .page_table            = a.cache_read.device_table_row() == nullptr
+                                     ? static_cast<const std::uint32_t*>(cache.block_table.data)
+                                     : a.cache_read.pool_block_tables(),
+        .page_table_pages      = mapped_pages,
+        .page_table_row        = a.cache_read.device_table_row(),
         .page_table_row_stride = a.cache_read.pool_table_row_stride(),
         .page_table_row_count  = a.cache_read.pool_table_row_count(),
         .context               = static_cast<std::size_t>(frontier),
@@ -215,6 +228,13 @@ static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_
         .value_layout          = raw_layout(cache.plane_layouts.value),
         .value_scale_layout    = raw_layout(cache.plane_layouts.value_scale),
         .output                = static_cast<float*>(a.output.data),
+        .codec                 = nvfp4 ? ops::r9700::kv::KvCodec::Nvfp4
+                                 : tq  ? ops::r9700::kv::KvCodec::TqK4V3
+                                       : ops::r9700::kv::KvCodec::Fp8Int4,
+        .key_scale_codes =
+            four_planes ? static_cast<const std::uint8_t*>(cache.key_scale_pages.data) : nullptr,
+        .value_scale_codes =
+            nvfp4 ? static_cast<const std::uint8_t*>(cache.value_scale_pages.data) : nullptr,
     };
     return hipSuccess;
 }
@@ -231,12 +251,12 @@ static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_
            raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
 }
 
-static hipError_t launch_r9700_attention(const R9700FullAttentionArgs& a,
+static hipError_t launch_r9700_attention_routes(const R9700FullAttentionArgs& a,
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
-                                         bool xattention_prefill, void* xattention_workspace,
-                                         std::size_t xattention_workspace_bytes,
+                                                bool xattention_prefill, void* xattention_workspace,
+                                                std::size_t xattention_workspace_bytes,
 #endif
-                                         hipStream_t stream) noexcept {
+                                                hipStream_t stream) noexcept {
     ops::r9700::kv::Fp8Int4KvAttentionArgs raw{};
     if (const hipError_t error = raw_attention_args(a, stream, raw); error != hipSuccess) {
         return error;
@@ -287,8 +307,10 @@ static hipError_t launch_r9700_attention(const R9700FullAttentionArgs& a,
         raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
     if (dense_prefill) {
         hipError_t error = ops::r9700::kv::fp8_int4_kv_attention_dense_prefill(raw, stream);
-        if (error != hipSuccess || !ops::r9700::kv::use_text_p129_wmma_tail(
-                                       static_cast<std::uint32_t>(rows), raw.context)) {
+        // The WMMA tail candidate reads the default codec only; NVFP4 keeps the dense row.
+        if (error != hipSuccess || raw.codec != ops::r9700::kv::KvCodec::Fp8Int4 ||
+            !ops::r9700::kv::use_text_p129_wmma_tail(static_cast<std::uint32_t>(rows),
+                                                     raw.context)) {
             return error;
         }
         const std::size_t tail_score_bytes =
@@ -331,6 +353,42 @@ static hipError_t launch_r9700_attention(const R9700FullAttentionArgs& a,
         return ops::r9700::kv::fp8_int4_kv_attention_split512(raw, a.workspace, required, stream);
     }
     return ops::r9700::kv::fp8_int4_kv_attention_fused(raw, stream);
+}
+
+// TQ-K4-V3 attends in its rotated basis: the represented Q is rotated in place before the route
+// (no later reader consumes Q) and the FP32 output is rotated back after it.
+
+static hipError_t launch_r9700_attention(const R9700FullAttentionArgs& a,
+#if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
+                                         bool xattention_prefill, void* xattention_workspace,
+                                         std::size_t xattention_workspace_bytes,
+#endif
+                                         hipStream_t stream) noexcept {
+    ops::r9700::kv::Fp8Int4KvAttentionArgs checked{};
+    if (const hipError_t error = raw_attention_args(a, stream, checked); error != hipSuccess) {
+        return error;
+    }
+    const bool tq = checked.codec == ops::r9700::kv::KvCodec::TqK4V3 && !a.tq_rotated_basis;
+    const std::size_t vectors =
+        static_cast<std::size_t>(a.query.ne[2] > 0 ? a.query.ne[2] : 0) * kQueryHeads;
+    if (tq) {
+#if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
+        if (xattention_prefill) return hipErrorInvalidValue;
+#endif
+        if (const hipError_t error = ops::r9700::kv::tq_rotate_query(
+                static_cast<hip_bfloat16*>(a.query.data), vectors, stream);
+            error != hipSuccess) {
+            return error;
+        }
+    }
+    const hipError_t error = launch_r9700_attention_routes(a,
+#if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
+                                                           xattention_prefill, xattention_workspace,
+                                                           xattention_workspace_bytes,
+#endif
+                                                           stream);
+    if (error != hipSuccess || !tq) return error;
+    return ops::r9700::kv::tq_unrotate_output(static_cast<float*>(a.output.data), vectors, stream);
 }
 
 hipError_t r9700_qwen3_8_27b_full_attention(const R9700FullAttentionArgs& args,
@@ -395,9 +453,36 @@ r9700_qwen3_8_27b_full_attention_sequences(std::span<const R9700FullAttentionArg
         }
         raw[i].score_workspace = static_cast<float*>(sequence.workspace);
     }
-    return ops::r9700::kv::fp8_int4_kv_attention_packed_decode(
+    const bool tq =
+        raw[0].codec == ops::r9700::kv::KvCodec::TqK4V3 && !sequences.front().tq_rotated_basis;
+    for (const R9700FullAttentionArgs& sequence : sequences) {
+        if (sequence.tq_rotated_basis != sequences.front().tq_rotated_basis) {
+            return hipErrorInvalidValue;
+        }
+    }
+    // Leaf-owned TQ basis changes: one launch each over every sequence of the batch.
+    std::array<hip_bfloat16*, ops::r9700::kv::kPackedDecodeMaximumSequences> queries{};
+    std::array<float*, ops::r9700::kv::kPackedDecodeMaximumSequences> outputs{};
+    std::array<std::size_t, ops::r9700::kv::kPackedDecodeMaximumSequences> vectors{};
+    for (std::size_t i = 0; i < sequences.size(); ++i) {
+        queries[i] = static_cast<hip_bfloat16*>(sequences[i].query.data);
+        outputs[i] = static_cast<float*>(sequences[i].output.data);
+        vectors[i] = static_cast<std::size_t>(sequences[i].query.ne[2]) * kQueryHeads;
+    }
+    const std::span<const std::size_t> counts(vectors.data(), sequences.size());
+    if (tq) {
+        if (const hipError_t error = ops::r9700::kv::tq_rotate_query(
+                std::span<hip_bfloat16* const>(queries.data(), sequences.size()), counts, stream);
+            error != hipSuccess) {
+            return error;
+        }
+    }
+    const hipError_t error = ops::r9700::kv::fp8_int4_kv_attention_packed_decode(
         std::span<const ops::r9700::kv::Fp8Int4KvAttentionArgs>(raw.data(), sequences.size()),
         stream);
+    if (error != hipSuccess || !tq) return error;
+    return ops::r9700::kv::tq_unrotate_output(
+        std::span<float* const>(outputs.data(), sequences.size()), counts, stream);
 }
 
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)

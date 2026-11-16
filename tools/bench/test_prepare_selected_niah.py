@@ -85,6 +85,7 @@ class PrepareSelectedNiahTest(unittest.TestCase):
             commands = (output / "commands.sh").read_text(encoding="utf-8")
             self.assertIn(f"readonly python={sys.executable}", commands)
             self.assertIn('"$python" -m tools.bench.run_niah_check', commands)
+            self.assertIn("--kv-cache fp8-int4", commands)
             self.assertIn('"$python" -m tools.bench.validate_selected_niah', commands)
             self.assertNotIn("python3 /", commands)
 

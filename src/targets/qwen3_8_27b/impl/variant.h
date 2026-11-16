@@ -110,9 +110,10 @@ struct Variant {
                                                       hipStream_t stream,
                                                       Tensor* normalized = nullptr);
         // - the attention output gate BF16(BF16(attention) * sigmoid(gate)) [6144, T];
+        //   with tq_unrotate, attention is in the TQ-K4-V3 basis and rotated back first.
         [[nodiscard]] bool lq4_gated_projections(const Tensor& gate, const Tensor& attention_fp32,
                                                  std::span<const Lq4Target> targets,
-                                                 hipStream_t stream);
+                                                 hipStream_t stream, bool tq_unrotate = false);
         // - the GDN gated per-head RMSNorm of `recurrent_output` with gate `z` [6144, T].
         [[nodiscard]] bool lq4_gated_rmsnorm_projections(const Tensor& recurrent_output,
                                                          const Tensor& norm, const Tensor& z,
@@ -392,17 +393,17 @@ struct Variant {
     [[nodiscard]] static bool
     attention_gated_output_projection(const Tensor& gate, const Tensor& attention_fp32,
                                       const Weight& weight, Tensor& residual, hipStream_t stream,
-                                      ExecutionState* execution, std::int32_t text_layer);
+                                      ExecutionState* execution, std::int32_t text_layer,
+                                      bool tq_unrotate = false);
     // The family schedule owns append/publication ordering and supplies the resulting typed read
     // capability. This target leaf owns the fixed Qwen3.8 full-attention geometry and R9700
     // implementation; it cannot manufacture a cache view or publish a frontier.
-    static void full_attention(const Tensor& normalized_query,
-                               const qwen3::PagedKVLayerRead& cache_read,
-                               const Tensor& cache_positions, Tensor& attention_fp32,
-                               WorkspaceArena& workspace, hipStream_t stream,
-                               const Tensor* ancestor_masks    = nullptr,
-                               const Tensor* prefix_lengths    = nullptr,
-                               const Tensor* active_query_rows = nullptr);
+    static void
+    full_attention(const Tensor& normalized_query, const qwen3::PagedKVLayerRead& cache_read,
+                   const Tensor& cache_positions, Tensor& attention_fp32, WorkspaceArena& workspace,
+                   hipStream_t stream, const Tensor* ancestor_masks = nullptr,
+                   const Tensor* prefix_lengths    = nullptr,
+                   const Tensor* active_query_rows = nullptr, bool tq_rotated_basis = false);
     [[nodiscard]] static std::size_t
     full_attention_workspace_capacity_bytes(std::int32_t maximum_query_rows,
                                             std::uint32_t maximum_visible_context,
@@ -422,7 +423,8 @@ struct Variant {
     // nothing, when some sequence is outside that route; the caller then attends one by one.
     [[nodiscard]] static bool
     full_attention_sequences(std::span<const FullAttentionSequence> sequences,
-                             WorkspaceArena& workspace, hipStream_t stream);
+                             WorkspaceArena& workspace, hipStream_t stream,
+                             bool tq_rotated_basis = false);
     [[nodiscard]] static std::size_t
     full_attention_sequences_workspace_capacity_bytes(std::int32_t sequences,
                                                       std::int32_t maximum_query_rows,
@@ -649,13 +651,28 @@ struct Variant {
     // NInfer-owned runtime overhead beyond logical arenas, HIP graph residency and the
     // physical allocation bound. The C-specific bound includes lazy kernel residency and
     // the measured physical-counter residual; SSD scatter adds its own residency.
-    // Keep the 2-MiB startup component separate from the main-stream bound.
+    // Keep the 2-MiB startup component separate from the main-stream bound. The NVFP4 cache's
+    // additional kernels raised the C4..8 residual (adaptive DFlash K7, 262,144-token context:
+    // 11.0/11.2/9.1/9.3/7.3 MiB physical-counter deficits, 2026-11-08); C9..16 bounds cover it.
+    // TQ-K4-V3's rotation kernels add to the NVFP4 C5..8 residual (adaptive DFlash K7 at the
+    // NVFP4 bound: 32.24/31.90/31.57/32.13 MiB minimum free, 2026-11-16); C9..16 bounds cover it.
     [[nodiscard]] static constexpr std::size_t
     runtime_driver_reservation_bytes(WeightsProfile profile, std::uint32_t concurrency,
-                                     bool disk_cache_enabled) noexcept {
-        if (!is_lq4_text_profile(profile) || concurrency == 0U || concurrency > 8U) return 0U;
-        constexpr std::array<std::size_t, 8> main_mib{6, 6, 4, 4, 2, 4, 4, 6};
-        return (2U + main_mib[concurrency - 1U] + (disk_cache_enabled ? 2U : 0U)) << 20U;
+                                     bool disk_cache_enabled, KvCacheFormat cache) noexcept {
+        if (!is_lq4_text_profile(profile) || concurrency == 0U || concurrency > kMaximumConcurrency)
+            return 0U;
+        constexpr std::array<std::size_t, kMaximumConcurrency> main_mib{
+            6, 6, 4, 4, 2, 4, 4, 6, 32, 32, 32, 34, 34, 34, 34, 34};
+        constexpr std::array<std::size_t, kMaximumConcurrency> nvfp4_mib{
+            0, 0, 0, 12, 12, 10, 10, 8, 0, 0, 0, 0, 0, 0, 0, 0};
+        constexpr std::array<std::size_t, kMaximumConcurrency> tq_mib{0, 0, 0, 2, 2, 2, 2, 2,
+                                                                      0, 0, 0, 0, 0, 0, 0, 0};
+        const std::size_t codec_mib = cache == KvCacheFormat::Fp8KInt4V ? 0U
+                                      : cache == KvCacheFormat::Nvfp4
+                                          ? nvfp4_mib[concurrency - 1U]
+                                          : nvfp4_mib[concurrency - 1U] + tq_mib[concurrency - 1U];
+        return (2U + main_mib[concurrency - 1U] + codec_mib + (disk_cache_enabled ? 2U : 0U))
+               << 20U;
     }
 
     [[nodiscard]] static std::vector<GraphExecutionProfile>

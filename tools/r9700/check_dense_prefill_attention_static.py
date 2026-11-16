@@ -53,7 +53,7 @@ def _count(body: str, opcode: str) -> int:
 def check(*, assembly: Path, metadata: Path, symbol: str, value_group: int) -> dict[str, int | str]:
     if value_group not in (16, 32):
         raise ValueError("dense attention requires G16 or G32")
-    if f"20dense_prefill_kernelILj{value_group}EE" not in symbol:
+    if f"20dense_prefill_kernelINS2_17Fp8Int4DenseCodecELj{value_group}EE" not in symbol:
         raise ValueError(
             "selected symbol is not the exact production fused dense-prefill "
             f"G{value_group} specialization"

@@ -10,7 +10,7 @@ from tools.r9700.check_dense_prefill_attention_static import PROFILE, check
 
 
 class DensePrefillAttentionStaticTest(unittest.TestCase):
-    symbol = "_ZN6ninfer3ops5r97002kv20dense_prefill_kernelILj16EEEvNS2_22Fp8Int4KvAttentionArgsE"
+    symbol = "_ZN6ninfer3ops5r97002kv20dense_prefill_kernelINS2_17Fp8Int4DenseCodecELj16EEEvNS2_22Fp8Int4KvAttentionArgsE"
 
     def fixture(
         self,

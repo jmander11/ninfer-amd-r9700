@@ -461,9 +461,10 @@ Outcome qualify(Scenario& s, std::size_t launches, std::size_t expected_lowered,
 
 // Text attention front: fused RMSNorm quantization -> row-scaled FP8 Q/K and gate/V projections
 // with the feature split -> Q/K norm + 1-D RoPE (QuantizeNormalized, Fp8SmallT<PairSplit>,
-// QkNormRope<Text1D>).
-Outcome attention_front(unsigned T, bool poison, hipStream_t stream) {
-    Scenario s("attention front T" + std::to_string(T) + (poison ? " poisoned" : ""));
+// QkNormRope<Text1D, tq>; tq: the query also taken into the TQ-K4-V3 basis).
+Outcome attention_front(unsigned T, bool poison, bool tq, hipStream_t stream) {
+    Scenario s("attention front T" + std::to_string(T) + (poison ? " poisoned" : "") +
+               (tq ? " tq" : ""));
     Rng rng(100U + T + (poison ? 50U : 0U));
     auto residual_host = bf16_values(std::size_t(T) * kHidden, -2.0, 2.0, rng);
     if (poison) residual_host[std::size_t(T / 2U) * kHidden + 77U] = hip_bfloat16(NAN);
@@ -511,7 +512,8 @@ Outcome attention_front(unsigned T, bool poison, hipStream_t stream) {
             const Tensor qw(q_norm, DType::BF16, {256}), kw(k_norm, DType::BF16, {256});
             Tensor qn_t(qn, DType::BF16, {256, 24, tokens}),
                 kn_t(kn, DType::BF16, {256, 4, tokens});
-            ninfer::ops::qk_norm_rope(positions_t, 64, 1.0e7F, q, k, qw, kw, 1e-6F, qn_t, kn_t, st);
+            ninfer::ops::qk_norm_rope(positions_t, 64, 1.0e7F, q, k, qw, kw, 1e-6F, qn_t, kn_t, st,
+                                      tq);
         },
         stream);
 }
@@ -519,10 +521,10 @@ Outcome attention_front(unsigned T, bool poison, hipStream_t stream) {
 // Attention output and MLP: gated quantization -> row-scaled FP8 output projection into the
 // residual -> fused RMSNorm quantization (publishing the normalized rows) -> LQ4 SiLU-pair
 // gate/up -> quantization of the MLP activation -> LQ4 down projection accumulated into the
-// residual (QuantizeGated, Fp8SmallT<Residual>, QuantizeNormalized, Lq4SmallT<false,true>,
-// QuantizeActivation, Lq4SmallT<true,false>).
-Outcome attention_output_mlp(unsigned T, hipStream_t stream) {
-    Scenario s("attention output + MLP T" + std::to_string(T));
+// residual (QuantizeGated<tq>, Fp8SmallT<Residual>, QuantizeNormalized, Lq4SmallT<false,true>,
+// QuantizeActivation, Lq4SmallT<true,false>; tq: the attention first leaves the TQ-K4-V3 basis).
+Outcome attention_output_mlp(unsigned T, bool tq, hipStream_t stream) {
+    Scenario s("attention output + MLP T" + std::to_string(T) + (tq ? " tq" : ""));
     Rng rng(200U + T);
     auto* gate = s.add("gate", Role::Data, bf16_values(std::size_t(T) * kQuery, -3.0, 3.0, rng));
     auto* attention =
@@ -541,10 +543,11 @@ Outcome attention_output_mlp(unsigned T, hipStream_t stream) {
     return qualify(
         s, 6, 1,
         [&](hipStream_t st) {
-            check(lin::fp8_quantize_gated_activation({.gate      = gate,
-                                                      .attention = attention,
-                                                      .workspace = gated_image,
-                                                      .warm      = fp8_warm(output_weight)},
+            check(lin::fp8_quantize_gated_activation({.gate        = gate,
+                                                      .attention   = attention,
+                                                      .workspace   = gated_image,
+                                                      .warm        = fp8_warm(output_weight),
+                                                      .tq_unrotate = tq},
                                                      st),
                   "quantize gated");
             check(lin::fp8_small_t_residual(output_weight.view, gated_image, residual, st),
@@ -793,9 +796,10 @@ Outcome gdn_layer(const GdnCase& c, hipStream_t stream) {
 }
 
 // Q/K norm + RoPE chain: 1-D RoPE of token-interleaved Q/K planes (padded token stride) -> MRoPE
-// of its outputs -> 1-D RoPE again (QkNormRope<Text1D>, QkNormRope<TextMrope>).
-Outcome rope_chain(unsigned T, hipStream_t stream) {
-    Scenario s("qk norm rope chain T" + std::to_string(T));
+// of its outputs -> 1-D RoPE again (QkNormRope<Text1D, tq>, QkNormRope<TextMrope, tq>; tq: every
+// query output also taken into the TQ-K4-V3 basis).
+Outcome rope_chain(unsigned T, bool tq, hipStream_t stream) {
+    Scenario s("qk norm rope chain T" + std::to_string(T) + (tq ? " tq" : ""));
     Rng rng(500U + T);
     auto* packed = s.add("packed_qk", Role::Data,
                          bf16_values(std::size_t(T) * kAttentionRows, -2.0, 2.0, rng));
@@ -831,11 +835,11 @@ Outcome rope_chain(unsigned T, hipStream_t stream) {
                 qt[i] = Tensor(qn[i], DType::BF16, {256, 24, Ti});
                 kt[i] = Tensor(kn[i], DType::BF16, {256, 4, Ti});
             }
-            ninfer::ops::qk_norm_rope(p1, 64, 1.0e7F, q, k, qw, kw, 1e-6F, qt[0], kt[0], st);
-            ninfer::ops::qk_norm_rope(p3, 64, 1.0e7F, qt[0], kt[0], qw, kw, 1e-6F, qt[1], kt[1],
-                                      st);
-            ninfer::ops::qk_norm_rope(p1, 64, 1.0e7F, qt[1], kt[1], qw, kw, 1e-6F, qt[2], kt[2],
-                                      st);
+            ninfer::ops::qk_norm_rope(p1, 64, 1.0e7F, q, k, qw, kw, 1e-6F, qt[0], kt[0], st, tq);
+            ninfer::ops::qk_norm_rope(p3, 64, 1.0e7F, qt[0], kt[0], qw, kw, 1e-6F, qt[1], kt[1], st,
+                                      tq);
+            ninfer::ops::qk_norm_rope(p1, 64, 1.0e7F, qt[1], kt[1], qw, kw, 1e-6F, qt[2], kt[2], st,
+                                      tq);
         },
         stream);
 }
@@ -886,9 +890,14 @@ int main(int argc, char** argv) {
         hipStream_t stream = nullptr;
         check(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), "stream");
         std::vector<Outcome> outcomes;
-        for (const unsigned T : {1U, 4U, 8U}) outcomes.push_back(attention_front(T, false, stream));
-        outcomes.push_back(attention_front(8U, true, stream));
-        for (const unsigned T : {1U, 4U, 8U}) outcomes.push_back(attention_output_mlp(T, stream));
+        // tq: the TQ-K4-V3 basis-change instantiations of QkNormRope and QuantizeGated.
+        for (const bool tq : {false, true}) {
+            for (const unsigned T : {1U, 4U, 8U})
+                outcomes.push_back(attention_front(T, false, tq, stream));
+            outcomes.push_back(attention_front(8U, true, tq, stream));
+            for (const unsigned T : {1U, 4U, 8U})
+                outcomes.push_back(attention_output_mlp(T, tq, stream));
+        }
         for (const unsigned T : {1U, 4U, 8U}) outcomes.push_back(projections(T, stream));
         for (const GdnCase& c :
              {GdnCase{4, false, 4, false, 0, 0, 0}, GdnCase{4, false, 4, false, 1, 1, 0},
@@ -897,7 +906,8 @@ int main(int argc, char** argv) {
               GdnCase{7, false, 7, false, 2, 4, 0}, GdnCase{8, false, 8, false, 0, 0, 0},
               GdnCase{8, false, 8, false, 1, 7, 0}, GdnCase{8, true, 8, true, 2, 8, 2}})
             outcomes.push_back(gdn_layer(c, stream));
-        for (const unsigned T : {1U, 4U, 8U}) outcomes.push_back(rope_chain(T, stream));
+        for (const bool tq : {false, true})
+            for (const unsigned T : {1U, 4U, 8U}) outcomes.push_back(rope_chain(T, tq, stream));
         check(hipStreamDestroy(stream), "stream destroy");
 
         const bool pass =

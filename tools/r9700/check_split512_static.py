@@ -62,8 +62,9 @@ def check_isa(selected: list[Kernel]) -> None:
         raise SystemExit(
             f"split-512 static gate expected 2 retained T1 QK specializations, got {len(t1_qk)}"
         )
-    if len(qk) != 2:
-        raise SystemExit(f"split-512 static gate expected 2 T4 QK specializations, got {len(qk)}")
+    # Two device-count forms for each of the FP8-K and NVFP4 codecs.
+    if len(qk) != 4:
+        raise SystemExit(f"split-512 static gate expected 4 T4 QK specializations, got {len(qk)}")
     for kernel in t1_qk:
         if "v_wmma_f32_16x16x16_fp8_fp8" not in kernel.body:
             raise SystemExit(f"{kernel.name}: missing native FP8 WMMA instruction")
@@ -101,7 +102,7 @@ def check_resources(selected: list[Kernel]) -> None:
             f"{kind}: lds={values['lds']} vgpr={values['vgpr']} "
             f"private={values['private']} scratch={values['scratch']}"
         )
-    expected_counts = {"t1_qk": 2, "qk": 2, "partial": 8, "merge": 2}
+    expected_counts = {"t1_qk": 2, "qk": 4, "partial": 12, "merge": 2}
     mismatched = [
         f"{kind}={counts[kind]} (expected {expected})"
         for kind, expected in expected_counts.items()

@@ -82,9 +82,14 @@ specific blocker plainly.
 
 NInfer is a from-scratch C++/HIP inference engine for maximum single-GPU inference performance,
 compiled only for `gfx1201` and tuned on one AMD Radeon AI PRO R9700. The sole supported model is
-Qwen3.8-27B. Its growing Text/MTP cache has exactly three planes: FP8 E4M3FN keys, signed INT4
-values, and FP16 value scales; there is no cache dtype selector, K scale, alternate cache path, or
-retained compatibility backend. The production Text weights are `qwen3.8-27b/r9700-lq4` (profile
+Qwen3.8-27B. Its growing Text/MTP cache uses one startup-selected codec. The production default
+is NVFP4: E2M1 keys and values with one E4M3 scale per 16 features of each, in four planes.
+Opt-in `--kv-cache fp8-int4` retains three planes: FP8 E4M3FN keys, signed INT4 values, and FP16
+value scales. NVFP4 is the comparison baseline for KV-cache work. Opt-in `--kv-cache tq-k4-v3`
+stores Hadamard-rotated 4-bit keys and 3-bit values with one FP16 norm-corrected scale per head vector of each (228 bytes per
+head-token); it is being qualified for the full master suite alongside NVFP4. NVFP4 and TQ
+require the G16 value-group build; G32 evaluation must explicitly select `--kv-cache fp8-int4`.
+There is no per-request cache selector or retained compatibility backend. The production Text weights are `qwen3.8-27b/r9700-lq4` (profile
 `R9700Lq4`): GPTQ-rounded LQ4 Text projections and output head with 21 row-scaled FP8
 protections (2026-09-30), admitted by the BF16-source PPL, NIAH, exact-token, and whole-inference
 gates. The weight-precision bar is no worse than the 5090 NVFP4 build on every BF16-source cell
@@ -95,8 +100,8 @@ matrices. Vision-off binding validates those matrices without placing them on th
 Other `-eval` identities remain evaluation and conversion-base artifacts. DFlash2 keeps its model-specified BF16 selector
 codebook and private fixed BF16 state.
 
-The workload is one R9700, one resident model instance, and a startup-fixed one to eight active
-resident requests. The Engine forms one compact decode batch per round boundary with bounded FIFO
+The workload is one R9700, one resident model instance, and a startup-fixed one to sixteen active
+resident requests; DFlash2 admits one to twelve. The Engine forms one compact decode batch per round boundary with bounded FIFO
 ingress. With RAM enabled, output reservations grow in windows of at most 8192 tokens and settled
 active continuations may suspend to secured RAM under KV pressure; RAM off retains full-lifetime
 GPU entitlement. A completion cohort whose target-produced lifetime envelopes jointly fit GPU capacity and dynamic
@@ -138,7 +143,7 @@ routing map, not a mandatory reading list:
 
 ## Upstream synchronization
 
-Upstream `experimental` is reconciled through `c88d194f51c52e6e1e1fff00da0f47c9f3f0c03b`
+Upstream `experimental` is reconciled through `4d5c4f22bf146eeadbfb7d42ed3f141f5bf6131b`
 via custom AMD ports, not merged ancestry.
 Unsupported NVIDIA paths were excluded; decisions are in `docs/maintainer/upstream-sync.md`.
 For future syncs, review upstream changes after this baseline against current AMD behavior,
@@ -207,14 +212,15 @@ directly against the same oracle with a criterion appropriate to its output and 
 profile; pairwise implementation parity is supplementary evidence only.
 
 Where relevant to the changed behavior, account for numeric-format decode, BF16 fusion order, FP32
-GDN state, the typed FP8-K/INT4-V/FP16-scale cache, private DFlash2 BF16 state, MTP accept/commit
-state, arena lifetime, and Device Graph address stability. This is a risk map, not a checklist for
+GDN state, the typed NVFP4 cache (or the selected opt-in FP8-K/INT4-V/FP16-scale or TQ cache),
+private DFlash2 BF16 state, MTP accept/commit state, arena lifetime, and Device Graph address stability. This is a risk map, not a checklist for
 every numerical task.
 
 ## Performance work
 
-CLI, serve, PPL, Engine A/Bs, and decode-speed work use the one fixed FP8-K/INT4-V cache. There is
-no cache dtype flag or alternate production cache path. Independent BF16-reference runs are
+CLI, serve, PPL, Engine A/Bs, and decode-speed work use the default NVFP4 cache unless the
+task concerns an opt-in codec (`--kv-cache fp8-int4` or `--kv-cache tq-k4-v3`). NVFP4 is the
+comparison baseline for KV-cache work; a change to shared route kernels is checked on all three. Independent BF16-reference runs are
 separate executables/artifacts used for numerical comparison, not a mutable Engine option.
 
 Kernel speed work follows [`docs/maintainer/kernel-iteration.md`](docs/maintainer/kernel-iteration.md),
@@ -266,8 +272,8 @@ never delete it or stop another owner's job. Builds need no GPU lock. Run one bu
 per agent with at most 8 jobs; reduce concurrency under memory or I/O pressure.
 
 The normal HIP build is `build-r9700/`, with ROCm selected under `/opt/rocm`.
-Generated evidence belongs under ignored `profiles/`. Product inference always uses
-the fixed FP8-K/INT4-V/FP16-scale cache. `DeviceContext` sets
+Generated evidence belongs under ignored `profiles/`. Product inference defaults to
+the NVFP4 cache. `DeviceContext` sets
 `HSA_USERPTR_FOR_PAGED_MEM=0` and `HSA_USE_SVM=1` before HIP initialization. Pinned
 arenas use HIP/GTT backing and direct reads use ordinary-RAM staging. Runtime,
 checkpoints and RAM prefixes share the driver GTT budget; an unavailable requested

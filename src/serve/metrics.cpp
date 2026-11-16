@@ -1373,7 +1373,7 @@ void ServeMetrics::attach(const ServeOptions& options, const ninfer::LoadSummary
         {"device_graph", yn(options.use_device_graph)},
         {"generation_recovery", yn(options.generation_recovery)},
         {"greedy", yn(options.greedy)},
-        {"kv_cache_format", "fp8-k-int4-v"},
+        {"kv_cache_format", ninfer::kv_cache_format_name(options.kv_cache_format)},
         {"kv_capacity_mode", kv_capacity_mode_name(memory.kv_capacity_mode)},
         {"kv_disk_compress",
          options.kv_disk_compress == ninfer::KvDiskCompress::Zstd ? "zstd" : "off"},

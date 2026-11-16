@@ -560,6 +560,17 @@ bool Program<Variant>::kv_copies_ready() const {
 }
 
 template <>
+bool Program<Variant>::prestage_checkpoint_restore(std::uint32_t lane,
+                                                   const RequestPlan<Variant>& plan) {
+    return impl_->prestage_checkpoint_restore(lane, plan);
+}
+
+template <>
+bool Program<Variant>::checkpoint_restore_ready(std::uint32_t lane) const {
+    return impl_->checkpoint_restore_ready(lane);
+}
+
+template <>
 void Program<Variant>::wait_kv_ram_copies_on_compute() {
     impl_->wait_kv_ram_copies_on_compute();
 }

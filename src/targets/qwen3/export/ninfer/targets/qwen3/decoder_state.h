@@ -19,8 +19,8 @@ namespace ninfer::targets::qwen3 {
 
 // The sole Qwen3.8 growing-cache identity. K is direct OCP E4M3FN, V is canonical signed INT4,
 // and each V group owns one FP16 scale. Text and MTP have distinct physical pools/layouts while
-// sharing one statically selected V group. There is no dtype, K scale, K mean, sparsity policy,
-// keep-fraction, or alternate growing-cache branch.
+// sharing one statically selected V group and one startup-selected codec (kv_cache_format). There
+// is no K mean, sparsity policy or keep-fraction.
 struct DecoderStateSpec {
     std::uint32_t full_attention_layers = 0;
     std::uint32_t mtp_layers            = 0;
@@ -28,6 +28,7 @@ struct DecoderStateSpec {
     std::int32_t kv_heads               = 0;
     std::int32_t attention_head_dim     = 0;
     std::int32_t value_group            = 0;
+    KvCacheFormat kv_cache_format       = KvCacheFormat::Nvfp4;
     Fp8KInt4VPlaneLayouts text_plane_layouts;
     Fp8KInt4VPlaneLayouts mtp_plane_layouts;
     bool enable_mtp                         = false;
@@ -273,6 +274,9 @@ public:
     // For device-prefix transactions this is the conservative launch maximum; the committed
     // count remains device-owned until commit() resolves it.
     [[nodiscard]] std::size_t position_count() const noexcept { return position_count_; }
+
+    // The cache's startup-fixed codec (selects, e.g., the TQ-K4-V3 basis-change ownership).
+    [[nodiscard]] KvCacheFormat cache_format() const noexcept { return cache_->spec().format; }
 
     [[nodiscard]] PagedKVLayerRead pending_layer_read(std::uint32_t layer) const;
     [[nodiscard]] std::uint32_t commit();

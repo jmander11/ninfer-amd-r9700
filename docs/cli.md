@@ -118,14 +118,15 @@ For DFlash, K describes the physical captured graph. Per-request output and cont
 | Option | Meaning | Default |
 |---|---|---:|
 | `--max-context N` | per-sequence logical context ceiling | `2048` |
+| `--kv-cache fp8-int4\|nvfp4\|tq-k4-v3` | growing Text/MTP KV codec; NVFP4 is the production default and comparison baseline; `fp8-int4` and rotated 4-bit K / 3-bit V `tq-k4-v3` remain opt-in | `nvfp4` |
 | `--kv-capacity N\|auto` | explicit shared Main Text KV capacity, or maximize it from remaining GPU memory; omitted means `--max-context` | `2048` |
-| `--kv-capacity-headroom MiB` | device memory `--kv-capacity auto` leaves free; requires `auto` | `64` |
+| `--kv-capacity-headroom MiB` | device memory `--kv-capacity auto` leaves free; requires `auto` | `32` |
 | `--kv-ram-capacity off\|N` | pinned host capacity in MiB for completed prefixes and live suspension; enables output windows up to 8192 tokens | `off` |
 | `--kv-ram-system-prompts N` | Retain up to N rendered system prefixes in the RAM budget; requires RAM capacity when nonzero | `0` |
 | `--kv-disk-capacity off\|N` | SSD KV prefix-cache unique-object capacity in MiB; `off` disables the tier | `off` |
 | `--kv-disk-location PATH` | directory for the SSD page store; required iff `--kv-disk-capacity` is enabled | unset |
 | `--kv-disk-compress off\|zstd` | zstd-1 on new GDN/hidden/cyclic writes; KV pages stay uncompressed | `off` |
-| `--prefill-chunk N` | positive text-prefill chunk, in multiples of 128 | `2048` |
+| `--prefill-chunk N` | text-prefill chunk, a multiple of 128 in [128,8192] | `2048` |
 | `--max-new N` | requested output-token limit | `128` |
 | `--device N` | HIP device index | `0` |
 | `--spec none\|mtp\|dflash` | speculative backend | `dflash` |
@@ -200,9 +201,9 @@ Live-image credit metadata allocation failure follows the unfunded-capacity poli
 
 ## Context and memory
 
-The registered model has a native context limit of 262,144 tokens. The practical allocation on one R9700 depends on the selected artifact, media workload, output budget, and enabled startup features. Growing Text/MTP KV always uses FP8 E4M3FN keys, signed INT4 values, and FP16 value scales; there is no runtime cache-format selector. The prepared prompt must fit `--max-context`; generation stops at the remaining context capacity when necessary.
+The registered model has a native context limit of 262,144 tokens. The practical allocation on one R9700 depends on the selected artifact, media workload, output budget, and enabled startup features. Growing Text/MTP KV defaults to NVFP4 E2M1 keys and values with E4M3 scales per 16 features. The startup-only `--kv-cache` selector also accepts `fp8-int4` (FP8 E4M3FN keys, signed INT4 values, FP16 value scales) and `tq-k4-v3`. NVFP4 and TQ require `NINFER_R9700_KV_VALUE_GROUP=16` (the CMake default); G32 evaluation must explicitly select `--kv-cache fp8-int4` or startup fails without fallback. The prepared prompt must fit `--max-context`; generation stops at the remaining context capacity when necessary.
 
-`--kv-capacity N` controls the shared physical Main Text KV pool independently and is rounded up to the 64-token page size. `--kv-capacity auto` loads the selected weights, measures the remaining GPU memory, and directly chooses the largest legal page capacity for the complete enabled runtime layout. This includes the selected speculative backend, fixed sequence state, workspace, Vision request transient, and Device Graph allowance, while leaving `--kv-capacity-headroom` MiB (default 64) available for external GPU users and display activity. NInfer's own allocations and lazy driver residency are included in its runtime budget; they do not consume this reserve. Raise it when a desktop or another process needs more GPU memory. A startup failure in automatic mode names this option.
+`--kv-capacity N` controls the shared physical Main Text KV pool independently and is rounded up to the 64-token page size. `--kv-capacity auto` loads the selected weights, measures the remaining GPU memory, and directly chooses the largest legal page capacity for the complete enabled runtime layout. This includes the selected speculative backend, fixed sequence state, workspace, Vision request transient, and Device Graph allowance, while leaving `--kv-capacity-headroom` MiB (default 32) available for external GPU users and display activity. NInfer's own allocations and lazy driver residency are included in its runtime budget; they do not consume this reserve. Raise it when a desktop or another process needs more GPU memory. A startup failure in automatic mode names this option.
 
 The token embedding is held in pinned host memory rather than VRAM (the load summary's `weight pinned host`), so it is not part of the device weights. It does not probe allocations or resize the pool at request time. The single-request CLI normally leaves the option omitted so it follows `--max-context`; the distinction matters primarily to a concurrent Engine or server.
 

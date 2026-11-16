@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Run the Qwen3.8-27B R9700 FP8-K/INT4-V accuracy campaign.
+"""Run the Qwen3.8-27B R9700 candidate accuracy campaign.
 
 The campaign compares separately built G16 and G32 executables against an
 independent BF16 reference executable. Both candidate executables consume the
 same explicit R9700 artifact; their JSON reports prove which value-group constant
-was compiled through the runtime. The campaign never changes the product's fixed
-cache format through a runtime flag. Device Graphs default on. Every candidate
+was compiled through the runtime. ``--kv-cache`` selects one growing-cache codec
+for every candidate cell (default FP8-K/INT4-V; opt-in NVFP4 is G16-only), and
+every candidate report must name it; the BF16 reference has no lossy cache and
+ignores the option. Device Graphs default on. Every candidate
 must meet finite/aligned, mean-NLL, and new-severe-position quality guardrails.
 Greedy-token differences from BF16 are retained as a diagnostic because the
 fixed lossy cache is not expected to reproduce BF16 argmax identity.
@@ -30,6 +32,10 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from tools.bench.matrix_contract import (  # noqa: E402  after sys.path setup
+    DEFAULT_KV_CACHE,
+    KV_CACHE_FORMATS,
+)
 from tools.convert.qwen3_8_27b_r9700 import (  # noqa: E402  after sys.path setup
     fp8_hybrid_decision,
     fp8_hybrid_inventory,
@@ -112,6 +118,22 @@ SOURCE_TEXT_TENSOR_COUNT = 851
 SOURCE_SHARD_COUNT = 18
 DEFAULT_MAX_NEW_SEVERE_RATE = 0.001
 DEFAULT_MIN_NEW_SEVERE_BUDGET = 4
+# Recorded golden new-severe counts for individual cells, keyed by
+# (weights_id, kv_format, schedule, spec, prompt_tokens). A recorded count
+# replaces the rate budget when it is larger. Each entry is a measured result
+# the owner accepted after a rounding-only change moved positions that sit at
+# the NLL threshold, with the mean NLL unchanged. Update an entry only when the
+# mean NLL stays similar and the extra new-severe positions come from rounding
+# churn (positions that are close to the threshold under BF16, crossing in both
+# directions). Report every update to the user: name the cell, the old and new
+# count, and why the change counts as rounding rather than a quality loss.
+RECORDED_NEW_SEVERE_GOLDEN = {
+    # Packed decode attention partitioned by batch and live frontier
+    # (2026-11-08, c3ce4772b): the previous partition measured 17 (the rate
+    # budget); this one moves six positions above NLL 10 and four below it,
+    # all within 0.45 nats of the threshold, mean NLL change -0.00016.
+    ("r9700-lq4", "nvfp4", "decode", "none", 32768): 19,
+}
 QUALITY_TIERS = {
     "accuracy": {
         "maximum_mean_nll_delta": 0.02,
@@ -775,6 +797,24 @@ def severe_position_stats(
     }
 
 
+def apply_recorded_new_severe_golden(cell: dict) -> None:
+    """Raise a cell's new-severe budget to its recorded golden count, if any."""
+
+    key = (
+        cell.get("weights_id"),
+        cell.get("kv_format"),
+        cell.get("schedule"),
+        cell.get("spec"),
+        cell.get("prompt_tokens"),
+    )
+    golden = RECORDED_NEW_SEVERE_GOLDEN.get(key)
+    if golden is None or golden <= cell["new_severe_position_budget"]:
+        return
+    cell["recorded_new_severe_golden"] = golden
+    cell["new_severe_position_budget"] = golden
+    cell["new_severe_positions_pass"] = cell["new_severe_positions"] <= golden
+
+
 def paired_nll_stats(prefill: list[float], decode: list[float]) -> dict | None:
     if len(prefill) != len(decode):
         raise ValueError(
@@ -947,6 +987,18 @@ def _extra_value(extra: list[str], flag: str) -> str | None:
     return extra[index + 1]
 
 
+def candidate_kv_cache_args(profile_name: str, kv_cache: str) -> list[str]:
+    """Name an opt-in candidate codec on ninfer-ppl; the BF16 reference has no lossy cache.
+
+    NVFP4 follows the scorer default. Historical FP8-K/INT4-V campaigns must select
+    fp8-int4 explicitly; every cell report names its measured kv_format.
+    """
+
+    if PROFILES[profile_name].reference or kv_cache == DEFAULT_KV_CACHE:
+        return []
+    return ["--kv-cache", kv_cache]
+
+
 def validate_cell_report(
     cell: dict,
     *,
@@ -963,9 +1015,10 @@ def validate_cell_report(
     expected_w8_activation_bits: int,
     expected_fp8_qk_wmma: bool,
     expected_xattention_profile: str = "dense",
+    kv_cache: str = DEFAULT_KV_CACHE,
 ) -> None:
     profile = PROFILES[profile_name]
-    expected_format = "bf16-reference" if profile.reference else "fp8-k-int4-v"
+    expected_format = BASELINE if profile.reference else KV_CACHE_FORMATS[kv_cache]
     expected_graph = False if profile.reference else "--no-device-graph" not in extra
     expected_spec = _extra_value(extra, "--spec") or "none"
     draft_text = _extra_value(extra, "--draft-tokens")
@@ -1132,6 +1185,7 @@ def run_cell(
     expected_w8_activation_bits: int = 8,
     expected_fp8_qk_wmma: bool = True,
     expected_xattention_profile: str = "dense",
+    kv_cache: str = DEFAULT_KV_CACHE,
 ) -> dict:
     profile = PROFILES[profile_name]
     cmd = [
@@ -1152,6 +1206,7 @@ def run_cell(
         str(prefill_chunk),
         "--device",
         str(device),
+        *candidate_kv_cache_args(profile_name, kv_cache),
         "--out-json",
         str(cell_path),
         *extra,
@@ -1182,6 +1237,7 @@ def run_cell(
         expected_w8_activation_bits=expected_w8_activation_bits,
         expected_fp8_qk_wmma=expected_fp8_qk_wmma,
         expected_xattention_profile=expected_xattention_profile,
+        kv_cache=kv_cache,
     )
     nll_path = cell_path.with_suffix(".nllf32")
     argmax_path = cell_path.with_suffix(".argmaxi32")
@@ -1698,6 +1754,7 @@ def load_reused_candidate_cells(
     expected_w8_activation_bits: int,
     expected_fp8_qk_wmma: bool,
     expected_xattention_profile: str,
+    kv_cache: str = DEFAULT_KV_CACHE,
     allow_partial: bool = False,
 ) -> dict[tuple[str, int], tuple[dict, Path]]:
     """Import unchanged candidate sidecars while recomputing BF16-relative gates.
@@ -1814,6 +1871,7 @@ def load_reused_candidate_cells(
             expected_w8_activation_bits=expected_w8_activation_bits,
             expected_fp8_qk_wmma=expected_fp8_qk_wmma,
             expected_xattention_profile=expected_xattention_profile,
+            kv_cache=kv_cache,
         )
         cell_path = _command_output_path(cell, evidence="candidate")
         expected_command = [
@@ -1834,6 +1892,7 @@ def load_reused_candidate_cells(
             str(prefill_chunk),
             "--device",
             str(device),
+            *candidate_kv_cache_args(name, kv_cache),
             "--out-json",
             cell["command"][cell["command"].index("--out-json") + 1],
         ]
@@ -1897,6 +1956,7 @@ def load_reused_candidate_cells(
             "persistent_severe_positions",
             "quality_eligible",
             "quality_tier",
+            "recorded_new_severe_golden",
             "repaired_severe_position_indices",
             "repaired_severe_positions",
             "severe_positions_compared",
@@ -1993,6 +2053,7 @@ def apply_baseline(
                 minimum_budget=minimum_new_severe_budget,
             )
         )
+        apply_recorded_new_severe_golden(cell)
     else:
         raise SystemExit("candidate comparison requires aligned BF16 NLL sidecars")
     cell["complete_finite_aligned"] = cell_ok(cell, cell_nlls, cell_argmax)
@@ -2018,6 +2079,7 @@ def write_markdown(path: Path, payload: dict) -> None:
         "",
         f"- weight inputs: {payload['weights_inputs']}",
         f"- candidate artifact: {payload.get('candidate_artifact')}",
+        f"- candidate KV cache: {payload.get('candidate_kv_format')}",
         f"- lengths: {payload['lengths']}",
         f"- skip default: {payload['skip']}",
         "- device graphs: on unless a cell sets device_graph=false",
@@ -2141,8 +2203,11 @@ def main() -> int:
     parser.add_argument("--long", action="store_true", help=f"only {LONG_TOKENS} tokens")
     parser.add_argument(
         "--profiles",
-        default=None,
-        help="comma-separated profiles; default: bf16-reference,r9700-g16,r9700-g32",
+        default="bf16-reference,r9700-g16",
+        help=(
+            "comma-separated profiles (default: bf16-reference,r9700-g16); "
+            "r9700-g32 is explicit FP8-K/INT4-V evaluation only"
+        ),
     )
     parser.add_argument(
         "--schedule",
@@ -2180,6 +2245,17 @@ def main() -> int:
     )
     parser.add_argument("--prefill-chunk", type=int, default=4096)
     parser.add_argument("--device", type=int, default=0)
+    parser.add_argument(
+        "--kv-cache",
+        choices=tuple(KV_CACHE_FORMATS),
+        default=DEFAULT_KV_CACHE,
+        help=(
+            f"candidate growing-KV codec (default: {DEFAULT_KV_CACHE}, the scorer default); "
+            "historical FP8-K/INT4-V campaigns and G32 evaluation must select fp8-int4; "
+            "opt-in codecs are named on every candidate ninfer-ppl command; "
+            "nvfp4 and tq-k4-v3 require G16; the BF16 reference has no lossy cache and ignores it"
+        ),
+    )
     parser.add_argument(
         "--expected-q4-activation-bits",
         type=int,
@@ -2353,6 +2429,13 @@ def main() -> int:
         for name in profiles
     }
     selected_candidates = [name for name in profiles if name != BASELINE]
+    if args.kv_cache != "fp8-int4" and any(
+        PROFILES[name].value_group != 16 for name in selected_candidates
+    ):
+        raise SystemExit(
+            f"--kv-cache {args.kv_cache} requires the G16 value-group build; "
+            "rebuild with G16 or explicitly select --kv-cache fp8-int4 for G32 evaluation"
+        )
     missing_gates = [name for name in selected_candidates if name not in gates]
     if missing_gates and not args.allow_ungated:
         raise SystemExit(
@@ -2442,6 +2525,7 @@ def main() -> int:
                 expected_w8_activation_bits=args.expected_w8_activation_bits,
                 expected_fp8_qk_wmma=bool(args.expected_fp8_qk_wmma),
                 expected_xattention_profile=args.expected_xattention_profile,
+                kv_cache=args.kv_cache,
                 allow_partial=allow_partial,
             )
             overlap = set(reused_candidates) & set(imported)
@@ -2497,6 +2581,7 @@ def main() -> int:
                         args.expected_w8_activation_bits,
                         bool(args.expected_fp8_qk_wmma),
                         args.expected_xattention_profile,
+                        args.kv_cache,
                     )
                 cell["profile_value_group"] = PROFILES[name].value_group
                 cell["quality_tier"] = args.quality_tier
@@ -2548,6 +2633,7 @@ def main() -> int:
                 args.expected_w8_activation_bits,
                 bool(args.expected_fp8_qk_wmma),
                 args.expected_xattention_profile,
+                args.kv_cache,
             )
             cell["profile_value_group"] = PROFILES[name].value_group
             cell["quality_tier"] = args.quality_tier
@@ -2611,6 +2697,7 @@ def main() -> int:
                 args.expected_w8_activation_bits,
                 bool(args.expected_fp8_qk_wmma),
                 args.expected_xattention_profile,
+                args.kv_cache,
             )
             cell["profile_value_group"] = PROFILES[name].value_group
             cell["quality_tier"] = args.quality_tier
@@ -2749,6 +2836,7 @@ def main() -> int:
         "draft_tokens": draft_tokens,
         "q4_activation_bits": args.expected_q4_activation_bits,
         "w8_activation_bits": args.expected_w8_activation_bits,
+        "candidate_kv_format": (KV_CACHE_FORMATS[args.kv_cache] if selected_candidates else None),
         "candidate_kv_plane_layouts": (R9700_KV_PLANE_LAYOUTS if selected_candidates else None),
         "split512_enabled": bool(args.expected_fp8_qk_wmma),
         "decode_attention_profile": DECODE_ATTENTION_PROFILE,

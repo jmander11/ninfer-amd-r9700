@@ -75,7 +75,10 @@ def main() -> int:
     # DFlash split-context verification: the packed, warp-specialized, double-buffered dense verify
     # kernel (three compute and three loader waves, 16-key blocks) and its merge.
     expected = {
-        "dense_verify_kernelILj16EE": ((41656, 0, 107, 235, 4, 32, 1024), 5),
+        "dense_verify_kernelINS2_17Fp8Int4DenseCodecELj16ELj3EE": (
+            (41656, 0, 107, 235, 4, 32, 1024),
+            5,
+        ),
         "dense_verify_merge_kernel": ((768, 0, 26, 29, 0, 32, 1024), 16),
     }
     for symbol, (wanted, wanted_occupancy) in expected.items():
@@ -85,7 +88,7 @@ def main() -> int:
             occupancy(text, symbol) == wanted_occupancy,
             f"{symbol} occupancy is not {wanted_occupancy}",
         )
-    body = section(text, "dense_verify_kernelILj16EE")
+    body = section(text, "dense_verify_kernelINS2_17Fp8Int4DenseCodecELj16ELj3EE")
     require(
         body.count("v_wmma_f32_16x16x16_bf16") == 16
         and body.count("v_wmma_f32_16x16x16_f16") == 16,

@@ -905,7 +905,7 @@ private:
     void maybe_direct_state_read_barrier();
     void process_job(const Job& job);
     void cancel_idle_locked(std::unique_lock<std::mutex>& lock);
-    void register_location();
+    void register_location(std::filesystem::path location);
     void unregister_location() noexcept;
     void enqueue_spill_jobs(SpillSession& session);
     void finish_restore_state_locked(std::unique_lock<std::mutex>& lock, hipStream_t stream);

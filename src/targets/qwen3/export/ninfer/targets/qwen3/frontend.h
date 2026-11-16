@@ -112,8 +112,10 @@ public:
     [[nodiscard]] std::shared_ptr<const GenerationRecoveryContext>
     generation_recovery_context() const noexcept;
     [[nodiscard]] bool terminal() const noexcept;
-    // Read-only snapshot of committed grammar, node-major. Node zero is the
-    // committed root; other nodes consume their token from an earlier parent.
+    // Masks from the committed grammar, node-major. Node zero is the committed
+    // root; other nodes consume their token from an earlier parent. The walk
+    // advances and restores the committed matcher, so it must not overlap a
+    // preview, commit or another fill of this session.
     void fill_token_masks(std::span<const TokenId> tokens, std::span<const std::int32_t> parents,
                           std::span<std::uint32_t> words) const;
 

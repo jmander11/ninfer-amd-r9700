@@ -1,3 +1,4 @@
+#include "../../../tools/r9700/qual_kv_format.h"
 #include "ninfer/engine.h"
 
 #include <cstdint>
@@ -24,6 +25,7 @@ void require(bool condition, const char* message) {
 
 void ordinary_continuation(const char* artifact, std::uint32_t lanes) {
     ninfer::EngineOptions config;
+    config.kv_cache_format       = ninfer::qual::kv_cache_format_from_environment();
     config.artifact_path         = artifact;
     config.max_concurrency       = lanes;
     config.max_context           = 256;
@@ -61,6 +63,7 @@ void ordinary_continuation(const char* artifact, std::uint32_t lanes) {
 ninfer::EngineOptions fork_config(const char* artifact, std::uint32_t lanes,
                                   ninfer::SpeculativeBackend backend) {
     ninfer::EngineOptions config;
+    config.kv_cache_format          = ninfer::qual::kv_cache_format_from_environment();
     config.artifact_path            = artifact;
     config.max_concurrency          = lanes;
     config.max_context              = 256;

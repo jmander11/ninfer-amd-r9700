@@ -576,11 +576,12 @@ int main(int argc, char** argv) {
             const auto rows    = std::stoul(argv[3]);
             const auto columns = std::stoul(argv[4]);
             require(tokens >= 1U && tokens <= 8192U, "time-cell T must be in 1..8192");
-            require((rows == 34816U && columns == 5120U) || (rows == 5120U && columns == 17408U) ||
-                        (rows == 12288U && columns == 5120U) ||
-                        (rows == 7168U && columns == 5120U) ||
-                        (rows == 5120U && columns == 6144U) || (rows == 4096U && columns == 5120U),
-                    "time-cell N/K must select an existing timing projection");
+            require(
+                (rows == 34816U && columns == 5120U) || (rows == 5120U && columns == 17408U) ||
+                    (rows == 12288U && columns == 5120U) || (rows == 7168U && columns == 5120U) ||
+                    (rows == 5120U && columns == 6144U) || (rows == 4096U && columns == 5120U) ||
+                    (rows == 248320U && columns == 5120U),
+                "time-cell N/K must select an existing timing projection");
             selected_tokens  = static_cast<std::uint32_t>(tokens);
             selected_rows    = static_cast<std::uint32_t>(rows);
             selected_columns = static_cast<std::uint32_t>(columns);
@@ -631,8 +632,8 @@ int main(int argc, char** argv) {
                  {1U,  5U,  6U,  16U, 17U, 20U, 24U, 32U, 33U,  40U, 48U,
                   49U, 56U, 57U, 64U, 65U, 80U, 96U, 97U, 113U, 128U})
                 run_case(book, shape.rows, shape.columns, tokens, false, false, rng, stream);
-        // LQ4 output head (N248320/K5120): C1..C8 verification widths up to T64.
-        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 40U, 49U, 64U})
+        // LQ4 output head (N248320/K5120): C1..C12 verification widths through T96.
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 40U, 49U, 64U, 72U, 84U, 96U})
             run_case(book, 248320, 5120, tokens, false, false, rng, stream);
         // Prefill CTA shapes: 256x64 (T130/200 at N<12288), 512x64 (T300/1000/2048), 256x128
         // (T640, and T <= 256 at N >= 12288), with partial token tiles.

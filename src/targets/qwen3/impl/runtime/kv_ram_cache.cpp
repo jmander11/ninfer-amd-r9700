@@ -145,7 +145,7 @@ void write_semantic_fingerprint(Cursor& w, const Fp8KInt4VSemanticFingerprint& f
     w.u8(static_cast<std::uint8_t>(fingerprint.plane_layouts.key));
     w.u8(static_cast<std::uint8_t>(fingerprint.plane_layouts.value));
     w.u8(static_cast<std::uint8_t>(fingerprint.plane_layouts.value_scale));
-    w.u8(0);
+    w.u8(static_cast<std::uint8_t>(fingerprint.format));
 }
 
 Fp8KInt4VSemanticFingerprint read_semantic_fingerprint(InCursor& r) {
@@ -161,13 +161,14 @@ Fp8KInt4VSemanticFingerprint read_semantic_fingerprint(InCursor& r) {
     fingerprint.plane_layouts.key         = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
     fingerprint.plane_layouts.value       = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
     fingerprint.plane_layouts.value_scale = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
-    r.skip(1);
+    fingerprint.format                    = static_cast<KvCacheFormat>(r.u8());
     return fingerprint;
 }
 
 Fp8KInt4VPagedKVSpec spec_for_pool(const Fp8KInt4VSemanticFingerprint& fingerprint,
                                    const PagedKVPool& pool) {
-    return {.page_group_count      = fingerprint.page_group_count,
+    return {.format                = fingerprint.format,
+            .page_group_count      = fingerprint.page_group_count,
             .logical_page_capacity = fingerprint.logical_page_capacity,
             .table_rows            = pool.table_row_count(),
             .layer_count           = fingerprint.layer_count,
@@ -185,9 +186,10 @@ void verify_semantic_pool(const Fp8KInt4VSemanticFingerprint& fingerprint, const
     }
     const Fp8KInt4VPagedKVSpec spec = spec_for_pool(fingerprint, pool);
     require_fp8_k_int4_v_semantic_fingerprint(fingerprint, fp8_k_int4_v_semantic_fingerprint(spec));
-    if (pool.plane_count() != static_cast<std::size_t>(fingerprint.layer_count) * 3U) {
+    if (pool.plane_count() != static_cast<std::size_t>(fingerprint.layer_count) *
+                                  kv_planes_per_layer(fingerprint.format)) {
         throw std::logic_error(std::string(label) +
-                               " must contain exactly K, V, and V-scale per layer");
+                               " must contain exactly its format's planes per layer");
     }
     for (std::int32_t layer = 0; layer < fingerprint.layer_count; ++layer) {
         (void)fp8_k_int4_v_paged_kv_layer_view(pool, spec, layer, 0);
@@ -1283,17 +1285,54 @@ bool KVRamCache::reserve_live_credit(std::uint64_t owner, std::size_t bytes) try
         return true;
     }
     void* block = arena_.try_alloc(bytes, kDeviceAlign);
+    if (!block) {
+        // Evict nothing for a credit that cannot fit even after every evictable entry is gone:
+        // callers probe shrinking grants, and a failed probe must not cost retained prefixes.
+        // Credits, claimed or I/O-pinned entries and retired blocks still under a copy fence stay.
+        std::vector<std::pair<std::size_t, std::size_t>> fixed;
+        const auto* base = static_cast<const std::uint8_t*>(arena_.base());
+        const auto keep  = [&](const void* at, std::size_t size) {
+            fixed.emplace_back(
+                static_cast<std::size_t>(static_cast<const std::uint8_t*>(at) - base), size);
+        };
+        for (const auto& [owner_id, credit] : live_credits_) { keep(credit.block, credit.bytes); }
+        for (const auto& [id, record] : records_) {
+            if (record.live_owner == 0 &&
+                (record.retired || record.pinned || record.io_pins != 0)) {
+                keep(record.block, record.bytes);
+            }
+        }
+        std::sort(fixed.begin(), fixed.end());
+        std::size_t begin = 0, largest = 0;
+        for (const auto& [offset, size] : fixed) {
+            largest = std::max(largest, offset - std::min(offset, begin));
+            begin   = std::max(begin, offset + size);
+        }
+        largest = std::max(largest, arena_.capacity() - std::min(arena_.capacity(), begin));
+        if (bytes > largest) { return false; }
+    }
+    // Ordinary FIFO images go first; a retained system prefix is taken, least recently used,
+    // only when no ordinary image remains and no retired block is still waiting for its copy.
     while (!block) {
         std::uint64_t victim = 0;
         for (auto id : fifo_) {
             const auto& r = require(id);
-            if (!r.pinned && r.io_pins == 0) {
+            if (!r.system_prompt && !r.pinned && r.io_pins == 0) {
                 victim = id;
                 break;
             }
         }
-        if (!victim) { return false; }
-        retire_locked(victim);
+        if (victim != 0) {
+            ++evictions_;
+            retire_locked(victim);
+        } else {
+            reap_retired_locked();
+            const bool fenced =
+                std::any_of(records_.begin(), records_.end(), [&](const auto& entry) {
+                    return entry.second.retired && !retired_free_locked(entry.second);
+                });
+            if (fenced || !evict_system_prompt_locked()) { return false; }
+        }
         reap_retired_locked();
         block = arena_.try_alloc(bytes, kDeviceAlign);
     }

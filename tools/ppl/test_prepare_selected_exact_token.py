@@ -188,6 +188,7 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             self.assertEqual(plan["workload"]["lengths"], [8192, 32768])
             self.assertEqual(plan["candidate_profile"], "r9700-g32")
             self.assertIn("--execution-parity-max-abs-nll", plan["command"])
+            self.assertEqual(plan["command"][plan["command"].index("--kv-cache") + 1], "fp8-int4")
             self.assertEqual(plan["command"].count("--no-position-extras"), 1)
             self.assertEqual(
                 plan["command"][plan["command"].index("--reuse-bf16-campaign") + 1], str(reference)

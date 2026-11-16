@@ -1,10 +1,10 @@
 """Fixed R9700 PPL profile registry.
 
-Profiles select separate binaries in ``run.py``; they never select a runtime KV
-codec. The BF16 authority is an independently built reference implementation.
-G16 and G32 are separately configured FP8-K/INT4-V executables over the same
-explicit R9700 artifact, used only until the accuracy/performance gate selects
-one static product ABI.
+Profiles select separate binaries in ``run.py``. The BF16 authority is an
+independently built reference implementation without a lossy cache. G16 and G32
+are separately configured candidate executables over the same explicit R9700
+artifact, used only until the accuracy/performance gate selects one static
+product ABI. The growing-cache codec is a separate campaign option, not a profile.
 """
 
 from __future__ import annotations

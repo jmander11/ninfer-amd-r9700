@@ -258,6 +258,14 @@ struct SequenceState {
     // Cleared at end of occupy and in clear_lane so a later VRAM staged restore still unpacks.
     std::uint32_t tier_unpacked_context_base = 0;
     qwen3::detail::PrefixHash128 tier_unpacked_context_hash{};
+    // Set when copy-hold admission queued the planned VRAM-resident checkpoint restore's
+    // host-image uploads on copy_stream (prestage_checkpoint_restore) so decoding lanes are not
+    // ordered behind them; occupy consumes it instead of uploading. `prestaged_restore_done` is
+    // the image's copies_done after the uploads and stays set until compute is ordered after it
+    // by the lane's first reader (order_after_prestaged_restore) or clear_lane.
+    bool prestaged_restore               = false;
+    std::uint32_t prestaged_restore_base = 0;
+    hipEvent_t prestaged_restore_done    = nullptr;
     // A committed DFlash chain round whose ReplaySSM fold is deferred into the lane's next
     // verification forward: `deferred_fold_columns` (> 0 while pending) columns of physical
     // record row `deferred_fold_row`. Until it is applied, the lane's GDN slot holds the state
@@ -477,6 +485,12 @@ public:
     [[nodiscard]] bool kv_disk_copies_ready() const;
     [[nodiscard]] bool kv_disk_restore_failed() const;
     [[nodiscard]] bool kv_copies_ready() const;
+    // Queue a held admission's VRAM-resident rewrite or context-checkpoint restore from its
+    // pinned host image on copy_stream; returns whether uploads were queued. Occupy consumes it.
+    [[nodiscard]] bool prestage_checkpoint_restore(std::uint32_t lane, const RequestPlan& plan);
+    // Whether the lane's prestaged restore uploads, if any, have landed; the executor keeps an
+    // occupied prefill owner out of rounds until then.
+    [[nodiscard]] bool checkpoint_restore_ready(std::uint32_t lane) const;
     void wait_kv_ram_copies_on_compute();
     void wait_kv_ram_copies();
     void wait_kv_disk_copies();
@@ -762,6 +776,10 @@ private:
     void allocate_rewrite_image(SequenceState& sequence);
     void capture_rewrite_image(SequenceState& sequence);
     void restore_rewrite_checkpoint_state(SequenceState& sequence);
+    // Orders compute after a prestaged restore of `base` and clears it; false when none.
+    [[nodiscard]] bool consume_prestaged_restore(SequenceState& sequence, std::uint32_t base);
+    // Orders compute after the lane's consumed prestaged uploads before a reader of that state.
+    void order_after_prestaged_restore(SequenceState& sequence);
     [[nodiscard]] qwen3::detail::RewriteStateHostTarget
     rewrite_state_host_target(SequenceState& sequence);
     void restore_dflash_cyclic_from_head(SequenceState& sequence,

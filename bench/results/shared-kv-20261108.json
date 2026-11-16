@@ -1,0 +1,608 @@
+{
+  "measured_on": "2026-11-08",
+  "hardware": {
+    "gpu": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "rocm": "10",
+    "hip": "7.15.26333",
+    "kernel": "7.0.0-42-generic",
+    "driver": "7.1.3.31500000"
+  },
+  "artifact_identity": "qwen3.8-27b/r9700-lq4",
+  "source": "experimental at 1aff0526 plus the uncommitted 2026-11-08 upstream-sync changes (Release build-r9700)",
+  "settings": {
+    "build": "Release",
+    "device_graphs": true,
+    "power": "auto",
+    "prefill_chunk": 2048,
+    "kv_capacity": "auto",
+    "vision": false,
+    "ram_prefix_cache": false,
+    "disk_prefix_cache": false,
+    "adaptive_draft": true,
+    "optimized_draft_head": true,
+    "max_context": 262144,
+    "max_draft_tokens": {
+      "dflash": 7,
+      "mtp": 3
+    },
+    "kv_capacity_headroom_mib": 32
+  },
+  "graph_environment": {
+    "DEBUG_HIP_GRAPH_CLASSIC_PATH": "0",
+    "ROC_ENABLE_LARGE_BAR": "0",
+    "ROC_SKIP_KERNEL_ARG_COPY": "0",
+    "HSA_DISABLE_FRAGMENT_ALLOCATOR": "1",
+    "DEBUG_HIP_GRAPH_BATCH_SIZE": "16384"
+  },
+  "method": "ninfer-serve startup capacity (public server_start event) followed by one concurrent request per lane with an 8-token budget, at every C1..12 (adaptive DFlash K7) and C1..16 (adaptive MTP K3), for both KV caches. Natural stop tokens stay enabled, so some requests ended early. Each startup waits for 5 s of idle device memory after the previous owner exits, and physical free VRAM (amdgpu counters) is sampled every 50 ms through startup and decode.",
+  "notes": [
+    "Allocated shared capacity, not an all-lane near-capacity qualification.",
+    "C1/C2 (and NVFP4 C3) reach the C x max_context ceiling.",
+    "Raw startup events, logs and responses remain local under the session scratch directory.",
+    "Every cell keeps at least the 32-MiB default headroom physically free; the NVFP4 C4..8 driver-residency addend is included.",
+    "Raw startup events, server logs and responses: profiles/upstream-sync/20261108/cap/final, with final2 remeasuring NVFP4 DFlash C3..9, NVFP4 MTP C4..8 and a default DFlash C8 control on the final build."
+  ],
+  "results": [
+    {
+      "spec": "dflash",
+      "concurrency": 1,
+      "kv_capacity": 262144,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 96468992,
+      "graph_observed_bytes": 77594624,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 9864.168
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 2,
+      "kv_capacity": 524288,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 79691776,
+      "graph_observed_bytes": 60817408,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 3017.105
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 3,
+      "kv_capacity": 633536,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 83886080,
+      "graph_observed_bytes": 65011712,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 37.09
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 4,
+      "kv_capacity": 625408,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 83886080,
+      "graph_observed_bytes": 65011712,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 37.398
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 5,
+      "kv_capacity": 617280,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 85983232,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 37.699
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 6,
+      "kv_capacity": 609088,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 85983232,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 39.637
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 7,
+      "kv_capacity": 600960,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 85983232,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 39.941
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 8,
+      "kv_capacity": 592768,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 85983232,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 41.875
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 9,
+      "kv_capacity": 583168,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 69.227
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 10,
+      "kv_capacity": 574400,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 69.137
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 11,
+      "kv_capacity": 565632,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 69.059
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 12,
+      "kv_capacity": 556800,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 70.012
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 1,
+      "kv_capacity": 262144,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 96468992,
+      "graph_observed_bytes": 77594624,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 11879.156
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 2,
+      "kv_capacity": 524288,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 79691776,
+      "graph_observed_bytes": 60817408,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 7096.598
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 3,
+      "kv_capacity": 786432,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 83886080,
+      "graph_observed_bytes": 65011712,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 2282.469
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 4,
+      "kv_capacity": 902656,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 83886080,
+      "graph_observed_bytes": 65011712,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 33.379
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 5,
+      "kv_capacity": 890944,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 85983232,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 33.188
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 6,
+      "kv_capacity": 879232,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 85983232,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 32.996
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 7,
+      "kv_capacity": 867520,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 85983232,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 32.793
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 8,
+      "kv_capacity": 855808,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 85983232,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 32.605
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 9,
+      "kv_capacity": 842368,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 52.457
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 10,
+      "kv_capacity": 829696,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 52.496
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 11,
+      "kv_capacity": 817024,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 52.547
+    },
+    {
+      "spec": "dflash",
+      "concurrency": 12,
+      "kv_capacity": 804288,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 88080384,
+      "graph_observed_bytes": 67108864,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 53.332
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 1,
+      "kv_capacity": 262144,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 184549376,
+      "graph_observed_bytes": 54525952,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 10932.73
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 2,
+      "kv_capacity": 524288,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 230686720,
+      "graph_observed_bytes": 54525952,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 3703.379
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 3,
+      "kv_capacity": 647424,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 276824064,
+      "graph_observed_bytes": 54525952,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 224.102
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 4,
+      "kv_capacity": 639936,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 322961408,
+      "graph_observed_bytes": 54525952,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 268.766
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 5,
+      "kv_capacity": 632576,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 369098752,
+      "graph_observed_bytes": 75497472,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 294.902
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 6,
+      "kv_capacity": 625024,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 415236096,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 356.297
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 7,
+      "kv_capacity": 617536,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 461373440,
+      "graph_observed_bytes": 75497472,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 385.938
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 8,
+      "kv_capacity": 610048,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 507510784,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 445.609
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 9,
+      "kv_capacity": 601600,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 553648128,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 516.176
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 10,
+      "kv_capacity": 594112,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 599785472,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 560.828
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 11,
+      "kv_capacity": 586688,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 645922816,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 603.75
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 12,
+      "kv_capacity": 579136,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 692060160,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 650.125
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 13,
+      "kv_capacity": 571648,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 738197504,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 694.77
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 14,
+      "kv_capacity": 564224,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 784334848,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 737.699
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 15,
+      "kv_capacity": 556736,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 830472192,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 782.352
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 16,
+      "kv_capacity": 549312,
+      "kv_cache_format": "fp8-k-int4-v",
+      "graph_allowance_bytes": 876609536,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 825.27
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 1,
+      "kv_capacity": 262144,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 184549376,
+      "graph_observed_bytes": 54525952,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 13092.266
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 2,
+      "kv_capacity": 524288,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 230686720,
+      "graph_observed_bytes": 54525952,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 8038.934
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 3,
+      "kv_capacity": 786432,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 276824064,
+      "graph_observed_bytes": 54525952,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 2985.625
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 4,
+      "kv_capacity": 923776,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 322961408,
+      "graph_observed_bytes": 54525952,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 263.145
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 5,
+      "kv_capacity": 913088,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 369098752,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 305.383
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 6,
+      "kv_capacity": 902336,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 415236096,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 348.871
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 7,
+      "kv_capacity": 891520,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 461373440,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 393.566
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 8,
+      "kv_capacity": 880768,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 507510784,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 437.051
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 9,
+      "kv_capacity": 868992,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 553648128,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 499.672
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 10,
+      "kv_capacity": 858240,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 599785472,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 543.172
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 11,
+      "kv_capacity": 847424,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 645922816,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 587.848
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 12,
+      "kv_capacity": 836544,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 692060160,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 633.723
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 13,
+      "kv_capacity": 825792,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 738197504,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 677.215
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 14,
+      "kv_capacity": 815040,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 784334848,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 720.695
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 15,
+      "kv_capacity": 804224,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 830472192,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 765.383
+    },
+    {
+      "spec": "mtp",
+      "concurrency": 16,
+      "kv_capacity": 793472,
+      "kv_cache_format": "nvfp4",
+      "graph_allowance_bytes": 876609536,
+      "graph_observed_bytes": 58720256,
+      "kv_capacity_headroom_bytes": 33554432,
+      "minimum_physical_free_mib": 808.871
+    }
+  ]
+}

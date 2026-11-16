@@ -26,6 +26,7 @@ except (ImportError, OSError) as exc:  # pragma: no cover - exercised only with 
         "install the package requirements explicitly"
     ) from exc
 
+from .kv_eval_codecs import RoundTripFullAttentionCache
 from .kv_tensor_codec import QuantizedFullAttentionCache, validate_codec_device
 from .protocol import (
     ATTENTION_PV_SOURCE_ROW_CHUNK,
@@ -178,21 +179,26 @@ def _attention(
     values: torch.Tensor,
     query_begin: int,
     detail_trace=None,
+    query_rows: int = ATTENTION_QUERY_ROWS,
 ) -> torch.Tensor:
     """Independent FP32 softmax and PV over BF16 GQA operands."""
     rows = query.shape[0]
     output = torch.empty_like(query, dtype=torch.bfloat16)
     all_key_positions = torch.arange(keys.shape[0], device=query.device)
-    for begin in range(0, rows, ATTENTION_QUERY_ROWS):
-        end = min(rows, begin + ATTENTION_QUERY_ROWS)
+    # One FP32 operand per KV head, shared by every query-row block (same values and strides
+    # as converting inside the loop).
+    head_keys = [keys[:, kv_head].float() for kv_head in range(KV_HEADS)]
+    head_values = [values[:, kv_head].float() for kv_head in range(KV_HEADS)]
+    for begin in range(0, rows, query_rows):
+        end = min(rows, begin + query_rows)
         absolute_query = torch.arange(query_begin + begin, query_begin + end, device=query.device)
         allowed = all_key_positions.unsqueeze(0) <= absolute_query.unsqueeze(1)
         for kv_head in range(KV_HEADS):
             q0 = kv_head * Q_PER_KV
             q1 = q0 + Q_PER_KV
             q = query[begin:end, q0:q1].float()
-            k = keys[:, kv_head].float()
-            v = values[:, kv_head].float()
+            k = head_keys[kv_head]
+            v = head_values[kv_head]
             scores = torch.einsum("thd,sd->ths", q, k) * ATTENTION_SCALE
             scores = scores.masked_fill(~allowed[:, None, :], -torch.inf)
             if detail_trace:
@@ -340,6 +346,8 @@ class LayerMajorTextScorer:
         schedule: str,
         skip_text: str,
         kv_value_group: int | None,
+        kv_round_trip: str | None = None,
+        attention_query_rows: int = ATTENTION_QUERY_ROWS,
         trace=None,
     ):
         if not torch.cuda.is_available():
@@ -356,6 +364,10 @@ class LayerMajorTextScorer:
         if kv_value_group not in (None, 16, 32):
             raise ValueError("BF16-source KV diagnostic group must be G16 or G32")
         self.kv_value_group = kv_value_group
+        if kv_round_trip is not None and kv_value_group is not None:
+            raise ValueError("a BF16-source cache diagnostic selects exactly one codec")
+        self.kv_round_trip = kv_round_trip
+        self.attention_query_rows = attention_query_rows
         self.trace = trace
         if self.kv_value_group is not None:
             validate_codec_device(self.device, self.kv_value_group)
@@ -372,7 +384,13 @@ class LayerMajorTextScorer:
     ) -> None:
         root = f"model.language_model.layers.{layer}."
         length = hidden.shape[0]
-        if self.kv_value_group is None:
+        if self.kv_round_trip is not None:
+            key_cache = None
+            value_cache = None
+            quantized_cache = RoundTripFullAttentionCache(
+                length, KV_HEADS, self.kv_round_trip, self.device
+            )
+        elif self.kv_value_group is None:
             key_cache = torch.empty(
                 (length, KV_HEADS, HEAD_DIM), device=self.device, dtype=torch.bfloat16
             )
@@ -437,6 +455,7 @@ class LayerMajorTextScorer:
                 represented_values,
                 begin,
                 self.trace if layer == 3 else None,
+                query_rows=self.attention_query_rows,
             )
             if self.trace:
                 self.trace.capture_attention_detail(layer, "attended-output", attended, begin, end)

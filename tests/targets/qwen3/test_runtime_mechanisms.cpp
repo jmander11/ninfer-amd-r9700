@@ -77,6 +77,7 @@ void test_fp8_k_int4_v_decoder_layout() {
         .kv_heads              = 4,
         .attention_head_dim    = 256,
         .value_group           = 32,
+        .kv_cache_format       = ninfer::KvCacheFormat::Fp8KInt4V,
         .text_plane_layouts =
             {
                 .key         = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
@@ -157,6 +158,31 @@ void test_fp8_k_int4_v_decoder_layout() {
             (void)q3::plan_decoder_state(invalid_builder, invalid);
         },
         "typed MTP decoder rejects insufficient physical pages");
+
+    for (const auto codec :
+         {ninfer::EngineOptions{}.kv_cache_format, ninfer::KvCacheFormat::TqK4V3}) {
+        auto four_plane            = spec;
+        four_plane.kv_cache_format = codec;
+        four_plane.value_group     = 16;
+        ninfer::LayoutBuilder codec_builder;
+        const auto codec_layout = q3::plan_decoder_state(codec_builder, four_plane);
+        expect(codec_layout.text_kv.storage.storage.planes.size() == 8 &&
+                   codec_layout.mtp_kv.has_value() &&
+                   codec_layout.mtp_kv.value().storage.storage.planes.size() == 4,
+               "default NVFP4 and opt-in TQ retain four planes per Text/MTP layer");
+        four_plane.value_group = 32;
+        try {
+            ninfer::LayoutBuilder invalid_builder;
+            (void)q3::plan_decoder_state(invalid_builder, four_plane);
+            expect(false, "four-plane codec silently accepted G32");
+        } catch (const std::invalid_argument& error) {
+            expect(std::string_view(error.what()).find("--kv-cache fp8-int4") !=
+                           std::string_view::npos &&
+                       std::string_view(error.what()).find("NINFER_R9700_KV_VALUE_GROUP=16") !=
+                           std::string_view::npos,
+                   "G32 codec rejection must name explicit FP8/INT4 selection and G16 rebuild");
+        }
+    }
 }
 
 void test_round_layout() {
@@ -1186,8 +1212,10 @@ void test_prefill_context_marks() {
     expect(Slots::staging_state_slot(3) == 3, "C=3 staging is slot C");
     expect(Slots::state_slot_count(8, true) == 9, "C=8 MTP/DFlash GDN pool is C+1");
     expect(Slots::current_state_slot(7, 8) == 7, "C=8 last-lane current is slot 7");
-    expect_throw([] { (void)Slots::state_slot_count(9, true); },
-                 "Linear Attention state slots accepted non-product C=9");
+    expect(Slots::state_slot_count(16, true) == 17, "C=16 MTP GDN pool is C+1");
+    expect(Slots::current_state_slot(15, 16) == 15, "C=16 last-lane current is slot 15");
+    expect_throw([] { (void)Slots::state_slot_count(17, true); },
+                 "Linear Attention state slots accepted non-product C=17");
 }
 
 } // namespace

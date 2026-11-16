@@ -628,6 +628,9 @@ public:
             throw std::logic_error("layer3 attention visibility metadata differs");
         }
         const auto& cache = read.layer();
+        if (cache.format != KvCacheFormat::Fp8KInt4V) {
+            throw std::logic_error("layer3 attention trace requires the FP8-K/INT4-V cache");
+        }
         if (cache.head_dim != 256 || cache.num_kv_heads != 4 || cache.value_group != 16 ||
             read.visible_frontier() != (dflash ? 134U : 130U) || read.mapped_pages() < 3U ||
             read.device_table_row() == nullptr || read.pool_block_tables() == nullptr ||
@@ -641,17 +644,16 @@ public:
             throw std::logic_error("layer3 attention cache layout differs");
         }
         const std::size_t physical_tokens =
-            static_cast<std::size_t>(cache.key_fp8_pages.numel()) / (4U * 256U);
+            static_cast<std::size_t>(cache.key_pages.numel()) / (4U * 256U);
         auto* payload = attention_payload();
         auto* status  = reinterpret_cast<std::uint32_t*>(attention_aux() + 24U);
         HIP_CHECK(ops::r9700::kv::fp8_int4_kv_trace_positions0_129(
-            {.key_codes   = static_cast<const std::uint8_t*>(cache.key_fp8_pages.data),
-             .value_codes = static_cast<const std::uint8_t*>(cache.value_int4_pages.data),
-             .value_scale_bits =
-                 static_cast<const std::uint16_t*>(cache.value_scale_fp16_pages.data),
-             .page_table            = read.pool_block_tables(),
-             .page_table_row        = read.device_table_row(),
-             .page_table_pages      = read.mapped_pages(),
+            {.key_codes        = static_cast<const std::uint8_t*>(cache.key_pages.data),
+             .value_codes      = static_cast<const std::uint8_t*>(cache.value_pages.data),
+             .value_scale_bits = static_cast<const std::uint16_t*>(cache.value_scale_pages.data),
+             .page_table       = read.pool_block_tables(),
+             .page_table_row   = read.device_table_row(),
+             .page_table_pages = read.mapped_pages(),
              .page_table_row_stride = read.pool_table_row_stride(),
              .page_table_row_count  = read.pool_table_row_count(),
              .physical_tokens       = physical_tokens,

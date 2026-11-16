@@ -35,6 +35,7 @@ struct Fp8KvQkArgs {
 // the dot product; its FP8-Q oracle is therefore distinct from the vector baseline's BF16-Q oracle.
 [[nodiscard]] hipError_t fp8_kv_qk_wmma(const Fp8KvQkArgs& a, hipStream_t stream) noexcept;
 
+// The vector, raw-WMMA and qualification-tail stages below read the Fp8Int4 planes only.
 // Exact-zero probabilities contribute zero regardless of the corresponding value/scale bytes;
 // masked slots in the allocated cache need not contain finite scales.
 struct Int4KvPvArgs {
@@ -115,6 +116,19 @@ struct Fp8Int4KvAttentionArgs {
     // of T. The score-streaming baseline ignores this field.
     float* score_workspace = nullptr;
     float* output          = nullptr; // [query_rows][query_heads][256]
+    // Nvfp4 cache (see KvCodec): key_codes and value_codes hold packed E2M1 and these planes the
+    // E4M3FN scales; value_scale_bits is unused. Every route but the Fp8Int4-only raw-WMMA tail
+    // takes it. Represented K and V are exact in FP16. The packed, mid-row and dense routes stage
+    // represented Q as FP16 with round-toward-zero and poison a row whose |Q| reaches 2^16; the
+    // fused and split512 routes keep represented Q.
+    KvCodec codec                         = KvCodec::Fp8Int4;
+    const std::uint8_t* key_scale_codes   = nullptr;
+    const std::uint8_t* value_scale_codes = nullptr;
+    // TqK4V3 cache: key_codes and value_codes hold the rotated 4-bit K and 3-bit V codes,
+    // key_scale_codes addresses the binary16 K-scale plane (one per head vector, token-fastest
+    // head-major) and value_scale_bits the binary16 V scales (one per row); value_scale_codes is
+    // unused. Q and the output are in the rotated basis (see tq_rotation.h). Every route but the
+    // Fp8Int4-only raw-WMMA tail takes it; staging matches Nvfp4 (FP16 Q, round-toward-zero).
 };
 
 [[nodiscard]] hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,
@@ -165,16 +179,18 @@ fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(std::size_t context,
 
 // Production packed decode route (1..8 host-fixed rows: ordinary decode, MTP, DFlash chain
 // verification), split over the context: one
-// 192-thread CTA per KV head and context chunk (at most 64 chunks of at least 256 keys) runs the
+// 192-thread CTA per KV head and context chunk (at most 64 chunks) runs the
 // dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K in BF16 WMMA, online FP32
 // Softmax with FP16 probabilities, FP16 V/8 PV with FP32 accumulation) and writes per-row
 // numerator/origin/denominator partials to the caller workspace; one stable FP32 merge normalizes.
 // Row positions are absolute; invalid positions, page-table rows and physical pages poison exactly
 // the dependent rows with NaN.
-// One launch pair serves up to kMaximumConcurrency sequences of a compact decode batch (grid z =
-// sequence), each with its own arguments, rows, frontier and caller-owned score_workspace partials;
-// every sequence's output bytes equal those of its one-sequence launch. Sequences must not share
-// output or workspace storage.
+// One launch pair serves up to kMaximumConcurrency sequences of a compact decode batch (split
+// grid y = sequence, z = chunk; merge grid z = sequence), each with its own arguments, rows,
+// frontier and caller-owned score_workspace partials (plus one word holding the chunk count the
+// split chose for the merge). A sequence's partition depends on the batch size and its live
+// frontier, so batched and one-sequence outputs agree to rounding, each meeting the oracle.
+// Sequences must not share output or workspace storage.
 inline constexpr std::size_t kPackedDecodeMaximumSequences = kMaximumConcurrency;
 [[nodiscard]] std::size_t
 fp8_int4_kv_attention_packed_decode_workspace_bytes(std::size_t context,

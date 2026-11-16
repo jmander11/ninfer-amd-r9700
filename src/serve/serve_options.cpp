@@ -87,6 +87,13 @@ std::size_t parse_kv_disk_capacity_bytes(const char* text) {
     return static_cast<std::size_t>(bytes);
 }
 
+KvCacheFormat parse_kv_cache(const char* text) {
+    if (std::string_view(text) == "fp8-int4") { return KvCacheFormat::Fp8KInt4V; }
+    if (std::string_view(text) == "nvfp4") { return KvCacheFormat::Nvfp4; }
+    if (std::string_view(text) == "tq-k4-v3") { return KvCacheFormat::TqK4V3; }
+    throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
+}
+
 KvDiskCompress parse_kv_disk_compress(const char* text) {
     if (text == nullptr || std::string_view(text) == "off") { return KvDiskCompress::Off; }
     if (std::string_view(text) == "zstd") { return KvDiskCompress::Zstd; }
@@ -98,10 +105,12 @@ KvDiskCompress parse_kv_disk_compress(const char* text) {
 std::string serve_usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> [--host H] [--port N] [--api-key KEY] "
-           "[--model-id ID] [--max-context N] [--kv-capacity N|auto] [--kv-capacity-headroom MiB] "
+           "[--model-id ID] [--max-context N] [--kv-cache fp8-int4|nvfp4|tq-k4-v3] [--kv-capacity "
+           "N|auto] "
+           "[--kv-capacity-headroom MiB] "
            "[--kv-ram-capacity off|N] [--kv-ram-system-prompts N] "
            "[--kv-disk-capacity off|N] [--kv-disk-location PATH] [--kv-disk-compress off|zstd] "
-           "[--max-concurrency 1..8] [--no-generation-recovery] "
+           "[--max-concurrency 1..16] [--no-generation-recovery] "
            "[--max-pending-requests N] [--pending-timeout-ms N] "
            "[--prefill-chunk N] [--mixed-forward auto|N] [--mixed-forward-rounds N] "
            "[--log-stats-interval-ms N] [--device N] "
@@ -131,8 +140,12 @@ std::string serve_usage_text(const char* argv0) {
            "       Responses history is memory-only by default; --response-store-location persists "
            "it\n"
            "       Response history defaults to 1024 records / 256 MiB\n"
+           "       --max-concurrency accepts 1..16 with --spec none or mtp; DFlash: 1..12\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
+           "       --kv-cache selects the growing Text/MTP KV codec: nvfp4 (default), fp8-int4\n"
+           "       (opt-in), or tq-k4-v3 (opt-in rotated 4-bit K / 3-bit V). NVFP4 and TQ require\n"
+           "       a G16 build; with G32 select --kv-cache fp8-int4 explicitly.\n"
            "       --kv-capacity defaults to auto: sizes KV from all free GPU memory except "
            "--kv-capacity-headroom "
            "MiB (default " +
@@ -215,6 +228,8 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--max-context") {
             options.max_context = static_cast<std::uint32_t>(
                 parse_nonnegative_int(require_value("--max-context"), "max-context"));
+        } else if (arg == "--kv-cache") {
+            options.kv_cache_format = parse_kv_cache(require_value("--kv-cache"));
         } else if (arg == "--kv-capacity") {
             options.kv_capacity = parse_kv_capacity(require_value("--kv-capacity"));
         } else if (arg == "--kv-capacity-headroom") {
@@ -425,7 +440,7 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     validate_kv_disk_options(options.kv_ram_capacity_bytes, options.kv_disk_capacity_bytes,
                              options.kv_disk_location);
     if (options.max_concurrency == 0 || options.max_concurrency > kMaximumConcurrency) {
-        throw std::invalid_argument("--max-concurrency must be in [1,8]");
+        throw std::invalid_argument("--max-concurrency must be in [1,16]");
     }
     if (options.max_pending_requests == 0) {
         throw std::invalid_argument("--max-pending-requests must be positive");
@@ -436,8 +451,9 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     if (options.max_request_bytes == 0) {
         throw std::invalid_argument("--max-request-mib must be positive");
     }
-    if (options.prefill_chunk == 0 || options.prefill_chunk % 128 != 0) {
-        throw std::invalid_argument("--prefill-chunk must be a positive multiple of 128");
+    if (options.prefill_chunk == 0 || options.prefill_chunk % 128 != 0 ||
+        options.prefill_chunk > ninfer::kMaximumPrefillChunk) {
+        throw std::invalid_argument("--prefill-chunk must be a multiple of 128 in [128,8192]");
     }
     if (options.mixed_forward && *options.mixed_forward % 256 != 0) {
         throw std::invalid_argument("--mixed-forward must be auto or a multiple of 256");

@@ -404,12 +404,15 @@ int main(int argc, char** argv) {
         merge(total, run_prepare(device, 8, 1, true));
         merge(total, run_prepare(device, 4, 2, false));
         merge(total, run_prepare(device, 16, 2, true));
+        merge(total, run_prepare(device, 8, 12, true));
+        merge(total, run_finish_normalized(device, 8, 12, true));
         merge(total, run_finish(device));
         merge(total, run_finish_normalized(device, 8, 1, true));
         merge(total, run_finish_normalized(device, 3, 4, false));
         merge(total, run_finish_normalized(device, 16, 2, true));
         std::cout << "grouped_dynamic_conv: PASS gfx1201 D5120/G320 prepare T1/B1 T8/B1 T4/B2 "
-                     "T16/B2, finish T4/B2, finish_normalized T8/B1 T3/B4 T16/B2; exact A8G64 "
+                     "T16/B2 T8/B12, finish T4/B2, finish_normalized T8/B1 T3/B4 T16/B2 T8/B12; "
+                     "exact A8G64 "
                      "images, last-block status with idle completion words, graph replay, "
                      "nonfinite status"
                   << " max_abs=" << total.max_abs << " rel_l2=" << total.relative_l2 << '\n';

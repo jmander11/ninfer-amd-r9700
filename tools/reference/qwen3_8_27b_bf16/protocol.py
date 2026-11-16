@@ -24,6 +24,19 @@ CACHE_DIAGNOSTIC_GROUPS = {
     G16_CACHE_SCHEME: 16,
     G32_CACHE_SCHEME: 32,
 }
+# Evaluation-only round-trip codecs (kv_eval_codecs.KEY_VALUE_CODECS), keyed by scheme.
+ROUND_TRIP_CACHE_SCHEMES = {
+    f"bf16-source-kv-{name}": name
+    for name in (
+        "nvfp4",
+        "nvfp4-46",
+        "k-nvfp4-46-v-tq3",
+        "k-tq4-v-tq3",
+        "k-tq4-v-tq3p5",
+        "k-tq4-v-tq4",
+        "tq-k4-v3",
+    )
+}
 TOKEN_DOMAIN = 248077
 VOCAB_SIZE = 248320
 HIDDEN_SIZE = 5120
@@ -140,6 +153,7 @@ class ScorerOptions:
     draft_tokens: int
     device_graph: bool
     trace_json: Path | None = None
+    attention_query_rows: int = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,7 +400,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scheme",
         default=BF16_SCHEME,
-        help=(f"report/formula profile: {BF16_SCHEME}, {G16_CACHE_SCHEME}, or {G32_CACHE_SCHEME}"),
+        help=(
+            f"report/formula profile: {BF16_SCHEME}, {G16_CACHE_SCHEME}, {G32_CACHE_SCHEME}, "
+            f"or an evaluation cache: {', '.join(ROUND_TRIP_CACHE_SCHEMES)}"
+        ),
     )
     parser.add_argument("--schedule", choices=("prefill", "decode"), default="prefill")
     parser.add_argument("--skip", default="half", help="half or a nonnegative token count")
@@ -394,6 +411,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--tokens", type=int, default=0, help="score the first N ids; zero means all"
     )
     parser.add_argument("--prefill-chunk", type=int, default=4096)
+    parser.add_argument(
+        "--attention-query-rows",
+        type=int,
+        default=32,
+        help="query rows per FP32 attention block; larger values cut long-context K/V re-reads",
+    )
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--out-json", default="-", help="JSON path or - for stdout")
     parser.add_argument("--trace-json", type=Path, help="separate diagnostic stage-hash report")
@@ -417,11 +440,18 @@ def parse_options(argv: Sequence[str] | None = None) -> ScorerOptions:
         raise ValueError("--tokens must be nonnegative")
     if args.prefill_chunk <= 0:
         raise ValueError("--prefill-chunk must be positive")
+    if args.attention_query_rows <= 0:
+        raise ValueError("--attention-query-rows must be positive")
     if args.device < 0:
         raise ValueError("--device must be nonnegative")
-    if args.scheme != BF16_SCHEME and args.scheme not in CACHE_DIAGNOSTIC_GROUPS:
+    if (
+        args.scheme != BF16_SCHEME
+        and args.scheme not in CACHE_DIAGNOSTIC_GROUPS
+        and args.scheme not in ROUND_TRIP_CACHE_SCHEMES
+    ):
         raise ValueError(
-            f"--scheme must be {BF16_SCHEME}, {G16_CACHE_SCHEME}, or {G32_CACHE_SCHEME}"
+            f"--scheme must be {BF16_SCHEME}, {G16_CACHE_SCHEME}, {G32_CACHE_SCHEME}, "
+            f"or one of {', '.join(ROUND_TRIP_CACHE_SCHEMES)}"
         )
     parse_skip_text(args.skip)
     if args.spec == "mtp":
@@ -454,11 +484,33 @@ def parse_options(argv: Sequence[str] | None = None) -> ScorerOptions:
         draft_tokens=args.draft_tokens,
         device_graph=False,
         trace_json=args.trace_json,
+        attention_query_rows=args.attention_query_rows,
     )
 
 
+def round_trip_cache_report(codec: str) -> dict:
+    """Report fields for an evaluation round-trip cache; they replace the FP8/INT4 labels."""
+    from .kv_eval_codecs import KEY_VALUE_CODECS, head_token_bytes
+
+    key_codec, value_codec = KEY_VALUE_CODECS[codec]
+    return {
+        "kv_format": f"eval-{codec}",
+        "cache_only_diagnostic": True,
+        "cache_diagnostic_scope": "full-attention-kv-only",
+        "cache_key_codec": key_codec,
+        "cache_value_codec": value_codec,
+        "cache_head_token_bytes": head_token_bytes(codec),
+        "cache_append_boundary": ("represented BF16 post-RoPE K and represented BF16 projected V"),
+        "cache_use_boundary": "decoded FP32 values of the evaluation codec round trip",
+    }
+
+
+def cache_round_trip_codec(scheme: str) -> str | None:
+    return ROUND_TRIP_CACHE_SCHEMES.get(scheme)
+
+
 def cache_value_group(scheme: str) -> int | None:
-    if scheme == BF16_SCHEME:
+    if scheme == BF16_SCHEME or scheme in ROUND_TRIP_CACHE_SCHEMES:
         return None
     try:
         return CACHE_DIAGNOSTIC_GROUPS[scheme]
@@ -466,7 +518,9 @@ def cache_value_group(scheme: str) -> int | None:
         raise ValueError(f"unknown BF16-source cache profile {scheme!r}") from exc
 
 
-def formula_signature(options: ScorerOptions) -> tuple[Path, Path, int, int, int, int | None]:
+def formula_signature(
+    options: ScorerOptions,
+) -> tuple[Path, Path, int, int, int, int | None, str | None, int]:
     """Execution inputs affecting logits; score-index and product labels are absent."""
     return (
         options.weights,
@@ -475,6 +529,8 @@ def formula_signature(options: ScorerOptions) -> tuple[Path, Path, int, int, int
         options.prefill_chunk,
         options.device,
         cache_value_group(options.scheme),
+        cache_round_trip_codec(options.scheme),
+        options.attention_query_rows,
     )
 
 
@@ -719,6 +775,7 @@ def result_payload(
         perplexity = float("inf")
     value_group = cache_value_group(options.scheme)
     cache_diagnostic = value_group is not None
+    round_trip = cache_round_trip_codec(options.scheme)
     return {
         "scheme": options.scheme,
         "weights": str(options.weights),
@@ -750,12 +807,14 @@ def result_payload(
         "cache_use_boundary": (
             "decode stored K/V to FP32 attention operands" if cache_diagnostic else None
         ),
+        **(round_trip_cache_report(round_trip) if round_trip is not None else {}),
         "schedule": options.schedule,
         "spec": options.spec,
         "draft_tokens": options.draft_tokens,
         "speculative_execution": False,
         "device_graph": False,
         "prefill_chunk": options.prefill_chunk,
+        "attention_query_rows": options.attention_query_rows,
         "skip_tokens": vectors.skip_tokens,
         "prompt_tokens": vectors.prompt_tokens,
         "tokens_scored": len(vectors.nlls),
@@ -838,6 +897,7 @@ __all__ = [
     "ScorerOptions",
     "TensorRequirement",
     "build_parser",
+    "cache_round_trip_codec",
     "cache_value_group",
     "clear_result",
     "enable_strict_torch_determinism",

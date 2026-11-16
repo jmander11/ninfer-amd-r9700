@@ -5,6 +5,7 @@
 // the RAM image onto the empty lane, and prefills without recomputing the restored prefix. Two
 // decoded retries restore the prompt checkpoint after speculative decode overwrote the lane and
 // must reproduce the committed GDN/hidden state and greedy continuation of an undecoded control.
+#include "qual_kv_format.h"
 #include "artifact/binder.h"
 #include "artifact/materializer.h"
 #include "artifact/reader.h"
@@ -337,6 +338,7 @@ void exercise(const std::filesystem::path& artifact, ninfer::SpeculativeBackend 
               bool device_graph) {
     ninfer::DeviceContext device(0);
     ninfer::EngineOptions options;
+    options.kv_cache_format       = ninfer::qual::kv_cache_format_from_environment();
     options.artifact_path         = artifact;
     options.max_context           = 4096;
     options.max_concurrency       = 1;

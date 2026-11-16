@@ -65,6 +65,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/schedule/scalar_schedule_ops.hip
   ops/r9700/kv/fp8_int4_kv_append.hip
   ops/r9700/kv/fp8_int4_kv_compact.hip
+  ops/r9700/kv/tq_rotation.hip
   ops/r9700/kv/fp8_int4_kv_trace.hip
   ops/r9700/kv/fp8_int4_kv_attention.hip
   ops/r9700/linear/linear_tensor_op.cpp
@@ -219,8 +220,8 @@ target_link_libraries(ninfer_r9700_qwen3_8_27b_runtime PUBLIC
 
 # Force every runtime archive member into one physical planner executable. This prevents an
 # unresolved schedule dependency from being hidden merely because a small main does not call that
-# Program method. The observable route then constructs/finalizes every C=1..8 ordinary, Vision,
-# MTP, and DFlash planner profile on the selected gfx1201 device.
+# Program method. The observable route then constructs/finalizes every C=1..16 ordinary, Vision,
+# and MTP planner profile and every C=1..8 DFlash profile on the selected gfx1201 device.
 add_executable(ninfer_r9700_runtime_planner_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/runtime_planner_qual.cpp)
 ninfer_r9700_internal_includes(ninfer_r9700_runtime_planner_qual)
@@ -338,6 +339,14 @@ ninfer_r9700_internal_includes(ninfer_r9700_engine_cache_cancel_qual)
 set_target_properties(ninfer_r9700_engine_cache_cancel_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
 target_link_libraries(ninfer_r9700_engine_cache_cancel_qual PRIVATE ninfer_engine)
+
+# Manual fixed-K7 C12 compaction regression through the public Engine.
+add_executable(ninfer_r9700_dflash_concurrency_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_concurrency_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_dflash_concurrency_qual)
+set_target_properties(ninfer_r9700_dflash_concurrency_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_dflash_concurrency_qual PRIVATE ninfer_engine)
 
 # Manual regression for concurrent long tool prompts, checkpoint copies, reuse and decode batches.
 add_executable(ninfer_r9700_concurrent_long_prompt_qual
@@ -555,7 +564,7 @@ set_target_properties(ninfer_r9700_sampling_qual PROPERTIES
 target_link_libraries(ninfer_r9700_sampling_qual PRIVATE ninfer_r9700_core hip::host)
 
 # Full speculative-round transition qualification: exact preparation, chain/tree acceptance,
-# selector-q residuals, state publication, and hidden/token movement over the sole B<=8/W<=16
+# selector-q residuals, state publication, and hidden/token movement over the sole B<=16/W<=16
 # product domain.  The executable uses an independent host oracle and caller-owned workspace.
 add_executable(ninfer_r9700_speculative_round_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/speculative_round_qual.hip)
@@ -638,11 +647,30 @@ set_target_properties(ninfer_r9700_full_attention_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_full_attention_qual PRIVATE ninfer_r9700_core hip::host)
 
+# Opt-in NVFP4 cache: every codec, transaction and attention route against its independent oracle.
+add_executable(ninfer_r9700_nvfp4_kv_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/nvfp4_kv_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_nvfp4_kv_qual)
+target_include_directories(ninfer_r9700_nvfp4_kv_qual PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+set_target_properties(ninfer_r9700_nvfp4_kv_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_nvfp4_kv_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Opt-in TQ-K4-V3 cache: rotation, codec, transactions and attention routes against its oracle.
+add_executable(ninfer_r9700_tq_kv_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/tq_kv_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_tq_kv_qual)
+target_include_directories(ninfer_r9700_tq_kv_qual PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+set_target_properties(ninfer_r9700_tq_kv_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_tq_kv_qual PRIVATE ninfer_r9700_core hip::host)
+
 # Standalone arithmetic discriminator for ordinary W1 versus DFlash-chain W5 attention. It calls
 # the two raw leaves directly and cannot alter the production row/context classifier.
 add_executable(ninfer_r9700_dflash_attention_route_discriminator
   ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_attention_route_discriminator.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_dflash_attention_route_discriminator)
+target_include_directories(ninfer_r9700_dflash_attention_route_discriminator PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 set_target_properties(ninfer_r9700_dflash_attention_route_discriminator PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_dflash_attention_route_discriminator PRIVATE ninfer_r9700_core hip::host)
@@ -775,7 +803,7 @@ set_target_properties(ninfer_r9700_a8q4_normalized_linear_prefill_qual PROPERTIE
 target_link_libraries(ninfer_r9700_a8q4_normalized_linear_prefill_qual PRIVATE
   ninfer_r9700_core hip::host)
 
-# Exact MTP next-round state transition for the complete fixed product domain K=1..5/B=1..8.
+# Exact MTP next-round state transition for the complete fixed product domain K=1..5/B=1..16.
 # The qualifier checks every output element, pitched padding, input immutability, and public
 # shape/stride rejection against an independent host integer oracle on physical gfx1201.
 add_executable(ninfer_r9700_mtp_round_qual

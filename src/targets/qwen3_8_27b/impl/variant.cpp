@@ -592,7 +592,7 @@ bool Variant::ExecutionState::lq4_normalized_projections(const Tensor& residual,
 bool Variant::ExecutionState::lq4_gated_projections(const Tensor& gate,
                                                     const Tensor& attention_fp32,
                                                     std::span<const Lq4Target> targets,
-                                                    hipStream_t stream) {
+                                                    hipStream_t stream, bool tq_unrotate) {
     if (gate.dtype != DType::BF16 || attention_fp32.dtype != DType::FP32 || !gate.is_contiguous() ||
         !attention_fp32.is_contiguous() || gate.numel() != attention_fp32.numel() ||
         gate.numel() % TextConfig::query_size != 0)
@@ -602,7 +602,8 @@ bool Variant::ExecutionState::lq4_gated_projections(const Tensor& gate,
     const auto image = lq4_image(tokens, TextConfig::query_size);
     HIP_CHECK(ops::r9700::linear::fp8_quantize_gated_activation(
         {static_cast<const hip_bfloat16*>(gate.data),
-         static_cast<const float*>(attention_fp32.data), image, lq4_warm(tokens, targets)},
+         static_cast<const float*>(attention_fp32.data), image, lq4_warm(tokens, targets),
+         tq_unrotate},
         stream));
     lq4_project(image, targets, stream);
     return true;
@@ -1882,8 +1883,8 @@ std::optional<std::size_t> Variant::calibrated_dflash_graph_allowance_bytes(
         prefill_chunk == 2048U || (prefill_chunk == 1024U && concurrency == 6U);
     if (!qualified_build || !is_lq4_text_profile(profile) || features.vision ||
         !features.dflash() || !features.optimized_proposal() || capacity != maximum_context ||
-        concurrency == 0U || concurrency > 8U || !qualified_chunk || draft_window != 7U ||
-        !adaptive_draft)
+        concurrency == 0U || concurrency > kDFlashMaximumConcurrency || !qualified_chunk ||
+        draft_window != 7U || !adaptive_draft)
         return std::nullopt;
 
     // Packet replay keeps immutable kernel arguments in pinned host pools when the runtime
@@ -1900,8 +1901,11 @@ std::optional<std::size_t> Variant::calibrated_dflash_graph_allowance_bytes(
         // and runtime headroom are qualified separately from chunk2048.
         // C1 remeasured after decode hosting and host-allocation changes.
         // profiles/bench/readme-refresh-20261017/
-        constexpr std::array<std::size_t, 8> host_argument_graph_mib{72, 56, 60, 60,
-                                                                     62, 62, 62, 62};
+        // C9..12 complete inventories each observed 64 MiB (2026-11-04).
+        // profiles/bench/dflash-c12-20261104/capacity/
+        constexpr std::array<std::size_t, 12> host_argument_graph_mib{72, 56, 60, 60, 62, 62,
+                                                                      62, 62, 64, 64, 64, 64};
+        if (concurrency > host_argument_graph_mib.size()) { return std::nullopt; }
         return host_argument_graph_mib[concurrency - 1U] << 20U;
     }
 
@@ -1911,6 +1915,7 @@ std::optional<std::size_t> Variant::calibrated_dflash_graph_allowance_bytes(
     // Complete immutable inventory, measured separately at every C on gfx1201.
     // profiles/bench/r9700-vram-runtime-budget-20261015/
     constexpr std::array<std::size_t, 8> graph_mib{318, 578, 842, 1102, 1364, 1624, 1884, 2144};
+    if (concurrency > graph_mib.size()) { return std::nullopt; }
     return graph_mib[concurrency - 1U] << 20U;
 }
 
@@ -1998,11 +2003,15 @@ bool Variant::attention_normalized_projection(const Tensor& residual, const Tens
 bool Variant::attention_gated_output_projection(const Tensor& gate, const Tensor& attention_fp32,
                                                 const Weight& weight, Tensor& residual,
                                                 hipStream_t stream, ExecutionState* execution,
-                                                std::int32_t text_layer) {
+                                                std::int32_t text_layer, bool tq_unrotate) {
     if (execution != nullptr) {
         const ExecutionState::Lq4Target targets[] = {{weight, residual, nullptr, true}};
-        if (execution->lq4_gated_projections(gate, attention_fp32, targets, stream)) return true;
+        if (execution->lq4_gated_projections(gate, attention_fp32, targets, stream, tq_unrotate)) {
+            return true;
+        }
     }
+    // Only the LQ4 consumer rotates TQ attention back; the caller does it for the others.
+    if (tq_unrotate) return false;
     return execution != nullptr &&
            (execution->attention_fp8_gated_output(gate, attention_fp32, weight, residual,
                                                   text_layer, stream) ||
@@ -2014,7 +2023,7 @@ void Variant::full_attention(const Tensor& normalized_query,
                              const Tensor& cache_positions, Tensor& attention_fp32,
                              WorkspaceArena& workspace, hipStream_t stream,
                              const Tensor* ancestor_masks, const Tensor* prefix_lengths,
-                             const Tensor* active_query_rows) {
+                             const Tensor* active_query_rows, bool tq_rotated_basis) {
     if (cache_positions.dtype != DType::I32 || cache_positions.data == nullptr ||
         !cache_positions.is_contiguous() || cache_positions.ne[0] != normalized_query.ne[2] ||
         cache_positions.ne[1] != 1 || cache_positions.ne[2] != 1 || cache_positions.ne[3] != 1) {
@@ -2068,6 +2077,7 @@ void Variant::full_attention(const Tensor& normalized_query,
             .workspace         = attention_workspace.data,
             .workspace_bytes   = attention_workspace.bytes,
             .output            = attention_fp32,
+            .tq_rotated_basis  = tq_rotated_basis,
         },
         stream));
 }
@@ -2082,7 +2092,8 @@ std::size_t Variant::full_attention_workspace_capacity_bytes(std::int32_t maximu
 }
 
 bool Variant::full_attention_sequences(std::span<const FullAttentionSequence> sequences,
-                                       WorkspaceArena& workspace, hipStream_t stream) {
+                                       WorkspaceArena& workspace, hipStream_t stream,
+                                       bool tq_rotated_basis) {
     std::array<R9700FullAttentionArgs, kMaximumConcurrency> args{};
     if (sequences.empty() || sequences.size() > args.size()) {
         throw std::invalid_argument("R9700 batched full attention has an invalid sequence count");
@@ -2097,10 +2108,11 @@ bool Variant::full_attention_sequences(std::span<const FullAttentionSequence> se
             throw std::invalid_argument("R9700 full attention has invalid causal positions");
         }
         args[i] = R9700FullAttentionArgs{
-            .query         = sequence.query,
-            .cache_read    = sequence.cache_read,
-            .row_positions = static_cast<const std::int32_t*>(positions.data),
-            .output        = sequence.output,
+            .query            = sequence.query,
+            .cache_read       = sequence.cache_read,
+            .row_positions    = static_cast<const std::int32_t*>(positions.data),
+            .output           = sequence.output,
+            .tq_rotated_basis = tq_rotated_basis,
         };
         stride = std::max(stride, r9700_full_attention_sequence_workspace_stride_bytes(
                                       static_cast<std::uint32_t>(sequence.query.ne[2]),

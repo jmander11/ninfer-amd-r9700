@@ -6,6 +6,7 @@
 // and the wave-sum order of the one-vector-per-thread launch (wave w of the launch is the wave
 // holding vector 32 w), so any width that holds the row produces identical bytes.
 #include "core/cache_warm.h"
+#include "ops/r9700/kv/tq_k4v3_device.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "ops/r9700/linear/fp8_encode_impl.h"
 #include "ops/r9700/persistent/persistent_cta.h"
@@ -259,26 +260,37 @@ __global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
     std::uint8_t* codes, float* scales, std::uint32_t* status, hip_bfloat16* normalized,
     CacheWarm warm, std::uint32_t tokens);
 
-// Output gate over K = 8 * Vectors features.
-__device__ __forceinline__ void gate_vector(const hip_bfloat16* gate, const float* attention,
-                                            std::size_t offset, float (&values)[8]) {
-    float gates[8];
-    unpack8(*reinterpret_cast<const uint4*>(gate + offset), gates);
+// Output gate over K = 8 * Vectors features: values holds the FP32 attention on entry and the
+// gated BF16-represented activation on return.
+__device__ __forceinline__ void load_attention_vector(const float* attention, std::size_t offset,
+                                                      float (&values)[8]) {
     const float4 low  = *reinterpret_cast<const float4*>(attention + offset);
     const float4 high = *reinterpret_cast<const float4*>(attention + offset + 4U);
     const float x[8]  = {low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w};
 #pragma unroll
+    for (int i = 0; i < 8; ++i) values[i] = x[i];
+}
+
+__device__ __forceinline__ void gate_vector(const hip_bfloat16* gate, std::size_t offset,
+                                            float (&values)[8]) {
+    float gates[8];
+    unpack8(*reinterpret_cast<const uint4*>(gate + offset), gates);
+#pragma unroll
     for (int i = 0; i < 8; ++i) {
-        const float represented = static_cast<float>(hip_bfloat16(x[i]));
+        const float represented = static_cast<float>(hip_bfloat16(values[i]));
         values[i] = static_cast<float>(hip_bfloat16(represented / (1.0F + expf(-gates[i]))));
     }
 }
 
-template <std::uint32_t Vectors, std::uint32_t Threads, class Cta>
+// The TqUnrotate instantiation first takes the attention out of the TQ-K4-V3 basis
+// (tq_k4v3_codec.h); a compile-time choice, so the default-cache bodies carry no FWHT code.
+template <std::uint32_t Vectors, std::uint32_t Threads, bool TqUnrotate, class Cta>
 __device__ __forceinline__ void
 quantize_gated_body(const Cta& cta, EncodeShared<Threads>& shared, const hip_bfloat16* gate,
                     const float* attention, std::uint8_t* codes, float* scales,
                     std::uint32_t* status, const CacheWarm& warm, std::uint32_t tokens) {
+    static_assert(!TqUnrotate || (Threads % 32U == 0U && Vectors % 32U == 0U),
+                  "a TQ head (32 vectors of 8 features) must fill whole waves");
     constexpr std::uint32_t V       = (Vectors + Threads - 1U) / Threads;
     constexpr std::uint32_t columns = 8U * Vectors;
     const std::uint32_t block       = cta.block().x;
@@ -291,20 +303,24 @@ quantize_gated_body(const Cta& cta, EncodeShared<Threads>& shared, const hip_bfl
 #pragma unroll
     for (std::uint32_t v = 0; v < V; ++v) {
         if (v * Threads + thread >= Vectors) continue;
-        gate_vector(gate, attention,
-                    static_cast<std::size_t>(token) * columns + (v * Threads + thread) * 8U,
-                    values[v]);
+        const std::size_t offset =
+            static_cast<std::size_t>(token) * columns + (v * Threads + thread) * 8U;
+        load_attention_vector(attention, offset, values[v]);
+        // TQ-K4-V3: attention over rotated V is rotated back first. A head is 32 consecutive
+        // vectors, so it fills one wave; the existence test above is wave-uniform.
+        if constexpr (TqUnrotate) r9700::kv::tq::unrotate_wave(values[v], thread & 31U);
+        gate_vector(gate, offset, values[v]);
     }
     encode_rows<Threads, V, Vectors>(cta, shared, values, token, codes, scales, columns, status);
 }
 
-template <std::uint32_t Threads>
+template <std::uint32_t Threads, bool TqUnrotate>
 __global__ __launch_bounds__(Threads) void fp8_quantize_gated_kernel(
     const hip_bfloat16* gate, const float* attention, std::uint8_t* codes, float* scales,
     std::uint32_t* status, CacheWarm warm, std::uint32_t tokens) {
     __shared__ EncodeShared<Threads> shared;
-    quantize_gated_body<Threads, Threads>(persistent::LaunchCta{}, shared, gate, attention, codes,
-                                          scales, status, warm, tokens);
+    quantize_gated_body<Threads, Threads, TqUnrotate>(
+        persistent::LaunchCta{}, shared, gate, attention, codes, scales, status, warm, tokens);
 }
 
 // Gated per-head RMSNorm of the GDN recurrent output x [T, 48 x 128] with gate z:

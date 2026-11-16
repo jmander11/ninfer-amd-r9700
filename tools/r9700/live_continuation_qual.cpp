@@ -1,4 +1,5 @@
 #include "core/device.h"
+#include "qual_kv_format.h"
 #include "runtime/contract/types.h"
 #include "targets/registry.h"
 
@@ -427,6 +428,7 @@ int main(int argc, char** argv) {
         options.max_context           = 2048;
         options.kv_capacity           = KvCapacityPolicy::explicit_capacity(4096);
         options.max_concurrency       = 2;
+        options.kv_cache_format       = ninfer::qual::kv_cache_format_from_environment();
         options.prefill_chunk         = 512;
         options.kv_ram_capacity_bytes = 2ULL << 30;
         options.generation_recovery   = false;

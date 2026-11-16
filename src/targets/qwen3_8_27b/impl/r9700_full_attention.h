@@ -34,6 +34,10 @@ struct R9700FullAttentionArgs {
     void* workspace             = nullptr;
     std::size_t workspace_bytes = 0;
     Tensor output; // contiguous FP32 [256,24,T]
+    // TQ-K4-V3 cache only: the caller owns both basis changes. Q is already in the rotated basis
+    // and the output is left in it (the caller rotates it back). False: this leaf rotates Q in
+    // place before the route and the output back after it. Ignored by the other codecs.
+    bool tq_rotated_basis = false;
 };
 
 // Returns the exact caller-owned score storage for one ordinary causal WMMA call, or zero for an

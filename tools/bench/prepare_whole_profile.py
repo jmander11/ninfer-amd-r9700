@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.bench.run_ninfer_bench_matrix import (
+    KV_CACHE_FORMATS,
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     R9700_KV_PLANE_LAYOUTS,
@@ -308,6 +309,7 @@ def prepare(
         or source_report.get("config", {}).get("kv_value_group") != expected_kv_value_group
         or source_report.get("config", {}).get("prefill_chunk") != expected_prefill_chunk
         or source_report.get("config", {}).get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
+        or source_report.get("config", {}).get("kv_cache_format") not in KV_CACHE_FORMATS.values()
     ):
         raise ValueError("source whole-inference report identity is invalid")
     config = source_report["config"]
@@ -380,6 +382,7 @@ def prepare(
             "spec": source_report["config"].get("spec"),
             "draft_tokens": source_report["config"].get("draft_tokens"),
             "dflash_verify_width": source_report["config"].get("dflash_verify_width"),
+            "kv_cache_format": config["kv_cache_format"],
             "kv_value_group": expected_kv_value_group,
             "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
             "xattention_profile": xattention_profile,

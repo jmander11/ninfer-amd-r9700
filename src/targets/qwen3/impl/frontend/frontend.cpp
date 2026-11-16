@@ -908,6 +908,9 @@ public:
         bool selected_tool             = false;
         bool raw_started               = false;
         bool raw_frozen                = false;
+        // Every `</tool_call>` before this offset of the pending call was rejected by
+        // decode_call. Its result depends only on the call text up to that close, which is final.
+        std::size_t undecoded_close = 0;
 
         void emit(PublishedOutput& output, ToolCallDeltaKind kind, std::string arguments = {}) {
             if (kind == ToolCallDeltaKind::Start) selected_tool = true;
@@ -1004,6 +1007,7 @@ public:
                 for (;;) {
                     const auto open = pending.find(kToolOpen);
                     if (open == std::string::npos) {
+                        undecoded_close = 0;
                         if (!calls.empty() &&
                             std::all_of(pending.begin(), pending.end(),
                                         [](unsigned char c) { return std::isspace(c) != 0; })) {
@@ -1027,10 +1031,11 @@ public:
                     if (!separator) {
                         append_delta(visible, OutputChannel::Content, pending.substr(0, open));
                     }
+                    if (open != 0) { undecoded_close = 0; }
                     pending.erase(0, open);
                     selected_tool = true;
                     stream_prefix(visible, grammar);
-                    auto close     = pending.find(kToolClose);
+                    auto close     = pending.find(kToolClose, undecoded_close);
                     bool completed = false;
                     while (close != std::string::npos) {
                         const auto end = close + kToolClose.size();
@@ -1054,11 +1059,13 @@ public:
                             streamed_arguments.clear();
                             streamed_raw_bytes = 0;
                             raw_started = raw_frozen = false;
+                            undecoded_close          = 0;
                             pending.erase(0, end);
                             completed = true;
                             break;
                         }
-                        close = pending.find(kToolClose, end);
+                        undecoded_close = end;
+                        close           = pending.find(kToolClose, end);
                     }
                     if (!completed) { break; }
                 }
@@ -1081,6 +1088,7 @@ public:
                     append_delta(visible, OutputChannel::Content, std::move(pending));
                 }
                 pending.clear();
+                undecoded_close = 0;
             }
             output = std::move(visible);
         }

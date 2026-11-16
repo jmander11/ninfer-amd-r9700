@@ -54,7 +54,7 @@ class ContextLadderTests(unittest.TestCase):
             corpus_path="/corpus.ids",
             corpus_tokens=4096,
             proposal_head="optimized",
-            kv_cache_format="fp8-k-int4-v",
+            kv_cache_format="nvfp4",
             use_device_graph=True,
             isolate_prompt_decode=False,
         )
@@ -116,12 +116,57 @@ class ContextLadderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "precision"):
             ladder.compare(dense, candidate)
 
+    def test_cache_comparison_changes_only_the_cache(self):
+        control = self.retain("control", self.raw)
+        saved = self.contract
+        self.contract = dict(saved, kv_cache="tq-k4-v3")
+        other = copy.deepcopy(self.raw)
+        other["config"]["kv_cache_format"] = "tq-k4-v3"
+        other["tests"][0]["prefill_active_tok_s_mean"] = 1100
+        candidate = self.retain("tq-k4-v3", other)
+        result = ladder.compare(control, candidate)
+        self.assertEqual(result["kv_cache"], dict(control="nvfp4", candidate="tq-k4-v3"))
+        self.assertAlmostEqual(result["cells"][0]["average_speedup"], 1.1)
+        with self.assertRaisesRegex(ValueError, "default-cache control"):
+            ladder.compare(candidate, control)
+        other["config"].update(xattention_qualification=True, xattention_profile="b128-s16-tau900")
+        both = self.retain("both", other)
+        self.contract = saved
+        with self.assertRaisesRegex(ValueError, "one KV cache"):
+            ladder.compare(control, both)
+
     def test_missing_tail_and_wrong_route_rejected(self):
         with self.assertRaisesRegex(ValueError, "attention profile"):
             ladder.speed_cell(self.raw, 8192, self.contract, "b128-s16-tau900")
         self.raw["tests"][0]["reps"][0]["prefill_tail_by_lane"] = []
         with self.assertRaisesRegex(ValueError, "one lane"):
             ladder.speed_cell(self.raw, 8192, self.contract, "dense")
+
+    def test_opt_in_cache_reaches_command_and_report_validation(self):
+        args = argparse.Namespace(
+            binary=Path("/bench"),
+            weights=Path("/model.ninfer"),
+            kind="speed",
+            ids=Path("/corpus.ids"),
+            chunk=2048,
+            max_context=131200,
+            spec="none",
+            lm_head_draft=False,
+            warmup=0,
+            repetitions=1,
+            kv_cache="nvfp4",
+        )
+        self.assertNotIn("--kv-cache", ladder.command_for(args, 8192, Path("/p8192.json")))
+        for codec, reported in (("fp8-int4", "fp8-k-int4-v"), ("tq-k4-v3", "tq-k4-v3")):
+            args.kv_cache = codec
+            command = ladder.command_for(args, 8192, Path("/p8192.json"))
+            self.assertEqual(command[command.index("--kv-cache") + 1], codec)
+            contract = dict(self.contract, kv_cache=codec)
+            with self.assertRaisesRegex(ValueError, "wrong cache format"):
+                ladder.speed_cell(self.raw, 8192, contract, "dense")
+            other = copy.deepcopy(self.raw)
+            other["config"]["kv_cache_format"] = reported
+            ladder.speed_cell(other, 8192, contract, "dense")
 
     def test_ppl_sidecar_alignment_and_nonfinite(self):
         contract = dict(kind="ppl", weights=self.contract["weights"], chunk=2048, skip="half")
@@ -140,7 +185,7 @@ class ContextLadderTests(unittest.TestCase):
             tokens_scored=3,
             argmax_tokens=3,
             non_finite=0,
-            kv_format="fp8-k-int4-v",
+            kv_format="nvfp4",
             mean_nll=2.0,
             ppl=ladder.math.exp(2),
             terrible_nll=10,
@@ -172,6 +217,7 @@ class ContextLadderTests(unittest.TestCase):
             kind="ppl",
             contexts=[8],
             chunk=2048,
+            kv_cache="fp8-int4",
             repetitions=1,
             warmup=0,
             skip="half",
@@ -203,6 +249,8 @@ class ContextLadderTests(unittest.TestCase):
         weights.write_bytes(b"x" * 123)
         power = self.root / "power"
         power.write_text("auto")
+        vram = self.root / "vram"
+        vram.write_text("1000")
         args = argparse.Namespace(
             binary=binary,
             weights=weights,
@@ -211,6 +259,7 @@ class ContextLadderTests(unittest.TestCase):
             kind="speed",
             contexts=[8192],
             chunk=2048,
+            kv_cache="nvfp4",
             max_context=131200,
             repetitions=1,
             warmup=0,
@@ -231,6 +280,7 @@ class ContextLadderTests(unittest.TestCase):
 
         with (
             patch.object(ladder, "POWER", power),
+            patch.object(ladder, "VRAM_USED", vram),
             patch.object(ladder.subprocess, "run", side_effect=execute) as proc,
         ):
             with patch("builtins.print"):
@@ -242,6 +292,26 @@ class ContextLadderTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "prior cell did not complete"):
                 ladder.run(args)
             self.assertEqual(proc.call_count, 1)
+
+    def test_next_cell_waits_for_previous_vram(self):
+        vram = self.root / "vram"
+        vram.write_text(str(1000 + ladder.VRAM_SLACK_BYTES + 1))
+        polls = []
+
+        def released(_seconds):
+            polls.append(vram.read_text())
+            vram.write_text("1000")
+
+        with patch.object(ladder, "VRAM_USED", vram), patch.object(ladder.time, "sleep", released):
+            ladder.wait_for_vram(1000)
+        self.assertEqual(len(polls), 1)
+        vram.write_text(str(1000 + ladder.VRAM_SLACK_BYTES + 1))
+        with (
+            patch.object(ladder, "VRAM_USED", vram),
+            patch.object(ladder, "VRAM_RELEASE_SECONDS", 0),
+            self.assertRaisesRegex(ValueError, "VRAM was not released"),
+        ):
+            ladder.wait_for_vram(1000)
 
     def test_matched_ppl_comparison(self):
         contract = dict(
@@ -270,7 +340,7 @@ class ContextLadderTests(unittest.TestCase):
                 tokens_scored=3,
                 argmax_tokens=3,
                 non_finite=0,
-                kv_format="fp8-k-int4-v",
+                kv_format="nvfp4",
                 mean_nll=mean,
                 ppl=ladder.math.exp(mean),
                 terrible_nll=10,

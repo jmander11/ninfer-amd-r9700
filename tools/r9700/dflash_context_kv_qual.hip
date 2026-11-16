@@ -1,3 +1,4 @@
+#include "ninfer/types.h"
 // Complete public-input projection oracle shared with the native Linear qualifiers.
 #define NINFER_A8Q4_VERIFY_QUAL_NO_MAIN
 #include "a8q4_verify_qual_impl.h"
@@ -128,8 +129,9 @@ void projection(unsigned tokens, hipStream_t stream) {
 }
 
 void append(int width, int batch, hipStream_t stream) {
-    constexpr int D = 128, H = 8, capacity = 2048, lane_capacity = 8;
-    const int columns = width * batch;
+    constexpr int D = 128, H = 8, capacity = 2048;
+    constexpr int lane_capacity = static_cast<int>(ninfer::kDFlashMaximumConcurrency);
+    const int columns           = width * batch;
     std::vector<hip_bfloat16> compact(static_cast<std::size_t>(2048) * columns);
     std::vector<hip_bfloat16> fused(static_cast<std::size_t>(6144) * columns);
     std::vector<hip_bfloat16> gains(D);
@@ -292,7 +294,7 @@ int main() {
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
         for (unsigned tokens : {1U, 4U, 8U, 9U, 16U, 17U, 32U, 64U, 65U, 128U, 129U})
             projection(tokens, stream);
-        for (int batch : {1, 4, 8})
+        for (int batch : {1, 4, 8, 9, 12})
             for (int width : {1, 8, 64}) append(width, batch, stream);
         append(2048, 1, stream);
         guard.check("context-after-timing");

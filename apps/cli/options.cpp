@@ -92,6 +92,13 @@ std::size_t parse_kv_disk_capacity_bytes(const char* text) {
     return static_cast<std::size_t>(bytes);
 }
 
+KvCacheFormat parse_kv_cache(const char* text) {
+    if (std::string_view(text) == "fp8-int4") { return KvCacheFormat::Fp8KInt4V; }
+    if (std::string_view(text) == "nvfp4") { return KvCacheFormat::Nvfp4; }
+    if (std::string_view(text) == "tq-k4-v3") { return KvCacheFormat::TqK4V3; }
+    throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
+}
+
 KvDiskCompress parse_kv_disk_compress(const char* text) {
     if (text == nullptr || std::string_view(text) == "off") { return KvDiskCompress::Off; }
     if (std::string_view(text) == "zstd") { return KvDiskCompress::Zstd; }
@@ -110,7 +117,8 @@ ReasoningEffort parse_reasoning_effort(std::string_view text) {
 std::string usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> (--prompt <text>|--messages <messages.json>)\n"
-           "       [--max-context N] [--kv-capacity N|auto] [--kv-capacity-headroom MiB]\n"
+           "       [--max-context N] [--kv-cache fp8-int4|nvfp4|tq-k4-v3] [--kv-capacity N|auto]\n"
+           "       [--kv-capacity-headroom MiB]\n"
            "       [--kv-ram-capacity off|N] [--kv-ram-system-prompts N] [--kv-disk-capacity "
            "off|N] [--kv-disk-location PATH]\n"
            "       [--kv-disk-compress off|zstd] [--prefill-chunk N] [--max-new N]\n"
@@ -134,6 +142,9 @@ std::string usage_text(const char* argv0) {
            "Structured message content accepts text, image/image_url, and video/video_url parts;\n"
            "media sources may be local paths, HTTP(S) URLs, or base64 data URIs.\n"
            "--vision enables image/video input and loads the fixed Vision GPU allocations.\n"
+           "--kv-cache selects the growing Text/MTP KV codec: nvfp4 (default), fp8-int4\n"
+           "(opt-in), or tq-k4-v3 (opt-in rotated 4-bit K / 3-bit V). NVFP4 and TQ require\n"
+           "a G16 build; with a G32 evaluation build select --kv-cache fp8-int4 explicitly.\n"
            "--kv-capacity auto sizes the KV pool from all free GPU memory except\n"
            "--kv-capacity-headroom MiB (default " +
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +
@@ -196,6 +207,8 @@ Options parse_options(int argc, char** argv) {
             options.max_new = parse_u32(value(arg), "max-new");
         } else if (arg == "--max-context") {
             options.max_context = parse_u32(value(arg), "max-context");
+        } else if (arg == "--kv-cache") {
+            options.kv_cache_format = parse_kv_cache(value(arg));
         } else if (arg == "--kv-capacity") {
             options.kv_capacity  = parse_kv_capacity(value(arg));
             kv_capacity_explicit = true;
@@ -328,8 +341,9 @@ Options parse_options(int argc, char** argv) {
     if (has_prompt == has_messages) {
         throw std::invalid_argument("pass exactly one of --prompt or --messages");
     }
-    if (options.prefill_chunk % 128 != 0) {
-        throw std::invalid_argument("--prefill-chunk must be a multiple of 128");
+    if (options.prefill_chunk == 0 || options.prefill_chunk % 128 != 0 ||
+        options.prefill_chunk > ninfer::kMaximumPrefillChunk) {
+        throw std::invalid_argument("--prefill-chunk must be a multiple of 128 in [128,8192]");
     }
     if (options.kv_capacity.mode == KvCapacityMode::Explicit &&
         options.kv_capacity.explicit_tokens < options.max_context) {

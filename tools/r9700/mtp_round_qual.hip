@@ -240,7 +240,7 @@ int main() {
             }
         }
         std::cout
-            << "mtp_round: PASS exact K=1..5 B=1..8 pitched-padding and immutable-input oracle\n";
+            << "mtp_round: PASS exact K=1..5 B=1..16 pitched-padding and immutable-input oracle\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "mtp_round: FAIL: " << error.what() << '\n';

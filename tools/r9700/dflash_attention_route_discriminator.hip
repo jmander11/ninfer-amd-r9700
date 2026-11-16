@@ -3,7 +3,8 @@
 #include "core/decode_graph.h"
 #include "ops/r9700/kv/fp8_int4_kv_attention.h"
 #include "ops/r9700/kv/r9700_attention_profile.h"
-#include "../../tests/ops/fp8_int4_kv_oracle.h"
+#include "ops/fp8_int4_kv_oracle.h"
+#include "ops/nvfp4_kv_oracle.h"
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
@@ -11,6 +12,8 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <map>
+#include <tuple>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -18,6 +21,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <limits>
 #include <memory>
 #include <random>
@@ -31,6 +35,7 @@ namespace {
 
 namespace kv     = ninfer::ops::r9700::kv;
 namespace oracle = ninfer::test::fp8_int4_kv_oracle;
+namespace nvfp4  = ninfer::test::nvfp4_kv_oracle;
 using Json       = nlohmann::json;
 
 constexpr std::uint32_t kHeadDim      = 256U;
@@ -395,15 +400,29 @@ double median(std::array<double, kTrials> values) {
     return values[kTrials / 2];
 }
 
-// Sequence-batched packed decode and append: every sequence of one batched launch must produce the
-// exact bytes of its own one-sequence launch from identically poisoned outputs, workspaces and
-// cache planes. The pool is shared as in production: disjoint shuffled physical pages per sequence,
-// either selected through device table rows of one pool-wide table or passed as direct page tables.
-Json sequence_batch_qualification(ninfer::DeviceContext& device) {
-    constexpr std::array<std::size_t, 8> kContexts{37U,  600U,  4100U, 33000U,
-                                                   129U, 2050U, 8200U, 1000U};
+// Sequence-batched packed decode and append: every sequence of one batched launch and of its own
+// one-sequence launch must meet its FP64 oracle from identically poisoned outputs, workspaces and
+// cache planes, and graph replay must reproduce the batched eager bytes; batched appends must equal
+// per-sequence appends exactly. The pool is shared as in production: disjoint shuffled physical
+// pages per sequence, either selected through device table rows of one pool-wide table or passed as
+// direct page tables. Selected cells may use the NVFP4 cache instead (E2M1 K/V codes with E4M3FN
+// group scales, against the independent NVFP4 FP64 oracle).
+Json sequence_batch_qualification(ninfer::DeviceContext& device,
+                                  const std::vector<std::size_t>& selected = {},
+                                  std::uint32_t selected_rows = 8U, bool profile = false,
+                                  const std::vector<std::size_t>& selected_live = {},
+                                  bool use_nvfp4                                = false) {
+    std::array<std::size_t, 16> kContexts{37U, 600U, 4100U, 33000U, 129U, 2050U, 8200U, 1000U,
+                                          9U,  65U,  320U,  16385U, 257U, 3071U, 64U,   70000U};
     static_assert(kContexts.size() == kv::kPackedDecodeMaximumSequences &&
                   kContexts.size() == kv::kAppendMaximumSequences);
+    if (!selected.empty()) {
+        kContexts.fill(64U);
+        std::copy(selected.begin(), selected.end(), kContexts.begin());
+    }
+    // Live frontier (last row position + 1) of each sequence; the envelope unless selected.
+    std::array<std::size_t, kContexts.size()> lives = kContexts;
+    std::copy(selected_live.begin(), selected_live.end(), lives.begin());
     constexpr std::size_t kSparePages  = 7U;
     constexpr std::size_t kRowElements = static_cast<std::size_t>(kQueryHeads) * kHeadDim;
     std::array<std::size_t, kContexts.size()> page_counts{};
@@ -419,7 +438,7 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     for (std::size_t page = 0; page < pool_pages; ++page)
         physical[page] = static_cast<std::uint32_t>(page);
     std::shuffle(physical.begin(), physical.end(), random);
-    // Pool-wide table [8][stride]; rows beyond a sequence's pages hold an out-of-pool page.
+    // Pool-wide table [16][stride]; rows beyond a sequence's pages hold an out-of-pool page.
     std::vector<std::uint32_t> tables(kContexts.size() * table_stride,
                                       static_cast<std::uint32_t>(pool_pages));
     std::size_t next_page = 0U;
@@ -441,6 +460,27 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     // Positive binary16 scales in [2^-10, 2^-3).
     for (auto& bits : scales)
         bits = static_cast<std::uint16_t>(((5U + random() % 7U) << 10U) | (random() & 0x3ffU));
+    // NVFP4 planes: K codes and scales token-fastest head-major, V codes and scales
+    // feature-fastest page-major; any E2M1 nibble, E4M3FN scales in [0.25, 1).
+    std::vector<std::uint8_t> nv_keys, nv_key_scales, nv_values, nv_value_scales;
+    if (use_nvfp4) {
+        nv_keys.resize(pool_tokens * kKvHeads * kHeadDim / 2U);
+        nv_values.resize(nv_keys.size());
+        nv_key_scales.resize(pool_tokens * kKvHeads * kGroups);
+        nv_value_scales.resize(nv_key_scales.size());
+        for (auto* plane : {&nv_keys, &nv_values})
+            for (auto& code : *plane) code = static_cast<std::uint8_t>(random());
+        for (auto* plane : {&nv_key_scales, &nv_value_scales})
+            for (auto& code : *plane) code = static_cast<std::uint8_t>(0x28U + random() % 16U);
+    }
+    const auto nv_key_offset = [&](std::size_t page, std::size_t in_page, std::uint32_t head,
+                                   std::size_t byte, std::size_t leading) {
+        return in_page + kPageSize * (byte + leading * (page + pool_pages * head));
+    };
+    const auto nv_value_offset = [&](std::size_t page, std::size_t in_page, std::uint32_t head,
+                                     std::size_t byte, std::size_t leading) {
+        return byte + leading * (in_page + kPageSize * (head + kKvHeads * page));
+    };
     std::uniform_real_distribution<float> uniform(-2.0F, 2.0F);
     std::vector<hip_bfloat16> queries(8U * kRowElements * kContexts.size());
     for (auto& query : queries) query = hip_bfloat16(represented_bf16(uniform(random)));
@@ -454,7 +494,19 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     upload(d_scales, scales);
     upload(d_tables, tables);
     upload(d_queries, queries);
-    upload(d_table_rows, std::vector<std::int32_t>{0, 1, 2, 3, 4, 5, 6, 7});
+    std::vector<std::int32_t> table_rows(kContexts.size());
+    std::iota(table_rows.begin(), table_rows.end(), 0);
+    upload(d_table_rows, table_rows);
+    DeviceArray<std::uint8_t> d_nv_keys(std::max<std::size_t>(nv_keys.size(), 1U)),
+        d_nv_values(std::max<std::size_t>(nv_values.size(), 1U)),
+        d_nv_key_scales(std::max<std::size_t>(nv_key_scales.size(), 1U)),
+        d_nv_value_scales(std::max<std::size_t>(nv_value_scales.size(), 1U));
+    if (use_nvfp4) {
+        upload(d_nv_keys, nv_keys);
+        upload(d_nv_values, nv_values);
+        upload(d_nv_key_scales, nv_key_scales);
+        upload(d_nv_value_scales, nv_value_scales);
+    }
 
     struct Case {
         const char* name;
@@ -463,7 +515,7 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
         bool table_rows;
     };
 
-    const std::vector<Case> cases{
+    std::vector<Case> cases{
         {"b1_w8_table_row", {3U}, {8U}, true},
         {"b2_w8_table_rows", {1U, 3U}, {8U, 8U}, true},
         {"b3_w8_table_rows", {1U, 2U, 3U}, {8U, 8U, 8U}, true},
@@ -478,6 +530,137 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
          {6U, 3U, 0U, 7U, 2U, 5U, 1U, 4U},
          {8U, 5U, 1U, 7U, 4U, 8U, 2U, 6U},
          false},
+        {"b12_w1_table_rows",
+         {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U},
+         std::vector<std::uint32_t>(12U, 1U),
+         true},
+        {"b16_w6_table_rows",
+         {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U},
+         std::vector<std::uint32_t>(16U, 6U),
+         true},
+        {"b16_mixed_rows_direct_tables",
+         {14U, 6U, 3U, 9U, 0U, 15U, 7U, 12U, 2U, 5U, 11U, 1U, 8U, 13U, 4U, 10U},
+         {8U, 5U, 1U, 7U, 4U, 8U, 2U, 6U, 1U, 3U, 6U, 8U, 2U, 1U, 5U, 4U},
+         false},
+    };
+    if (!selected.empty()) {
+        std::vector<std::size_t> indices(selected.size());
+        std::iota(indices.begin(), indices.end(), 0U);
+        cases = {{"selected", indices, std::vector<std::uint32_t>(selected.size(), selected_rows),
+                  true}};
+    }
+    // FP64 oracle of one sequence's rows over the shared pool (TokenFastest head-major keys,
+    // page-major INT4 values and FP16 scales), cached by (sequence, rows, live frontier).
+    std::map<std::tuple<std::size_t, std::uint32_t, std::int32_t>, std::vector<double>> oracles;
+    const auto sequence_oracle = [&](std::size_t sequence, std::uint32_t rows,
+                                     std::int32_t last_position) -> const std::vector<double>& {
+        const auto key = std::make_tuple(sequence, rows, last_position);
+        if (const auto found = oracles.find(key); found != oracles.end()) return found->second;
+        std::vector<double> result(static_cast<std::size_t>(rows) * kRowElements);
+        const std::size_t last_visible = static_cast<std::size_t>(last_position) + 1U;
+        if (use_nvfp4) {
+            // Logical token t of KV head h is oracle token t * kKvHeads + h.
+            const std::size_t tokens = last_visible * kKvHeads;
+            nvfp4::Encoded k{tokens, kHeadDim, std::vector<std::uint8_t>(tokens * kHeadDim / 2U),
+                             std::vector<std::uint8_t>(tokens * kGroups)};
+            nvfp4::Encoded v{tokens, kHeadDim, std::vector<std::uint8_t>(tokens * kHeadDim / 2U),
+                             std::vector<std::uint8_t>(tokens * kGroups)};
+            for (std::size_t token = 0U; token < last_visible; ++token) {
+                const std::size_t page    = tables[sequence * table_stride + token / kPageSize];
+                const std::size_t in_page = token % kPageSize;
+                for (std::uint32_t kvh = 0U; kvh < kKvHeads; ++kvh) {
+                    const std::size_t item = token * kKvHeads + kvh;
+                    for (std::size_t byte = 0U; byte < kHeadDim / 2U; ++byte) {
+                        k.packed_codes[item * kHeadDim / 2U + byte] =
+                            nv_keys[nv_key_offset(page, in_page, kvh, byte, kHeadDim / 2U)];
+                        v.packed_codes[item * kHeadDim / 2U + byte] =
+                            nv_values[nv_value_offset(page, in_page, kvh, byte, kHeadDim / 2U)];
+                    }
+                    for (std::size_t group = 0U; group < kGroups; ++group) {
+                        k.scales[item * kGroups + group] =
+                            nv_key_scales[nv_key_offset(page, in_page, kvh, group, kGroups)];
+                        v.scales[item * kGroups + group] =
+                            nv_value_scales[nv_value_offset(page, in_page, kvh, group, kGroups)];
+                    }
+                }
+            }
+            std::vector<std::size_t> selected_tokens(last_visible);
+            std::iota(selected_tokens.begin(), selected_tokens.end(), std::size_t{0U});
+            for (std::uint32_t row = 0U; row < rows; ++row) {
+                const std::size_t visible = last_visible - rows + 1U + row;
+                for (std::uint32_t qh = 0U; qh < kQueryHeads; ++qh) {
+                    const std::size_t query_base =
+                        sequence * 8U * kRowElements + (row * kQueryHeads + qh) * kHeadDim;
+                    std::vector<float> query(kHeadDim);
+                    for (std::uint32_t feature = 0U; feature < kHeadDim; ++feature)
+                        query[feature] = static_cast<float>(queries[query_base + feature]);
+                    const std::vector<double> head = nvfp4::attention_fp64(
+                        query, std::span<const std::size_t>(selected_tokens.data(), visible), k, v,
+                        kKvHeads, qh / kQueriesPerKv, static_cast<double>(kAttentionScale));
+                    std::copy(head.begin(), head.end(),
+                              result.begin() +
+                                  static_cast<std::ptrdiff_t>((row * kQueryHeads + qh) * kHeadDim));
+                }
+            }
+            return oracles.emplace(key, std::move(result)).first->second;
+        }
+        for (std::uint32_t kvh = 0U; kvh < kKvHeads; ++kvh) {
+            oracle::Fp8Keys all_keys{last_visible, kHeadDim,
+                                     std::vector<std::uint8_t>(last_visible * kHeadDim)};
+            oracle::Int4Values all_values{last_visible, kHeadDim, kValueGroup,
+                                          std::vector<std::uint8_t>(last_visible * kHeadDim / 2U),
+                                          std::vector<std::uint16_t>(last_visible * kGroups)};
+            for (std::size_t token = 0U; token < last_visible; ++token) {
+                const std::size_t page    = tables[sequence * table_stride + token / kPageSize];
+                const std::size_t in_page = token % kPageSize;
+                for (std::uint32_t feature = 0U; feature < kHeadDim; ++feature) {
+                    all_keys.codes[token * kHeadDim + feature] =
+                        keys[in_page +
+                             kPageSize * (feature + kHeadDim * (page + pool_pages * kvh))];
+                }
+                const std::size_t value_base =
+                    (kHeadDim / 2U) * (in_page + kPageSize * (kvh + kKvHeads * page));
+                std::copy_n(values.begin() + static_cast<std::ptrdiff_t>(value_base), kHeadDim / 2U,
+                            all_values.packed_codes.begin() +
+                                static_cast<std::ptrdiff_t>(token * kHeadDim / 2U));
+                const std::size_t scale_base =
+                    kGroups * (in_page + kPageSize * (kvh + kKvHeads * page));
+                std::copy_n(scales.begin() + static_cast<std::ptrdiff_t>(scale_base), kGroups,
+                            all_values.fp16_scales.begin() +
+                                static_cast<std::ptrdiff_t>(token * kGroups));
+            }
+            for (std::uint32_t row = 0U; row < rows; ++row) {
+                const std::size_t visible = last_visible - rows + 1U + row;
+                oracle::Fp8Keys row_keys{
+                    visible, kHeadDim,
+                    std::vector<std::uint8_t>(all_keys.codes.begin(),
+                                              all_keys.codes.begin() +
+                                                  static_cast<std::ptrdiff_t>(visible * kHeadDim))};
+                oracle::Int4Values row_values{
+                    visible, kHeadDim, kValueGroup,
+                    std::vector<std::uint8_t>(
+                        all_values.packed_codes.begin(),
+                        all_values.packed_codes.begin() +
+                            static_cast<std::ptrdiff_t>(visible * kHeadDim / 2U)),
+                    std::vector<std::uint16_t>(all_values.fp16_scales.begin(),
+                                               all_values.fp16_scales.begin() +
+                                                   static_cast<std::ptrdiff_t>(visible * kGroups))};
+                for (std::uint32_t qh = kvh * kQueriesPerKv; qh < (kvh + 1U) * kQueriesPerKv;
+                     ++qh) {
+                    const std::size_t query_base =
+                        sequence * 8U * kRowElements + (row * kQueryHeads + qh) * kHeadDim;
+                    std::vector<float> query(kHeadDim);
+                    for (std::uint32_t feature = 0U; feature < kHeadDim; ++feature)
+                        query[feature] = static_cast<float>(queries[query_base + feature]);
+                    const std::vector<double> head = oracle::attention_fp64(
+                        query, row_keys, row_values, static_cast<double>(kAttentionScale));
+                    std::copy(head.begin(), head.end(),
+                              result.begin() +
+                                  static_cast<std::ptrdiff_t>((row * kQueryHeads + qh) * kHeadDim));
+                }
+            }
+        }
+        return oracles.emplace(key, std::move(result)).first->second;
     };
     Json attention_cells = Json::array();
     for (const Case& cell : cases) {
@@ -499,7 +682,7 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
             positions.push_back(std::make_unique<DeviceArray<std::int32_t>>(rows));
             std::vector<std::int32_t> host_positions(rows);
             for (std::uint32_t row = 0; row < rows; ++row)
-                host_positions[row] = static_cast<std::int32_t>(context - rows + row);
+                host_positions[row] = static_cast<std::int32_t>(lives[sequence] - rows + row);
             upload(*positions.back(), host_positions);
             args[i] = kv::Fp8Int4KvAttentionArgs{
                 .query            = d_queries.get() + sequence * 8U * kRowElements,
@@ -526,6 +709,14 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
                 .value_scale_layout    = kv::Fp8Int4KvPlaneLayout::FeatureFastest,
                 .score_workspace       = workspaces.back()->get() + 1U,
                 .output                = outputs.back()->get() + 1U};
+            if (use_nvfp4) {
+                args[i].codec             = kv::KvCodec::Nvfp4;
+                args[i].key_codes         = d_nv_keys.get();
+                args[i].value_codes       = d_nv_values.get();
+                args[i].key_scale_codes   = d_nv_key_scales.get();
+                args[i].value_scale_codes = d_nv_value_scales.get();
+                args[i].value_scale_bits  = nullptr;
+            }
         }
         const auto poison = [&] {
             for (std::size_t i = 0; i < count; ++i) {
@@ -569,11 +760,28 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
                     return !std::isfinite(std::bit_cast<float>(bits));
                 }));
         if (nonfinite != 0U) fail(std::string(cell.name) + " reference has nonfinite outputs");
+        // A batched launch sizes each sequence's context partition from the batch and its live
+        // frontier, so per-sequence and batched launches agree only to rounding: both must meet
+        // the FP64 oracle. Graph replay must reproduce the batched eager bytes exactly.
+        const auto require_batch_oracle = [&](const std::vector<std::vector<std::uint32_t>>& bits,
+                                              const char* label) {
+            for (std::size_t i = 0; i < count; ++i) {
+                std::vector<float> actual(bits[i].size());
+                std::transform(bits[i].begin(), bits[i].end(), actual.begin(),
+                               [](std::uint32_t word) { return std::bit_cast<float>(word); });
+                const std::int32_t last = download(*positions[i]).back();
+                // NVFP4 V reaches 6: 1e-3 of that peak, as the NVFP4 qualifier's staged routes.
+                require_oracle(actual, sequence_oracle(cell.sequences[i], cell.rows[i], last),
+                               use_nvfp4 ? 6.0e-3 : 2.0e-3,
+                               (std::string(cell.name) + " " + label).c_str());
+            }
+        };
+        require_batch_oracle(reference, "per-sequence FP64 oracle");
         poison();
         hip_check(batched(), "sequence-batch batched packed decode");
         device.synchronize();
-        if (read_outputs("sequence-batch batched eager") != reference)
-            fail(std::string(cell.name) + " batched eager bytes differ from per-sequence");
+        const auto batched_eager = read_outputs("sequence-batch batched eager");
+        require_batch_oracle(batched_eager, "batched FP64 oracle");
         ninfer::DecodeGraphDefinition definition;
         definition.capture(device.stream,
                            [&] { hip_check(batched(), "capture sequence-batch packed decode"); });
@@ -584,22 +792,31 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
         executable.launch(device.stream);
         hip_check(hipGetLastError(), "sequence-batch graph replay");
         device.synchronize();
-        if (read_outputs("sequence-batch batched graph") != reference)
-            fail(std::string(cell.name) + " batched graph bytes differ from per-sequence");
-        std::array<double, kTrials> serial_ms{}, batched_ms{};
-        for (int trial = 0; trial < kTrials; ++trial) {
-            if (trial % 2 == 0) {
-                serial_ms[trial]  = time_ms(device.stream, serial);
-                batched_ms[trial] = time_ms(device.stream, batched);
-            } else {
-                batched_ms[trial] = time_ms(device.stream, batched);
-                serial_ms[trial]  = time_ms(device.stream, serial);
-            }
+        if (read_outputs("sequence-batch batched graph") != batched_eager)
+            fail(std::string(cell.name) + " batched graph bytes differ from batched eager");
+        if (profile) {
+            for (int i = 0; i < 8; ++i) hip_check(batched(), "profile packed attention");
+            device.synchronize();
+            return {{"profile_only", true},
+                    {"kv_cache", use_nvfp4 ? "nvfp4" : "fp8-int4"},
+                    {"contexts", selected},
+                    {"rows", selected_rows}};
         }
+        ninfer::r9700_qualification::device_guard().check("before-sequence-timing");
+        // Batched trials run as one block before the serial ones: interleaved serial trials of a
+        // different duration change the clock state the batched trials run under.
+        std::array<double, kTrials> serial_ms{}, batched_ms{};
+        for (double& trial : batched_ms) trial = time_ms(device.stream, batched);
+        for (double& trial : serial_ms) trial = time_ms(device.stream, serial);
         Json contexts = Json::array();
-        for (const std::size_t sequence : cell.sequences) contexts.push_back(kContexts[sequence]);
+        Json live     = Json::array();
+        for (const std::size_t sequence : cell.sequences) {
+            contexts.push_back(kContexts[sequence]);
+            live.push_back(lives[sequence]);
+        }
         attention_cells.push_back({{"name", cell.name},
                                    {"contexts", contexts},
+                                   {"live", live},
                                    {"rows", cell.rows},
                                    {"device_table_rows", cell.table_rows},
                                    {"eager_bytes_equal", true},
@@ -608,7 +825,16 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
                                    {"batched_median_ms", median(batched_ms)}});
     }
 
-    // Append: eight sequences write disjoint suffixes into one poisoned pool; one uses a device
+    if (!selected.empty()) {
+        ninfer::r9700_qualification::device_guard().check("after-sequence-timing");
+        return {{"attention", attention_cells},
+                {"kv_cache", use_nvfp4 ? "nvfp4" : "fp8-int4"},
+                {"diagnostic_only", true},
+                {"iterations", kTimingIterations},
+                {"trials", kTrials}};
+    }
+
+    // Append: all sequences write disjoint suffixes into one poisoned pool; one uses a device
     // token count, one a device table row, and one a gapped position panel (InvalidPosition).
     constexpr std::size_t kAppendRows = 8U;
     std::vector<float> source_values(kContexts.size() * kAppendRows * kKvHeads * kHeadDim);
@@ -672,8 +898,9 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     const auto reference_values = download(d_values);
     const auto reference_scales = download(d_scales);
     const auto reference_status = download(d_status);
-    if (reference_status !=
-        std::vector<std::uint32_t>{0U, 0U, kv::Fp8Int4KvAppendInvalidPosition, 0U, 0U, 0U, 0U, 0U})
+    std::vector<std::uint32_t> expected_status(kContexts.size(), 0U);
+    expected_status[2] = kv::Fp8Int4KvAppendInvalidPosition;
+    if (reference_status != expected_status)
         fail("per-sequence append status is not the fixture's expected isolation");
     if (reference_keys == keys || reference_values == values || reference_scales == scales)
         fail("per-sequence append wrote no cache bytes");
@@ -685,12 +912,14 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     if (download(d_keys) != reference_keys || download(d_values) != reference_values ||
         download(d_scales) != reference_scales || download(d_status) != reference_status)
         fail("batched append bytes or status differ from per-sequence launches");
+    std::vector<std::uint32_t> append_rows(kContexts.size(), kAppendRows);
+    append_rows[0] = 3U;
     return {{"attention", attention_cells},
             {"attention_criterion", "per-sequence output bytes and output/workspace canaries "
                                     "equal to one-sequence launches, eager and graph replay"},
             {"append",
              {{"sequences", kContexts.size()},
-              {"rows", {3, 8, 8, 8, 8, 8, 8, 8}},
+              {"rows", append_rows},
               {"device_token_count_sequence", 1},
               {"device_table_row_sequences", {3, 6}},
               {"invalid_position_sequence", 2},
@@ -708,6 +937,48 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc >= 4 && (std::string_view(argv[1]) == "--sequence-cell" ||
+                          std::string_view(argv[1]) == "--sequence-profile")) {
+            // Optional cache selector before ROWS: --kv-cache fp8-int4|nvfp4.
+            int first           = 2;
+            bool selected_nvfp4 = false;
+            if (std::string_view(argv[2]) == "--kv-cache") {
+                if (argc < 6) fail("--kv-cache requires a cache name, ROWS and contexts");
+                const std::string_view cache(argv[3]);
+                if (cache != "nvfp4" && cache != "fp8-int4")
+                    fail("--kv-cache must be fp8-int4 or nvfp4");
+                selected_nvfp4 = cache == "nvfp4";
+                first          = 4;
+            }
+            const auto rows = static_cast<std::uint32_t>(std::stoul(argv[first]));
+            // Each sequence is CTX or CTX:LIVE (live frontier within the envelope).
+            std::vector<std::size_t> contexts, lives;
+            for (int i = first + 1; i < argc; ++i) {
+                const std::string_view text(argv[i]);
+                const std::size_t colon = text.find(':');
+                contexts.push_back(std::stoul(std::string(text.substr(0, colon))));
+                lives.push_back(colon == std::string_view::npos
+                                    ? contexts.back()
+                                    : std::stoul(std::string(text.substr(colon + 1U))));
+            }
+            if (contexts.size() > kv::kPackedDecodeMaximumSequences || rows < 1U || rows > 8U ||
+                std::any_of(contexts.begin(), contexts.end(),
+                            [&](std::size_t n) { return n < rows || n > 262144U; }))
+                fail("sequence cell requires rows1..8 and up to16 contexts in rows..262144");
+            for (std::size_t i = 0; i < contexts.size(); ++i)
+                if (lives[i] < rows || lives[i] > contexts[i])
+                    fail("sequence cell live frontier must lie in rows..CTX");
+            const int selected_device = ninfer::r9700_qualification::device_guard().select();
+            ninfer::DeviceContext device(selected_device);
+            std::cout << Json{{"sequence_batch",
+                               sequence_batch_qualification(device, contexts, rows,
+                                                            std::string_view(argv[1]) ==
+                                                                "--sequence-profile",
+                                                            lives, selected_nvfp4)}}
+                             .dump(2)
+                      << '\n';
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--sequence-batch") {
             const int selected_device = ninfer::r9700_qualification::device_guard().select();
             ninfer::DeviceContext device(selected_device);
@@ -722,7 +993,9 @@ int main(int argc, char** argv) {
         if (argc != 1 && !long_context && !live_context)
             fail("usage: dflash_attention_route_discriminator "
                  "[--long-context|--live-context|--live-context-cell ENVELOPE ROWS "
-                 "LIVE|--sequence-batch]");
+                 "LIVE|--sequence-batch|--sequence-cell|--sequence-profile [--kv-cache "
+                 "fp8-int4|nvfp4] "
+                 "ROWS CTX[:LIVE]...]");
         std::vector<std::size_t> selected_envelopes{8192U, 65536U};
         std::vector<std::uint32_t> selected_widths{1U, 4U, 6U};
         std::vector<std::size_t> selected_live{4097U, 65U, 257U};
@@ -1108,20 +1381,26 @@ int main(int argc, char** argv) {
                     if (kv::fp8_int4_kv_attention_packed_decode(tree, device.stream) !=
                         hipErrorInvalidValue)
                         fail("small-width accepted tree metadata");
-                    // Device-resident invalid row positions must poison only that
-                    // row; the remaining represented causal queries remain exact.
+                    // Device-resident invalid row positions must poison only that row. The
+                    // shorter live frontier may repartition the context, so the remaining
+                    // represented causal queries must still meet the FP64 oracle.
                     host_positions.back() = -1;
                     upload(positions, host_positions);
                     executable.launch(device.stream);
                     device.synchronize();
-                    const auto masked = download(output);
-                    for (std::size_t i = 0; i < elements; ++i) {
-                        if (i >= (rows - 1U) * row_elements) {
-                            if (!std::isnan(masked[i + 1U]))
-                                fail("small-width invalid row was not poisoned");
-                        } else if (std::bit_cast<std::uint32_t>(masked[i + 1U]) !=
-                                   std::bit_cast<std::uint32_t>(actual[i]))
-                            fail("small-width invalid row changed valid prefix");
+                    const auto masked                = download(output);
+                    const std::size_t valid_elements = (rows - 1U) * row_elements;
+                    require_oracle(
+                        std::vector<float>(masked.begin() + 1,
+                                           masked.begin() + 1 +
+                                               static_cast<std::ptrdiff_t>(valid_elements)),
+                        std::vector<double>(public_oracle.begin(),
+                                            public_oracle.begin() +
+                                                static_cast<std::ptrdiff_t>(valid_elements)),
+                        implementation_limit, "small-width valid prefix after invalid row");
+                    for (std::size_t i = valid_elements; i < elements; ++i) {
+                        if (!std::isnan(masked[i + 1U]))
+                            fail("small-width invalid row was not poisoned");
                     }
                     require_guard_canaries(output, "small-width masked output");
                     require_guard_canaries(scores, "small-width masked workspace");

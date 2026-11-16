@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare recipe-separated DFlash evaluation after terminal base/chunk selection."""
+"""Prepare recipe-separated DFlash evaluation after terminal base/chunk selection.
+
+This fixed historical admission protocol pins --kv-cache fp8-int4, not default NVFP4.
+"""
 
 from __future__ import annotations
 
@@ -139,6 +142,8 @@ def _common(
         *_python(plan),
         "-m",
         "tools.bench.run_ninfer_bench_matrix",
+        "--kv-cache",
+        "fp8-int4",
         "--preset",
         preset,
         "--prefill-chunk",

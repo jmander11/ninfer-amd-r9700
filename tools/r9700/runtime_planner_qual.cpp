@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <initializer_list>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -55,15 +56,17 @@ void require_invalid_argument(Function&& function, const char* message) {
 }
 
 void qualify_host_request_lane_cap() {
-    constexpr auto max_batch = static_cast<std::int32_t>(ninfer::kMaximumConcurrency);
-    constexpr auto too_many  = max_batch + 1;
-    constexpr auto q4        = ninfer::QType::Q4G64_F16S;
-    constexpr auto profile   = Variant::WeightsProfile::R9700Q4G64DFlash2Q4Evaluation;
+    constexpr auto max_batch        = static_cast<std::int32_t>(ninfer::kMaximumConcurrency);
+    constexpr auto too_many         = max_batch + 1;
+    constexpr auto dflash_max_batch = static_cast<std::int32_t>(ninfer::kDFlashMaximumConcurrency);
+    constexpr auto dflash_too_many  = dflash_max_batch + 1;
+    constexpr auto q4               = ninfer::QType::Q4G64_F16S;
+    constexpr auto profile          = Variant::WeightsProfile::R9700Q4G64DFlash2Q4Evaluation;
 
-    (void)ninfer::ops::dflash2_path_select_workspace_capacity_bytes(q4, 1, 16, max_batch);
-    (void)ninfer::ops::swa_workspace_capacity_bytes({0, 4096}, 1, 16, max_batch);
+    (void)ninfer::ops::dflash2_path_select_workspace_capacity_bytes(q4, 1, 16, dflash_max_batch);
+    (void)ninfer::ops::swa_workspace_capacity_bytes({0, 4096}, 1, 16, dflash_max_batch);
     (void)ninfer::ops::bidirectional_gqa_attention_workspace_capacity_bytes({0, 4096}, 1, 16,
-                                                                            max_batch);
+                                                                            dflash_max_batch);
     (void)ninfer::ops::gated_delta_net_replay_record_workspace_capacity_bytes(48, max_batch, 16);
     (void)Variant::gdn_input_projection_snapshot_workspace_capacity_bytes(
         profile, ninfer::targets::qwen3::TextPhase::Verify, max_batch, 1, 16);
@@ -72,16 +75,17 @@ void qualify_host_request_lane_cap() {
 
     require_invalid_argument(
         [&] {
-            (void)ninfer::ops::dflash2_path_select_workspace_capacity_bytes(q4, 1, 16, too_many);
+            (void)ninfer::ops::dflash2_path_select_workspace_capacity_bytes(q4, 1, 16,
+                                                                            dflash_too_many);
         },
         "DFlash path selection accepted an oversized request batch");
     require_invalid_argument(
-        [&] { (void)ninfer::ops::swa_workspace_capacity_bytes({0, 4096}, 1, 16, too_many); },
+        [&] { (void)ninfer::ops::swa_workspace_capacity_bytes({0, 4096}, 1, 16, dflash_too_many); },
         "SWA accepted an oversized request batch");
     require_invalid_argument(
         [&] {
-            (void)ninfer::ops::bidirectional_gqa_attention_workspace_capacity_bytes({0, 4096}, 1,
-                                                                                    16, too_many);
+            (void)ninfer::ops::bidirectional_gqa_attention_workspace_capacity_bytes(
+                {0, 4096}, 1, 16, dflash_too_many);
         },
         "bidirectional attention accepted an oversized request batch");
     require_invalid_argument(
@@ -193,7 +197,7 @@ void qualify_host_split512_routing() {
                 class_at(Variant::ordinary_graph_profiles(63U), 62U) == 0U,
             "split-512 Device Graph topology classes are incomplete");
     for (const std::uint32_t width : {5U, 6U}) {
-        for (std::uint32_t batch = 1; batch <= ninfer::kMaximumConcurrency; ++batch) {
+        for (std::uint32_t batch = 1; batch <= ninfer::kDFlashMaximumConcurrency; ++batch) {
             const auto profiles = Variant::dflash_graph_profiles(16384U, width - 1U, batch, width);
             const bool g16      = ninfer::targets::qwen3::detail::kR9700TextKVValueGroup == 16;
             const std::uint32_t verify_class = g16 ? 3U : 0U;
@@ -215,10 +219,12 @@ void qualify_host_attention_parity_routing() {
     namespace kv  = ninfer::ops::r9700::kv;
     namespace q27 = ninfer::targets::qwen3_8_27b::detail;
     // Split verify partials: min(64, ceil(context/256)) chunks x rows x 24 heads x (256 numerator
-    // + origin + denominator) FP32.
+    // + origin + denominator) FP32, then the one 32-bit chunk count the split records for the
+    // merge.
     const auto verify_bytes = [](std::uint32_t rows, std::size_t context) {
         return std::min<std::size_t>(64U, (context + 255U) / 256U) * rows * 24U * 258U *
-               sizeof(float);
+                   sizeof(float) +
+               sizeof(std::uint32_t);
     };
     const std::size_t kW5C134Bytes = verify_bytes(5U, 134U);
     const std::size_t kW5C140Bytes = verify_bytes(5U, 140U);
@@ -317,7 +323,7 @@ void qualify_host_ordinary_graph_allowance() {
         }
     }
     std::printf(
-        "r9700_runtime_planner: PASS host ordinary C1..8/context1024,4096,4224 allowance\n");
+        "r9700_runtime_planner: PASS host ordinary C1..16/context1024,4096,4224 allowance\n");
 }
 
 void qualify_host_hybrid_allocation_bound() {
@@ -353,6 +359,9 @@ void qualify_host_hybrid_allocation_bound() {
     for (std::uint32_t concurrency = 1; concurrency <= ninfer::kMaximumConcurrency; ++concurrency) {
         for (const auto backend :
              {ninfer::SpeculativeBackend::DFlash, ninfer::SpeculativeBackend::Mtp}) {
+            if (backend == ninfer::SpeculativeBackend::DFlash &&
+                concurrency > ninfer::kDFlashMaximumConcurrency)
+                continue;
             runtime::SequencePlanningInputs inputs{};
             inputs.weights_profile     = Variant::WeightsProfile::R9700Lq4;
             inputs.capacity            = 262144U;
@@ -367,10 +376,9 @@ void qualify_host_hybrid_allocation_bound() {
             inputs.kv_disk_capacity_bytes = 1024ULL * 1024ULL * 1024ULL;
             const auto with_disk =
                 runtime::build_sequence_candidate_for_qualification(inputs, 4096U);
-            // Independently derive packed page geometry from the represented codec:
-            // 256 FP8 keys, 128 packed INT4 value bytes, FP16 scales per KV head.
-            constexpr std::size_t head_bytes =
-                256U + 128U + 2U * (256U / ninfer::targets::qwen3::detail::kR9700TextKVValueGroup);
+            // Default NVFP4: two packed E2M1 vectors plus one E4M3 scale per 16
+            // features of each K/V head vector.
+            constexpr std::size_t head_bytes    = std::size_t{2U} * (256U / 2U + 256U / 16U);
             constexpr std::size_t page_bytes    = std::size_t{16U} * 4U * head_bytes * 64U;
             constexpr std::size_t physical_unit = 2ULL * 1024ULL * 1024ULL;
             const std::size_t expected_disk =
@@ -385,12 +393,12 @@ void qualify_host_hybrid_allocation_bound() {
                     "SSD restore staging changed the affine per-page KV capacity cost");
         }
     }
-    std::printf("r9700_runtime_planner: PASS host arena bounds and C1..8 SSD affine capacity\n");
+    std::printf("r9700_runtime_planner: PASS host arena bounds and C1..16 SSD affine capacity\n");
 }
 
 void qualify_host_dflash_graph_allowance() {
     namespace runtime = ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
-    for (std::uint32_t concurrency = 1U; concurrency <= ninfer::kMaximumConcurrency;
+    for (std::uint32_t concurrency = 1U; concurrency <= ninfer::kDFlashMaximumConcurrency;
          ++concurrency) {
         for (const std::uint32_t capacity : {64U, 1024U, 4240U, 262144U}) {
             for (const std::uint32_t k : {1U, 3U, 7U}) {
@@ -440,7 +448,8 @@ void qualify_host_dflash_graph_allowance() {
     // These constants come from independent physical measurements, not a model
     // of executable counts. Keep the production capacity regression explicit.
     constexpr std::array<std::size_t, 8> graph_mib{318, 578, 842, 1102, 1364, 1624, 1884, 2144};
-    constexpr std::array<std::size_t, 8> host_argument_graph_mib{72, 56, 60, 60, 62, 62, 62, 62};
+    constexpr std::array<std::size_t, 12> host_argument_graph_mib{72, 56, 60, 60, 62, 62,
+                                                                  62, 62, 64, 64, 64, 64};
     const auto setting = [](const char* name, const char* expected) {
         const char* value = std::getenv(name);
         return value != nullptr && std::strcmp(value, expected) == 0;
@@ -448,8 +457,13 @@ void qualify_host_dflash_graph_allowance() {
     const bool bulk_arguments =
         setting("DEBUG_HIP_GRAPH_CLASSIC_PATH", "0") && setting("ROC_ENABLE_LARGE_BAR", "0") &&
         setting("ROC_SKIP_KERNEL_ARG_COPY", "0") && setting("HSA_DISABLE_FRAGMENT_ALLOCATOR", "1");
-    const auto& measured_graph_mib = bulk_arguments ? host_argument_graph_mib : graph_mib;
-    constexpr std::array<std::size_t, 8> main_driver_mib{6, 6, 4, 4, 2, 4, 4, 6};
+    const std::span<const std::size_t> measured_graph_mib =
+        bulk_arguments ? std::span<const std::size_t>(host_argument_graph_mib)
+                       : std::span<const std::size_t>(graph_mib);
+    constexpr std::array<std::size_t, ninfer::kMaximumConcurrency> main_driver_mib{
+        6, 6, 4, 4, 2, 4, 4, 6, 32, 32, 32, 34, 34, 34, 34, 34};
+    constexpr std::array<std::size_t, ninfer::kMaximumConcurrency> nvfp4_driver_mib{
+        0, 0, 0, 12, 12, 10, 10, 8, 0, 0, 0, 0, 0, 0, 0, 0};
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
     constexpr bool production_attention = false;
 #else
@@ -469,7 +483,7 @@ void qualify_host_dflash_graph_allowance() {
         !ninfer::ops::r9700::gdn_recurrence::kVerifyWaveQkCandidate &&
         ninfer::ops::r9700::kv::kFp8QkWmmaDecode &&
         !ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate;
-    for (std::uint32_t c = 1; c <= ninfer::kMaximumConcurrency; ++c) {
+    for (std::uint32_t c = 1; c <= ninfer::kDFlashMaximumConcurrency; ++c) {
         runtime::SequencePlanningInputs inputs{};
         inputs.weights_profile     = Variant::WeightsProfile::R9700Lq4;
         inputs.capacity            = 262144U;
@@ -486,7 +500,7 @@ void qualify_host_dflash_graph_allowance() {
         const auto calibrated      = Variant::calibrated_dflash_graph_allowance_bytes(
             inputs.weights_profile, inputs.features, inputs.capacity, c, inputs.prefill_chunk,
             inputs.draft_window, inputs.adaptive_draft);
-        require(calibrated.has_value() == measured_build,
+        require(calibrated.has_value() == (measured_build && c <= measured_graph_mib.size()),
                 "production calibration applicability differs from measured build profile");
         for (const bool disk : {false, true}) {
             inputs.kv_disk_capacity_bytes = disk ? 1ULL << 30U : 0U;
@@ -494,19 +508,18 @@ void qualify_host_dflash_graph_allowance() {
             require(plan->graph_definition_count == std::size_t{65U} * c &&
                         plan->graph_executable_count == std::size_t{65U} * c,
                     "production immutable executable inventory changed; remeasure residency");
-            if (measured_build)
+            if (calibrated)
                 require(plan->graph_allowance_bytes ==
                             (measured_graph_mib[c - 1U] + 20U) * (1ULL << 20U),
                         "production C-specific graph reservation differs from measurement");
-            const auto logical = plan->persistent.bytes + plan->workspace.capacity +
-                                 plan->request_transient_capacity_bytes +
-                                 plan->graph_allowance_bytes;
-            constexpr std::size_t head_bytes =
-                256U + 128U + 2U * (256U / ninfer::targets::qwen3::detail::kR9700TextKVValueGroup);
+            const auto logical               = plan->persistent.bytes + plan->workspace.capacity +
+                                               plan->request_transient_capacity_bytes +
+                                               plan->graph_allowance_bytes;
+            constexpr std::size_t head_bytes = std::size_t{2U} * (256U / 2U + 256U / 16U);
             constexpr std::size_t staging_bytes = std::size_t{16U} * 4U * head_bytes * 64U * 32U;
             const std::size_t disk_mib = (staging_bytes + (2U << 20U) - 1U) / (2U << 20U) * 2U + 2U;
-            const std::size_t internal_mib =
-                4U + 2U + main_driver_mib[c - 1U] + (disk ? disk_mib + 2U : 0U);
+            const std::size_t internal_mib = 4U + 2U + main_driver_mib[c - 1U] +
+                                             nvfp4_driver_mib[c - 1U] + (disk ? disk_mib + 2U : 0U);
             require(plan->device_reservation_bytes == logical + internal_mib * (1ULL << 20U),
                     "NInfer-owned driver or SSD storage escaped the internal capacity budget");
         }
@@ -517,6 +530,30 @@ void qualify_host_dflash_graph_allowance() {
                         inputs.draft_window, inputs.adaptive_draft)
                             .has_value() == qualified,
                     "prefill chunk calibration escaped its measured concurrency/environment");
+        }
+    }
+    for (std::uint32_t c = 1; c <= ninfer::kMaximumConcurrency; ++c) {
+        for (const auto backend :
+             {ninfer::SpeculativeBackend::Mtp, ninfer::SpeculativeBackend::None}) {
+            const bool mtp = backend == ninfer::SpeculativeBackend::Mtp;
+            runtime::SequencePlanningInputs inputs{};
+            inputs.weights_profile     = Variant::WeightsProfile::R9700Lq4;
+            inputs.capacity            = 262144U;
+            inputs.max_concurrency     = c;
+            inputs.prefill_chunk       = 2048U;
+            inputs.draft_window        = mtp ? 5U : 0U;
+            inputs.adaptive_draft      = mtp;
+            inputs.speculative_backend = backend;
+            inputs.features            = {.vision = false, .speculative = backend};
+            inputs.use_device_graph    = true;
+            const auto plan    = runtime::build_sequence_candidate_for_qualification(inputs, 4096U);
+            const auto logical = plan->persistent.bytes + plan->workspace.capacity +
+                                 plan->request_transient_capacity_bytes +
+                                 plan->graph_allowance_bytes;
+            require(plan->device_reservation_bytes ==
+                        logical + (4U + 2U + main_driver_mib[c - 1U] + nvfp4_driver_mib[c - 1U]) *
+                                      (1ULL << 20U),
+                    "MTP/ordinary driver reservation differs from the measured C-specific bound");
         }
     }
 
@@ -603,7 +640,7 @@ void qualify_host_dflash_graph_allowance() {
     require(!chunk_calibration(Variant::WeightsProfile::R9700Q4G64Evaluation, features, 262144U, 6U,
                                1024U, 7U, true),
             "chunk1024 calibration admitted an evaluation weight profile");
-    std::printf("r9700_runtime_planner: PASS immutable DFlash C1..8/K/context inventory\n");
+    std::printf("r9700_runtime_planner: PASS immutable DFlash C1..12/K/context inventory\n");
 }
 
 void qualify_host_mtp_graph_allowance() {
@@ -617,9 +654,10 @@ void qualify_host_mtp_graph_allowance() {
 
     // Includes singleton, the reproduced short-context failure, full
     // context profiles/split topologies, and all three independently captured Ks.
-    for (const auto c : {Case{64, 1, 3, false, 1}, Case{1024, 1, 3, false, 3},
-                         Case{1024, 4, 5, false, 12}, Case{262144, 1, 3, false, 11},
-                         Case{262144, 4, 5, false, 32}, Case{262144, 4, 5, true, 108}}) {
+    for (const auto c :
+         {Case{64, 1, 3, false, 1}, Case{1024, 1, 3, false, 3}, Case{1024, 4, 5, false, 12},
+          Case{262144, 1, 3, false, 11}, Case{262144, 4, 5, false, 32},
+          Case{262144, 4, 5, true, 108}, Case{262144, 16, 5, true, 432}}) {
         runtime::SequencePlanningInputs inputs{
             .weights_profile     = Variant::WeightsProfile::R9700Q4G64Evaluation,
             .capacity            = c.context,
@@ -926,18 +964,25 @@ int main(int argc, char** argv) {
                 "--host-hybrid-widths-csv PREFILL MAX_CONCURRENCY MTP_WIDTH DFLASH_WIDTH]");
         }
         ninfer::DeviceContext device(0);
+        bool dflash_excess_rejected = false;
+        try {
+            qualify_plan(device, ninfer::kDFlashMaximumConcurrency + 1U,
+                         ninfer::SpeculativeBackend::DFlash, 7U, false);
+        } catch (const std::invalid_argument&) { dflash_excess_rejected = true; }
+        require(dflash_excess_rejected, "DFlash accepted concurrency above twelve");
         for (std::uint32_t concurrency = 1; concurrency <= ninfer::kMaximumConcurrency;
              ++concurrency) {
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::None, 0, false);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::None, 0, true);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::Mtp, 3, false);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::Mtp, 3, true);
-            qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 4, false);
-            qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 5, false, 6);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::None, 0, false, 0,
                          WeightsProfile::R9700Q4G64Evaluation, true, 32768);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::Mtp, 3, false, 0,
                          WeightsProfile::R9700Q4G64Evaluation, true, 32774);
+            if (concurrency > ninfer::kDFlashMaximumConcurrency) continue;
+            qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 4, false);
+            qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 5, false, 6);
             if (concurrency == 1U) {
                 qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 1, false, 2,
                              WeightsProfile::R9700Q4G64DFlash2Q4Evaluation, true, 128);
@@ -964,10 +1009,12 @@ int main(int argc, char** argv) {
         require(capacity_envelope_workspace == kCapacityEnvelopeWorkspaceBytes,
                 "S16/tau900 4K/262K global planner workspace envelope changed");
 #endif
-        (void)qualify_plan(device, ninfer::kMaximumConcurrency, ninfer::SpeculativeBackend::DFlash,
-                           5, false, 6, WeightsProfile::R9700Q4G64DFlash2Q4Evaluation);
-        (void)qualify_plan(device, ninfer::kMaximumConcurrency, ninfer::SpeculativeBackend::DFlash,
-                           5, false, 6, WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation);
+        (void)qualify_plan(device, ninfer::kDFlashMaximumConcurrency,
+                           ninfer::SpeculativeBackend::DFlash, 5, false, 6,
+                           WeightsProfile::R9700Q4G64DFlash2Q4Evaluation);
+        (void)qualify_plan(device, ninfer::kDFlashMaximumConcurrency,
+                           ninfer::SpeculativeBackend::DFlash, 5, false, 6,
+                           WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation);
         const std::size_t dflash_q4_linear = Variant::linear_workspace_capacity_bytes(
             WeightsProfile::R9700Q4G64DFlash2Q4Evaluation, 128);
         const std::size_t dflash_mixed_linear = Variant::linear_workspace_capacity_bytes(
@@ -994,15 +1041,16 @@ int main(int argc, char** argv) {
             require(q4_workspace > mixed_workspace,
                     "all-Q4 plan did not reserve its larger MLP/Vision activation workspace");
         }
-        std::printf("r9700_runtime_planner: PASS q4_activation_bits=%d q4_prefill_cta_profile=%.*s "
-                    "w8_activation_bits=%d C=1..8 "
-                    "ordinary/vision/MTP/DFlash fixed widths; 32K MTP3 graph allowance; "
-                    "exact 32K DFlash K=1..11 C=1..8 graph inventories; profile-consistent integer "
-                    "workspace including DFlash Q4 companions\n",
-                    ninfer::ops::r9700::linear::kQ4ActivationBits,
-                    static_cast<int>(ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.size()),
-                    ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.data(),
-                    ninfer::ops::r9700::linear::kW8ActivationBits);
+        std::printf(
+            "r9700_runtime_planner: PASS q4_activation_bits=%d q4_prefill_cta_profile=%.*s "
+            "w8_activation_bits=%d C=1..16 "
+            "ordinary/vision/MTP/DFlash fixed widths; 32K MTP3 graph allowance; "
+            "exact 32K DFlash K=1..11 C=1..12 graph inventories; profile-consistent integer "
+            "workspace including DFlash Q4 companions\n",
+            ninfer::ops::r9700::linear::kQ4ActivationBits,
+            static_cast<int>(ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.size()),
+            ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.data(),
+            ninfer::ops::r9700::linear::kW8ActivationBits);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "r9700_runtime_planner: FAIL: %s\n", error.what());

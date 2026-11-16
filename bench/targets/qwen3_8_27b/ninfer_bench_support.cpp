@@ -291,8 +291,9 @@ std::string usage_text(std::string_view program) {
         << "  --warmup <n>                discarded repetitions (default: " << kDefaultWarmup
         << ")\n"
         << "  --max-ctx <tokens>          override auto-sized context capacity\n"
+        << "  --kv-cache <fp8-int4|nvfp4|tq-k4-v3> growing Text/MTP KV codec (default: nvfp4)\n"
         << "  --kv-capacity <workload|auto> exact workload capacity or maximum capacity with\n"
-        << "                              the default 64 MiB headroom (default: workload)\n"
+        << "                              the default 32 MiB headroom (default: workload)\n"
         << "  --prefill-chunk <tokens>    multiple of " << kPrefillChunkAlignment
         << " (default: " << kDefaultPrefillChunk << ")\n"
         << "  --mixed-forward auto|<N>    prefill-step forward width (multiple of 256) while\n"
@@ -304,7 +305,7 @@ std::string usage_text(std::string_view program) {
         << "  --contention-context <L>    prompt tokens of each contention decode lane\n"
         << "                              (default: 512)\n"
         << "  --contention-lanes <N>      contention decode lanes, 1..C-1 (default: C-1)\n"
-        << "  --concurrency <1..8>        concurrent Engine lanes (default: 1);\n"
+        << "  --concurrency <1..16>       concurrent Engine lanes (default: 1; DFlash: 1..12);\n"
         << "                              pp+tg at C>1 reports batched decode after a sequential\n"
         << "                              prefix-reuse seed so prefill/decode do not interleave\n"
         << "                              benchmark requests use a fixed non-expiring long-run\n"
@@ -372,6 +373,17 @@ BenchOptions parse_args(int argc, char** argv) {
             options.warmup = parse_nonnegative(value("--warmup"), "warmup");
         } else if (arg == "--max-ctx") {
             options.max_context = parse_u32(value("--max-ctx"), "max-ctx");
+        } else if (arg == "--kv-cache") {
+            const std::string selected = value("--kv-cache");
+            if (selected == "fp8-int4") {
+                options.kv_cache_format = ninfer::KvCacheFormat::Fp8KInt4V;
+            } else if (selected == "nvfp4") {
+                options.kv_cache_format = ninfer::KvCacheFormat::Nvfp4;
+            } else if (selected == "tq-k4-v3") {
+                options.kv_cache_format = ninfer::KvCacheFormat::TqK4V3;
+            } else {
+                throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
+            }
         } else if (arg == "--kv-capacity") {
             const std::string selected = value("--kv-capacity");
             if (selected == "auto") {
@@ -414,7 +426,7 @@ BenchOptions parse_args(int argc, char** argv) {
         } else if (arg == "--concurrency") {
             options.concurrency = parse_u32(value("--concurrency"), "concurrency");
             if (options.concurrency > kMaximumConcurrency) {
-                throw std::invalid_argument("--concurrency must be in [1,8]");
+                throw std::invalid_argument("--concurrency must be in [1,16]");
             }
         } else if (arg == "--spec") {
             const std::string selected = value("--spec");
@@ -843,8 +855,9 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << format_bytes(env.memory.kv_payload_bytes) << '\n'
         << "  corpus:     " << env.corpus_path << " (" << env.corpus_tokens << " tokens)\n"
         << "  config:     max_context=" << env.max_context << " prefill_chunk=" << env.prefill_chunk
-        << " kv_format=fp8-k-int4-v concurrency=" << env.concurrency
-        << " pending_timeout_ms=" << env.pending_timeout_ms << " pending_deadline=unbounded"
+        << " kv_format=" << kv_cache_format_name(env.kv_cache_format)
+        << " concurrency=" << env.concurrency << " pending_timeout_ms=" << env.pending_timeout_ms
+        << " pending_deadline=unbounded"
         << " q4_activation_bits=" << ninfer::ops::r9700::linear::kQ4ActivationBits
         << " q4_activation_profile=" << ninfer::ops::r9700::linear::kQ4ActivationProfile
         << " q4_prefill_gate_up_a4="
@@ -950,7 +963,7 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
         << "    \"kv_capacity_page_groups\": " << env.memory.kv_capacity_page_groups << ",\n"
         << "    \"kv_capacity_max_page_groups\": " << env.memory.kv_capacity_max_page_groups
         << ",\n"
-        << "    \"kv_cache_format\": \"fp8-k-int4-v\",\n";
+        << "    \"kv_cache_format\": \"" << kv_cache_format_name(env.kv_cache_format) << "\",\n";
     append_arena_json(out, "weights", env.memory.weights, "    ", true);
     append_arena_json(out, "sequence", env.memory.sequence, "    ", true);
     append_arena_json(out, "workspace", env.memory.workspace, "    ", true);
@@ -975,7 +988,7 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
         << "  \"config\": {\n"
         << "    \"max_context\": " << env.max_context << ",\n"
         << "    \"prefill_chunk\": " << env.prefill_chunk << ",\n"
-        << "    \"kv_cache_format\": \"fp8-k-int4-v\",\n"
+        << "    \"kv_cache_format\": \"" << kv_cache_format_name(env.kv_cache_format) << "\",\n"
         << "    \"kv_value_group\": " << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup
         << ",\n"
         << "    \"kv_plane_layouts\": {\"key\": \""
@@ -1165,8 +1178,9 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << decode_path_name(env.use_device_graph,
                                 SpeculativeOptions{env.speculative_backend, env.draft_tokens,
                                                    env.proposal_head, env.dflash_verify_width})
-            << ',' << "fp8-k-int4-v," << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup
-            << ',' << ninfer::targets::qwen3::detail::kR9700TextKVKeyPlaneLayoutName << ','
+            << ',' << kv_cache_format_name(env.kv_cache_format) << ','
+            << ninfer::targets::qwen3::detail::kR9700TextKVValueGroup << ','
+            << ninfer::targets::qwen3::detail::kR9700TextKVKeyPlaneLayoutName << ','
             << ninfer::targets::qwen3::detail::kR9700TextKVValuePlaneLayoutName << ','
             << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName << ','
             << ninfer::ops::r9700::linear::kQ4ActivationBits << ','

@@ -132,6 +132,12 @@ ApiError request_error_to_api_error(const ninfer::RequestError& exception,
         error.type   = "server_error";
         error.code   = "generation_recovery_exhausted";
         break;
+    case ninfer::RequestErrorKind::Cancelled:
+        error.param.clear();
+        error.status = 499;
+        error.type   = "request_cancelled";
+        error.code   = "client_disconnected";
+        break;
     }
     if (exception.location()) {
         const auto& location = *exception.location();
@@ -369,6 +375,7 @@ GenerationService::GenerationService(ServeOptions options, LoadProgress load_pro
     engine_options.kv_disk_capacity_bytes   = options_.kv_disk_capacity_bytes;
     engine_options.kv_disk_location         = options_.kv_disk_location;
     engine_options.kv_disk_compress         = options_.kv_disk_compress;
+    engine_options.kv_cache_format          = options_.kv_cache_format;
     engine_options.context_checkpoint_marks = options_.context_checkpoint_marks;
     engine_options.max_concurrency          = options_.max_concurrency;
     engine_options.generation_recovery      = options_.generation_recovery;

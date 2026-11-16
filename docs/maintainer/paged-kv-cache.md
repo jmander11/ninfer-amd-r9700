@@ -1,18 +1,34 @@
-# FP8-K/INT4-V paged context store
+# Paged context store: default NVFP4 and opt-in FP8-K/INT4-V and TQ-K4-V3
 
 This document defines growing key/value storage and publication for Qwen3.8-27B on R9700, including attention access, retained prefixes, host-RAM spill and SSD storage. The attention and Op references define kernel arithmetic; `concurrent-inference-architecture.md` defines scheduling.
 
 ## 1. Product contract
 
-The Text and MTP growing caches have exactly three persistent planes:
+The Text and MTP growing caches use one startup-selected codec (`--kv-cache`, `EngineOptions::kv_cache_format`). NVFP4 is the production default and the comparison baseline for KV-cache work. The opt-in FP8-K/INT4-V codec (`--kv-cache fp8-int4`) has exactly three persistent planes:
 
 - K: one OCP FP8 E4M3FN byte per feature;
 - V: signed canonical INT4, two codes per byte; and
 - V scale: one IEEE FP16 scale for each fixed feature group.
 
-There is no K scale, K mean, homogeneous cache dtype, runtime cache-format selector, or alternate growing-cache path. Represented BF16 K/V inputs are quantized only when appended. Attention reads the stored representation directly; it never gathers the cache into a request-contiguous buffer.
+The default NVFP4 codec has exactly four planes, in the order K, V, V scale, K scale, and stores 288 instead of 416 bytes per head-token, so the same memory holds about 1.44x the context:
 
-The product is one resident model on one `gfx1201` wave32 device with startup-fixed concurrency `C=1..8`. A single request may consume most of the shared physical page pool. Active, retained, and speculative provisional state use the same entitlement accounting.
+- K and V: E2M1, two codes per byte; and
+- K scale and V scale: one E4M3FN byte per 16 features: `E4M3_satfinite_rn(FP32_rn(max|x| / 6))`, with codes `E2M1_rn(FP32_rn(x / decoded scale))` and zero codes under a zero scale.
+
+The opt-in TQ-K4-V3 codec (TurboQuant MSE variant with norm correction, `ops/r9700/kv/tq_k4v3_codec.h`) has the same four planes in the same order and stores 228 bytes per head-token, about 1.82x FP8-K/INT4-V's context and 1.26x the NVFP4 default's:
+
+- rotation: every 256-feature K and V head vector is stored in the basis `y = H diag(s) x / 16` (Sylvester-Hadamard `H`, fixed signs `s`); attention rotates represented Q into that basis after RoPE and rotates its FP32 output back before the output gate;
+- K: four bits per feature (sign plus a 3-bit magnitude index), two codes per byte;
+- V: three bits per feature (sign plus a 2-bit magnitude index), as 12 bytes per 32 features (two magnitude words and one sign word);
+- K scale and V scale: one binary16 `FP16_rn(||x|| / ||c||)` per head vector (norm correction), where `c` is the signed level vector. Levels are exact binary16 high bytes, chosen from the Gaussian Lloyd-Max codebooks with a fixed level-domain scale (3/4 for K, 24/25 for V); a K scale above 32752 is rejected at append so every staged product stays finite.
+
+Its qualifier is `ninfer_r9700_tq_kv_qual` against the oracle in `tests/ops/tq_kv_oracle.h`. Quality evidence (BF16-source scorer, cache-only arms) is in `profiles/ppl/kv-codec-eval-20261115/`.
+
+The codec is fixed for an Engine's lifetime and requests cannot select it. NVFP4 uses no global scales or K mean, and both four-plane codecs qualify only G16 in their one plane order below. G16 (`NINFER_R9700_KV_VALUE_GROUP=16`) is the CMake default; a G32 evaluation build must explicitly select `--kv-cache fp8-int4` or fail with that fix, never silently fall back. Codec-independent ownership and publication rules below apply to all three codecs.
+
+There is no K mean, homogeneous cache dtype, or per-request cache-format selector. Represented BF16 K/V inputs are quantized only when appended. Attention reads the stored representation directly; it never gathers the cache into a request-contiguous buffer.
+
+The product is one resident model on one `gfx1201` wave32 device with startup-fixed concurrency `C=1..16` (`C=1..12` under DFlash). A single request may consume most of the shared physical page pool. Active, retained, and speculative provisional state use the same entitlement accounting.
 
 The cache owns storage and physical mapping, not model scheduling. It does not interpret request priority, MTP acceptance, DFlash selection, or GDN state. The target runtime owns those semantics and changes the published cache frontier only through the transaction API.
 
@@ -40,7 +56,7 @@ Text page_group_bytes     = 64 * 26624 = 1.625 MiB
 MTP page_group_bytes      = 64 * 1664  = 0.1015625 MiB
 ```
 
-`G=16` is the current whole-attention timing leader, not a finalized public artifact decision. The real paired quality, capacity, and whole-inference Pareto gate must compare G16 and G32 before the losing branch is deleted.
+`G=16` is the production build profile required by default NVFP4 and opt-in TQ. `G=32` remains an FP8-K/INT4-V evaluation profile, selected explicitly rather than as a fallback.
 
 ## 3. Pools
 
@@ -48,11 +64,11 @@ Startup constructs a fixed set of typed pools:
 
 ```text
 ordinary or DFlash Engine:
-    Text FP8-K/INT4-V pool
+    Text startup-selected codec pool
 
 MTP Engine:
-    Text FP8-K/INT4-V pool
-    MTP FP8-K/INT4-V pool
+    Text startup-selected codec pool
+    MTP startup-selected codec pool
 ```
 
 Text and MTP are physically separate because they have different layer counts and publication frontiers. Each pool nevertheless uses the same allocator semantics and current codec profile.
@@ -83,13 +99,13 @@ B_step = B(M_min+1) - B(M_min)
 M      = min(M_max, M_min + floor((F-R-B_min)/B_step))
 ```
 
-`F` is device memory available after weights and completed RAM-cache registration: the smaller of HIP availability and physical VRAM total minus usage from the matching PCI device's amdgpu sysfs counters. Required physical counters must be readable; HIP alone can overstate the graphics-inclusive reserve. Startup availability uses the same query. `R` is the configured sizing headroom (`--kv-capacity-headroom`, default 64 MiB). `R` is exclusively for external GPU users and display activity. NInfer-owned storage and its lazy driver allocations belong in `B(M)`; the runtime reservation includes both. Raise `R` when a desktop or another process needs more memory. Startup failures in automatic mode name the option. The same production layout builder supplies `B_min` and `B_step`; the common resolver does not duplicate model dimensions or bytes-per-token formulas.
+`F` is device memory available after weights and completed RAM-cache registration: the smaller of HIP availability and physical VRAM total minus usage from the matching PCI device's amdgpu sysfs counters. Required physical counters must be readable; HIP alone can overstate the graphics-inclusive reserve. Startup availability uses the same query. `R` is the configured sizing headroom (`--kv-capacity-headroom`, default 32 MiB). `R` is exclusively for external GPU users and display activity. NInfer-owned storage and its lazy driver allocations belong in `B(M)`; the runtime reservation includes both. Raise `R` when a desktop or another process needs more memory. Startup failures in automatic mode name the option. The same production layout builder supplies `B_min` and `B_step`; the common resolver does not duplicate model dimensions or bytes-per-token formulas.
 
 Enabled SSD caching reserves its device restore window and per-pool scatter descriptors in `B(M)`. The production 16-reader window has 32 packed-page slots: G16 Text pages require 52 MiB of staging, plus a 2-MiB physical allocation bound for each scatter table (54 MiB with DFlash, 56 MiB with MTP). Host file-alignment padding belongs only to the pinned host I/O window. This reservation is independent of physical KV page count and preserves the affine curve; it does not consume the external headroom.
 
-For the measured production `R9700Lq4` build at `S=262144`, adaptive DFlash K7 with the optimized proposal head, no Vision, and prefill chunk 2048, the target bounds the complete immutable Device Graph residency by its measured C1..8 inventory. This includes one executable for every captured profile and the lowered persistent decode definitions. Other startup selectors and qualification builds use the conservative immutable-executable inventory bound.
+For the measured production `R9700Lq4` build at `S=262144`, adaptive DFlash K7 with the optimized proposal head, no Vision, and prefill chunk 2048, the target bounds complete immutable Device Graph residency by its measured inventory: C1..12 with the bulk host-argument graph settings and C1..8 with classic graphs. This includes one executable for every captured profile and the lowered persistent decode definitions. The C9..12 bulk inventories each observed 64 MiB; the plan adds its existing 20-MiB persistent-decode allowance, for 84 MiB total. Classic C9..12, other startup selectors and qualification builds use the conservative immutable-executable inventory bound.
 
-The target separately reserves 2 MiB for startup driver residency and a C-specific main-stream bound of 6/6/4/4/2/4/4/6 MiB at C1..8, plus 2 MiB for the SSD scatter kernel when enabled. The main-stream bound covers both lazy kernel residency and the measured aggregate physical residual beyond logical arenas, HIP graph accounting and the separate 4-MiB arena allocation bound. The C6/C7/C8 physical-counter correction is owned by NInfer, not external headroom; its attribution and qualification are recorded in the 2026-10-16 GDN follow-up in `docs/performance.md`. Physical and HIP graph deltas differ, so the residual is not claimed to identify an exact driver allocation.
+The target separately reserves 2 MiB for startup driver residency and a C-specific main-stream bound of 6/6/4/4/2/4/4/6 MiB at C1..8, plus 2 MiB for the SSD scatter kernel when enabled. The main-stream bound covers both lazy kernel residency and the measured aggregate physical residual beyond logical arenas, HIP graph accounting and the separate 4-MiB arena allocation bound. The C6/C7/C8 physical-counter correction is owned by NInfer, not external headroom; its attribution and qualification are recorded in the 2026-10-16 GDN follow-up in `docs/performance.md`. Physical and HIP graph deltas differ, so the residual is not claimed to identify an exact driver allocation. The NVFP4 cache adds 12/12/10/10/8 MiB at C4..8 for its additional kernel residency (adaptive DFlash K7 at 262,144 tokens left 20.8..24.7 MiB free against the 32-MiB headroom without it, 2026-11-08). C9..16 reserves 32/32/32/34/34/34/34/34 MiB, measured on the MTP and ordinary routes; DFlash C9..12 retains the same bounds and passes rebuilt native-ceiling startup/decode checks with the calibrated graph allowance (2026-11-04 concurrency measurements in `docs/performance.md`).
 
 The low-residency calibration requires `DEBUG_HIP_GRAPH_CLASSIC_PATH=0`, `ROC_ENABLE_LARGE_BAR=0`, `ROC_SKIP_KERNEL_ARG_COPY=0`, and `HSA_DISABLE_FRAGMENT_ALLOCATOR=1`, as set by Compose. Immutable graph arguments reside in pinned host memory and cached packets replay in bulk; the same preset without those settings retains the conservative device-argument-pool reservation. Other presets use the full inventory bound.
 
@@ -120,9 +136,9 @@ The retained historical schema-v12 directories are `profiles/bench/pareto-capaci
 
 These once superseded every earlier capacity generation, but are themselves historical after the C=1..4 product-cap migration and cannot enter the current selection. Fresh exact C=1..8 capacity matrices are required for both eligible recipes, both cache groups, and each candidate execution profile. The still earlier generations are the `pareto-capacity-layout-*` pair with always-on nested ROCTX markers, the completed G16 and interrupted G32 `pareto-capacity-unprofiled-layout-*` intermediate runs, and the schema-v11 manifest/schema-v18 report `pareto-capacity-max-*` pair. All old raw evidence remains unchanged as historical evidence; none is valid input to the current selection frontier.
 
-## 5. Three-plane physical layout
+## 5. Physical plane layout
 
-Every layer has three required planes. A page-group ID identifies the same 64 logical positions across all three planes and all layers in that pool. There is one I32 block-table row per allocation, not a table per plane, layer, or head.
+Every layer has its codec's required planes. A page-group ID identifies the same 64 logical positions across all of its codec's planes and all layers in that pool. There is one I32 block-table row per allocation, not a table per plane, layer, or head.
 
 Each plane independently selects one of two closed physical orders:
 
@@ -137,7 +153,9 @@ The startup profile fixes all three orders. Requests and runtime modes cannot se
 | V INT4 | feature-fastest, page-major |
 | V-scale FP16 | feature-fastest, page-major |
 
-The generic pool records plane extents, element type, alignment, slab order, and intra-page order. The typed wrapper validates exact K/V/scale geometry before exposing a layer view. Storage contains no optional fourth plane.
+NVFP4 fixes one profile: K codes and K scales token-fastest, head-major; V codes and V scales feature-fastest, page-major.
+
+The generic pool records plane extents, element type, alignment, slab order, and intra-page order. The typed wrapper validates exact K/V/scale geometry before exposing a layer view. The opt-in FP8-K/INT4-V codec has exactly three planes; default NVFP4 and opt-in TQ have four including key scale, and no codec has optional planes.
 
 For a logical position `p`:
 
@@ -208,7 +226,7 @@ A committed read is valid only while publication remains closed with the same ge
 
 Mapping materialize/trim/bind/unbind, a new transaction, commit, abort, compaction, or row rebinding invalidates older capabilities. Cross-stream pending reads and capabilities from another allocation are rejected before dispatch.
 
-The attention leaf traverses logical positions, translates each page once per shared work unit, decodes FP8 K and signed INT4 V with FP16 scales, and evaluates causal or packed-tree visibility. Malformed device positions/table rows make only the affected output row conspicuously NaN. A cached-only read never writes cache storage.
+The attention leaf traverses logical positions, translates each page once per shared work unit, decodes the selected codec's K/V codes and scales, and evaluates causal or packed-tree visibility. Malformed device positions/table rows make only the affected output row conspicuously NaN. A cached-only read never writes cache storage.
 
 ## 9. Compaction and speculative rollback
 
@@ -234,13 +252,13 @@ RAM and disk restore read only the state sets retained by the planned reuse path
 
 Resident and RAM reuse candidates must satisfy the selected backend's readiness requirements before longest-prefix ranking; an unusable longer candidate cannot hide a usable shorter one. An exact ordinary hit requires valid tail hidden state. Each staged checkpoint's lifetime event covers both its capture and subsequent H2D readers, so releasing the head waits for its last use, not just its initial D2H capture. Retired RAM storage transfers ownership only after its retirement record is allocated. Pinned-arena allocation failure leaves existing allocations/free space intact; releasing valid blocks requires no metadata allocation.
 
-The RAM image version binds an FP8-K/INT4-V semantic fingerprint containing codec version, page size, physical/logical capacity, layer/head geometry, value group, and all plane orders. A mismatch rejects before any destination byte changes. Text and MTP fingerprints are independent.
+The RAM image version binds a codec-specific semantic fingerprint containing codec version, page size, physical/logical capacity, layer/head geometry, value group, and all plane orders. A mismatch rejects before any destination byte changes. Text and MTP fingerprints are independent.
 
 `--kv-ram-system-prompts N` enables retained snapshots of the exact leading system-prefix frontier inside the same arena. The frontend marks the boundary before any first-user content, and the tokenizer verifies that its encoding is an exact prefix of the full prompt without changing input tokens. Prefill splits at the boundary; capture stores only its leading mapped KV pages and current GDN/backend state, with no stale later checkpoint. Ordinary and DFlash snapshots omit the tail hidden; their strict suffix prefill supplies it. MTP retains the last normalized Text hidden and only MTP validity through F−1: the bridge column at F−1 depends on lookahead token F and is regenerated from the new user token before suffix prefill. The copy stream waits for the producing compute, and subsequent compute waits for that entry's D2H event before mutating its partial page or recurrent/cyclic state. All claims, H2D readers and retired blocks retain the existing event lifetime rules.
 
 A successful system restore releases its claim without retiring the source and touches LRU recency. Count replacement evicts the least recently restored unclaimed system entry; byte pressure first reclaims ordinary entries through their normal RAM/disk policy, then older system entries. Ordinary spill enumeration excludes system anchors, so they remain RAM-only and ordinary FIFO pressure cannot evict them. At most N indexed system entries are retained, with no capacity beyond the existing host arena. Optional capture failure preserves request progress. The planner continues longest-ready-prefix ranking across all retained classes. A missing system image behind an already longer selected frontier does not force a cold restart just to populate an auxiliary entry.
 
-Host capacity is fixed by `--kv-ram-capacity`; `off` disables retained FIFO spill and active RAM suspension, but not live-lane checkpoint state. Optional completed-prefix captures that do not fit may be dropped. With RAM on, live image credits and suspended continuations share the configured arena and take precedence over optional completed/system entries. Live images are private continuation ownership, excluded from prefix lookup, FIFO eviction and disk spill.
+Host capacity is fixed by `--kv-ram-capacity`; `off` disables retained FIFO spill and active RAM suspension, but not live-lane checkpoint state. Optional completed-prefix captures that do not fit may be dropped. With RAM on, live image credits and suspended continuations share the configured arena and take precedence over optional completed/system entries: securing a credit evicts ordinary entries first and a retained system entry, least recently restored, only when no ordinary entry remains, and a credit that cannot fit even after every evictable entry is gone fails without evicting. Live images are private continuation ownership, excluded from prefix lookup, FIFO eviction and disk spill.
 
 Every resident outside the completion cohort has allocatable image credit through its granted window end; an already suspended request keeps its exact image. Credit includes required current/rewrite/checkpoint/backend state, packing and alignment, and bytes still held by transfers. Free-byte sums must not promise an image that fragmentation prevents allocating. The cohort's target-authoritative completion envelopes jointly fit every GPU pool and lane axis. Those envelopes include bounded native recovery suffix growth only for enabled retry paths; ordinary raw, disabled-recovery and public capped-Close requests pay no speculative recovery charge. Cohort membership is a future completion proof, not an upfront GPU reservation: members still acquire windows, and backed peers can evacuate so all members finish without extra RAM. A restore claims future cohort capacity before transfer commit and releases its existing image backing only after all restore readers finish. Active handoff first secures the departing member's image and the successor's future feasibility. A queued replacement that fits the cohort claims that future capacity through victim capture and physical admission without requiring a redundant RAM image credit; cancellation or failed admission releases the claim.
 
@@ -260,13 +278,13 @@ Direct disk reads use ordinary aligned staging before copying into pinned GTT: o
 
 A closed preserve-off turn is captured cut at its turn checkpoint. The request stopped on a stop token or string without a tool call, and its `TurnClosure` checkpoint `F` is its own generation opener (frontend `generation_opener`; a checkpoint inside a tool loop sits at the loop's first opener and is not marked). The next preserve-off prompt re-renders that reply without reasoning and diverges after `F`, so no frontier past `F` is reachable. The RAM entry, and therefore its disk spill, stores the lane as of `F`: ledger, identity, Text and backend KV end at `F`; the current GDN state, DFlash cyclic lane and tail hidden are the checkpoint's; no rewrite set and no head past `F` is stored. The next turn appends at `F` with the reuse length `restore_turn_checkpoint` had, so each entry holds one state set. Such a request appending from a cut RAM/disk entry writes no automatic turn-rollback head; a resident append writes it as usual. The VRAM retained lane is unchanged. Cost: switching that conversation to preserve-on, or continuing the reply as an assistant prefill, re-prefills the reply.
 
-RAM image version 6 binds both semantic and per-plane physical fingerprints. Capture explicitly returns captured, needs-eviction, or dropped; the caller owns spill/eviction decisions. Optional pinned allocation failure leaves the request able to proceed without retained cache capture. The startup pinned arena uses driver-backed HIP/GTT host memory and is zero-initialized; its preparation can overlap artifact materialization. Device startup fixes `HSA_USERPTR_FOR_PAGED_MEM=0` with normal SVM/unified addressing before HIP initialization, so these buffers do not use the movable USERPTR backing implicated in compaction stalls. RAM KV capacity, checkpoint slabs, mapped weights, transfer staging and runtime host buffers share the device's GTT budget as well as host-memory resources. Each allocation checks current GTT availability; HIP allocation remains authoritative under concurrent usage. Engine startup fails clearly when its requested capacity cannot be allocated; it never silently shrinks the RAM tier or falls back to registered pageable memory.
+RAM image version 6 binds both semantic and per-plane physical fingerprints, including the codec. An SSD directory binds its codec too: starting an Engine on a directory written by the other codec fails with `KV disk fingerprint mismatch: text_codec`, as for another model, so keep one `--kv-disk-location` per codec. Capture explicitly returns captured, needs-eviction, or dropped; the caller owns spill/eviction decisions. Optional pinned allocation failure leaves the request able to proceed without retained cache capture. The startup pinned arena uses driver-backed HIP/GTT host memory and is zero-initialized; its preparation can overlap artifact materialization. Device startup fixes `HSA_USERPTR_FOR_PAGED_MEM=0` with normal SVM/unified addressing before HIP initialization, so these buffers do not use the movable USERPTR backing implicated in compaction stalls. RAM KV capacity, checkpoint slabs, mapped weights, transfer staging and runtime host buffers share the device's GTT budget as well as host-memory resources. Each allocation checks current GTT availability; HIP allocation remains authoritative under concurrent usage. Engine startup fails clearly when its requested capacity cannot be allocated; it never silently shrinks the RAM tier or falls back to registered pageable memory.
 
 `--kv-disk-capacity` and `--kv-disk-location` enable an inclusive persistent SSD tier; a nonzero RAM tier is required. Each RAM capture requests a write-behind spill on the disk worker, so entries usually become durable while other requests decode.
 
 When a capture needs RAM, the oldest unpinned disk-durable entry is evicted first. Without one, the in-flight write-behind spill, or else the oldest savable entry, is spilled first: synchronously when no other lane is decoding, otherwise at emergency priority on the disk worker while the admission stays queued, claims and captures nothing, and the other lanes keep decoding. The admission retries once that spill commits, so decoding never waits for a disk write and an entry is dropped unsaved only when the disk cannot store it; when disk bandwidth is the limit, admission (TTFT) waits for it. Entries captured earlier in the same admission attempt, which the deferral rolls back, are never the spill it waits on nor the unsaved drop, so the retried attempt cannot defer on its own capture. A disk restore whose setup would wait for another entry's window reads holds admission while other lanes keep decoding.
 
-Disk version 8 stores raw or Zstd-compressed exact logical-page payloads plus complete checkpoint state. Packing respects each of the three planes' slab and intra-page order; scatter restores represented bytes without dequantization. Durable identity binds model, weights, artifact, fixed codec semantics and Vision-aware prefix identity, but excludes pool allocation capacity so a compatible restart may resize the pool. RAM images retain their stricter physical fingerprint; disk restore reconstructs the current physical mapping rather than importing old page IDs.
+Disk version 8 stores raw or Zstd-compressed exact logical-page payloads plus complete checkpoint state. Packing respects each plane's slab and intra-page order; scatter restores represented bytes without dequantization. Durable identity binds model, weights, artifact, fixed codec semantics and Vision-aware prefix identity, but excludes pool allocation capacity so a compatible restart may resize the pool. RAM images retain their stricter physical fingerprint; disk restore reconstructs the current physical mapping rather than importing old page IDs.
 
 Ranking selects the longest complete usable frontier; ties keep VRAM before RAM before disk. Bounded reader/staging resources may overlap validated page copies with further reads, but a lane is not published until all state owners and the copy event complete. Cancellation drains I/O and releases the pinned entry generation without deleting its durable source.
 
@@ -357,9 +375,11 @@ If complete evidence leaves the G16 and G32 layouts for the selected byte-identi
 
 Measured suffix append costs about 5 to 8 microseconds at T=1..8 and 37 to 46 microseconds at T=128, while complete attention ranges from roughly 0.66 ms at 1K/T1 to 301 ms at 32K/T128. Even a physically impossible zero-cost append fusion is therefore below 0.8 percent at 1K and below 0.21 percent at longer contexts. A single ordinary HIP launch cannot globally order all independent append writers before all attention readers, and per-query-head encoding violates single-writer transaction ownership. Separate ordered append followed by the selected attention family is the qualified architecture.
 
-Host-fixed 1..8-row decode (ordinary T=1, MTP and DFlash chain verification; non-tree, contexts 64..262144) runs the packed decode route: the dense attention arithmetic split over context chunks with a stable FP32 merge and a bounded caller-owned partial workspace.
+Host-fixed 1..8-row-per-sequence decode over up to 16 sequences of a compact batch (ordinary T=1, MTP and DFlash chain verification; non-tree, contexts 64..262144) runs the packed decode route: the dense attention arithmetic split over context chunks with a stable FP32 merge and a bounded caller-owned partial workspace.
 
-A uniform causal sequence batch (ordinary decode, MTP and chain verification, and a mixed round's verify part) keeps one append transaction per sequence but issues each layer's append for all of them as one codec launch, and, when every sequence takes the packed route, attends all of them with one split launch and one merge (grid z = sequence, each with its own table row, frontier, positions, output and workspace slice); every sequence's bytes equal its own launch. Tree verification and batches with a sequence off the packed route attend one sequence at a time after the shared append.
+The partition is chosen per sequence on the device. One lane of each partial workgroup reads the sequence's active row positions while another runs the tile setup, takes the largest valid position plus one as the live frontier, and applies the measured gfx1201 target for the batch size, row class (1..4 or 5..8 rows) and live frontier (at most 8,192 or above; 16,384 for 5..8 rows at B12/B16), which the host passes per sequence in the kernel arguments (`kDenseVerifyTargets`). A target `n` splits the live keys into at most `n` chunks of at least 256 keys, rounded up to 32-key tiles. The targets keep about `4 * batch * chunks` ≈ 64 workgroups on the 64 compute units: 16/8/5/4/3 chunks at B1..5 and 2 at B8, with per-batch values for the other sizes. The partial workgroup of KV head 0 and chunk 0 records the chosen chunk count in one word after the workspace's partial slots, and the merge reads that word instead of recomputing the partition. The host plans the grid and workspace from the largest partition any live frontier within the envelope can select. A sequence keeps the frontier-envelope partition (up to 64 chunks for 1..4 rows, 16/64/32 for 5..8 rows through 64K/128K/256K) when its envelope exceeds the short-frontier limit of a zero long target (5..8 rows at B7, B9, B11 and B13..16, where no per-batch count beat it), or when its envelope chunks already have the minimum 256 keys and the target never binds. When every sequence of a launch keeps it, the launch uses kernels without live-frontier code. The live frontier over-estimates rows the tile setup rejects, so the partition always covers every admitted key.
+
+A uniform causal sequence batch (ordinary decode, MTP and chain verification, and a mixed round's verify part) keeps one append transaction per sequence but issues each layer's append for all of them as one codec launch, and, when every sequence takes the packed route, attends all of them with one split launch (grid y = sequence, z = chunk) and one merge (grid z = sequence), each sequence retaining its own table row, frontier, positions, output and workspace slice. A sequence's partition depends on the batch size, so batched and one-sequence launches agree to rounding and each meets the FP64 oracle; graph replay reproduces eager bytes. Tree verification and batches with a sequence off the packed route attend one sequence at a time after the shared append.
 
 Host-fixed 9..127-row causal chunks (appended turns, tool results and prompt tails) run the mid-row route: the 32-row dense prefill tiles split over at most 64 context chunks into at most 2048 row-chunk FP32 partials (50.7 MB), merged by the same stable FP32 merge. The chunk count minimizes whole 64-CTA waves times keys per CTA plus a fixed overhead; host-fixed 128..1023-row calls take this route whenever that splits the context and dense prefill otherwise, as do 1024 rows and above and device-counted rows.
 
@@ -381,7 +401,7 @@ The complete BF16 source checkpoint and supported Python environment are present
 
 Fixed architecture:
 
-- FP8 E4M3FN K, signed INT4 V, FP16 V scale, three planes only;
+- default NVFP4 E2M1 K/V with E4M3 G16 K and V scales in four planes; opt-in FP8 E4M3FN K, signed INT4 V, FP16 V scale in three planes; opt-in TQ rotated 4-bit K / 3-bit V with FP16 head-vector scales in four planes;
 - `P=64`, pool-local I32 page-group IDs, one allocation-owned block-table row;
 - Text/MTP physical separation and target-derived capacity coupling;
 - generation-bound read capabilities and transaction-only publication;
@@ -391,7 +411,7 @@ Fixed architecture:
 Currently tunable until the real-model gate:
 
 - G16 versus G32;
-- the three plane orders;
+- the selected codec's plane orders;
 - attention tile/split/vector/LDS staging and wave assignment; and
 - append workgroup geometry, provided it preserves one writer per packed destination.
 
@@ -399,6 +419,6 @@ Changing page size, code semantics, scale type, pool grouping, page-ID model, pu
 
 ## Disposable cache reads
 
-`ExecutionOptions.cache_write=false` forks a selected prefix into independent allocations and complete continuation state. It never shares writable pages, mutates source checkpoints, or consumes a RAM/disk original. Copy all three planes in their per-plane stored layouts, including partial final pages; preserve logical publication frontiers and initialize GDN, hidden state, position/media metadata and MTP/DFlash state at the selected frontier. Reader fences protect source allocations and images. A pending AMD GDN fold is materialized before copying current state.
+`ExecutionOptions.cache_write=false` forks a selected prefix into independent allocations and complete continuation state. It never shares writable pages, mutates source checkpoints, or consumes a RAM/disk original. Copy all of the codec's planes in their per-plane stored layouts, including partial final pages; preserve logical publication frontiers and initialize GDN, hidden state, position/media metadata and MTP/DFlash state at the selected frontier. Reader fences protect source allocations and images. A pending AMD GDN fold is materialized before copying current state.
 
 An ordinary original may migrate into a full-original RAM image before its GPU bundle is released, bypassing closed-turn rewrite cutting while keeping existing checkpoints. A disposable original cannot be offloaded. Disposable completion retains only coherent current state in VRAM; no future-reuse checkpoint, RAM or disk capture is created. Disposable retention precedes ordinary retention for lane replacement and page reclamation. A later writable continuation promotes its own resulting state. Cancellation drains destination readers; a committed original migration remains cached. The concurrent architecture defines preservation-feasible admission and failure classification.
