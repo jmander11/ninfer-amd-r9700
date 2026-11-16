@@ -9,6 +9,15 @@ the server. Relative fixture paths resolve from the repository root.
     python3 -m tools.bench.run_niah_check --fixture examples/cli/messages/long_niah_64k.json \
         --needle "ORCHID=493817; COLOR=COBALT" --max-tokens 64 --label SAGE
 
+Structured suites (multi-value, multi-query, variable-tracking, aggregation, in-distribution)
+use fixture-local answer metadata that is never sent to the server:
+
+    python3 -m tools.bench.run_niah_check --suite multi-value --lengths 32k,128k,260k \
+        --fixture-dir out/needle/prompts --max-tokens 192 --label tq
+
+Structured scoring requires every expected JSON value or key/value binding and no extras;
+array order is immaterial, and prose, Markdown wrappers or duplicates fail. Records keep each
+answer and its score. Exit 0 means every trial passed, 1 a wrong answer, 2 a request error.
 Records go to ignored profiles/bench/niah-check/ by default. For durable gate
 evidence, supply --out, --server-log, --artifact and --serve-bin. That mode
 binds the loaded files and requires a fresh full-prefill request_done event
@@ -22,6 +31,7 @@ import hashlib
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -464,16 +474,26 @@ def validate_fresh_prefill_log(
     }
 
 
-def matrix_cases(lengths, positions, multikey=False):
+HARD_SUITES = ("multi-value", "multi-query", "variable-tracking", "aggregation", "in-distribution")
+
+
+def matrix_cases(lengths, positions, multikey=False, suite="standard", fixture_dir=None):
     """Expand (lengths, positions) into (label, fixture-ref) NIAH matrix cells.
 
     The mid cell uses the bare fixture name (long_niah_{len}.json); every other
     position uses the suffixed name (long_niah_{len}_{pos}.json). Multi-key cells
-    are always suffixed (long_niah_multikey_{len}_{pos}.json)."""
+    are always suffixed (long_niah_multikey_{len}_{pos}.json), as are structured
+    suite cells (long_niah_{suite}_{len}_{pos}.json). fixture_dir replaces the
+    examples directory."""
     out = []
     for length in lengths:
         for pos in positions:
-            if multikey:
+            if suite != "standard":
+                ref = (
+                    f"examples/cli/messages/long_niah_{suite.replace('-', '_')}_{length}_{pos}.json"
+                )
+                label = f"{suite}_{length}_{pos}"
+            elif multikey:
                 ref = f"examples/cli/messages/long_niah_multikey_{length}_{pos}.json"
                 label = f"multikey_{length}_{pos}"
             elif pos == "mid":
@@ -482,8 +502,72 @@ def matrix_cases(lengths, positions, multikey=False):
             else:
                 ref = f"examples/cli/messages/long_niah_{length}_{pos}.json"
                 label = f"context_{length}_{pos}"
+            if fixture_dir is not None:
+                ref = str(Path(fixture_dir) / Path(ref).name)
             out.append((label, ref))
     return out
+
+
+def _unique_json_object(pairs: list[tuple]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def score_answer(text: str, expected: list[str] | dict[str, str], scoring: str) -> dict:
+    """Require every expected value/binding, no extras, and an unambiguous raw JSON answer.
+
+    json-set is order-independent but rejects duplicates and non-string values; json-object
+    preserves key/value bindings. Partial match counts are diagnostics only."""
+    if scoring not in ("json-set", "json-object"):
+        raise ValueError(f"unknown structured scoring: {scoring}")
+    if scoring == "json-set":
+        if (
+            not isinstance(expected, list)
+            or not expected
+            or any(not isinstance(x, str) for x in expected)
+            or len(set(expected)) != len(expected)
+        ):
+            raise ValueError("json-set metadata must contain distinct expected strings")
+    elif (
+        not isinstance(expected, dict)
+        or not expected
+        or any(not isinstance(k, str) or not isinstance(v, str) for k, v in expected.items())
+    ):
+        raise ValueError("json-object metadata must contain expected string bindings")
+    result = {
+        "passed": False,
+        "matched": 0,
+        "expected_count": len(expected),
+        "unexpected": 0,
+        "error": None,
+    }
+    try:
+        answer = json.loads(text, object_pairs_hook=_unique_json_object)
+    except (ValueError, TypeError) as exc:
+        result["error"] = str(exc)
+        return result
+    if scoring == "json-set":
+        if not isinstance(answer, list) or any(not isinstance(x, str) for x in answer):
+            result["error"] = "answer must be an array of strings"
+            return result
+        values, targets = set(answer), set(expected)
+        result["matched"] = len(values & targets)
+        result["unexpected"] = len(values - targets)
+        result["passed"] = values == targets and len(answer) == len(values)
+        if len(answer) != len(values):
+            result["error"] = "answer contains duplicate values"
+    else:
+        if not isinstance(answer, dict) or any(not isinstance(x, str) for x in answer.values()):
+            result["error"] = "answer must be an object with string values"
+            return result
+        result["matched"] = sum(answer.get(key) == value for key, value in expected.items())
+        result["unexpected"] = len(set(answer) - set(expected))
+        result["passed"] = answer == expected
+    return result
 
 
 def load_key(api_key: str | None) -> str:
@@ -506,18 +590,19 @@ def resolve_fixture(ref: str) -> Path:
     return p
 
 
-def load_messages_and_identity(fixture: str) -> tuple[list, dict[str, Any]]:
+def load_fixture(fixture: str) -> tuple[list, dict[str, Any], dict | None]:
+    """Messages, file identity, and the optional structured answer contract ("niah")."""
     path = resolve_fixture(fixture).resolve(strict=True)
     data = path.read_bytes()
     raw = json.loads(data)
     identity = {"path": str(path), "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
     if isinstance(raw, list):
-        return raw, identity
-    return raw.get("messages", []), identity
+        return raw, identity, None
+    return raw.get("messages", []), identity, raw.get("niah")
 
 
 def load_messages(fixture: str) -> list:
-    return load_messages_and_identity(fixture)[0]
+    return load_fixture(fixture)[0]
 
 
 def post(base: str, key: str, body: dict, timeout: float) -> dict:
@@ -578,6 +663,8 @@ def main() -> int:
         action="store_true",
         help="run the multi-key matrix cells (32 same-form distractor records)",
     )
+    ap.add_argument("--suite", choices=("standard", *HARD_SUITES), default="standard")
+    ap.add_argument("--fixture-dir", type=Path, help="directory holding generated matrix fixtures")
     ap.add_argument("--max-tokens", type=int, default=64)
     ap.add_argument(
         "--thinking",
@@ -615,6 +702,8 @@ def main() -> int:
         help="schema-v7 terminal artifact/cache/execution selection authority",
     )
     args = ap.parse_args()
+    if args.multikey and args.suite != "standard":
+        ap.error("--multikey applies only to --suite standard")
 
     durable_values = (args.server_log, args.artifact, args.serve_bin, args.selection)
     if any(value is not None for value in durable_values) and (
@@ -642,7 +731,7 @@ def main() -> int:
         for ref in args.fixture:
             label = Path(ref).stem
             cases.append((label, ref))
-    elif args.lengths or args.positions or args.multikey:
+    elif args.lengths or args.positions or args.multikey or args.suite != "standard":
         known_lengths = NIAH_MULTIKEY_LENGTHS if args.multikey else NIAH_LENGTHS
         lengths = (
             [p.strip() for p in args.lengths.split(",") if p.strip()]
@@ -665,7 +754,7 @@ def main() -> int:
                 raise SystemExit(
                     f"unknown NIAH position {p!r} (choose from {', '.join(NIAH_POSITIONS)})"
                 )
-        cases = matrix_cases(lengths, positions, args.multikey)
+        cases = matrix_cases(lengths, positions, args.multikey, args.suite, args.fixture_dir)
     else:
         cases = DEFAULT_FIXTURES
 
@@ -673,10 +762,15 @@ def main() -> int:
     # must not leave a partially executed durable campaign.
     loaded_cases = []
     for label, ref in cases:
-        messages, fixture_identity = load_messages_and_identity(ref)
+        messages, fixture_identity, contract = load_fixture(ref)
         if not isinstance(messages, list) or not messages:
             ap.error(f"NIAH fixture has no messages: {ref}")
-        loaded_cases.append((label, ref, messages, fixture_identity))
+        if contract:
+            # Validate the answer contract before any inference request.
+            score_answer("null", contract["expected"], contract["scoring"])
+        elif args.suite != "standard":
+            ap.error(f"structured-suite fixture lacks answer metadata: {ref}")
+        loaded_cases.append((label, ref, messages, fixture_identity, contract))
 
     key = load_key(args.key)
     if not key:
@@ -701,6 +795,7 @@ def main() -> int:
         "label": args.label,
         "base": args.base,
         "model": args.model,
+        "suite": args.suite,
         "needle": args.needle,
         "answer_match": "exact" if args.exact_answer else "contains",
         "max_tokens": args.max_tokens,
@@ -715,8 +810,9 @@ def main() -> int:
     }
 
     all_pass = True
+    errors = 0
     expected_log_requests = []
-    for label, ref, messages, fixture_identity in loaded_cases:
+    for label, ref, messages, fixture_identity, contract in loaded_cases:
         fixture_path = Path(fixture_identity["path"])
         n_prompt_chars = sum(len(m.get("content", "")) for m in messages)
         retrieved = 0
@@ -741,10 +837,15 @@ def main() -> int:
                 data = post(args.base, key, body, args.timeout)
             except Exception as exc:
                 total += 1
+                errors += 1
                 all_pass = False
-                snippets.append(f"RUN ERROR: {exc}")
-                request_records.append({"run": run + 1, "status": "error", "error": str(exc)})
-                print(f"  [{label}] run {run + 1}/{args.runs}: ERROR {exc}")
+                error = f"{type(exc).__name__}: {exc}"
+                if isinstance(exc, urllib.error.HTTPError):
+                    with exc:
+                        error += ": " + exc.read().decode(errors="replace")
+                snippets.append(f"RUN ERROR: {error}")
+                request_records.append({"run": run + 1, "status": "error", "error": error})
+                print(f"  [{label}] run {run + 1}/{args.runs}: ERROR {error}")
                 continue
             wall = time.perf_counter() - t0
             text = content_of(data)
@@ -759,7 +860,13 @@ def main() -> int:
                 all_pass = False
             total += 1
             normalized_answer = text.strip()
-            ok = normalized_answer == args.needle if args.exact_answer else args.needle in text
+            score = (
+                score_answer(text, contract["expected"], contract["scoring"]) if contract else None
+            )
+            if score is not None:
+                ok = score["passed"]
+            else:
+                ok = normalized_answer == args.needle if args.exact_answer else args.needle in text
             retrieved += 1 if ok else 0
             status = "PASS" if ok else "FAIL"
             all_pass = all_pass and ok
@@ -775,6 +882,9 @@ def main() -> int:
                     "completion_tokens": completion_tokens,
                     "answer_bytes": len(normalized_answer.encode("utf-8")),
                     "answer_sha256": hashlib.sha256(normalized_answer.encode("utf-8")).hexdigest(),
+                    "answer": text,
+                    "score": score,
+                    "wall_seconds": wall,
                 }
             )
             expected_log_requests.append(
@@ -799,6 +909,7 @@ def main() -> int:
                 "label": label,
                 "fixture": str(ref),
                 "fixture_identity": fixture_identity,
+                "answer_contract": contract,
                 "fixture_unchanged": fixture_unchanged,
                 "prompt_chars": n_prompt_chars,
                 "retrieved": retrieved,
@@ -818,6 +929,7 @@ def main() -> int:
         except (OSError, ValueError) as error:
             record["fresh_full_prefill"] = {"pass": False, "error": str(error)}
             all_pass = False
+    record["errors"] = errors
     record["pass"] = all_pass and all(case["passed"] for case in record["cases"])
     pending = rec_path.with_name(f".{rec_path.name}.pending-{os.getpid()}")
     published = False
@@ -873,7 +985,8 @@ def main() -> int:
         f"{failed_runs}/{total_runs} runs failed; "
         f"all cases must retrieve the needle in every run)"
     )
-    return 0 if all_pass else 1
+    # Request errors (exit 2) are distinct from wrong answers (exit 1).
+    return 0 if all_pass else (2 if errors else 1)
 
 
 if __name__ == "__main__":
