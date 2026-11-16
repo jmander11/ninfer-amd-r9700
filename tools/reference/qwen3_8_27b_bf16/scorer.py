@@ -6,6 +6,7 @@ import sys
 
 from .protocol import (
     ScoreProvenance,
+    cache_round_trip_codec,
     cache_value_group,
     clear_result,
     enable_strict_torch_determinism,
@@ -81,6 +82,8 @@ def main(argv: list[str] | None = None) -> int:
             schedule=options.schedule,
             skip_text=options.skip,
             kv_value_group=cache_value_group(options.scheme),
+            kv_round_trip=cache_round_trip_codec(options.scheme),
+            attention_query_rows=options.attention_query_rows,
             trace=trace,
         )
         vectors = scorer.score(ids)
