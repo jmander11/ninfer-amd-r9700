@@ -618,8 +618,11 @@ Build `ninfer_r9700_concurrent_long_prompt_qual`, then run
 `build-r9700/src/ninfer_r9700_concurrent_long_prompt_qual ARTIFACT NEW_CACHE_DIRECTORY`
 under the shared GPU lock after sourcing `.ninfer-local.env`. The cache directory must not
 exist. This uses the production C6 adaptive-K7 DFlash configuration, 12 GiB RAM and 25 GiB SSD
-prefix tiers, four approximately 93K–178K tool prompts, and three turns per client. Warm
-followups synchronize after tokenization to exercise concurrent decode and the return to B1.
+prefix tiers, four approximately 93K–178K tool prompts, and three turns per client. Its fixed
+458,752-token shared KV capacity lies below the clients' combined retained prefixes, so every
+codec spills to RAM/SSD and restores, while warm followups of resident clients still decode
+together. Warm followups synchronize after tokenization to exercise concurrent decode and the
+return to B1.
 It requires valid tool calls, prefix reuse, concurrent decode, and completion of every request.
 Add `--history` for thinking, automatic tool choice, streaming publication, and long historical
 tool results with checkpoint boundaries. Run `ninfer_r9700_persistent_decode_qual` in both runtime graph submission modes when

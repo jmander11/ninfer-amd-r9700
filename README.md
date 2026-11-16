@@ -28,70 +28,70 @@ This port combines NInfer features with AMD-specific kernels, weight/cache forma
 
 Each request can use up to **262,144 tokens** for prompt and answer combined, subject to the shared GPU cache capacity below.
 
-Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to seven drafts, MTP up to three), optimized proposal heads, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333), measured 2026-11-08 for both caches at the default 32 MiB headroom. These measurements compare `fp8-int4` (FP8 keys with INT4 values) with NVFP4 (E2M1 keys and values with E4M3 scales per 16 features), now the production default. NVFP4 stores about 1.44x as many tokens:
+Shared cache capacity with automatic sizing, adaptive drafting (DFlash up to seven drafts, MTP up to three), optimized proposal heads, chunk 2048, Vision off, RAM/SSD off and Compose graph settings (HIP 7.15.26333), measured 2026-11-16 at the default 32 MiB headroom. NVFP4 (E2M1 keys and values with E4M3 scales per 16 features, 288 bytes per head-token) is the production default. The opt-in `--kv-cache tq-k4-v3` cache stores Hadamard-rotated 4-bit keys and 3-bit values in 228 bytes per head-token, about 1.26x as many tokens once shared capacity rather than the 262,144-token request ceiling is the limit:
 
-| Concurrent requests (C) | DFlash K7, fp8-int4 | DFlash K7, NVFP4 | MTP K3, fp8-int4 | MTP K3, NVFP4 |
+| Concurrent requests (C) | DFlash K7, NVFP4 | DFlash K7, TQ | MTP K3, NVFP4 | MTP K3, TQ |
 |---:|---:|---:|---:|---:|
 | 1 | 262,144 | 262,144 | 262,144 | 262,144 |
 | 2 | 524,288 | 524,288 | 524,288 | 524,288 |
-| 3 | 633,536 | 786,432 | 647,424 | 786,432 |
-| 4 | 625,408 | 902,656 | 639,936 | 923,776 |
-| 5 | 617,280 | 890,944 | 632,576 | 913,088 |
-| 6 | 609,088 | 879,232 | 625,024 | 902,336 |
-| 7 | 600,960 | 867,520 | 617,536 | 891,520 |
-| 8 | 592,768 | 855,808 | 610,048 | 880,768 |
-| 9 | 583,168 | 842,368 | 601,600 | 868,992 |
-| 10 | 574,400 | 829,696 | 594,112 | 858,240 |
-| 11 | 565,632 | 817,024 | 586,688 | 847,424 |
-| 12 | 556,800 | 804,288 | 579,136 | 836,544 |
-| 13 | Unsupported | Unsupported | 571,648 | 825,792 |
-| 14 | Unsupported | Unsupported | 564,224 | 815,040 |
-| 15 | Unsupported | Unsupported | 556,736 | 804,224 |
-| 16 | Unsupported | Unsupported | 549,312 | 793,472 |
+| 3 | 786,432 | 786,432 | 786,432 | 786,432 |
+| 4 | 902,656 | 1,048,576 | 905,472 | 1,048,576 |
+| 5 | 890,944 | 1,125,312 | 894,848 | 1,130,240 |
+| 6 | 879,232 | 1,110,528 | 884,096 | 1,116,608 |
+| 7 | 867,520 | 1,095,680 | 873,216 | 1,102,976 |
+| 8 | 855,808 | 1,080,896 | 862,464 | 1,089,408 |
+| 9 | 842,368 | 1,064,064 | 850,752 | 1,074,624 |
+| 10 | 829,696 | 1,048,064 | 840,000 | 1,060,992 |
+| 11 | 817,024 | 1,032,064 | 829,184 | 1,047,488 |
+| 12 | 804,288 | 1,015,936 | 818,368 | 1,033,728 |
+| 13 | Unsupported | Unsupported | 807,488 | 1,020,096 |
+| 14 | Unsupported | Unsupported | 796,800 | 1,006,400 |
+| 15 | Unsupported | Unsupported | 785,984 | 992,896 |
+| 16 | Unsupported | Unsupported | 775,168 | 979,200 |
 
-NVFP4 passes the same BF16-source PPL gate as `fp8-int4` (no worse than the 5090 NVFP4 build on every cell) and 108/108 needle retrievals from 8K to 260K; its README workload throughput is on par with `fp8-int4` (geometric mean +0.8% DFlash, +1.2% MTP; 32K summaries +3–6%) with equal draft acceptance. NVFP4 is now the production default and the KV-cache comparison baseline; see `docs/performance.md` for the unchanged historical measurements.
+TQ costs some quality and a little speed. Against NVFP4 on the engine PPL cells it raises perplexity 0.5% / 0.3% (prefill 8K / 32K) and 0.6% / 0.2% (decode 8K / 32K); in the cache-only comparison with BF16 it adds 0.59% (32K WikiText) and 1.13% (64K natural text) where NVFP4 adds 0.18% and 0.30%. Needle retrieval on a TQ server passed 59 of 60 cases from 8K to 260K (the miss, a multi-value needle at the start of a 260K prompt, also misses on the 5090 NVFP4 build). NVFP4 passes the BF16-source PPL gate (no worse than the 5090 NVFP4 build on every cell) and 108/108 needle retrievals from 8K to 260K. `--kv-cache fp8-int4` (FP8 keys, INT4 values) remains selectable at about 0.69x NVFP4 capacity; its tables are in `docs/performance.md`.
 
-Capacity depends on available VRAM and enabled features; automatic sizing leaves 32 MiB headroom by default (raise `--kv-capacity-headroom` when a desktop or another process shares the GPU). These are allocated shared capacities, checked at startup and with short decode, rather than an all-lane near-capacity qualification; every cell kept the headroom physically free. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; startup summaries for every cell: `bench/results/shared-kv-20261108.json`.
+Capacity depends on available VRAM and enabled features; automatic sizing leaves 32 MiB headroom by default (raise `--kv-capacity-headroom` when a desktop or another process shares the GPU). These are allocated shared capacities, checked at startup and with one short request per lane; every cell kept the headroom physically free, although some repeated startups used up to about 20 MiB more device memory (see `docs/performance.md`). Filling the lanes does not raise device memory use: NVFP4 DFlash C4 with 4 x 222.6K-token prompts (98.6% of capacity) and TQ DFlash C12 with 12 x 82K-token prompts (97.2%) kept the same physical free memory from startup through prefill and decode. RAM can separately back suspended active continuations under KV pressure. Test conditions and settings: `docs/performance.md`; startup summaries for every cell: `bench/results/shared-kv-20261116.json`.
 
 ## Performance and quality
 
-One R9700, Release build, Device Graphs, power `auto`, chunk 2048 and optimized proposal heads. Prefill samples were measured 2026-10-17; generation dates are given below.
+One R9700, Release build, Device Graphs, power `auto`, chunk 2048 and optimized proposal heads, measured 2026-11-16.
 
-**Prompt processing (prefill), one request:**
+**Prompt processing (prefill), one request (NVFP4 / TQ cache):**
 
 | Prompt tokens | Average tokens/s |
 |---:|---:|
-| 8,192 | 3,375 |
-| 32,768 | 2,903 |
-| 65,536 | 2,477 |
-| 131,072 | 1,907 |
-| 245,760 | 1,354 |
+| 8,192 | 3,456 / 3,444 |
+| 32,768 | 2,959 / 2,953 |
+| 65,536 | 2,506 / 2,486 |
+| 131,072 | 1,923 / 1,897 |
+| 245,760 | 1,364 / 1,339 |
 
-**DFlash answer generation with the default sampling settings (fp8-int4 / NVFP4 cache):**
+**DFlash answer generation with the default sampling settings (NVFP4 / TQ cache):**
 
 | Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s | C12 aggregate tokens/s |
 |---|---:|---:|---:|---:|---:|
-| English story | 146–147 | 86 / 85 | 362 / 356 | 446 / 443 | 593 / 601 |
-| Python package | 172–173 | 134 / 136 | 620 / 555 | 700 / 718 | 866 / 850 |
-| Math reasoning | 346–347 | 122 / 125 | 510 / 528 | 619 / 648 | 768 / 758 |
-| Document summary 8K | 8,194 | 90 / 92 | 365 / 383 | 452 / 450 | 582 / 587 |
-| Document summary 32K | 32,779 | 91 / 90 | 313 / 324 | 367 / 379 | 459 / 479 |
+| English story | 146–147 | 85 / 88 | 369 / 352 | 450 / 443 | 603 / 594 |
+| Python package | 172–173 | 136 / 131 | 585 / 616 | 698 / 729 | 839 / 865 |
+| Math reasoning | 346–347 | 124 / 120 | 505 / 501 | 643 / 616 | 771 / 766 |
+| Document summary 8K | 8,194 | 98 / 95 | 380 / 384 | 467 / 456 | 612 / 610 |
+| Document summary 32K | 32,778 | 90 / 92 | 329 / 338 | 378 / 391 | 487 / 487 |
 
 P-less temperature 1.5, adaptive DFlash up to seven drafts, 512 output tokens per request (including reasoning). Means of three measured waves after one warmup; C1 uses twelve waves per cache.
 
-**MTP answer generation (fp8-int4 / NVFP4 cache):**
+**MTP answer generation (NVFP4 / TQ cache):**
 
 | Workload | Prompt tokens | C1 tokens/s | C6 aggregate tokens/s | C8 aggregate tokens/s | C12 aggregate tokens/s | C16 aggregate tokens/s |
 |---|---:|---:|---:|---:|---:|---:|
-| English story | 146–147 | 71 / 69 | 311 / 317 | 389 / 397 | 528 / 534 | 619 / 630 |
-| Python package | 172–173 | 100 / 97 | 473 / 448 | 569 / 573 | 770 / 784 | 908 / 928 |
-| Math reasoning | 346–347 | 86 / 85 | 374 / 373 | 459 / 464 | 611 / 616 | 731 / 731 |
-| Document summary 8K | 8,194 | 81 / 78 | 337 / 345 | 408 / 417 | 530 / 540 | 615 / 627 |
-| Document summary 32K | 32,779 | 81 / 84 | 289 / 305 | 339 / 357 | 418 / 443 | 469 / 490 |
+| English story | 146–147 | 70 / 71 | 314 / 310 | 392 / 392 | 526 / 522 | 620 / 608 |
+| Python package | 172–173 | 98 / 98 | 454 / 468 | 560 / 569 | 773 / 778 | 924 / 910 |
+| Math reasoning | 346–347 | 84 / 83 | 371 / 373 | 456 / 468 | 612 / 625 | 742 / 725 |
+| Document summary 8K | 8,194 | 87 / 83 | 369 / 369 | 451 / 441 | 596 / 590 | 694 / 663 |
+| Document summary 32K | 32,778 | 80 / 83 | 315 / 317 | 364 / 374 | 464 / 464 | 501 / 503 |
 
 Adaptive MTP up to three drafts, otherwise the same settings with three measured waves per cell.
 
-Both tables were measured 2026-11-07 on one build for both caches, with a 65,536-token per-request ceiling, automatic shared KV sizing, and RAM/SSD and Vision off. Rates exclude prompt processing: each prompt is cached before timing, and C>1 counts only intervals in which every request is decoding. Divide an aggregate rate by concurrency for the average per active request. Across all cells NVFP4 throughput is 0.8% (DFlash) and 1.2% (MTP) higher by geometric mean; 32K summaries gain 3–6%. Pooled first-draft acceptance is equal within sampling error at every concurrency; the largest single-cell difference (DFlash C6 Python) follows that cell's sampled acceptance at temperature 1.5. Prompt content and sampling affect draft acceptance and speed, and answer quality is not scored. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results, including per-cell acceptance: `bench/results/readme-workloads-kv-cache-20261107.json`.
+Both tables were measured 2026-11-16 on one build for both caches, with a 65,536-token per-request ceiling, automatic shared KV sizing, and RAM/SSD and Vision off. Rates exclude prompt processing: each prompt is cached before timing, and C>1 counts only intervals in which every request is decoding. Divide an aggregate rate by concurrency for the average per active request. TQ throughput matches NVFP4 within sampling noise (geometric mean 0.999 for DFlash and for MTP; single cells 0.95–1.05), and pooled first-draft acceptance is equal (0.75–0.77 for both caches at every concurrency). Prompt content and sampling affect draft acceptance and speed, and answer quality is not scored. Prefill above uses a separate greedy token-corpus workload. Methodology and variation: `docs/performance.md`. Machine-readable results, including per-cell acceptance: `bench/results/readme-workloads-kv-cache-20261116.json`.
 
 The stored weight recipe’s original standard 8K/32K prefill and ordinary-decode admission cells measured smaller prediction-loss increases over BF16 than the fixed 5090 NVFP4 reference. The updated verification partitioning changes floating-point rounding; its separate NLL measurements and 103/103 exact retrieval answers are recorded in `docs/performance.md`. Historical standard and multikey needle retrieval passed through 240K; multikey also passed at 260K. These are prediction-loss and retrieval measurements; test conditions and limitations are documented with the results.
 
