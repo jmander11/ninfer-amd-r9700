@@ -674,11 +674,10 @@ void qualify_deferred(const ninfer::GdnReplayRecords& records,
                     "deferred batch above record capacity");
 }
 
-// Real W8 server batches: every lane has permuted source rows and state slots, including
-// zero, short and full accepted prefixes. Fixture columns repeat after six, while the independent
-// recurrence oracle evaluates all eight transitions rather than copying a device reduction.
-void qualify_w8_batch(int batch, const Fixture& fixture, hipStream_t stream) {
-    constexpr int width = 8;
+// Real server batches (DFlash W8, MTP W5): every lane has permuted source rows and state slots,
+// including zero, short and full accepted prefixes. Fixture columns repeat after six, while the
+// independent recurrence oracle evaluates every transition rather than copying a device reduction.
+void qualify_prepared_batch(int width, int batch, const Fixture& fixture, hipStream_t stream) {
     ninfer::LayoutBuilder builder;
     const auto layout = ninfer::plan_gdn_replay_records(builder, {.layers          = 48,
                                                                   .record_capacity = batch,
@@ -707,8 +706,8 @@ void qualify_w8_batch(int batch, const Fixture& fixture, hipStream_t stream) {
     auto output = allocate(ninfer::DType::BF16, {128, 48, width, batch});
     auto slots  = allocate(ninfer::DType::I32, {batch});
     auto valid  = allocate(ninfer::DType::I32, {batch});
-    auto rows =
-        allocate(ninfer::DType::I32, {4, static_cast<int>(ninfer::kDFlashMaximumConcurrency)});
+    auto rows   = allocate(ninfer::DType::I32,
+                           {4, static_cast<int>(ninfer::ops::GdnDeferredFoldRows{}.row.size())});
     ninfer::ops::GdnRecordFold staged{allocate(ninfer::DType::BF16, {128, 16, width, batch}),
                                       allocate(ninfer::DType::BF16, {128, 48, width, batch}),
                                       allocate(ninfer::DType::FP32, {2, 48, width, batch}),
@@ -754,7 +753,9 @@ void qualify_w8_batch(int batch, const Fixture& fixture, hipStream_t stream) {
     HIP_CHECK(hipMemcpy(beta.data, host_beta.data(), beta.bytes(), hipMemcpyHostToDevice));
     std::vector<int> host_slots(batch), host_valid(batch);
     ninfer::ops::GdnDeferredFoldRows host_rows{};
-    constexpr int commits[12] = {0, 1, 2, 3, 6, 8, 4, 7, 8, 5, 0, 6};
+    constexpr int kCommits[12] = {0, 1, 2, 3, 6, 8, 4, 7, 8, 5, 0, 6};
+    std::vector<int> commits(batch);
+    for (int b = 0; b < batch; ++b) commits[b] = kCommits[b % 12] % (width + 1);
     for (int b = 0; b < batch; ++b) {
         host_slots[b]    = (b + 3) % batch;
         host_valid[b]    = width - b % 3;
@@ -803,10 +804,10 @@ void qualify_w8_batch(int batch, const Fixture& fixture, hipStream_t stream) {
     ninfer::ops::gdn_replay_prepare_layer(fold, staged, stream);
     record(&staged);
     HIP_CHECK(hipStreamSynchronize(stream));
-    if (copy_tensor<float>(state) != expected_state) fail("W8 folded state differs");
-    require_bf16_exact(copy_tensor<hip_bfloat16>(conv), expected_conv, "W8 convolution");
+    if (copy_tensor<float>(state) != expected_state) fail("prepared folded state differs");
+    require_bf16_exact(copy_tensor<hip_bfloat16>(conv), expected_conv, "prepared convolution");
     const auto actual = copy_tensor<hip_bfloat16>(output);
-    require_bf16_exact(actual, expected_output, "W8 output");
+    require_bf16_exact(actual, expected_output, "prepared output");
     for (int b = 0; b < batch; ++b) {
         const int slot = host_slots[b], source = host_rows.row[b].record_row;
         std::vector<int> previous_sequence(commits[b]), current_sequence(host_valid[b]);
@@ -818,7 +819,7 @@ void qualify_w8_batch(int batch, const Fixture& fixture, hipStream_t stream) {
         require_state_close(
             std::vector<float>(expected_state.begin() + slot * 48 * 128 * 128,
                                expected_state.begin() + (slot + 1) * 48 * 128 * 128),
-            old_ideal, "W8 independent state oracle");
+            old_ideal, "prepared independent state oracle");
         const std::vector<float> represented(old_ideal.begin(), old_ideal.end());
         std::vector<double> ideal;
         (void)recurrent_oracle(current, b % 2, current_sequence, represented, &ideal, &queries);
@@ -830,13 +831,14 @@ void qualify_w8_batch(int batch, const Fixture& fixture, hipStream_t stream) {
             oracle2 += ideal[t] * ideal[t];
         }
         if (maximum > 0.025 || std::sqrt(error2 / std::max(oracle2, 1e-30)) > 0.02)
-            fail("W8 independent output oracle mismatch");
+            fail("prepared independent output oracle mismatch");
         for (int t = host_valid[b]; t < width; ++t)
             for (int f = 0; f < 48 * 128; ++f)
                 if (actual[(b * width + t) * 48 * 128 + f].data != 0)
-                    fail("W8 inactive suffix not zero");
+                    fail("prepared inactive suffix not zero");
     }
-    std::cout << "prepared fold-record B=" << batch << " W8 FP64/state/output/alias=PASS\n";
+    std::cout << "prepared fold-record B=" << batch << " W" << width
+              << " FP64/state/output/alias=PASS\n";
 }
 
 // A full compact batch: every kernarg row 0..C-1 folds its own distinct record row (prefix and
@@ -957,9 +959,12 @@ void qualify(hipStream_t stream) {
     ninfer::DeviceBuffer record_storage(record_builder.finish(256));
     ninfer::GdnReplayRecords records({record_storage.data(), record_storage.size()}, record_layout);
     const Fixture fixture = make_fixture(records);
-    qualify_w8_batch(6, fixture, stream);
-    qualify_w8_batch(8, fixture, stream);
-    qualify_w8_batch(12, fixture, stream);
+    qualify_prepared_batch(8, 6, fixture, stream);
+    qualify_prepared_batch(8, 8, fixture, stream);
+    qualify_prepared_batch(8, 12, fixture, stream);
+    qualify_prepared_batch(5, 8, fixture, stream);
+    qualify_prepared_batch(5, 12, fixture, stream);
+    qualify_prepared_batch(5, 16, fixture, stream);
     HIP_CHECK(hipMemcpy(records.conv.data, fixture.conv.data(), records.conv.bytes(),
                         hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(records.key.data, fixture.key.data(), records.key.bytes(),
@@ -1104,7 +1109,7 @@ int main() {
             throw;
         }
         std::cout << "r9700_gdn_replay_fold: PASS gfx1201 wave32 Qwen3.8 L48/Hq16/Hv48 "
-                     "B=2,16 W=6 and prepared W8 B=6,8,12 prefix/path/no-op/read-only "
+                     "B=2,16 W=6 and prepared W8 B=6,8,12 W5 B=8,12,16 prefix/path/no-op/read-only "
                      "ordinary-state-exact "
                      "deferred-layer/front-fused-bitwise max_state_abs="
                   << g_max_state_abs << " max_state_rel_l2=" << g_max_state_relative_l2 << '\n';

@@ -335,8 +335,9 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         auto stage = layout.scope();
         (void)workspace_recipe::gdn_control<TextConfig>(layout, last);
         (void)workspace_recipe::gdn_projection<TextConfig>(layout, last);
-        if (path == GdnWorkspacePath::ReplayRecord && plan.features.dflash() && batch_size > 1 &&
-            !dflash_tree && Variant::gdn_record_fold_selected(last)) {
+        if (path == GdnWorkspacePath::ReplayRecord &&
+            (plan.features.dflash() || plan.features.mtp()) && batch_size > 1 && !dflash_tree &&
+            Variant::gdn_record_fold_selected(last)) {
             (void)workspace_recipe::gdn_record_fold<TextConfig>(layout, dflash_verify, batch_size);
         }
         if (path == GdnWorkspacePath::Snapshot) {

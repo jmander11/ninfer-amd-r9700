@@ -272,8 +272,7 @@ fold::LayerArgs replay_fold_layer_args(const GdnLayerFold& layer_fold) {
     require_tensor(layer_fold.conv, DType::BF16, {spec.conv_channels, 3, slots}, 256,
                    "gdn_replay_fold_layer", "conv state");
     static_assert(sizeof(fold::DeferredRow) == sizeof(GdnDeferredFoldRow) &&
-                  sizeof(GdnDeferredFoldRows) ==
-                      kDFlashMaximumConcurrency * sizeof(fold::DeferredRow));
+                  sizeof(GdnDeferredFoldRows) == kMaximumConcurrency * sizeof(fold::DeferredRow));
     return fold::LayerArgs{
         .planes = {static_cast<const hip_bfloat16*>(records.key.data),
                    static_cast<const hip_bfloat16*>(records.value.data),
