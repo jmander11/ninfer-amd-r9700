@@ -8,6 +8,8 @@ import unittest
 from types import ModuleType
 from unittest.mock import Mock, patch
 
+import tools.convert.qwen3.common as family_common
+import tools.convert.qwen3_8_27b_r9700 as r9700_package
 from tools.convert.qwen3.common.inventory import BF16, Q4, W8, tensor_spec
 from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes as recipes
 from tools.convert.qwen3_8_27b_r9700 import dflash2_q4_inventory as inventory
@@ -79,12 +81,18 @@ class DFlash2MatrixRecipesTest(unittest.TestCase):
         w8_mse = Mock(return_value=b"w8-mse")
         mse_quantize.quantize_and_encode_q4g64_mse = q4_mse
         mse_quantize.quantize_and_encode_mse = w8_mse
-        with patch.dict(
-            sys.modules,
-            {
-                family_conversion.__name__: family_conversion,
-                mse_quantize.__name__: mse_quantize,
-            },
+        # `from package import submodule` reads the package attribute before sys.modules, so an
+        # earlier real import would bypass a sys.modules-only patch.
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    family_conversion.__name__: family_conversion,
+                    mse_quantize.__name__: mse_quantize,
+                },
+            ),
+            patch.object(family_common, "conversion", family_conversion, create=True),
+            patch.object(r9700_package, "mse_quantize", mse_quantize, create=True),
         ):
             self.assertEqual(
                 recipes.encode_matrix_payload(tensor, q4, recipes.CANONICAL_Q4G64, "cpu"),

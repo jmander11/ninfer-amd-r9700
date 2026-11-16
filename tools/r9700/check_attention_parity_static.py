@@ -28,14 +28,21 @@ def resources(text: str, fragment: str) -> tuple[int, int, int, int, int, int, i
     name = re.search(rf"(?m)^\s*\.name:\s+.*{re.escape(fragment)}.*$", text)
     if name is None:
         raise RuntimeError(f"missing metadata: {fragment}")
+    # Metadata keys are sorted: fields before `.name` belong to the text preceding it (the last
+    # match there), fields after it end at the next kernel's `.name`.
     before = text[: name.start()]
-    group = list(re.finditer(r"(?m)^\s*\.group_segment_fixed_size:\s+(\d+)\s*$", before))
-    require(bool(group), f"missing LDS metadata: {fragment}")
     block = text[name.end() :]
     next_name = re.search(r"(?m)^\s*\.name:", block)
     if next_name is not None:
         block = block[: next_name.start()]
-    values = [int(group[-1].group(1))]
+
+    def field_value(field: str, preceding: bool) -> int:
+        pattern = rf"(?m)^\s*\.{field}:\s+(\d+)\s*$"
+        found = list(re.finditer(pattern, before)) if preceding else [re.search(pattern, block)]
+        require(bool(found) and found[-1] is not None, f"missing {field}: {fragment}")
+        return int(found[-1].group(1))
+
+    values = [field_value("group_segment_fixed_size", True)]
     for field in (
         "private_segment_fixed_size",
         "sgpr_count",
@@ -43,11 +50,9 @@ def resources(text: str, fragment: str) -> tuple[int, int, int, int, int, int, i
         "sgpr_spill_count",
         "vgpr_spill_count",
         "wavefront_size",
-        "max_flat_workgroup_size",
     ):
-        found = re.search(rf"(?m)^\s*\.{field}:\s+(\d+)\s*$", block)
-        require(found is not None, f"missing {field}: {fragment}")
-        values.append(int(found.group(1)))
+        values.append(field_value(field, False))
+    values.append(field_value("max_flat_workgroup_size", True))
     # No scratch and no VGPR spills; SGPR spills (to VGPR lanes, no memory traffic) are pinned.
     require(
         values[1] == 0 and values[5] == 0 and values[6] == 32,
@@ -72,15 +77,30 @@ def main() -> int:
     parser.add_argument("assembly", type=Path)
     args = parser.parse_args()
     text = args.assembly.read_text(encoding="utf-8")
+
     # DFlash split-context verification: the packed, warp-specialized, double-buffered dense verify
-    # kernel (three compute and three loader waves, 16-key blocks) and its merge.
-    expected = {
-        "dense_verify_kernelINS2_17Fp8Int4DenseCodecELj16ELj3EE": (
-            (41656, 0, 107, 235, 4, 32, 1024),
-            5,
-        ),
-        "dense_verify_merge_kernel": ((768, 0, 26, 29, 0, 32, 1024), 16),
-    }
+    # kernel (three compute waves plus loader waves, 16-key blocks) for each cache codec and both
+    # partition plans (LivePlan false/true), and its merge. NVFP4 and TQ select five or six loader
+    # waves; FP8/INT4 uses three.
+    def verify(codec: str, loaders: int, live: int) -> str:
+        return f"dense_verify_kernelINS2_{codec}ELj16ELj{loaders}ELb{live}EE"
+
+    expected: dict[str, tuple[tuple[int, ...], int]] = {}
+    for live in (0, 1):
+        for loaders, threads in ((5, 256), (6, 288)):
+            expected[verify("15Nvfp4DenseCodec", loaders, live)] = (
+                (41664, 0, 38, 234, 0, 32, threads),
+                6,
+            )
+            expected[verify("12TqDenseCodec", loaders, live)] = (
+                (41664, 0, 40, 234, 0, 32, threads),
+                6,
+            )
+    # FP8/INT4 pins its small SGPR-to-VGPR-lane spill count.
+    expected[verify("17Fp8Int4DenseCodec", 3, 0)] = ((41664, 0, 107, 235, 4, 32, 192), 5)
+    expected[verify("17Fp8Int4DenseCodec", 3, 1)] = ((41664, 0, 107, 235, 3, 32, 192), 5)
+    expected["dense_verify_merge_kernelILb0EE"] = ((768, 0, 20, 31, 0, 32, 256), 16)
+    expected["dense_verify_merge_kernelILb1EE"] = ((768, 0, 18, 34, 0, 32, 256), 16)
     for symbol, (wanted, wanted_occupancy) in expected.items():
         actual = resources(text, symbol)
         require(actual == wanted, f"{symbol} resources {actual} != {wanted}")
@@ -88,12 +108,19 @@ def main() -> int:
             occupancy(text, symbol) == wanted_occupancy,
             f"{symbol} occupancy is not {wanted_occupancy}",
         )
-    body = section(text, "dense_verify_kernelINS2_17Fp8Int4DenseCodecELj16ELj3EE")
-    require(
-        body.count("v_wmma_f32_16x16x16_bf16") == 16
-        and body.count("v_wmma_f32_16x16x16_f16") == 16,
-        "split verify kernel lost its 16 BF16 QK and 16 FP16 PV WMMAs",
-    )
+    # QK/PV WMMAs per verify kernel: FP8/INT4 stages QK in BF16 and PV in FP16; NVFP4 and TQ stage
+    # both in FP16.
+    for symbol in expected:
+        if "merge" in symbol:
+            continue
+        body = section(text, symbol)
+        bf16 = body.count("v_wmma_f32_16x16x16_bf16")
+        f16 = body.count("v_wmma_f32_16x16x16_f16")
+        wanted_wmma = (16, 16) if "Fp8Int4" in symbol else (0, 32)
+        require(
+            (bf16, f16) == wanted_wmma,
+            f"{symbol} WMMAs (bf16, f16) {(bf16, f16)} != {wanted_wmma}",
+        )
     print("attention parity gfx1201 static checks: PASS")
     return 0
 

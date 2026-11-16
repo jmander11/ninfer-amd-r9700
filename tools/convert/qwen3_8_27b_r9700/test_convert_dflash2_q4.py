@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+import tools.convert.qwen3.common as family_common
 from tools.artifact.container import ArtifactIdentity, ArtifactWriter, TensorSpec, plan_objects
 from tools.convert.qwen3_8_27b_r9700 import convert_dflash2_q4 as conversion
 from tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 import (
@@ -132,6 +133,9 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                             "tools.convert.qwen3.common.conversion": family,
                         },
                     ),
+                    # The converter's `from package import conversion` reads the package
+                    # attribute first; patch it so an earlier real import cannot bypass the fake.
+                    patch.object(family_common, "conversion", family, create=True),
                     patch.object(conversion, "preflight", return_value=checked),
                     patch.object(conversion, "_base_authority", return_value=None),
                     patch.object(conversion, "_load_source_tensor", return_value=object()),

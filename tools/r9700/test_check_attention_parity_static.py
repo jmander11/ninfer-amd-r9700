@@ -23,8 +23,8 @@ class AttentionParityStaticTest(unittest.TestCase):
     def test_rejects_resource_mutation(self) -> None:
         assembly = ASSEMBLY
         text = assembly.read_text(encoding="utf-8")
-        marker = ".vgpr_count:     235"
-        symbol = "dense_verify_kernelINS2_17Fp8Int4DenseCodecELj16ELj3EE"
+        marker = ".vgpr_count:     234"
+        symbol = "dense_verify_kernelINS2_15Nvfp4DenseCodecELj16ELj6ELb1EE"
         metadata = text.find(".amdgpu_metadata")
         symbol_at = text.find(symbol, metadata)
         start = text.rfind(".name:", metadata, symbol_at)
@@ -33,7 +33,7 @@ class AttentionParityStaticTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             mutated = Path(temporary) / "mutated.s"
             mutated.write_text(
-                text[:location] + ".vgpr_count:     236" + text[location + len(marker) :],
+                text[:location] + ".vgpr_count:     235" + text[location + len(marker) :],
                 encoding="utf-8",
             )
             result = subprocess.run(
