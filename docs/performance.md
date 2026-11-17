@@ -837,6 +837,43 @@ completed; it remains a negative result for that bounded horizon. The complete-w
 measures the cost and benefit of finishing the same eight requests. This is one raw-token stress
 workload with model stopping disabled, not a universal speedup, a useful-action benchmark or a
 model-quality result. Evidence: `profiles/chunked-kv/throughput-completion-comparison.json`.
+That pair predates the newest-first pressure policy below.
+
+### Newest-first KV pressure policy at C6 (2026-11-16)
+
+Three server builds differing only in the RAM-on pressure scheduler were compared on one
+R9700 with the `r9700-lq4` artifact: the incumbent-epoch policy (`ccbe9f815`), the contributed
+single-victim latest-first policy (`82f4ecace`) and the selected newest-first prefix policy
+(`7605b0b2b`). Each cell started a fresh server with C6 adaptive DFlash up to seven drafts,
+greedy sampling, a pinned 131,072-token NVFP4 pool, 65,536-token context, 12 GiB RAM and 8 GiB
+disk tiers. Every request asked for an exact comma-separated count of 4-digit integers after a
+unique synthetic document, so prompt and output lengths are fixed and each output is checked.
+Burst submits six requests 0.5 s apart (8k-18k prompt, 9.6k-19.2k output tokens); staggered
+submits fourteen at 6 s intervals (2k-20k prompt, 1.5k-15k output); agents runs six four-turn
+conversations (12k-19.5k tool manual, 2k tool output per turn, 1.5k-6k answers, 4-13 s pauses)
+with prefix reuse across turns. Throughput is completion tokens over the client makespan.
+
+| Scenario | Policy | Runs | tok/s | Makespan, s | TTFT p50 / p90, s | Suspensions |
+|---|---|---:|---:|---:|---:|---:|
+| Burst | incumbent epoch | 1 | 454.9 | 189.9 | 21.8 / 40.2 | 2 |
+| Burst | single victim | 1 | 457.3 | 188.9 | 21.9 / 40.4 | 2 |
+| Burst | newest-first prefix | 1 | 459.9 | 187.8 | 21.9 / 40.4 | 2 |
+| Staggered | incumbent epoch | 1 | 470.0 | 280.9 | 80.6 / 124.6 | 2 |
+| Staggered | single victim | 1 | 409.8 | 322.1 | 26.6 / 171.8 | 4 |
+| Staggered | newest-first prefix | 1 | 479.0 | 275.5 | 26.8 / 113.8 | 3 |
+| Agents | incumbent epoch | 3 | 242.9 (239.8-247.7) | 400.2 | 38.7 / 89.8 | 3.3 |
+| Agents | single victim | 3 | 263.2 (262.5-264.0) | 369.3 | 45.3 / 58.7 | 2.7 |
+| Agents | newest-first prefix | 3 | 258.4 (237.9-272.9) | 377.3 | 39.4 / 68.2 | 4.0 |
+
+All 160 requests across the fifteen runs returned their exact sequence. The selected policy is
+at least as fast as the incumbent in every scenario: equal under burst, faster with a third of
+the staggered median TTFT, and 6% faster on agents with lower p90 TTFT. It matches the
+single-victim policy on burst and agents within run-to-run spread and avoids that policy's
+staggered loss, where suspending older running requests doubled the suspensions and raised
+p90 TTFT. Burst and staggered are single runs. An earlier simultaneous-submission burst
+showed that arrival order alone, which decides the newest request, can move makespan by a
+third; the 0.5 s spacing fixes it. Recovery retries under pressure are covered by the
+executor probe tests, not this workload. Evidence: `profiles/kv-pressure-ab/`.
 
 
 ### Reasoning budgets and KV-window interaction (2026-10-22)
