@@ -1747,8 +1747,8 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
             }
         }
         // A continuing chain row folds inside its next verification forward instead
-        // (DFlashDecodeIngress::gdn_fold); every other row folds here.
-        if (speculative_backend == SpeculativeBackend::DFlash && !tree_fold && committed > 0 &&
+        // (DFlashDecodeIngress::gdn_fold, MtpDecodeIngress::gdn_fold); every other row folds here.
+        if (speculative_backend != SpeculativeBackend::None && !tree_fold && committed > 0 &&
             !terminal[row]) {
             fold_rows[row].commit_columns = 0;
             defer_rows[row]               = committed;
@@ -5617,6 +5617,19 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
     if (lanes.empty() || lanes.size() > max_concurrency || budgets.size() != lanes.size()) {
         throw std::invalid_argument("MTP batch membership is invalid");
     }
+    {
+        std::array<std::uint32_t, kMaximumConcurrency> outside{};
+        std::size_t outside_count = 0;
+        for (std::uint32_t lane = 0; lane < max_concurrency; ++lane) {
+            if (sequences[lane].deferred_fold_columns != 0 &&
+                std::find(lanes.begin(), lanes.end(), lane) == lanes.end()) {
+                outside[outside_count++] = lane;
+            }
+        }
+        if (outside_count != 0) {
+            flush_deferred_gdn_folds(std::span<const std::uint32_t>(outside.data(), outside_count));
+        }
+    }
 
     const std::uint32_t width = draft_window + 1;
     std::array<std::uint32_t, kMaximumConcurrency> row_ks{};
@@ -5741,6 +5754,13 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
             mtp_host_ingress->rope_deltas[row]        = sequence.rope_delta;
             mtp_host_ingress->logprob_rows[row]       = request.token_logprobs ? 1 : 0;
             mtp_host_ingress->sampling[row]           = request.sampling_host;
+            mtp_host_ingress->gdn_fold.row[row]       = ops::GdnDeferredFoldRow{
+                .linear_state_slot =
+                    LinearStateSlots::current_state_slot(lanes[row], max_concurrency),
+                .commit_columns = static_cast<std::int32_t>(sequence.deferred_fold_columns),
+                .record_row     = static_cast<std::int32_t>(sequence.deferred_fold_row),
+            };
+            sequence.deferred_fold_columns = 0;
             materialize_sequence_kv(sequence, frontier + extent + 1,
                                     std::min(capacity, frontier + extent + draft_window));
             realized_extent = std::max(realized_extent, extent);
