@@ -32,26 +32,26 @@ We recommend enabling the RAM cache, for example `--kv-ram-capacity 8192` (MiB).
 
 The default cache is **NVFP4**: 4-bit floating-point keys and values with one 8-bit scale per 16 features, using 288 bytes per token per KV head. **TurboQuant** is the opt-in `--kv-cache tq-k4-v3` cache, called "TQ" below. It rotates each key and value vector with a Hadamard transform, then stores 4-bit keys and 3-bit values (228 bytes). From five requests up, where shared cache capacity rather than the 262,144-token request limit is the constraint, TurboQuant holds about **1.26x** as many tokens. At four requests it already reaches the full 4 × 262,144.
 
-Shared cache capacity in tokens, measured 2026-11-16. Settings: automatic sizing, the default 32 MiB headroom, RAM/SSD and Vision off. Adaptive drafting uses up to seven drafts for DFlash and up to three for MTP:
+Shared cache capacity in tokens, measured 2026-11-16 (MTP columns 2026-11-17). Settings: automatic sizing, the default 32 MiB headroom, RAM/SSD and Vision off. Adaptive drafting uses up to seven drafts for DFlash and up to three for MTP:
 
 | Concurrent requests (C) | DFlash K7, NVFP4 | DFlash K7, TQ | MTP K3, NVFP4 | MTP K3, TQ |
 |---:|---:|---:|---:|---:|
 | 1 | 262,144 | 262,144 | 262,144 | 262,144 |
 | 2 | 524,288 | 524,288 | 524,288 | 524,288 |
 | 3 | 786,432 | 786,432 | 786,432 | 786,432 |
-| 4 | 902,656 | 1,048,576 | 905,472 | 1,048,576 |
-| 5 | 890,944 | 1,125,312 | 894,848 | 1,130,240 |
-| 6 | 879,232 | 1,110,528 | 884,096 | 1,116,608 |
-| 7 | 867,520 | 1,095,680 | 873,216 | 1,102,976 |
-| 8 | 855,808 | 1,080,896 | 862,464 | 1,089,408 |
-| 9 | 842,368 | 1,064,064 | 850,752 | 1,074,624 |
-| 10 | 829,696 | 1,048,064 | 840,000 | 1,060,992 |
-| 11 | 817,024 | 1,032,064 | 829,184 | 1,047,488 |
-| 12 | 804,288 | 1,015,936 | 818,368 | 1,033,728 |
-| 13 | Unsupported | Unsupported | 807,488 | 1,020,096 |
-| 14 | Unsupported | Unsupported | 796,800 | 1,006,400 |
-| 15 | Unsupported | Unsupported | 785,984 | 992,896 |
-| 16 | Unsupported | Unsupported | 775,168 | 979,200 |
+| 4 | 902,656 | 1,048,576 | 908,096 | 1,048,576 |
+| 5 | 890,944 | 1,125,312 | 897,408 | 1,133,376 |
+| 6 | 879,232 | 1,110,528 | 886,592 | 1,119,872 |
+| 7 | 867,520 | 1,095,680 | 875,840 | 1,106,240 |
+| 8 | 855,808 | 1,080,896 | 865,088 | 1,092,608 |
+| 9 | 842,368 | 1,064,064 | 853,376 | 1,077,952 |
+| 10 | 829,696 | 1,048,064 | 842,560 | 1,064,320 |
+| 11 | 817,024 | 1,032,064 | 831,808 | 1,049,216 |
+| 12 | 804,288 | 1,015,936 | 819,712 | 1,033,984 |
+| 13 | Unsupported | Unsupported | 807,744 | 1,018,880 |
+| 14 | Unsupported | Unsupported | 795,840 | 1,003,776 |
+| 15 | Unsupported | Unsupported | 783,872 | 988,672 |
+| 16 | Unsupported | Unsupported | 771,904 | 973,568 |
 
 **TurboQuant trade-offs.** It raises perplexity by 0.2–0.6% against NVFP4 on the 8K and 32K test cells. With only the cache quantized against a BF16 reference, it adds 0.6% (32K) and 1.1% (64K), where NVFP4 adds 0.2% and 0.3%. On a 60-case long-context retrieval suite (32K to 260K), NVFP4 finds all 60 and TurboQuant 59. Its one miss, a multi-value needle at the start of a 260K prompt, also fails on the 5090 NVFP4 build. Speed is about the same; see below. The older `--kv-cache fp8-int4` (FP8 keys, INT4 values) remains available with about 0.69x NVFP4's capacity.
 

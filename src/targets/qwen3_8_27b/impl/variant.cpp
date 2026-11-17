@@ -1830,7 +1830,7 @@ std::size_t Variant::mtp_graph_allowance_bytes(std::uint32_t capacity,
     constexpr std::uint32_t never = kMaximumConcurrency + 1U;
     // First batch whose exact-B executable takes 6 MiB instead of 4, by K. Fixed and adaptive
     // captures of a K have identical executables. TQ's rotation launches push K2 and K3 one
-    // 2-MiB argument-pool step earlier (gfx1201, HIP 7.16.26385, per-executable trace,
+    // 2-MiB argument-pool step earlier (gfx1201, HIP 7.15.26333, per-executable trace,
     // 2026-11-16).
     constexpr std::array<std::uint32_t, maximum_mtp_draft_tokens> wide_executable_batch{
         never, never, 12, 9, 7};
