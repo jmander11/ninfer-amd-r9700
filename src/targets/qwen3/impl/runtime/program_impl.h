@@ -5793,7 +5793,9 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         bind_token_mask_batch(lanes, mtp_host_ingress->sampling);
         TokenMaskRoundGuard token_mask_round(*token_masks, device);
         mark_workspace_usage(workspace_plan.mtp_round);
-        const auto started = Clock::now();
+        // A round may wait on or share bandwidth with KV RAM/disk copies already in flight.
+        const bool transfers_idle = kv_copies_ready();
+        const auto started        = Clock::now();
         if (executable != nullptr) {
             text_transactions.mark_graph_replay(device.stream);
             mtp_transactions.mark_graph_replay(device.stream);
@@ -5824,8 +5826,9 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         text_transactions.finish_resolution({text_retained_frontiers.data(), lanes.size()});
         mtp_transactions.finish_resolution({mtp_retained_frontiers.data(), lanes.size()});
         token_mask_round.finish();
-        // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it.
-        if (adaptive_draft && realized_extent > 0) {
+        // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it, nor from
+        // a round that overlapped KV transfers.
+        if (adaptive_draft && realized_extent > 0 && transfers_idle) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,
                                                static_cast<float>(seconds), maximum_frontier);
         }
@@ -6187,7 +6190,9 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
         TokenMaskRoundGuard token_mask_round(*token_masks, device);
         mark_workspace_usage(prefill_lane ? workspace_plan.dflash_mixed
                                           : workspace_plan.dflash_round);
-        const auto started = Clock::now();
+        // A round may wait on or share bandwidth with KV RAM/disk copies already in flight.
+        const bool transfers_idle = kv_copies_ready();
+        const auto started        = Clock::now();
         if (executable != nullptr) { text_transactions.mark_graph_replay(device.stream); }
         if (prefill_lane) {
             // The owner's chunk and the verify batch share one target forward; the prefill
@@ -6265,8 +6270,9 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             }
         }
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it, nor from
-        // a mixed round whose time includes the owner's chunk.
-        if (adaptive_draft && realized_extent > 0 && !prefill_lane) {
+        // a mixed round whose time includes the owner's chunk, nor from a round that overlapped
+        // KV transfers.
+        if (adaptive_draft && realized_extent > 0 && !prefill_lane && transfers_idle) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,
                                                static_cast<float>(seconds), maximum_frontier);
         }

@@ -875,6 +875,29 @@ showed that arrival order alone, which decides the newest request, can move make
 third; the 0.5 s spacing fixes it. Recovery retries under pressure are covered by the
 executor probe tests, not this workload. Evidence: `profiles/kv-pressure-ab/`.
 
+### Retained-conversation capture under KV pressure (2026-11-17)
+
+Window growth, live resume and recovery retries now capture free retained lanes to the RAM
+tier before releasing their pages, least recently admitted first, where the previous build
+evicted every retained lane uncaptured. The same harness compared it (`dbc4fa504` through this change, with
+adaptive-draft round-time samples skipped while KV RAM or disk copies are in flight) against
+the newest-first build above. Prefill tokens count the target prompt tokens actually computed.
+
+| Scenario | Build | Runs | tok/s | Makespan, s | TTFT p50 / p90, s | Prefill tokens |
+|---|---|---:|---:|---:|---:|---:|
+| Burst | evict uncaptured | 1 | 459.9 | 187.8 | 21.9 / 40.4 | 127,197 |
+| Burst | capture first | 1 | 459.6 | 188.0 | 21.8 / 40.3 | 127,197 |
+| Staggered | evict uncaptured | 1 | 479.0 | 275.5 | 26.8 / 113.8 | 222,167 |
+| Staggered | capture first | 1 | 479.3 | 275.4 | 26.7 / 114.2 | 222,167 |
+| Agents | evict uncaptured | 3 | 258.4 (237.9-272.9) | 377.3 | 39.4 / 68.2 | 395,348 |
+| Agents | capture first | 3 | 292.1 (291.1-293.3) | 332.7 | 27.0 / 53.3 | 304,422 |
+
+All 132 requests returned their exact sequence. Agents recompute 23% fewer prompt tokens,
+finish 12% sooner and halve the spread between runs; one-shot scenarios are unchanged. Before
+the round-time guard, capture-first burst ran at 403 tok/s: one batch-2 DFlash round queued
+behind a retained lane's capture on the copy stream took 119 ms instead of 36 ms, and that
+sample held adaptive K at 4 for the rest of the run.
+
 
 ### Reasoning budgets and KV-window interaction (2026-10-22)
 
