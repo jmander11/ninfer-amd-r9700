@@ -332,6 +332,7 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
                                  .accepted_drafts = accepted,
                                  .selected_hidden = selected_hidden,
                                  .replay_records  = state.execution.replay_records,
+                                 .gdn_fold        = frame.gdn_fold,
                                  .sampling        = frame.sampling,
                                  .token_masks     = state.token_masks,
                              },

@@ -41,7 +41,7 @@ Engine A/B, before versus after the TQ change (`ninfer_bench` plain decode at P5
 
 The README prefill (`ninfer_bench -p 8192,32768,65536,131072,245760 --max-ctx 262144 --kv-capacity auto`, adaptive DFlash K7 with the optimized head, one warmup and three repetitions, Engine prefill service time) measured NVFP4 3455.6/2959.4/2506.4/1922.5/1363.6 tok/s and TQ 3443.5/2952.6/2486.2/1896.5/1339.3 tok/s (−0.3% at 8K to −1.8% at 245,760; standard deviations ≤6 tok/s). The README workloads (`run_readme_workloads.py`, five workloads, p-less temperature 1.5, 512 output tokens, one warmup and three measured waves, twelve for DFlash C1, same static build and frozen inputs for both caches) give TQ/NVFP4 geometric means 0.999 over the 20 adaptive DFlash K7 cells (C1 0.990, C6 1.007, C8 1.000, C12 1.001; cells 0.953–1.054) and 0.999 over the 25 adaptive MTP K3 cells (C16 0.980; cells 0.951–1.038). Pooled first-draft acceptance is 0.756–0.770 for both caches at every concurrency. The NVFP4 table replaces the 2026-11-07 one: its Document summary 8K cells moved +6.6% (C1) and +3.8% (C8) with a changed document input (all-position acceptance 26.4 → 29.1% at C1), while the other DFlash C1/C8 cells stayed within −2.9..+1.6%. `bench/results/readme-workloads-kv-cache-20261116.json`.
 
-Shared KV capacity (`ninfer-serve --max-context 262144 --kv-capacity auto`, chunk 2048, RAM/SSD/Vision off, optimized proposal heads, one 8-token request per lane, physical free VRAM sampled every 50 ms; `bench/results/shared-kv-20261116.json`): TQ/NVFP4 is 1.263x once shared capacity, not the C×262,144 ceiling, binds (DFlash C8 1,080,896/855,808, C12 1,015,936/804,288; MTP C16 979,200/775,168); C4 TQ reaches the 1,048,576 ceiling. The first TQ measurement, using NVFP4's residency bound, left DFlash C6/C7 31.90/31.57 MiB free, below the 32 MiB headroom, so TQ adds a measured 2 MiB driver-residency addend at C4..8: DFlash C5..8 then keep 34.02/33.68/34.20/32.35 MiB (C5 34.02 twice; one earlier run 30.91), and the NVFP4 C7 control reproduced 32.37 MiB. Every C1..12 DFlash and C1..16 MTP cell for both caches keeps the headroom. The 2026-11-08 MTP capacity runner omitted `--lm-head-draft` and so measured the full proposal head; with the documented optimized head, MTP capacity is about 2% lower (NVFP4 C4 905,472 rather than 923,776; the full-head values reproduce exactly and are retained as `historical_runner_mtp_results`).
+Shared KV capacity (`ninfer-serve --max-context 262144 --kv-capacity auto`, chunk 2048, RAM/SSD/Vision off, optimized proposal heads, one 8-token request per lane, physical free VRAM sampled every 50 ms; `bench/results/shared-kv-20261116.json`): TQ/NVFP4 is 1.263x once shared capacity, not the C×262,144 ceiling, binds (DFlash C8 1,080,896/855,808, C12 1,015,936/804,288; MTP C16 973,568/771,904, remeasured 2026-11-17 with the measured MTP graph allowance); C4 TQ reaches the 1,048,576 ceiling. The first TQ measurement, using NVFP4's residency bound, left DFlash C6/C7 31.90/31.57 MiB free, below the 32 MiB headroom, so TQ adds a measured 2 MiB driver-residency addend at C4..8: DFlash C5..8 then keep 34.02/33.68/34.20/32.35 MiB (C5 34.02 twice; one earlier run 30.91), and the NVFP4 C7 control reproduced 32.37 MiB. Every C1..12 DFlash and C1..16 MTP cell for both caches keeps the headroom. The 2026-11-08 MTP capacity runner omitted `--lm-head-draft` and so measured the full proposal head; with the documented optimized head, MTP capacity is about 2% lower (NVFP4 C4 905,472 rather than 923,776; the full-head values reproduce exactly and are retained as `historical_runner_mtp_results`).
 
 Near-capacity fills through `ninfer-serve` (distinct natural-text prompts filling each lane's share, 64 output tokens, greedy, `--pending-timeout-ms` raised because prompts are prefilled one owner at a time): NVFP4 DFlash C4 with 4 × 222.6K tokens (98.6% of capacity) kept 32.98 MiB free, equal to its short-request startup measurement; TQ DFlash C12 with 12 × 82.2K tokens (97.2%) and TQ C7 with 7 × 153.7K (98.2%) kept physical free memory constant from the end of startup through prefill and decode. Long resident contexts therefore add no device residency. The startup level itself varied between processes: in some runs it settled 9–21 MiB lower than the repeatable short-request value (NVFP4 C8 23.1 and 11.7 against 32.2; TQ C12 35.8 against 52.8) with an unchanged 57 MiB idle baseline. The Engine's own `available_after_startup_bytes` shows the same shortfall (NVFP4 C8 29.7 against 51.2 MB with an identical plan), and it persists for the whole process, so the server allocated more device memory during startup rather than another process holding it. One low run coincided with unlocked host-side tests creating HIP contexts; the others are not attributed (host-memory fragmentation enlarging GPU page tables for pinned host memory is a candidate, unverified). All such runs completed every request; the 32 MiB headroom is therefore met in repeatable measurements but is not a guaranteed physical floor, and `--kv-capacity-headroom` should be raised when another process needs that memory. `ninfer_bench` leaves about 11 MiB less free than `ninfer-serve` at the same capacity (NVFP4 C4 21.1 against 33.0 MiB); the residency bound targets the server and CLI. Evidence: `profiles/kv-default/nearcap/`, `profiles/kv-default/w2/`, `profiles/kv-default/w4/`.
 
@@ -274,7 +274,7 @@ The `experimental` base `682ae41d` with PR #4 (`32a7aa06`) integrated locally ad
 
 Measured completion counts per request: 512. Actual prompt and output counts and per-cell draft acceptance are retained in `bench/results/readme-workloads-mtp-20261104.json`. Document prompts use the current repository text, so these separately measured MTP and DFlash samples are not a controlled backend or concurrency-scaling A/B. Task quality is not scored. Reproduce with the command above plus the artifact, tokenizer, output directory and Compose graph environment shown in `tools/bench/README.md`. Raw input/output, periodic intervals and startup reports remain under `profiles/pr4-review/mtp-workloads/`, `mtp-workloads-c12-remainder/`, `mtp-workloads-c16-remainder/` and `mtp-workloads-code/`.
 
-The MTP shared-capacity column in the README is a separate native-ceiling startup measurement: `ninfer-serve ARTIFACT --spec mtp --draft-tokens 3 --adaptive-draft --lm-head-draft --max-context 262144 --max-concurrency C --kv-capacity auto --prefill-chunk 2048`, at every C1..16, with the same production artifact and Compose graph environment and RAM/SSD/Vision off. Every startup was followed by eight output tokens per concurrent request. Between processes, the probe waits for the prior server's deferred VRAM cleanup before the next capacity snapshot. Capacity is read from the public `server_start` event; it describes allocated shared capacity, not an all-lane near-capacity qualification. `bench/results/shared-kv-mtp-20261104.json` records capacities and planned/observed graph memory; full startup metadata and responses remain under `profiles/pr4-review/mtp-capacity/`. At C16, the unchanged graph allowance reserves 836 MiB while startup observes 56 MiB under the Compose environment; that conservative reservation is included in the reported capacity. The historical DFlash capacity column uses its separately identified October 17 measurements.
+The MTP shared-capacity column in the README is a separate native-ceiling startup measurement: `ninfer-serve ARTIFACT --spec mtp --draft-tokens 3 --adaptive-draft --lm-head-draft --max-context 262144 --max-concurrency C --kv-capacity auto --prefill-chunk 2048`, at every C1..16, with the same production artifact and Compose graph environment and RAM/SSD/Vision off. Every startup was followed by eight output tokens per concurrent request. Between processes, the probe waits for the prior server's deferred VRAM cleanup before the next capacity snapshot. Capacity is read from the public `server_start` event; it describes allocated shared capacity, not an all-lane near-capacity qualification. `bench/results/shared-kv-mtp-20261104.json` records capacities and planned/observed graph memory; full startup metadata and responses remain under `profiles/pr4-review/mtp-capacity/`. At C16, the unchanged graph allowance reserves 836 MiB while startup observes 56 MiB under the Compose environment; that conservative reservation is included in the reported capacity. The measured MTP allowance of 2026-11-16 (`concurrent-inference-architecture.md` §9) reserves 48 MiB less for this configuration through C11, 26/4 MiB less at C12/C13 and 18/40/62 MiB more at C14/C15/C16; the current README column was remeasured with it on 2026-11-17 (`bench/results/shared-kv-20261116.json`). The historical DFlash capacity column uses its separately identified October 17 measurements.
 
 The reviewed candidate passes 65 host CTests and the selected speculative-round, MTP-round, GDN, GDN-fold, attention and runtime-planner GPU qualifiers. The C16 GDN fold is checked against the independent FP64 recurrence and exact convolution history. Packed append/attention at B12/B16 retain exact per-sequence bytes and graph/eager output; their qualifier fixture now initializes and checks all 16 sequence entries. Both the fold and sequence-batch attention/append checks pass memcheck and initcheck. A public-Engine C16/P512/G32 MTP test retains identical token IDs and speculative statistics between graph and eager execution over two repetitions; plain C16 also completes, and DFlash C9 is rejected at startup. Pinned formatting and affected clang-tidy checks pass. These checks support the expanded concurrency domain; they do not establish batch-invariant tokens across different concurrency values.
 
@@ -837,6 +837,66 @@ completed; it remains a negative result for that bounded horizon. The complete-w
 measures the cost and benefit of finishing the same eight requests. This is one raw-token stress
 workload with model stopping disabled, not a universal speedup, a useful-action benchmark or a
 model-quality result. Evidence: `profiles/chunked-kv/throughput-completion-comparison.json`.
+That pair predates the newest-first pressure policy below.
+
+### Newest-first KV pressure policy at C6 (2026-11-16)
+
+Three server builds differing only in the RAM-on pressure scheduler were compared on one
+R9700 with the `r9700-lq4` artifact: the incumbent-epoch policy (`ccbe9f815`), the contributed
+single-victim latest-first policy (`82f4ecace`) and the selected newest-first prefix policy
+(`7605b0b2b`). Each cell started a fresh server with C6 adaptive DFlash up to seven drafts,
+greedy sampling, a pinned 131,072-token NVFP4 pool, 65,536-token context, 12 GiB RAM and 8 GiB
+disk tiers. Every request asked for an exact comma-separated count of 4-digit integers after a
+unique synthetic document, so prompt and output lengths are fixed and each output is checked.
+Burst submits six requests 0.5 s apart (8k-18k prompt, 9.6k-19.2k output tokens); staggered
+submits fourteen at 6 s intervals (2k-20k prompt, 1.5k-15k output); agents runs six four-turn
+conversations (12k-19.5k tool manual, 2k tool output per turn, 1.5k-6k answers, 4-13 s pauses)
+with prefix reuse across turns. Throughput is completion tokens over the client makespan.
+
+| Scenario | Policy | Runs | tok/s | Makespan, s | TTFT p50 / p90, s | Suspensions |
+|---|---|---:|---:|---:|---:|---:|
+| Burst | incumbent epoch | 1 | 454.9 | 189.9 | 21.8 / 40.2 | 2 |
+| Burst | single victim | 1 | 457.3 | 188.9 | 21.9 / 40.4 | 2 |
+| Burst | newest-first prefix | 1 | 459.9 | 187.8 | 21.9 / 40.4 | 2 |
+| Staggered | incumbent epoch | 1 | 470.0 | 280.9 | 80.6 / 124.6 | 2 |
+| Staggered | single victim | 1 | 409.8 | 322.1 | 26.6 / 171.8 | 4 |
+| Staggered | newest-first prefix | 1 | 479.0 | 275.5 | 26.8 / 113.8 | 3 |
+| Agents | incumbent epoch | 3 | 242.9 (239.8-247.7) | 400.2 | 38.7 / 89.8 | 3.3 |
+| Agents | single victim | 3 | 263.2 (262.5-264.0) | 369.3 | 45.3 / 58.7 | 2.7 |
+| Agents | newest-first prefix | 3 | 258.4 (237.9-272.9) | 377.3 | 39.4 / 68.2 | 4.0 |
+
+All 160 requests across the fifteen runs returned their exact sequence. The selected policy is
+at least as fast as the incumbent in every scenario: equal under burst, faster with a third of
+the staggered median TTFT, and 6% faster on agents with lower p90 TTFT. It matches the
+single-victim policy on burst and agents within run-to-run spread and avoids that policy's
+staggered loss, where suspending older running requests doubled the suspensions and raised
+p90 TTFT. Burst and staggered are single runs. An earlier simultaneous-submission burst
+showed that arrival order alone, which decides the newest request, can move makespan by a
+third; the 0.5 s spacing fixes it. Recovery retries under pressure are covered by the
+executor probe tests, not this workload. Evidence: `profiles/kv-pressure-ab/`.
+
+### Retained-conversation capture under KV pressure (2026-11-17)
+
+Window growth, live resume and recovery retries now capture free retained lanes to the RAM
+tier before releasing their pages, least recently admitted first, where the previous build
+evicted every retained lane uncaptured. The same harness compared it (`dbc4fa504` through this change, with
+adaptive-draft round-time samples skipped while KV RAM or disk copies are in flight) against
+the newest-first build above. Prefill tokens count the target prompt tokens actually computed.
+
+| Scenario | Build | Runs | tok/s | Makespan, s | TTFT p50 / p90, s | Prefill tokens |
+|---|---|---:|---:|---:|---:|---:|
+| Burst | evict uncaptured | 1 | 459.9 | 187.8 | 21.9 / 40.4 | 127,197 |
+| Burst | capture first | 1 | 459.6 | 188.0 | 21.8 / 40.3 | 127,197 |
+| Staggered | evict uncaptured | 1 | 479.0 | 275.5 | 26.8 / 113.8 | 222,167 |
+| Staggered | capture first | 1 | 479.3 | 275.4 | 26.7 / 114.2 | 222,167 |
+| Agents | evict uncaptured | 3 | 258.4 (237.9-272.9) | 377.3 | 39.4 / 68.2 | 395,348 |
+| Agents | capture first | 3 | 292.1 (291.1-293.3) | 332.7 | 27.0 / 53.3 | 304,422 |
+
+All 132 requests returned their exact sequence. Agents recompute 23% fewer prompt tokens,
+finish 12% sooner and halve the spread between runs; one-shot scenarios are unchanged. Before
+the round-time guard, capture-first burst ran at 403 tok/s: one batch-2 DFlash round queued
+behind a retained lane's capture on the copy stream took 119 ms instead of 36 ms, and that
+sample held adaptive K at 4 for the rest of the run.
 
 
 ### Reasoning budgets and KV-window interaction (2026-10-22)

@@ -59,7 +59,7 @@ struct GdnDeferredFoldRow {
 };
 
 struct GdnDeferredFoldRows {
-    std::array<GdnDeferredFoldRow, kDFlashMaximumConcurrency> row{};
+    std::array<GdnDeferredFoldRow, kMaximumConcurrency> row{};
 };
 
 // One GDN layer's share of a deferred fold: rows [0, batch) of the device `rows` applied to this

@@ -1,4 +1,5 @@
 #include "arena.h"
+#include "capacity_exhausted.h"
 #include "device.h"
 
 #include <algorithm>
@@ -224,7 +225,11 @@ DeviceSpan DeviceArena::alloc_bytes(std::size_t bytes, std::size_t align) {
     const std::uintptr_t aligned =
         (address + align - 1U) & ~static_cast<std::uintptr_t>(align - 1U);
     const std::size_t next = static_cast<std::size_t>(aligned - base);
-    if (next > capacity_ || bytes > capacity_ - next) { throw std::bad_alloc(); }
+    if (next > capacity_ || bytes > capacity_ - next) {
+        throw CapacityExhausted("device arena allocation of " + std::to_string(bytes) +
+                                " bytes at offset " + std::to_string(next) +
+                                " exceeds its capacity of " + std::to_string(capacity_) + " bytes");
+    }
     offset_ = next + bytes;
     peak_   = std::max(peak_, offset_);
     return {static_cast<std::byte*>(base_) + next, bytes};

@@ -337,6 +337,8 @@ MtpDecodeState::MtpDecodeState(DeviceSpan backing, const MtpDecodeStateLayout& l
     rope_deltas = ingress_tensor(offsetof(MtpDecodeIngress, rope_deltas), DType::I32, {batch});
     sampling    = reinterpret_cast<const ops::SamplingConfig*>(
         static_cast<const unsigned char*>(ingress.data) + offsetof(MtpDecodeIngress, sampling));
+    gdn_fold = reinterpret_cast<const ops::GdnDeferredFoldRows*>(
+        static_cast<const unsigned char*>(ingress.data) + offsetof(MtpDecodeIngress, gdn_fold));
 
     updated_frontiers = layout.updated_frontiers.bind(backing);
     licensed_tokens =

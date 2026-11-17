@@ -19,6 +19,7 @@
 #include "ninfer/ops/speculative_round.h"
 
 #include "core/arena.h"
+#include "core/capacity_exhausted.h"
 #include "core/device.h"
 #include "core/dtype.h"
 #include "core/roctx.h"
@@ -805,6 +806,9 @@ bool ProgramImplCore::grant_window(std::uint32_t lane, const runtime::ExecutionW
     try {
         resize_sequence_kv_entitlement(sequence, window.admission.main_kv_pages,
                                        window.admission.backend_kv_pages);
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         // The bundle reserves every host page vector before committing any entitlement.
         return false;
@@ -1020,6 +1024,9 @@ bool ProgramImplCore::start_resume(std::uint32_t lane, std::uint64_t owner,
         saved.lane                         = lane;
         saved.phase                        = SuspendedRequest::Phase::Restoring;
         return true;
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         // Fence readers before releasing a partial destination; the source remains parked.
         device.synchronize_all();
@@ -1164,7 +1171,17 @@ bool ProgramImplCore::can_admit_lane_after_releasing(
         request.lifecycle == Lifecycle::Pending) {
         return false;
     }
+    return kv_fits_after_releasing(lane,
+                                   {.active_lanes     = 1,
+                                    .main_kv_pages    = plan.impl_->text_kv_page_entitlement,
+                                    .backend_kv_pages = plan.impl_->backend_kv_page_entitlement},
+                                   release_lanes);
+}
 
+bool ProgramImplCore::kv_fits_after_releasing(
+    std::uint32_t lane, const runtime::AdmissionResources& resources,
+    std::span<const std::uint32_t> release_lanes) const noexcept {
+    if (lane >= max_concurrency) { return false; }
     std::uint32_t reclaimable_text    = 0;
     std::uint32_t reclaimable_backend = 0;
     for (const std::uint32_t other : release_lanes) {
@@ -1191,16 +1208,36 @@ bool ProgramImplCore::can_admit_lane_after_releasing(
     const SequenceState& sequence = sequences[lane];
     const std::uint32_t old_text  = sequence.kv ? sequence.kv->text.page_entitlement() : 0;
     if (!can_replace(decoder->text_kv.pool(), old_text, reclaimable_text,
-                     plan.impl_->text_kv_page_entitlement)) {
+                     resources.main_kv_pages)) {
         return false;
     }
 
     const PagedKVPool* backend = backend_kv_pool();
-    if (backend == nullptr) { return plan.impl_->backend_kv_page_entitlement == 0; }
+    if (backend == nullptr) { return resources.backend_kv_pages == 0; }
     const std::uint32_t old_backend =
         sequence.kv && sequence.kv->backend ? sequence.kv->backend->page_entitlement() : 0;
-    return can_replace(*backend, old_backend, reclaimable_backend,
-                       plan.impl_->backend_kv_page_entitlement);
+    return can_replace(*backend, old_backend, reclaimable_backend, resources.backend_kv_pages);
+}
+
+bool ProgramImplCore::retained_lane_extended_by(std::uint32_t lane,
+                                                const RequestPlan& plan) noexcept {
+    if (!has_retained_lane(lane) || plan.impl_ == nullptr || !plan.impl_->prompt_hashes) {
+        return false;
+    }
+    SequenceState& sequence = sequences[lane];
+    const std::uint32_t previous =
+        sequence.closure_frontier != 0
+            ? std::min(requests[lane].prompt_tokens, sequence.closure_frontier)
+            : requests[lane].prompt_tokens;
+    const auto& hashes = *plan.impl_->prompt_hashes;
+    if (previous == 0 || previous >= hashes.size() || previous > sequence.ledger.size() ||
+        previous > sequence.prefix_identity.size()) {
+        return false;
+    }
+    try {
+        return hashes[previous] ==
+               sequence.prefix_hashes.at(sequence.ledger, sequence.prefix_identity, previous);
+    } catch (...) { return false; }
 }
 
 runtime::AdmissionResources ProgramImplCore::admission_capacity() const noexcept {
@@ -1710,8 +1747,8 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
             }
         }
         // A continuing chain row folds inside its next verification forward instead
-        // (DFlashDecodeIngress::gdn_fold); every other row folds here.
-        if (speculative_backend == SpeculativeBackend::DFlash && !tree_fold && committed > 0 &&
+        // (DFlashDecodeIngress::gdn_fold, MtpDecodeIngress::gdn_fold); every other row folds here.
+        if (speculative_backend != SpeculativeBackend::None && !tree_fold && committed > 0 &&
             !terminal[row]) {
             fold_rows[row].commit_columns = 0;
             defer_rows[row]               = committed;
@@ -2316,6 +2353,9 @@ void ProgramImplCore::fork_retained_lane(std::uint32_t destination, std::uint32_
         }
         to.deferred_fold_columns = 0;
         to.fork_initialized      = true;
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         device.synchronize_all();
         clear_lane(to, requests[destination]);
@@ -3466,6 +3506,9 @@ void ProgramImplCore::restore_ram_entry(std::uint32_t lane, std::uint64_t entry_
                 sequence.rewrite_checkpoint = {};
             }
         }
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         // Partial cache H2D must finish before its destination pages are released.
         // A HIP failure remains fatal; only optional host metadata is retried.
@@ -3711,6 +3754,9 @@ void ProgramImplCore::restore_disk_entry(std::uint32_t lane, std::uint64_t entry
                 sequence.rewrite_checkpoint = {};
             }
         }
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         pending_disk_checkpoint_lane_.reset();
         // restore_device drains any unreturned ticket on setup failure. A live
@@ -5571,6 +5617,19 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
     if (lanes.empty() || lanes.size() > max_concurrency || budgets.size() != lanes.size()) {
         throw std::invalid_argument("MTP batch membership is invalid");
     }
+    {
+        std::array<std::uint32_t, kMaximumConcurrency> outside{};
+        std::size_t outside_count = 0;
+        for (std::uint32_t lane = 0; lane < max_concurrency; ++lane) {
+            if (sequences[lane].deferred_fold_columns != 0 &&
+                std::find(lanes.begin(), lanes.end(), lane) == lanes.end()) {
+                outside[outside_count++] = lane;
+            }
+        }
+        if (outside_count != 0) {
+            flush_deferred_gdn_folds(std::span<const std::uint32_t>(outside.data(), outside_count));
+        }
+    }
 
     const std::uint32_t width = draft_window + 1;
     std::array<std::uint32_t, kMaximumConcurrency> row_ks{};
@@ -5695,6 +5754,13 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
             mtp_host_ingress->rope_deltas[row]        = sequence.rope_delta;
             mtp_host_ingress->logprob_rows[row]       = request.token_logprobs ? 1 : 0;
             mtp_host_ingress->sampling[row]           = request.sampling_host;
+            mtp_host_ingress->gdn_fold.row[row]       = ops::GdnDeferredFoldRow{
+                .linear_state_slot =
+                    LinearStateSlots::current_state_slot(lanes[row], max_concurrency),
+                .commit_columns = static_cast<std::int32_t>(sequence.deferred_fold_columns),
+                .record_row     = static_cast<std::int32_t>(sequence.deferred_fold_row),
+            };
+            sequence.deferred_fold_columns = 0;
             materialize_sequence_kv(sequence, frontier + extent + 1,
                                     std::min(capacity, frontier + extent + draft_window));
             realized_extent = std::max(realized_extent, extent);
@@ -5747,7 +5813,9 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         bind_token_mask_batch(lanes, mtp_host_ingress->sampling);
         TokenMaskRoundGuard token_mask_round(*token_masks, device);
         mark_workspace_usage(workspace_plan.mtp_round);
-        const auto started = Clock::now();
+        // A round may wait on or share bandwidth with KV RAM/disk copies already in flight.
+        const bool transfers_idle = kv_copies_ready();
+        const auto started        = Clock::now();
         if (executable != nullptr) {
             text_transactions.mark_graph_replay(device.stream);
             mtp_transactions.mark_graph_replay(device.stream);
@@ -5778,8 +5846,9 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
         text_transactions.finish_resolution({text_retained_frontiers.data(), lanes.size()});
         mtp_transactions.finish_resolution({mtp_retained_frontiers.data(), lanes.size()});
         token_mask_round.finish();
-        // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it.
-        if (adaptive_draft && realized_extent > 0) {
+        // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it, nor from
+        // a round that overlapped KV transfers.
+        if (adaptive_draft && realized_extent > 0 && transfers_idle) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,
                                                static_cast<float>(seconds), maximum_frontier);
         }
@@ -6141,7 +6210,9 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
         TokenMaskRoundGuard token_mask_round(*token_masks, device);
         mark_workspace_usage(prefill_lane ? workspace_plan.dflash_mixed
                                           : workspace_plan.dflash_round);
-        const auto started = Clock::now();
+        // A round may wait on or share bandwidth with KV RAM/disk copies already in flight.
+        const bool transfers_idle = kv_copies_ready();
+        const auto started        = Clock::now();
         if (executable != nullptr) { text_transactions.mark_graph_replay(device.stream); }
         if (prefill_lane) {
             // The owner's chunk and the verify batch share one target forward; the prefill
@@ -6219,8 +6290,9 @@ runtime::BatchedGeneratedRound ProgramImplCore::decode_dflash_batch(
             }
         }
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it, nor from
-        // a mixed round whose time includes the owner's chunk.
-        if (adaptive_draft && realized_extent > 0 && !prefill_lane) {
+        // a mixed round whose time includes the owner's chunk, nor from a round that overlapped
+        // KV transfers.
+        if (adaptive_draft && realized_extent > 0 && !prefill_lane && transfers_idle) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,
                                                static_cast<float>(seconds), maximum_frontier);
         }

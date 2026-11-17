@@ -602,6 +602,16 @@ public:
         return can_admit_lane(lane, plan);
     }
 
+    [[nodiscard]] virtual bool
+    kv_fits_after_releasing(std::uint32_t, const AdmissionResources&,
+                            std::span<const std::uint32_t>) const noexcept {
+        return true;
+    }
+
+    [[nodiscard]] bool retained_lane_extended_by(std::uint32_t, const ProbePlan& plan) noexcept {
+        return plan.fields.reusable_prompt_tokens != 0;
+    }
+
     [[nodiscard]] ninfer::GenerationTimings generation_timings_lane(std::uint32_t) const noexcept {
         return {};
     }
@@ -749,7 +759,7 @@ public:
         return {.save = 0.5, .load = 1.0, .h2d = 2.0};
     }
 
-    [[nodiscard]] bool kv_ram_copies_ready() const { return true; }
+    [[nodiscard]] virtual bool kv_ram_copies_ready() const { return true; }
 
     [[nodiscard]] bool kv_disk_restore_failed() const { return false; }
 
@@ -3268,8 +3278,20 @@ class ChunkedProgram : public ProbeProgram {
 public:
     enum class HoldPhase { None, Capture, Restore, Parked };
     HoldPhase hold_phase = HoldPhase::None;
-    enum class MetricHold { None, Extension, SingleBlocked };
+    enum class MetricHold { None, Extension, SuspendedPeer };
     MetricHold metric_hold = MetricHold::None;
+    // Three planted residents; the named one is growth-blocked, the newest waits on a native
+    // retry beside two decoding peers, or all three wait on native retries.
+    enum class PressureOrder {
+        None,
+        OldestBlocked,
+        MiddleBlocked,
+        NewestBlocked,
+        NewestRetryWaits,
+        RecoveryPrefix,
+        RetainedReclaim
+    };
+    PressureOrder pressure_order = PressureOrder::None;
 
     void release_held_decode() {
         std::lock_guard lock(phase_mutex_);
@@ -3292,9 +3314,32 @@ public:
                                     [&] { return phase_entered_; });
     }
 
-    [[nodiscard]] bool no_live_image() const { return !saved_; }
+    [[nodiscard]] bool no_live_image() const { return saved_.empty(); }
 
     [[nodiscard]] bool no_owned_kv_pages() const { return used_pages() == 0; }
+
+    // A completed conversation left on a free lane, as reuse retention leaves it.
+    void plant_retained(std::uint32_t lane, std::uint32_t pages) {
+        pages_[lane]    = pages;
+        retained_[lane] = true;
+    }
+
+    [[nodiscard]] bool retained(std::uint32_t lane) const { return retained_[lane]; }
+
+    // Retained-lane captures land only once released, like in-flight D2H copies.
+    std::atomic<bool> hold_ram_copies{false};
+    std::uint32_t retained_captures = 0;
+
+    [[nodiscard]] bool kv_ram_copies_ready() const override { return !hold_ram_copies.load(); }
+
+    [[nodiscard]] bool capture_retained_lane(std::uint32_t lane, std::uint64_t* = nullptr,
+                                             bool = true, bool* deferred = nullptr,
+                                             std::span<const std::uint64_t> = {}) override {
+        if (deferred != nullptr) *deferred = false;
+        if (!retained_[lane]) return false;
+        ++retained_captures;
+        return true;
+    }
 
     bool require_peer                        = false;
     bool wait_for_queue                      = false;
@@ -3316,7 +3361,7 @@ public:
     std::size_t ram_credit_ceiling           = 0;
     std::size_t total_ram_credit_ceiling     = 0;
     std::uint64_t single_token_window_seed   = 0;
-    bool replacement_started_beside_peer     = false;
+    bool third_started_beside_peer           = false;
     std::array<std::uint32_t, 8> credit_attempts{};
     std::atomic<bool> peer_submitted{false};
     std::uint32_t starts                   = 0;
@@ -3324,9 +3369,11 @@ public:
     std::uint32_t resumes                  = 0;
     std::uint32_t extensions               = 0;
     std::uint32_t blocked_single_rounds    = 0;
+    std::uint32_t suspended_single_rounds  = 0;
     std::uint32_t paired_rounds            = 0;
     std::uint32_t credit_rejections        = 0;
     std::uint32_t smallest_admitted_window = std::numeric_limits<std::uint32_t>::max();
+    std::vector<std::uint64_t> suspended_ids;
 
     [[nodiscard]] bool chunked_execution_enabled() const noexcept override { return true; }
 
@@ -3384,8 +3431,8 @@ public:
         ++starts;
         if (starts == 3) {
             for (std::size_t at = 0; at < pages_.size(); ++at)
-                replacement_started_beside_peer = replacement_started_beside_peer ||
-                                                  (at != lane && pages_[at] != 0 && !retained_[at]);
+                third_started_beside_peer =
+                    third_started_beside_peer || (at != lane && pages_[at] != 0 && !retained_[at]);
         }
         smallest_admitted_window =
             std::min(smallest_admitted_window, plan.fields.window_output_tokens);
@@ -3420,8 +3467,23 @@ public:
     }
 
     [[nodiscard]] ninfer::runtime::ExecutionWindow
-    plan_suspended_window(std::uint64_t, std::uint32_t end) const override {
+    plan_suspended_window(std::uint64_t id, std::uint32_t end) const override {
+        // The target rejects a suspended window beyond the request's lifetime output.
+        const auto* saved = find_saved(id);
+        if (!saved || end > saved->lifetime) {
+            throw std::logic_error("chunked probe planned a window beyond the suspended lifetime");
+        }
         return plan_window(0, end);
+    }
+
+    [[nodiscard]] bool
+    kv_fits_after_releasing(std::uint32_t lane, const AdmissionResources& resources,
+                            std::span<const std::uint32_t> release) const noexcept override {
+        std::uint32_t used = used_pages() - pages_[lane];
+        for (const std::uint32_t other : release) {
+            if (other != lane && retained_[other]) used -= pages_[other];
+        }
+        return used + resources.main_kv_pages <= physical_pages;
     }
 
     [[nodiscard]] bool grant_window(std::uint32_t lane,
@@ -3476,7 +3538,7 @@ public:
     }
 
     void release_suspension_credit(std::uint64_t owner) override {
-        if (saved_ && saved_->id == owner) {
+        if (find_saved(owner)) {
             throw std::logic_error(
                 "chunked probe released RAM while its live image still owned it");
         }
@@ -3499,29 +3561,31 @@ public:
     }
 
     [[nodiscard]] bool start_suspend(std::uint32_t lane, std::uint64_t id) override {
-        if (saved_) { throw std::logic_error("chunked probe overwrote a live suspension"); }
+        if (find_saved(id)) { throw std::logic_error("chunked probe overwrote a live suspension"); }
         if (live_credits.at(id) == 0) {
             throw std::logic_error("chunked probe captured without secured RAM");
         }
         credit_releases_at_capture = credit_releases.at(id);
-        saved_ = Saved{id, cursor_[lane], lane, lifetime_[lane], output_[lane], answered_[lane]};
+        saved_.push_back(
+            Saved{id, cursor_[lane], lane, lifetime_[lane], output_[lane], answered_[lane]});
+        suspended_ids.push_back(id);
         if (hold_phase == HoldPhase::Capture) { signal_held_phase(); }
         return true;
     }
 
     void finish_suspend(std::uint32_t lane, std::uint64_t id) override {
-        if (!saved_ || saved_->id != id) {
-            throw std::logic_error("chunked probe finished the wrong suspension");
-        }
+        auto* saved = find_saved(id);
+        if (!saved) { throw std::logic_error("chunked probe finished the wrong suspension"); }
         pages_[lane]  = 0;
         cursor_[lane] = 0;
-        saved_->phase = Saved::Phase::Parked;
+        saved->phase  = Saved::Phase::Parked;
         ++suspensions;
     }
 
     [[nodiscard]] bool start_resume(std::uint32_t lane, std::uint64_t id,
                                     const ninfer::runtime::ExecutionWindow& window) override {
-        if (!saved_ || saved_->id != id || pages_[lane] != 0 ||
+        auto* saved = find_saved(id);
+        if (!saved || pages_[lane] != 0 ||
             used_pages() + window.admission.main_kv_pages > physical_pages) {
             return false;
         }
@@ -3529,28 +3593,26 @@ public:
             signal_held_phase();
             return false;
         }
-        cursor_[lane]             = saved_->cursor;
-        lifetime_[lane]           = saved_->lifetime;
-        output_[lane]             = saved_->output;
-        answered_[lane]           = saved_->answered;
-        resumed_on_different_lane = resumed_on_different_lane || lane != saved_->lane;
+        cursor_[lane]             = saved->cursor;
+        lifetime_[lane]           = saved->lifetime;
+        output_[lane]             = saved->output;
+        answered_[lane]           = saved->answered;
+        resumed_on_different_lane = resumed_on_different_lane || lane != saved->lane;
         pages_[lane]              = window.admission.main_kv_pages;
-        saved_->phase             = Saved::Phase::Restoring;
-        saved_->restore_lane      = lane;
+        saved->phase              = Saved::Phase::Restoring;
+        saved->restore_lane       = lane;
         if (hold_phase == HoldPhase::Restore) { signal_held_phase(); }
         return true;
     }
 
     void finish_resume(std::uint32_t, std::uint64_t id) override {
-        if (!saved_ || saved_->id != id) {
-            throw std::logic_error("chunked probe resumed the wrong identity");
-        }
-        saved_.reset();
+        if (!find_saved(id)) { throw std::logic_error("chunked probe resumed the wrong identity"); }
+        std::erase_if(saved_, [id](const Saved& saved) { return saved.id == id; });
         ++resumes;
     }
 
     void synchronize_all() override {
-        if (shutdown_capture_probe && saved_ && !release_transfer.load()) {
+        if (shutdown_capture_probe && !saved_.empty() && !release_transfer.load()) {
             release_transfer.store(true);
             ++shutdown_transfer_fences;
         }
@@ -3558,14 +3620,14 @@ public:
     }
 
     void discard_suspended(std::uint64_t id) override {
-        if (saved_ && saved_->id == id) {
+        if (const auto* saved = find_saved(id)) {
             if (shutdown_capture_probe && !release_transfer.load())
                 shutdown_discarded_before_fence = true;
-            if (saved_->phase == Saved::Phase::Restoring) {
-                pages_[saved_->restore_lane]  = 0;
-                cursor_[saved_->restore_lane] = 0;
+            if (saved->phase == Saved::Phase::Restoring) {
+                pages_[saved->restore_lane]  = 0;
+                cursor_[saved->restore_lane] = 0;
             }
-            saved_.reset();
+            std::erase_if(saved_, [id](const Saved& image) { return image.id == id; });
             ++discarded_images;
         }
     }
@@ -3611,9 +3673,12 @@ public:
         if (require_peer && starts == 2 && lanes.size() == 1 && suspensions == 0) {
             ++blocked_single_rounds;
         }
+        if (require_peer && starts == 2 && lanes.size() == 1 && suspensions == 1 && resumes == 0) {
+            ++suspended_single_rounds;
+        }
         if (!metric_hold_entered_ &&
             ((metric_hold == MetricHold::Extension && extensions != 0) ||
-             (metric_hold == MetricHold::SingleBlocked && blocked_single_rounds != 0))) {
+             (metric_hold == MetricHold::SuspendedPeer && suspended_single_rounds != 0))) {
             std::unique_lock lock(phase_mutex_);
             metric_hold_entered_ = true;
             phase_entered_       = true;
@@ -3631,6 +3696,9 @@ public:
                  cursor_[lane] >=
                      (partial_tool_probe ? tool_sequence().size() : sequence_.size()))) {
                 throw std::logic_error("chunked probe decoded outside funded lifetime");
+            }
+            if (cursor_[lane] + budgets[row].generated_tokens_remaining + 1 > pages_[lane]) {
+                throw std::logic_error("chunked probe decode budget exceeds its granted window");
             }
             if (pending_recovery_probe && lifetime_[lane] < 6) {
                 if (output_[lane]->in_reasoning())
@@ -3696,6 +3764,18 @@ private:
         std::uint32_t restore_lane                              = 0;
     };
 
+    [[nodiscard]] Saved* find_saved(std::uint64_t id) {
+        const auto it = std::find_if(saved_.begin(), saved_.end(),
+                                     [id](const Saved& saved) { return saved.id == id; });
+        return it == saved_.end() ? nullptr : &*it;
+    }
+
+    [[nodiscard]] const Saved* find_saved(std::uint64_t id) const {
+        const auto it = std::find_if(saved_.begin(), saved_.end(),
+                                     [id](const Saved& saved) { return saved.id == id; });
+        return it == saved_.end() ? nullptr : &*it;
+    }
+
     void signal_held_phase() {
         std::lock_guard lock(phase_mutex_);
         phase_entered_ = true;
@@ -3729,7 +3809,7 @@ private:
         top_ids_{};
     std::array<float, std::size_t{ninfer::kMaximumConcurrency} * ninfer::kMaximumTopLogprobs>
         top_values_{};
-    std::optional<Saved> saved_;
+    std::vector<Saved> saved_;
     std::array<TokenId, ninfer::kMaximumConcurrency> tokens_{};
     std::array<std::int32_t, ninfer::kMaximumConcurrency> counts_{};
 };
@@ -3929,6 +4009,174 @@ int drive_scripted_recovery<ChunkedProbe>(ConcurrentExecutor<ChunkedProbe>& exec
     const auto now = Executor::Clock::now();
     std::array<std::shared_ptr<Request>, 2> requests;
     int failures = 0;
+    if (program.pressure_order != ChunkedProgram::PressureOrder::None) {
+        using Order         = ChunkedProgram::PressureOrder;
+        const auto order    = program.pressure_order;
+        const bool recovery = order == Order::RecoveryPrefix;
+        const std::uint32_t blocked_lane =
+            order == Order::OldestBlocked || order == Order::RetainedReclaim ? 0
+            : order == Order::MiddleBlocked                                  ? 1
+                                                                             : 2;
+        std::array<std::shared_ptr<Request>, 3> planted;
+        // RetainedReclaim keeps lane 2 as a retained conversation instead of a resident.
+        const std::uint32_t residents = order == Order::RetainedReclaim ? 2 : 3;
+        {
+            std::scoped_lock lock(executor.execution_mutex_);
+            if (order == Order::RetainedReclaim) program.plant_retained(2, 4);
+            for (std::uint32_t lane = 0; lane < residents; ++lane) {
+                const bool recovers = recovery || (order == Order::NewestRetryWaits && lane == 2);
+                auto input          = thinking_input();
+                input.options.enable_thinking = recovers;
+                auto prompt                   = frontend.prepare(std::move(input));
+                const auto summary            = prompt.summary();
+                ResolvedRequestOptions options;
+                options.execution.requested_output_tokens = 6;
+                options.execution.allow_prefix_reuse      = false;
+                options.execution.cache_write             = false;
+                options.output.raw                        = !recovers;
+                auto session =
+                    frontend.make_output_session(prompt, options.stop, options.output, recovers);
+                auto request = std::make_shared<Request>(
+                    lane + 1, std::move(prompt), std::move(session), summary, 0.0,
+                    std::move(options), ninfer::OutputDelivery::TerminalOnly,
+                    now + std::chrono::hours(1), now, ninfer::HostInputLease{}, recovers);
+                auto plan = program.plan_request_base(request->prompt, request->options.execution);
+                const std::uint32_t window       = recovers || lane == blocked_lane ? 1 : 3;
+                plan.fields.window_output_tokens = window;
+                plan.fields.admission            = {1, window + 1, 0};
+                plan.fields.suspension_bytes     = window + 1;
+                request->budget.emplace(6, FinishReason::OutputLimit);
+                request->lane                   = lane;
+                request->queue_order            = lane + 1;
+                request->admission_resources    = plan.summary().admission;
+                request->completion_resources   = plan.summary().lifetime_admission;
+                request->window_output_tokens   = window;
+                request->window_budget_origin   = 6;
+                request->suspension_bytes       = window + 1;
+                request->remaining_service_work = 7;
+                executor.slots_[lane]           = request;
+                failures += check(lane == 0 ? executor.claim_completion(request)
+                                            : program.reserve_suspension_credit(
+                                                  request->id, request->suspension_bytes),
+                                  "pressure order: initial completion claim or credit failed");
+                const auto first = program.start_prefill_lane(lane, std::move(request->prompt),
+                                                              plan, {}, &request->output, false);
+                (void)executor.resolve_prefill_step(request, first, false);
+                if (recovers) {
+                    targets::qwen3::PublishedOutput published;
+                    failures += check(executor.recover_unpublished_attempt(request, published,
+                                                                           "repeated_reasoning"),
+                                      "pressure order: intervention did not queue a retry");
+                }
+                planted[lane] = std::move(request);
+            }
+            if (recovery) {
+                // Each retry needs seven of eight pages; every frontier holds two.
+                failures += check(!executor.start_generation_recovery() &&
+                                      !executor.start_generation_recovery() &&
+                                      !executor.start_generation_recovery(),
+                                  "pressure order: a retry fit beside both peers");
+            } else {
+                if (order == Order::NewestRetryWaits) {
+                    failures += check(!executor.start_generation_recovery(),
+                                      "pressure order: the newest retry fit beside its peers");
+                }
+                executor.refresh_execution_windows();
+                for (std::uint32_t lane = 0; lane < residents; ++lane) {
+                    failures += check(planted[lane]->growth_blocked == (lane == blocked_lane),
+                                      "pressure order: planted growth state was not as intended");
+                }
+            }
+            const bool planned = executor.plan_kv_pressure();
+            const auto captured =
+                executor.live_transfer_ ? executor.live_transfer_->request : nullptr;
+            const std::deque<std::shared_ptr<Request>> queued_victims{executor.pressure_victims_};
+            switch (order) {
+            case Order::OldestBlocked:
+            case Order::MiddleBlocked:
+                failures += check(planned && captured == planted[2] && queued_victims.empty() &&
+                                      executor.growth_priority_ == planted[blocked_lane]->id,
+                                  "pressure order: growth did not displace only the newest peer");
+                break;
+            case Order::NewestBlocked:
+                failures += check(!planned && !captured && queued_victims.empty() &&
+                                      executor.growth_priority_ == 0 &&
+                                      program.live_credits[3] == planted[2]->suspension_bytes,
+                                  "pressure order: the newest resident displaced an older peer");
+                break;
+            case Order::NewestRetryWaits:
+                // The peers' unused window slack cannot fund the retry, so none is reclaimed.
+                failures +=
+                    check(!planned && !captured && queued_victims.empty() && program.shrinks == 0 &&
+                              planted[0]->window_output_tokens == 3 &&
+                              planted[1]->window_output_tokens == 3 &&
+                              program.live_credits[3] == planted[2]->suspension_bytes,
+                          "pressure order: a waiting retry stripped its peers' windows");
+                break;
+            case Order::RecoveryPrefix:
+                // Neither peer alone frees the retry window; both together do, latest first.
+                failures +=
+                    check(planned && captured == planted[2] &&
+                              queued_victims == std::deque<std::shared_ptr<Request>>{planted[1]} &&
+                              executor.growth_priority_ == planted[0]->id,
+                          "pressure order: retry did not evacuate a latest-first prefix");
+                break;
+            case Order::RetainedReclaim:
+                // The grant fits once the retained lane's capture lands. Nothing is suspended
+                // and the peer keeps decoding while it waits.
+                failures += check(planned == false && !captured && queued_victims.empty() &&
+                                      executor.growth_priority_ == 0 &&
+                                      planted[0]->retained_reclaim_pending &&
+                                      program.retained_captures == 1 && program.retained(2) &&
+                                      executor.build_round_membership().size == 1,
+                                  "pressure order: a pending retained capture stalled its peers");
+                program.hold_ram_copies.store(false);
+                break;
+            case Order::None:
+                break;
+            }
+            executor.control_dirty_.store(true, std::memory_order_release);
+            executor.queue_cv_.notify_all();
+        }
+        for (const auto& request : planted) {
+            if (!request) continue;
+            std::unique_lock lock(request->mutex);
+            if (!request->cv.wait_for(lock, std::chrono::seconds(5),
+                                      [&] { return request->done; })) {
+                failures += check(false, "pressure order: a planted request did not finish");
+                continue;
+            }
+            const bool recovers =
+                recovery || (order == Order::NewestRetryWaits && request == planted[2]);
+            failures += check(
+                !request->error &&
+                    (recovers ? request->result.generated_token_ids ==
+                                        std::vector<TokenId>({15, 248069, 15, 6}) &&
+                                    request->result.finish_reason == FinishReason::StopToken &&
+                                    request->recovery.attempts == 1
+                              : request->result.generated_token_ids == ChunkedProgram::expected() &&
+                                    request->result.finish_reason == FinishReason::OutputLimit),
+                "pressure order: suspension lost, replayed or truncated output");
+        }
+        std::scoped_lock lock(executor.execution_mutex_);
+        const auto& ids = program.suspended_ids;
+        if (order == Order::RetainedReclaim) {
+            // Later pressure may still suspend; the planted conversation went to RAM first.
+            failures += check(program.retained_captures >= 1 && !program.retained(2),
+                              "pressure order: retained conversation was not captured and freed");
+        } else {
+            failures += check(!ids.empty() && ids.front() == 3 &&
+                                  std::find(ids.begin(), ids.end(), 1) == ids.end() &&
+                                  (!recovery || (ids == std::vector<std::uint64_t>{3, 2} &&
+                                                 program.resumes == 2 && program.starts == 6)),
+                              "pressure order: captures were not newest first or repeated a retry");
+        }
+        failures += check(program.no_live_image() && executor.completion_cohort_.empty() &&
+                              std::all_of(program.live_credits.begin(), program.live_credits.end(),
+                                          [](auto bytes) { return bytes == 0; }),
+                          "pressure order: live image, credit or cohort claim leaked");
+        return failures;
+    }
     if (program.partial_tool_probe) {
         const auto submit = [&] {
             auto input                    = thinking_input();
@@ -4142,6 +4390,33 @@ int run_chunked_pending_recovery(Frontend& frontend) {
     return ninfer::runtime::drive_scripted_recovery(executor);
 }
 
+int run_pressure_victim_order(Frontend& frontend) {
+    using Order  = ChunkedProgram::PressureOrder;
+    int failures = 0;
+    for (const auto order :
+         {Order::OldestBlocked, Order::MiddleBlocked, Order::NewestBlocked, Order::NewestRetryWaits,
+          Order::RecoveryPrefix, Order::RetainedReclaim}) {
+        const bool recovery = order == Order::RecoveryPrefix;
+        const bool retry    = recovery || order == Order::NewestRetryWaits;
+        ChunkedProgram program;
+        program.pressure_order         = order;
+        program.pending_recovery_probe = retry;
+        program.allow_shrink           = order == Order::NewestRetryWaits;
+        program.physical_concurrency   = 3;
+        program.physical_pages         = recovery ? 8 : 10;
+        program.hold_ram_copies.store(order == Order::RetainedReclaim);
+        program.initial_window = retry ? 5 : 3;
+        ProbeLoaded loaded{frontend};
+        ChunkedProbe instance{.program = &program, .loaded = &loaded};
+        auto engine                = engine_options();
+        engine.max_concurrency     = 3;
+        engine.generation_recovery = retry;
+        ninfer::runtime::ConcurrentExecutor<ChunkedProbe> executor(instance, ProbeDevice{}, engine);
+        failures += ninfer::runtime::drive_scripted_recovery(executor);
+    }
+    return failures;
+}
+
 int run_chunked_shutdown_and_partial_tool(Frontend& frontend) {
     int failures = 0;
     enum class Case { Shutdown, FailedCleanup, PartialTool };
@@ -4222,7 +4497,7 @@ int run_chunked_continuation(Frontend& frontend, bool paired, bool initial_ram_p
         const auto b = second->wait(nullptr, cancellation);
         if (b.finish_reason != FinishReason::OutputLimit ||
             b.generated_token_ids != ChunkedProgram::expected() || program.suspensions != 1 ||
-            program.resumes != 1 || program.blocked_single_rounds == 0) {
+            program.resumes != 1 || (!initial_ram_pressure && program.blocked_single_rounds != 0)) {
             std::cerr << "chunked diagnostic ram_pressure=" << initial_ram_pressure
                       << " starts=" << program.starts << " suspended=" << program.suspensions
                       << " resumed=" << program.resumes << " extensions=" << program.extensions
@@ -4236,8 +4511,10 @@ int run_chunked_continuation(Frontend& frontend, bool paired, bool initial_ram_p
                           "chunked: resumed continuation lost or replayed output");
         failures += check(program.suspensions == 1 && program.resumes == 1 && program.starts == 2,
                           "chunked: pressure did not suspend/resume directly without prefill");
-        failures += check(program.blocked_single_rounds != 0,
-                          "chunked: a single blocked lane prevented its peer from advancing");
+        // Without RAM pressure the latest peer's image is funded, so the blocked lane never
+        // waits a round for it.
+        failures += check(initial_ram_pressure || program.blocked_single_rounds == 0,
+                          "chunked: a blocked lane waited instead of suspending the latest peer");
         if (initial_ram_pressure) {
             failures +=
                 check(program.credit_rejections != 0 && program.smallest_admitted_window == 1,
@@ -4396,7 +4673,7 @@ int run_chunked_lifecycle(Frontend& frontend) {
     return failures;
 }
 
-int run_chunked_finite_ram_and_replacement(Frontend& frontend) {
+int run_chunked_finite_ram_and_queued(Frontend& frontend) {
     int failures = 0;
     for (const bool no_credit_fits : {false, true}) {
         ChunkedProgram program;
@@ -4423,8 +4700,8 @@ int run_chunked_finite_ram_and_replacement(Frontend& frontend) {
         };
         auto first  = submit(6);
         auto second = submit(6);
-        std::optional<decltype(first)> replacement;
-        if (!no_credit_fits) { replacement.emplace(submit(2)); }
+        std::optional<decltype(first)> queued;
+        if (!no_credit_fits) { queued.emplace(submit(2)); }
         program.peer_submitted.store(true);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         ninfer::CancellationView cancellation(
@@ -4434,12 +4711,12 @@ int run_chunked_finite_ram_and_replacement(Frontend& frontend) {
         failures += check(a.generated_token_ids == ChunkedProgram::expected() &&
                               b.generated_token_ids == ChunkedProgram::expected(),
                           "chunked finite RAM: escape drain lost a request or its continuation");
-        if (replacement) {
-            const auto c = replacement->wait(nullptr, cancellation);
+        if (queued) {
+            const auto c = queued->wait(nullptr, cancellation);
             failures += check(
                 c.generated_token_ids == std::vector<TokenId>({15, 22}) && program.starts == 3 &&
                     program.suspensions == 1 && program.resumes == 1,
-                "chunked replacement: queued short request did not use pressure-released lane");
+                "chunked queued: short request was lost or the suspended peer did not resume");
         } else {
             failures += check(
                 program.starts == 2 && program.credit_rejections != 0 && program.suspensions == 0 &&
@@ -4454,7 +4731,7 @@ int run_chunked_finite_ram_and_replacement(Frontend& frontend) {
     return failures;
 }
 
-int run_cohort_replacement_without_spare_ram(Frontend& frontend) {
+int run_cohort_admission_without_spare_ram(Frontend& frontend) {
     ChunkedProgram program;
     program.wait_for_queue           = true;
     program.physical_pages           = 10;
@@ -4480,25 +4757,26 @@ int run_cohort_replacement_without_spare_ram(Frontend& frontend) {
         return executor.submit(std::move(prompt), summary, 0.0, std::move(options),
                                ninfer::OutputDelivery::Streaming);
     };
-    auto first       = submit(6, 1);
-    auto blocked     = submit(6, 2);
-    auto replacement = submit(2, 3);
+    auto first   = submit(6, 1);
+    auto blocked = submit(6, 2);
+    auto queued  = submit(2, 3);
     program.peer_submitted.store(true);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     ninfer::CancellationView cancellation(
         [deadline] { return std::chrono::steady_clock::now() >= deadline; });
     const auto a = first.wait(nullptr, cancellation);
     const auto b = blocked.wait(nullptr, cancellation);
-    const auto c = replacement.wait(nullptr, cancellation);
+    const auto c = queued.wait(nullptr, cancellation);
     return check(a.generated_token_ids == ChunkedProgram::expected() &&
                      b.generated_token_ids == ChunkedProgram::expected() &&
                      c.generated_token_ids == std::vector<TokenId>({15, 22}) &&
-                     program.replacement_started_beside_peer && program.suspensions == 1 &&
-                     program.resumes == 1 && program.credit_attempts[3] == 0 &&
+                     program.third_started_beside_peer && program.suspensions == 0 &&
+                     program.resumes == 0 && program.credit_attempts[3] == 0 &&
                      program.no_live_image() &&
                      std::all_of(program.live_credits.begin(), program.live_credits.end(),
                                  [](auto bytes) { return bytes == 0; }),
-                 "cohort replacement: spare RAM was required despite reserved completion capacity");
+                 "cohort admission: spare RAM or a suspension was required despite completion "
+                 "capacity");
 }
 
 int run_chunked_active_window_metrics(Frontend& frontend) {
@@ -4506,7 +4784,7 @@ int run_chunked_active_window_metrics(Frontend& frontend) {
     for (const bool paired : {false, true}) {
         ChunkedProgram program;
         program.require_peer = paired;
-        program.metric_hold  = paired ? ChunkedProgram::MetricHold::SingleBlocked
+        program.metric_hold  = paired ? ChunkedProgram::MetricHold::SuspendedPeer
                                       : ChunkedProgram::MetricHold::Extension;
         ProbeLoaded loaded{frontend};
         ChunkedProbe instance{.program = &program, .loaded = &loaded};
@@ -4535,13 +4813,13 @@ int run_chunked_active_window_metrics(Frontend& frontend) {
         const auto active             = executor.runtime_stats();
         const auto granted_extensions = program.extensions;
         program.release_held_decode();
-        failures += check(reached && active.running_requests == (paired ? 2U : 1U),
+        failures += check(reached && active.running_requests == 1U,
                           "chunked metrics: observation did not hold an active continuation");
         if (paired) {
-            failures += check(
-                active.kv_growth_blocked_requests == 1 && active.decode_ready_requests == 1 &&
-                    active.kv_live_suspensions == 0,
-                "chunked metrics: growth-blocked transition was stale while a peer still decoded");
+            failures +=
+                check(active.kv_growth_blocked_requests == 0 && active.decode_ready_requests == 1 &&
+                          active.kv_suspended_requests == 1 && active.kv_live_suspensions == 1,
+                      "chunked metrics: suspension was stale while the older peer decoded alone");
         } else {
             failures += check(
                 active.kv_window_extensions == granted_extensions &&
@@ -5001,12 +5279,13 @@ int main(int argc, char** argv) {
         failures += run_chunked_continuation(frontend, true, true);
         failures += run_chunked_reasoning_boundary(frontend);
         failures += run_chunked_lifecycle(frontend);
-        failures += run_chunked_finite_ram_and_replacement(frontend);
-        failures += run_cohort_replacement_without_spare_ram(frontend);
+        failures += run_chunked_finite_ram_and_queued(frontend);
+        failures += run_cohort_admission_without_spare_ram(frontend);
         failures += run_chunked_active_window_metrics(frontend);
         failures += run_completion_cohort(frontend);
         failures += run_completion_recovery_envelope_gates(frontend);
         failures += run_chunked_pending_recovery(frontend);
+        failures += run_pressure_victim_order(frontend);
         failures += run_chunked_shutdown_and_partial_tool(frontend);
         failures += run_unused_window_reclamation(frontend);
         failures += run_reasoning_close_sampling(frontend);

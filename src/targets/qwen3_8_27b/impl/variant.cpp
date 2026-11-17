@@ -36,6 +36,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -1820,6 +1821,35 @@ std::vector<GraphExecutionProfile> Variant::mtp_graph_profiles(std::uint32_t cap
                                                                                              : 0U);
     }
     return profiles;
+}
+
+std::size_t Variant::mtp_graph_allowance_bytes(std::uint32_t capacity,
+                                               std::span<const std::uint32_t> captured_ks,
+                                               std::uint32_t concurrency, KvCacheFormat cache) {
+    constexpr std::size_t kMiB    = std::size_t{1} << 20U;
+    constexpr std::uint32_t never = kMaximumConcurrency + 1U;
+    // First batch whose exact-B executable takes 6 MiB instead of 4, by K. Fixed and adaptive
+    // captures of a K have identical executables. TQ's rotation launches push K2 and K3 one
+    // 2-MiB argument-pool step earlier (gfx1201, HIP 7.15.26333, per-executable trace,
+    // 2026-11-16).
+    constexpr std::array<std::uint32_t, maximum_mtp_draft_tokens> wide_executable_batch{
+        never, never, 12, 9, 7};
+    constexpr std::array<std::uint32_t, maximum_mtp_draft_tokens> tq_wide_executable_batch{
+        never, 16, 11, 9, 7};
+    const auto& wide =
+        cache == KvCacheFormat::TqK4V3 ? tq_wide_executable_batch : wide_executable_batch;
+    std::size_t bytes = 84U * kMiB;
+    for (const std::uint32_t k : captured_ks) {
+        if (k == 0U || k > maximum_mtp_draft_tokens) {
+            throw std::invalid_argument(
+                "MTP graph allowance has no calibration for this draft length");
+        }
+        const std::size_t profiles = mtp_graph_profiles(capacity, k).size();
+        for (std::uint32_t batch = 1; batch <= concurrency; ++batch) {
+            bytes += profiles * (batch >= wide[k - 1U] ? 6U : 4U) * kMiB;
+        }
+    }
+    return bytes;
 }
 
 std::vector<GraphExecutionProfile> Variant::dflash_graph_profiles(std::uint32_t capacity,

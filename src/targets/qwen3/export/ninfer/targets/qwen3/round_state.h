@@ -103,6 +103,7 @@ struct MtpDecodeIngress {
     // Nonzero for a row whose request reports token logprobs.
     std::array<std::int32_t, kMaximumConcurrency> logprob_rows{};
     std::array<ops::SamplingConfig, kMaximumConcurrency> sampling{};
+    ops::GdnDeferredFoldRows gdn_fold{};
 };
 
 struct MtpDecodeEgress {
@@ -300,7 +301,8 @@ struct MtpDecodeState {
     Tensor mtp_kv_table_rows;
     Tensor lanes;
     Tensor rope_deltas;
-    const ops::SamplingConfig* sampling = nullptr;
+    const ops::SamplingConfig* sampling      = nullptr;
+    const ops::GdnDeferredFoldRows* gdn_fold = nullptr;
     // Acceptance advances this private vector while ingress base_frontiers remains immutable for
     // the round-scoped Text/MTP segmented transaction cursors.
     Tensor updated_frontiers;
