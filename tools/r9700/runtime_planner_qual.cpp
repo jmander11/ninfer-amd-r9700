@@ -654,11 +654,11 @@ void qualify_host_mtp_graph_allowance() {
     // Includes singleton, the reproduced short-context failure, full
     // context profiles/split topologies, and all three independently captured Ks.
     for (const auto c :
-         {Case{64, 1, 3, false, 1, 64}, Case{1024, 1, 3, false, 3, 72},
-          Case{1024, 4, 5, false, 12, 108}, Case{262144, 1, 3, false, 11, 104},
-          Case{262144, 4, 5, false, 32, 188}, Case{262144, 4, 5, true, 108, 492},
-          Case{65536, 14, 3, false, 154, 742}, Case{65536, 14, 4, false, 112, 604},
-          Case{65536, 16, 5, false, 128, 716}, Case{262144, 16, 5, true, 432, 2170}}) {
+         {Case{64, 1, 3, false, 1, 88}, Case{1024, 1, 3, false, 3, 96},
+          Case{1024, 4, 5, false, 12, 132}, Case{262144, 1, 3, false, 11, 128},
+          Case{262144, 4, 5, false, 32, 212}, Case{262144, 4, 5, true, 108, 516},
+          Case{65536, 14, 3, false, 154, 766}, Case{65536, 14, 4, false, 112, 628},
+          Case{65536, 16, 5, false, 128, 740}, Case{262144, 16, 5, true, 432, 2194}}) {
         runtime::SequencePlanningInputs inputs{
             .weights_profile     = Variant::WeightsProfile::R9700Q4G64Evaluation,
             .capacity            = c.context,

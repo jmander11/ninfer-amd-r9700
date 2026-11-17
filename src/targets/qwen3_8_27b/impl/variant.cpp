@@ -1829,7 +1829,7 @@ std::size_t Variant::mtp_graph_allowance_bytes(std::uint32_t capacity,
     constexpr std::uint32_t never = kMaximumConcurrency + 1U;
     constexpr std::array<std::uint32_t, maximum_mtp_draft_tokens> wide_executable_batch{
         never, never, 12, 9, 8};
-    std::size_t bytes = 60U * kMiB;
+    std::size_t bytes = 84U * kMiB;
     for (const std::uint32_t k : captured_ks) {
         if (k == 0U || k > maximum_mtp_draft_tokens) {
             throw std::invalid_argument(
