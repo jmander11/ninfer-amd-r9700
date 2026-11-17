@@ -759,7 +759,7 @@ public:
         return {.save = 0.5, .load = 1.0, .h2d = 2.0};
     }
 
-    [[nodiscard]] bool kv_ram_copies_ready() const { return true; }
+    [[nodiscard]] virtual bool kv_ram_copies_ready() const { return true; }
 
     [[nodiscard]] bool kv_disk_restore_failed() const { return false; }
 
@@ -3249,7 +3249,13 @@ int run_integrity_failure(Frontend& frontend) {
               "integrity: failed Engine did not abort both active slots or admitted queued work");
     failures += check(program.resolved_rounds.load() == resolved_before,
                       "integrity: failed decode round reached the publication commit");
-    failures += check(executor.available(), "integrity: recovered Engine refused new requests");
+    bool unavailable = false;
+    try {
+        (void)submit(executor, 2);
+    } catch (const ninfer::RequestError& error) {
+        unavailable = error.kind() == ninfer::RequestErrorKind::Unavailable;
+    }
+    failures += check(unavailable, "integrity: failed Engine accepted another request");
 
     IntegrityFailureProgram clean;
     clean.lifecycle_retries = true;
@@ -3282,7 +3288,8 @@ public:
         MiddleBlocked,
         NewestBlocked,
         NewestRetryWaits,
-        RecoveryPrefix
+        RecoveryPrefix,
+        RetainedReclaim
     };
     PressureOrder pressure_order = PressureOrder::None;
 
@@ -3310,6 +3317,29 @@ public:
     [[nodiscard]] bool no_live_image() const { return saved_.empty(); }
 
     [[nodiscard]] bool no_owned_kv_pages() const { return used_pages() == 0; }
+
+    // A completed conversation left on a free lane, as reuse retention leaves it.
+    void plant_retained(std::uint32_t lane, std::uint32_t pages) {
+        pages_[lane]    = pages;
+        retained_[lane] = true;
+    }
+
+    [[nodiscard]] bool retained(std::uint32_t lane) const { return retained_[lane]; }
+
+    // Retained-lane captures land only once released, like in-flight D2H copies.
+    std::atomic<bool> hold_ram_copies{false};
+    std::uint32_t retained_captures = 0;
+
+    [[nodiscard]] bool kv_ram_copies_ready() const override { return !hold_ram_copies.load(); }
+
+    [[nodiscard]] bool capture_retained_lane(std::uint32_t lane, std::uint64_t* = nullptr,
+                                             bool = true, bool* deferred = nullptr,
+                                             std::span<const std::uint64_t> = {}) override {
+        if (deferred != nullptr) *deferred = false;
+        if (!retained_[lane]) return false;
+        ++retained_captures;
+        return true;
+    }
 
     bool require_peer                        = false;
     bool wait_for_queue                      = false;
@@ -3980,16 +4010,20 @@ int drive_scripted_recovery<ChunkedProbe>(ConcurrentExecutor<ChunkedProbe>& exec
     std::array<std::shared_ptr<Request>, 2> requests;
     int failures = 0;
     if (program.pressure_order != ChunkedProgram::PressureOrder::None) {
-        using Order                      = ChunkedProgram::PressureOrder;
-        const auto order                 = program.pressure_order;
-        const bool recovery              = order == Order::RecoveryPrefix;
-        const std::uint32_t blocked_lane = order == Order::OldestBlocked   ? 0
-                                           : order == Order::MiddleBlocked ? 1
-                                                                           : 2;
+        using Order         = ChunkedProgram::PressureOrder;
+        const auto order    = program.pressure_order;
+        const bool recovery = order == Order::RecoveryPrefix;
+        const std::uint32_t blocked_lane =
+            order == Order::OldestBlocked || order == Order::RetainedReclaim ? 0
+            : order == Order::MiddleBlocked                                  ? 1
+                                                                             : 2;
         std::array<std::shared_ptr<Request>, 3> planted;
+        // RetainedReclaim keeps lane 2 as a retained conversation instead of a resident.
+        const std::uint32_t residents = order == Order::RetainedReclaim ? 2 : 3;
         {
             std::scoped_lock lock(executor.execution_mutex_);
-            for (std::uint32_t lane = 0; lane < planted.size(); ++lane) {
+            if (order == Order::RetainedReclaim) program.plant_retained(2, 4);
+            for (std::uint32_t lane = 0; lane < residents; ++lane) {
                 const bool recovers = recovery || (order == Order::NewestRetryWaits && lane == 2);
                 auto input          = thinking_input();
                 input.options.enable_thinking = recovers;
@@ -4048,7 +4082,7 @@ int drive_scripted_recovery<ChunkedProbe>(ConcurrentExecutor<ChunkedProbe>& exec
                                       "pressure order: the newest retry fit beside its peers");
                 }
                 executor.refresh_execution_windows();
-                for (std::uint32_t lane = 0; lane < planted.size(); ++lane) {
+                for (std::uint32_t lane = 0; lane < residents; ++lane) {
                     failures += check(planted[lane]->growth_blocked == (lane == blocked_lane),
                                       "pressure order: planted growth state was not as intended");
                 }
@@ -4087,6 +4121,17 @@ int drive_scripted_recovery<ChunkedProbe>(ConcurrentExecutor<ChunkedProbe>& exec
                               executor.growth_priority_ == planted[0]->id,
                           "pressure order: retry did not evacuate a latest-first prefix");
                 break;
+            case Order::RetainedReclaim:
+                // The grant fits once the retained lane's capture lands. Nothing is suspended
+                // and the peer keeps decoding while it waits.
+                failures += check(planned == false && !captured && queued_victims.empty() &&
+                                      executor.growth_priority_ == 0 &&
+                                      planted[0]->retained_reclaim_pending &&
+                                      program.retained_captures == 1 && program.retained(2) &&
+                                      executor.build_round_membership().size == 1,
+                                  "pressure order: a pending retained capture stalled its peers");
+                program.hold_ram_copies.store(false);
+                break;
             case Order::None:
                 break;
             }
@@ -4094,6 +4139,7 @@ int drive_scripted_recovery<ChunkedProbe>(ConcurrentExecutor<ChunkedProbe>& exec
             executor.queue_cv_.notify_all();
         }
         for (const auto& request : planted) {
+            if (!request) continue;
             std::unique_lock lock(request->mutex);
             if (!request->cv.wait_for(lock, std::chrono::seconds(5),
                                       [&] { return request->done; })) {
@@ -4114,11 +4160,17 @@ int drive_scripted_recovery<ChunkedProbe>(ConcurrentExecutor<ChunkedProbe>& exec
         }
         std::scoped_lock lock(executor.execution_mutex_);
         const auto& ids = program.suspended_ids;
-        failures += check(!ids.empty() && ids.front() == 3 &&
-                              std::find(ids.begin(), ids.end(), 1) == ids.end() &&
-                              (!recovery || (ids == std::vector<std::uint64_t>{3, 2} &&
-                                             program.resumes == 2 && program.starts == 6)),
-                          "pressure order: captures were not newest first or repeated a retry");
+        if (order == Order::RetainedReclaim) {
+            // Later pressure may still suspend; the planted conversation went to RAM first.
+            failures += check(program.retained_captures >= 1 && !program.retained(2),
+                              "pressure order: retained conversation was not captured and freed");
+        } else {
+            failures += check(!ids.empty() && ids.front() == 3 &&
+                                  std::find(ids.begin(), ids.end(), 1) == ids.end() &&
+                                  (!recovery || (ids == std::vector<std::uint64_t>{3, 2} &&
+                                                 program.resumes == 2 && program.starts == 6)),
+                              "pressure order: captures were not newest first or repeated a retry");
+        }
         failures += check(program.no_live_image() && executor.completion_cohort_.empty() &&
                               std::all_of(program.live_credits.begin(), program.live_credits.end(),
                                           [](auto bytes) { return bytes == 0; }),
@@ -4341,8 +4393,9 @@ int run_chunked_pending_recovery(Frontend& frontend) {
 int run_pressure_victim_order(Frontend& frontend) {
     using Order  = ChunkedProgram::PressureOrder;
     int failures = 0;
-    for (const auto order : {Order::OldestBlocked, Order::MiddleBlocked, Order::NewestBlocked,
-                             Order::NewestRetryWaits, Order::RecoveryPrefix}) {
+    for (const auto order :
+         {Order::OldestBlocked, Order::MiddleBlocked, Order::NewestBlocked, Order::NewestRetryWaits,
+          Order::RecoveryPrefix, Order::RetainedReclaim}) {
         const bool recovery = order == Order::RecoveryPrefix;
         const bool retry    = recovery || order == Order::NewestRetryWaits;
         ChunkedProgram program;
@@ -4351,7 +4404,8 @@ int run_pressure_victim_order(Frontend& frontend) {
         program.allow_shrink           = order == Order::NewestRetryWaits;
         program.physical_concurrency   = 3;
         program.physical_pages         = recovery ? 8 : 10;
-        program.initial_window         = retry ? 5 : 3;
+        program.hold_ram_copies.store(order == Order::RetainedReclaim);
+        program.initial_window = retry ? 5 : 3;
         ProbeLoaded loaded{frontend};
         ChunkedProbe instance{.program = &program, .loaded = &loaded};
         auto engine                = engine_options();
@@ -5086,10 +5140,7 @@ public:
 
     bool wait_for_prefill() { return wait_for(prefill_entered_); }
 
-    bool shutdown_entered() {
-        std::lock_guard lock(mutex_);
-        return shutdown_entered_;
-    }
+    bool wait_for_shutdown() { return wait_for(shutdown_entered_); }
 
     void release_prefill() { release(release_prefill_); }
 
@@ -5149,18 +5200,29 @@ int run_executor_availability(Frontend& frontend) {
         if (fault != Fault::StableDecodeAllocation) { queued.emplace(submit()); }
         failures += check(executor.available(), "busy executor was unavailable");
         program.release_prefill();
-        program.release_shutdown();
+        if (fault != Fault::RequestLocal) {
+            failures += check(program.wait_for_shutdown(), "fatal worker did not clean up tiers");
+            failures +=
+                check(!executor.available(), "fatal worker stayed available during cleanup");
+            bool rejected = false;
+            try {
+                auto unexpected = submit();
+            } catch (const ninfer::RequestError& error) {
+                rejected = error.kind() == ninfer::RequestErrorKind::Unavailable;
+            }
+            failures += check(rejected, "failed worker accepted a request during tier cleanup");
+            program.release_shutdown();
+        }
         bool primary_preserved = false;
         try {
             (void)first.wait(nullptr, {});
         } catch (const std::bad_alloc&) {
-            primary_preserved =
-                fault == Fault::DecodeAllocation || fault == Fault::StableDecodeAllocation;
+            primary_preserved = fault == Fault::PrefillAllocation ||
+                                fault == Fault::DecodeAllocation ||
+                                fault == Fault::StableDecodeAllocation;
         } catch (const ninfer::RequestError& error) {
-            primary_preserved = (fault == Fault::RequestLocal &&
-                                 error.kind() == ninfer::RequestErrorKind::ContextLengthExceeded) ||
-                                (fault == Fault::PrefillAllocation &&
-                                 error.kind() == ninfer::RequestErrorKind::Overloaded);
+            primary_preserved = fault == Fault::RequestLocal &&
+                                error.kind() == ninfer::RequestErrorKind::ContextLengthExceeded;
         } catch (const std::logic_error& error) {
             primary_preserved = fault == Fault::PrefillInvariant &&
                                 std::string(error.what()) == "availability invariant failure";
@@ -5171,10 +5233,10 @@ int run_executor_availability(Frontend& frontend) {
             try {
                 const auto result = queued->wait(nullptr, {});
                 queued_completed =
-                    (fault == Fault::RequestLocal || fault == Fault::PrefillAllocation) &&
-                    result.finish_reason == FinishReason::StopToken;
+                    fault == Fault::RequestLocal && result.finish_reason == FinishReason::StopToken;
             } catch (const std::bad_alloc&) {
-                queued_completed = fault == Fault::DecodeAllocation;
+                queued_completed =
+                    fault == Fault::PrefillAllocation || fault == Fault::DecodeAllocation;
             } catch (const std::logic_error& error) {
                 queued_completed = fault == Fault::PrefillInvariant &&
                                    std::string(error.what()) == "availability invariant failure";
@@ -5185,15 +5247,8 @@ int run_executor_availability(Frontend& frontend) {
             failures += check(program.decode_calls == 2,
                               "stable decode fault did not follow a successful round");
         }
-        failures += check(executor.available() && !program.shutdown_entered(),
-                          "worker failure took the Engine down or shut its KV tiers");
-        if (fault == Fault::PrefillAllocation || fault == Fault::PrefillInvariant) {
-            bool served = false;
-            try {
-                served = submit().wait(nullptr, {}).finish_reason == FinishReason::StopToken;
-            } catch (...) {}
-            failures += check(served, "recovered worker did not serve a later request");
-        }
+        failures += check(executor.available() == (fault == Fault::RequestLocal),
+                          "terminal worker availability did not match error ownership");
     }
     return failures;
 }

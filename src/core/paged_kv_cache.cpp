@@ -1,5 +1,6 @@
 #include "core/paged_kv_cache.h"
 
+#include "core/capacity_exhausted.h"
 #include "core/device.h"
 
 #include <algorithm>
@@ -11,6 +12,20 @@
 #include <utility>
 
 namespace ninfer {
+
+namespace {
+
+[[noreturn]] void throw_pool_exhausted(const PagedKVPool& pool, std::uint32_t old_pages,
+                                       std::uint32_t new_pages) {
+    throw CapacityExhausted(
+        "paged KV entitlement " + std::to_string(old_pages) + " -> " + std::to_string(new_pages) +
+        " pages refused: " + std::to_string(pool.entitled_pages()) + " of " +
+        std::to_string(pool.page_group_count()) + " page groups entitled, logical capacity " +
+        std::to_string(pool.logical_page_capacity()));
+}
+
+} // namespace
+
 namespace {
 
 std::int32_t checked_i32(std::uint32_t value, const char* label) {
@@ -186,7 +201,7 @@ bool PagedKVPool::can_replace_entitlement(std::uint32_t old_pages,
 }
 
 PagedKVAllocation PagedKVPool::reserve(std::uint32_t page_entitlement) {
-    if (!can_reserve(page_entitlement)) { throw std::bad_alloc(); }
+    if (!can_reserve(page_entitlement)) { throw_pool_exhausted(*this, 0, page_entitlement); }
     PagedKVAllocation allocation(*this, page_entitlement);
     add_entitlement(page_entitlement);
     return allocation;
@@ -366,7 +381,9 @@ void PagedKVAllocation::set_page_entitlement(std::uint32_t pages) {
     if (!valid() || pages < mapped_page_count()) {
         throw std::invalid_argument("Paged KV entitlement is smaller than mapped pages");
     }
-    if (!pool_->can_replace_entitlement(page_entitlement_, pages)) { throw std::bad_alloc(); }
+    if (!pool_->can_replace_entitlement(page_entitlement_, pages)) {
+        throw_pool_exhausted(*pool_, page_entitlement_, pages);
+    }
     page_ids_.reserve(pages);
     pool_->replace_entitlement(page_entitlement_, pages);
     page_entitlement_ = pages;
@@ -464,7 +481,7 @@ reserve_paged_kv_bundle(std::span<const PagedKVReservation> reservations) {
     validate_distinct_pools(reservations);
     for (const PagedKVReservation& reservation : reservations) {
         if (!reservation.pool->can_reserve(reservation.page_entitlement)) {
-            throw std::bad_alloc();
+            throw_pool_exhausted(*reservation.pool, 0, reservation.page_entitlement);
         }
     }
 
@@ -494,7 +511,8 @@ void resize_paged_kv_bundle(std::span<const PagedKVResize> changes) {
         }
         if (!change.allocation->pool_->can_replace_entitlement(change.allocation->page_entitlement_,
                                                                change.page_entitlement)) {
-            throw std::bad_alloc();
+            throw_pool_exhausted(*change.allocation->pool_, change.allocation->page_entitlement_,
+                                 change.page_entitlement);
         }
     }
     // Complete every potentially throwing host allocation before changing any pool accounting.

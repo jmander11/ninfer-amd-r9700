@@ -19,6 +19,7 @@
 #include "ninfer/ops/speculative_round.h"
 
 #include "core/arena.h"
+#include "core/capacity_exhausted.h"
 #include "core/device.h"
 #include "core/dtype.h"
 #include "core/roctx.h"
@@ -805,6 +806,9 @@ bool ProgramImplCore::grant_window(std::uint32_t lane, const runtime::ExecutionW
     try {
         resize_sequence_kv_entitlement(sequence, window.admission.main_kv_pages,
                                        window.admission.backend_kv_pages);
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         // The bundle reserves every host page vector before committing any entitlement.
         return false;
@@ -1020,6 +1024,9 @@ bool ProgramImplCore::start_resume(std::uint32_t lane, std::uint64_t owner,
         saved.lane                         = lane;
         saved.phase                        = SuspendedRequest::Phase::Restoring;
         return true;
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         // Fence readers before releasing a partial destination; the source remains parked.
         device.synchronize_all();
@@ -2346,6 +2353,9 @@ void ProgramImplCore::fork_retained_lane(std::uint32_t destination, std::uint32_
         }
         to.deferred_fold_columns = 0;
         to.fork_initialized      = true;
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         device.synchronize_all();
         clear_lane(to, requests[destination]);
@@ -3496,6 +3506,9 @@ void ProgramImplCore::restore_ram_entry(std::uint32_t lane, std::uint64_t entry_
                 sequence.rewrite_checkpoint = {};
             }
         }
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         // Partial cache H2D must finish before its destination pages are released.
         // A HIP failure remains fatal; only optional host metadata is retried.
@@ -3741,6 +3754,9 @@ void ProgramImplCore::restore_disk_entry(std::uint32_t lane, std::uint64_t entry
                 sequence.rewrite_checkpoint = {};
             }
         }
+    } catch (const CapacityExhausted&) {
+        // The pool was checked above; a refusal is an accounting fault.
+        throw;
     } catch (const std::bad_alloc&) {
         pending_disk_checkpoint_lane_.reset();
         // restore_device drains any unreturned ticket on setup failure. A live

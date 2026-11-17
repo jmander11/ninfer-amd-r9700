@@ -23,6 +23,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <exception>
 #include <future>
@@ -660,7 +661,9 @@ private:
         std::uint32_t window_budget_origin = 0;
         std::size_t suspension_bytes       = 0;
         bool growth_blocked                = false;
-        bool recovery_waiting_resources    = false;
+        // Growth waits for retained lanes' RAM captures; the pressure plan leaves it alone.
+        bool retained_reclaim_pending   = false;
+        bool recovery_waiting_resources = false;
         ExecutionWindow recovery_window;
         std::uint32_t suspension_count  = 0;
         std::uint32_t resumed_at_output = 0;
@@ -753,6 +756,8 @@ private:
         bool needs_prefill       = false;
         // The resident checkpoint restore was offered to the copy stream (at most once).
         bool checkpoint_prestaged = false;
+        // start_prefill_lane was entered; the lane's resident state may have changed.
+        bool prefill_attempted = false;
         // Set for a generation-recovery retry: its lane and output stay with the retry,
         // so a failed host restore replans or cold-prefills this lane from the base plan.
         std::optional<BasePlan> recovery_base;
@@ -1454,8 +1459,29 @@ private:
                                                     request->id, summary.suspension_bytes))) {
                 request->recovery_waiting_resources = true;
                 request->growth_blocked             = true;
+                request->retained_reclaim_pending   = false;
                 return;
             }
+            // Free retained lanes still hold pool pages the accounting above does not see:
+            // capture and release them before the retry reserves, or wait for their copies.
+            const auto reclaim = reclaim_retained_kv(lane, summary.admission, false,
+                                                     build_round_membership().empty());
+            if (reclaim != RetainedReclaim::Fits) {
+                if (reclaim == RetainedReclaim::Short && !copy_hold_) {
+                    throw std::logic_error(
+                        "retained lanes cannot free KV the scheduler accounted as available");
+                }
+                // The live image keeps its current credit while the retry waits.
+                if (!request->completion_member) {
+                    (void)instance_.program->reserve_suspension_credit(request->id,
+                                                                       request->suspension_bytes);
+                }
+                request->recovery_waiting_resources = true;
+                request->growth_blocked             = true;
+                request->retained_reclaim_pending   = true;
+                return;
+            }
+            request->retained_reclaim_pending   = false;
             request->recovery_waiting_resources = false;
             if (growth_priority_ == request->id) growth_priority_ = 0;
             request->growth_blocked       = false;
@@ -2096,8 +2122,10 @@ private:
         return std::find(victims.begin(), victims.end(), lane) != victims.end();
     }
 
+    // may_block is set when no other lane can decode, so capturing and waiting for the copies
+    // stalls nothing; otherwise captures that would block are deferred and the caller retries.
     RetainedReclaim reclaim_retained_kv(std::uint32_t lane, const AdmissionResources& resources,
-                                        bool vacate) {
+                                        bool vacate, bool may_block) {
         std::array<std::uint32_t, kMaximumConcurrency> victims{};
         std::size_t count = 0;
         if (vacate && instance_.program->has_retained_lane(lane)) victims[count++] = lane;
@@ -2116,18 +2144,24 @@ private:
             if (!victim) return RetainedReclaim::Short;
             victims[count++] = *victim;
         }
+        if (count == 0) return RetainedReclaim::Fits;
         bool captured = true;
         for (const std::uint32_t victim : std::span(victims).first(count)) {
             if (reclaim_capture_versions_[victim] == lane_plan_versions_[victim] + 1) continue;
             bool deferred = false;
-            (void)instance_.program->capture_retained_lane(victim, nullptr, false, &deferred, {});
+            (void)instance_.program->capture_retained_lane(victim, nullptr, may_block, &deferred,
+                                                           {});
             if (deferred) {
                 captured = false;
                 continue;
             }
             reclaim_capture_versions_[victim] = lane_plan_versions_[victim] + 1;
         }
-        if (!captured || !instance_.program->kv_ram_copies_ready()) return RetainedReclaim::Pending;
+        if (!captured) return RetainedReclaim::Pending;
+        if (!instance_.program->kv_ram_copies_ready()) {
+            if (!may_block) return RetainedReclaim::Pending;
+            instance_.program->wait_kv_ram_copies();
+        }
         for (const std::uint32_t victim : std::span(victims).first(count)) {
             instance_.program->evict_retained_lane(victim);
             invalidate_lane_plans(victim);
@@ -2146,13 +2180,15 @@ private:
                        request->recovery_waiting_resources;
             }))
             return;
-        bool changed    = false;
+        bool changed = false;
+        // Returns true while the grant waits for retained lanes' RAM captures to land.
         const auto grow = [&](const std::shared_ptr<Request>& request) {
-            if (!request || !request->decode_ready || request->recovery_pending) return;
-            const bool was_blocked  = request->growth_blocked;
-            request->growth_blocked = window_remaining(*request) == 0;
-            changed                 = changed || was_blocked != request->growth_blocked;
-            if (!request->growth_blocked) return;
+            if (!request || !request->decode_ready || request->recovery_pending) return false;
+            request->retained_reclaim_pending = false;
+            const bool was_blocked            = request->growth_blocked;
+            request->growth_blocked           = window_remaining(*request) == 0;
+            changed                           = changed || was_blocked != request->growth_blocked;
+            if (!request->growth_blocked) return false;
             const auto lane      = *request->lane;
             const auto consumed  = window_consumed(*request);
             const auto remaining = request->budget->remaining();
@@ -2165,44 +2201,62 @@ private:
                 }
                 bool granted = instance_.program->grant_window(lane, window);
                 if (!granted) {
-                    const auto reclaim = reclaim_retained_kv(lane, window.admission, false);
+                    const auto reclaim = reclaim_retained_kv(lane, window.admission, false,
+                                                             build_round_membership().empty());
                     if (reclaim == RetainedReclaim::Pending) {
+                        request->retained_reclaim_pending = true;
                         if (!request->completion_member) {
                             (void)instance_.program->reserve_suspension_credit(
                                 request->id, request->suspension_bytes);
                         }
-                        return;
+                        return true;
+                    }
+                    // The accounting fits but retained lanes cannot free the pages. That is
+                    // transient only while a copy-hold keeps victims mapped; otherwise it is an
+                    // accounting fault. No victim helps, so the plan must not take this lane.
+                    if (reclaim == RetainedReclaim::Short) {
+                        if (!copy_hold_) {
+                            throw std::logic_error("retained lanes cannot free KV the scheduler "
+                                                   "accounted as available");
+                        }
+                        request->retained_reclaim_pending = true;
                     }
                     if (reclaim == RetainedReclaim::Fits)
                         granted = instance_.program->grant_window(lane, window);
                 }
                 if (granted) {
-                    request->window_output_tokens = window.output_tokens;
-                    request->admission_resources  = window.admission;
-                    request->suspension_bytes     = window.suspension_bytes;
-                    request->growth_blocked       = false;
+                    request->retained_reclaim_pending = false;
+                    request->window_output_tokens     = window.output_tokens;
+                    request->admission_resources      = window.admission;
+                    request->suspension_bytes         = window.suspension_bytes;
+                    request->growth_blocked           = false;
                     ++cumulative_stats_.kv_window_extensions;
                     changed = true;
-                    return;
+                    return false;
                 }
                 if (!request->completion_member) {
                     (void)instance_.program->reserve_suspension_credit(request->id,
                                                                        request->suspension_bytes);
                 }
             }
+            return false;
         };
         if (growth_priority_ != 0) {
             for (const auto& request : slots_) {
-                if (request && request->id == growth_priority_) grow(request);
+                // Capacity released for this recipient stays held until its captures land.
+                if (request && request->id == growth_priority_ && grow(request)) {
+                    if (changed) publish_runtime_stats();
+                    return;
+                }
             }
             growth_priority_ = 0;
         }
         // Protected members consume growth first; backed peers can evacuate into secured RAM.
         for (const auto& request : slots_) {
-            if (request && request->completion_member) grow(request);
+            if (request && request->completion_member) (void)grow(request);
         }
         for (const auto& request : slots_) {
-            if (request && !request->completion_member) grow(request);
+            if (request && !request->completion_member) (void)grow(request);
         }
         // Stable decode rounds do not take the stats mutex. Publish only a window grant or
         // blocked-state transition, before the resulting decode membership can execute.
@@ -2458,8 +2512,9 @@ private:
             }
             if (!target) target = empty;
             if (!target) return false;
-            const auto lane    = *target;
-            const auto reclaim = reclaim_retained_kv(lane, window.admission, true);
+            const auto lane = *target;
+            const auto reclaim =
+                reclaim_retained_kv(lane, window.admission, true, build_round_membership().empty());
             if (reclaim == RetainedReclaim::Pending) return false;
             if (reclaim == RetainedReclaim::Short) continue;
             const bool claimed = joins_cohort && !request->completion_member;
@@ -2601,6 +2656,13 @@ private:
             pressure_victims_.pop_front();
             if (begin_live_suspension(victim)) return true;
         }
+        // Capacity already released for a recipient stays with it while its captures land.
+        if (growth_priority_ != 0 &&
+            std::any_of(slots_.begin(), slots_.end(), [&](const auto& request) {
+                return request && request->id == growth_priority_ &&
+                       request->retained_reclaim_pending;
+            }))
+            return false;
         kv_pressure_.observe(pressure_snapshot(), !build_round_membership().empty());
         if (!kv_pressure_.pressure_needed()) return false;
         std::vector<KvPressureRequest> resident;
@@ -2615,7 +2677,8 @@ private:
         std::size_t recipient_index = requests.size();
         for (std::size_t i = 0; i < requests.size(); ++i) {
             const auto& request = requests[i];
-            if (!request->growth_blocked) continue;
+            // A grant waiting for retained lanes' RAM copies already fits; peers keep decoding.
+            if (!request->growth_blocked || request->retained_reclaim_pending) continue;
             if (recipient_index == requests.size()) {
                 recipient_index = i;
                 continue;
@@ -3356,7 +3419,12 @@ private:
             return AdmissionProgress::ControlProgress;
         }
         const bool replan = hold.replan_restore;
-        instance_.program->abort_lane(lane);
+        // A lane reused in place that nothing has restored into or started on still holds its
+        // retained conversation; keep it rather than discard it uncaptured.
+        if (hold.restored || hold.checkpoint_prestaged || hold.prefill_attempted ||
+            !instance_.program->has_retained_lane(lane)) {
+            instance_.program->abort_lane(lane);
+        }
         copy_hold_.reset();
         slots_[lane].reset();
         invalidate_lane_plans(lane);
@@ -3412,19 +3480,15 @@ private:
                 hold.victims_evicted = true;
             }
 
-            for (;;) {
-                const auto reclaim =
-                    reclaim_retained_kv(lane, hold.plan.summary().admission, false);
-                if (reclaim == RetainedReclaim::Fits) break;
-                if (reclaim == RetainedReclaim::Short) {
-                    return fail_host_restore(membership_empty,
-                                             std::make_exception_ptr(CacheRestoreFailure(
-                                                 "admission KV entitlement no longer fits",
-                                                 CacheRestoreFailureKind::StalePlan)));
-                }
-                if (!membership_empty) { return AdmissionProgress::CopyHold; }
-                instance_.program->wait_kv_ram_copies();
+            const auto reclaim =
+                reclaim_retained_kv(lane, hold.plan.summary().admission, false, membership_empty);
+            if (reclaim == RetainedReclaim::Short) {
+                return fail_host_restore(membership_empty,
+                                         std::make_exception_ptr(CacheRestoreFailure(
+                                             "admission KV entitlement no longer fits",
+                                             CacheRestoreFailureKind::StalePlan)));
             }
+            if (reclaim == RetainedReclaim::Pending) { return AdmissionProgress::CopyHold; }
 
             if (hold.fork_source && !hold.restored) {
                 if (lane_plan_versions_[*hold.fork_source] != hold.fork_source_version) {
@@ -3485,6 +3549,7 @@ private:
                 transient     = instance_.request_memory.region();
             }
             end_copy_hold(request);
+            hold.prefill_attempted        = true;
             const auto prefill_started    = Clock::now();
             const PrefillStepResult first = instance_.program->start_prefill_lane(
                 lane, std::move(request->prompt), std::move(hold.plan), transient, &request->output,
@@ -3534,12 +3599,6 @@ private:
                     [&] { instance_.program->release_disk_entry(disk_entry_id); });
             }
         }
-        try {
-            std::rethrow_exception(error);
-        } catch (const std::bad_alloc&) {
-            error = std::make_exception_ptr(RequestError(
-                RequestErrorKind::Overloaded, "memory for this request's KV state is unavailable"));
-        } catch (...) {}
         if (!fail_admitted_request(request, lane, error)) { std::rethrow_exception(error); }
         return AdmissionProgress::ControlProgress;
     }
@@ -4174,6 +4233,64 @@ private:
         }
     }
 
+    // An Engine-fatal failure records the scheduler and KV-pool state it was raised from, so an
+    // accounting fault (a reservation the scheduler had proven to fit) can be traced.
+    void log_fatal_state(const std::exception_ptr& error) const noexcept {
+        try {
+            std::string what = "unknown exception";
+            try {
+                std::rethrow_exception(error);
+            } catch (const std::exception& failure) {
+                what = failure.what();
+            } catch (...) { // NOLINT(bugprone-empty-catch): non-std failure keeps default text
+            }
+            std::fprintf(stderr, "ninfer: Engine-fatal worker failure: %s\n", what.c_str());
+            const auto pools      = instance_.program->kv_gpu_snapshot();
+            const auto print_pool = [](const char* name, const auto& pool) {
+                std::fprintf(stderr, "  kv %s: groups=%u entitled=%u mapped=%u free=%u\n", name,
+                             pool.page_group_count, pool.entitled_pages, pool.mapped_pages,
+                             pool.free_pages);
+            };
+            print_pool("main", pools.main);
+            print_pool("spec", pools.spec);
+            std::fprintf(
+                stderr,
+                "  capacity lanes=%u main=%llu backend=%llu prefill_lane=%d "
+                "copy_hold_lane=%d live_transfer=%llu suspended=%zu victims=%zu "
+                "growth_priority=%llu\n",
+                admission_capacity_.active_lanes,
+                static_cast<unsigned long long>(admission_capacity_.main_kv_pages),
+                static_cast<unsigned long long>(admission_capacity_.backend_kv_pages),
+                prefill_lane_ ? static_cast<int>(*prefill_lane_) : -1,
+                copy_hold_ ? static_cast<int>(copy_hold_->lane) : -1,
+                static_cast<unsigned long long>(live_transfer_ ? live_transfer_->request->id : 0),
+                suspended_.size(), pressure_victims_.size(),
+                static_cast<unsigned long long>(growth_priority_));
+            for (std::uint32_t lane = 0; lane < max_concurrency_; ++lane) {
+                const auto& request = slots_[lane];
+                if (!request) {
+                    std::fprintf(stderr, "  lane %u: free retained=%d\n", lane,
+                                 instance_.program->has_retained_lane(lane) ? 1 : 0);
+                    continue;
+                }
+                std::fprintf(
+                    stderr,
+                    "  lane %u: id=%llu order=%llu ready=%d blocked=%d reclaim=%d recovery=%d/%d "
+                    "member=%d window=%u consumed=%u remaining=%u main=%llu backend=%llu\n",
+                    lane, static_cast<unsigned long long>(request->id),
+                    static_cast<unsigned long long>(request->queue_order),
+                    request->decode_ready ? 1 : 0, request->growth_blocked ? 1 : 0,
+                    request->retained_reclaim_pending ? 1 : 0, request->recovery_pending ? 1 : 0,
+                    request->recovery_waiting_resources ? 1 : 0, request->completion_member ? 1 : 0,
+                    request->window_output_tokens, window_consumed(*request),
+                    request->budget ? request->budget->remaining() : 0,
+                    static_cast<unsigned long long>(request->admission_resources.main_kv_pages),
+                    static_cast<unsigned long long>(request->admission_resources.backend_kv_pages));
+            }
+            // NOLINTNEXTLINE(bugprone-empty-catch): diagnostics must not mask the failure
+        } catch (...) {}
+    }
+
     void fail_executor(const std::exception_ptr& error) noexcept {
         {
             std::lock_guard lock(queue_mutex_);
@@ -4181,6 +4298,7 @@ private:
         }
         {
             std::scoped_lock execution_lock(execution_mutex_);
+            log_fatal_state(error);
             drain_copy_hold_before_abort();
             detail::run_secondary_cleanup(
                 [&] { instance_.program->shutdown_kv_tiers(load_progress_); });
@@ -4188,40 +4306,12 @@ private:
         fail_all(error);
     }
 
-    bool recover_executor(const std::exception_ptr& error) noexcept {
-        fail_all(error, false);
-        bool clean = false;
-        {
-            std::scoped_lock execution_lock(execution_mutex_);
-            detail::run_secondary_cleanup([&] { instance_.program->synchronize_all(); });
-            for (std::uint32_t lane = 0; lane < max_concurrency_; ++lane) {
-                instance_.program->evict_retained_lane(lane);
-                invalidate_lane_plans(lane);
-            }
-            completion_cohort_.clear();
-            recovery_queue_.clear();
-            growth_priority_    = 0;
-            window_head_id_     = 0;
-            window_head_bypass_ = 0;
-            const auto pools    = instance_.program->kv_gpu_snapshot();
-            clean               = pools.main.entitled_pages == 0 && pools.main.mapped_pages == 0 &&
-                                  pools.spec.entitled_pages == 0 && pools.spec.mapped_pages == 0;
-            detail::run_secondary_cleanup([&] { publish_runtime_stats(); });
-        }
-        if (!clean) {
-            fail_executor(error);
-            return false;
-        }
-        signal_control();
-        return true;
-    }
-
-    void fail_all(const std::exception_ptr& error, bool permanent = true) noexcept {
+    void fail_all(const std::exception_ptr& error) noexcept {
         std::scoped_lock execution_lock(execution_mutex_);
         std::vector<std::shared_ptr<Request>> pending;
         {
             std::lock_guard lock(queue_mutex_);
-            failed_ = failed_ || permanent;
+            failed_ = true;
             pending.assign(pending_.begin(), pending_.end());
             pending_.clear();
             published_waiting_requests_.store(0, std::memory_order_relaxed);
@@ -4296,9 +4386,8 @@ private:
                     }
                     stable_decode_epoch = false;
                 } catch (...) {
-                    if (!recover_executor(std::current_exception())) return;
-                    stable_decode_epoch = false;
-                    continue;
+                    fail_executor(std::current_exception());
+                    return;
                 }
             }
             stable_decode_epoch = false;
@@ -4492,8 +4581,8 @@ private:
                     continue;
                 }
             } catch (...) {
-                if (!recover_executor(std::current_exception())) return;
-                continue;
+                fail_executor(std::current_exception());
+                return;
             }
         }
     }
