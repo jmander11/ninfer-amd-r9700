@@ -599,7 +599,7 @@ Fp8KInt4VSemanticFingerprint decode_semantics(InBuf& r) {
     value.plane_layouts.value_scale = static_cast<Fp8KInt4VPlaneLayout>(r.u8());
     const std::uint8_t format       = r.u8();
     value.format                    = static_cast<KvCacheFormat>(format);
-    if (format > static_cast<std::uint8_t>(KvCacheFormat::Nvfp4) ||
+    if (format > static_cast<std::uint8_t>(KvCacheFormat::TqK4V3) ||
         value.format_version != Fp8KInt4VSemanticFingerprint::kFormatVersion ||
         value.page_size != kPagedKVPageSize) {
         throw std::runtime_error("KV disk fixed codec fingerprint is invalid");

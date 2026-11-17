@@ -72,6 +72,9 @@ struct Fp8GatedQuantizeArgs {
     const float* attention   = nullptr;
     Fp8ActivationWorkspace workspace{};
     CacheWarm warm{};
+    // TQ-K4-V3: attention is in the rotated basis (tq_k4v3_codec.h); each 256-feature head is
+    // rotated back in FP32 (x = diag(s) H y / 16) before its BF16 representation and gate.
+    bool tq_unrotate = false;
 };
 
 [[nodiscard]] hipError_t fp8_quantize_gated_activation(const Fp8GatedQuantizeArgs& args,

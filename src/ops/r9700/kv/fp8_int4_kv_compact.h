@@ -24,6 +24,8 @@ struct Fp8Int4KvCompactArgs {
     KvCodec codec                   = KvCodec::Fp8Int4;
     std::uint8_t* key_scale_codes   = nullptr;
     std::uint8_t* value_scale_codes = nullptr;
+    // TqK4V3 only: the K-scale plane; value_scale_bits holds the V scales.
+    std::uint16_t* key_scale_bits = nullptr;
 };
 
 // Compacts a monotone speculative path in place across the exact persistent planes of the codec.

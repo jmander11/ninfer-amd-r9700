@@ -320,8 +320,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--kv-cache",
         choices=tuple(KV_CACHE_FORMATS),
-        default="fp8-int4",
-        help="ninfer-serve KV cache codec (default: fp8-int4)",
+        default="nvfp4",
+        help="ninfer-serve KV cache codec (default: nvfp4)",
     )
     parser.add_argument("--output", type=Path, required=True, help="campaign output directory")
     parser.add_argument(

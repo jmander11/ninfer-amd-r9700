@@ -7,6 +7,7 @@
 #include "targets/qwen3/impl/runtime/workspace_recipe.h"
 
 #include "core/roctx.h"
+#include "ops/r9700/kv/tq_rotation.h"
 #include "targets/qwen3/impl/runtime/visual_scatter.h"
 #include "targets/qwen3/impl/runtime/vision_context.h"
 #include <ninfer/targets/qwen3/vision_control.h>
@@ -486,6 +487,13 @@ void TextContext::mtp_forward_tail(Tensor& x, const Tensor& ah, const Tensor& po
     ops::rmsnorm(k, *mtp_.k_norm, kCfg.rms_eps, true, kn, s);
     Tensor rope_for_op = active_sequence_batch_ != 0 ? rope_positions.view({T}) : rope_positions;
     ops::rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, qn, kn, s);
+    // TQ-K4-V3: this MTP panel owns both basis changes, one launch each for all sequences.
+    const bool tq = !mtp_kv_transactions_.empty() &&
+                    mtp_kv_transactions_.front()->cache_format() == KvCacheFormat::TqK4V3;
+    if (tq) {
+        HIP_CHECK(ops::r9700::kv::tq_rotate_query(static_cast<hip_bfloat16*>(qn.data),
+                                                  static_cast<std::size_t>(T) * kCfg.n_q, s));
+    }
 
     Tensor attention_fp32     = results.attention_fp32.view({kCfg.head_dim, kCfg.n_q, T});
     const auto* all_keys      = static_cast<const hip_bfloat16*>(kn.data);
@@ -520,7 +528,11 @@ void TextContext::mtp_forward_tail(Tensor& x, const Tensor& ah, const Tensor& po
             active_count_ptr = &active_count;
         }
         Variant::full_attention(query_panel, transaction.pending_layer_read(0), position_panel,
-                                attention_panel, work_, s, nullptr, nullptr, active_count_ptr);
+                                attention_panel, work_, s, nullptr, nullptr, active_count_ptr, tq);
+    }
+    if (tq) {
+        HIP_CHECK(ops::r9700::kv::tq_unrotate_output(static_cast<float*>(attention_fp32.data),
+                                                     static_cast<std::size_t>(T) * kCfg.n_q, s));
     }
     Tensor a = results.attention.view({kCfg.head_dim, kCfg.n_q, T});
     ops::cast_fp32_to_bf16(attention_fp32, a, s);
@@ -1011,6 +1023,13 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
                 "Text FP8-K/INT4-V transaction extent does not match actual schedule width");
         }
     }
+    // TQ-K4-V3: this schedule owns both basis changes for the whole panel (Q into the rotated
+    // basis after RoPE, the FP32 attention output back before the output gate); the attention
+    // leaf is told so and performs neither.
+    const qwen3::PagedKVTransaction* format_source =
+        !text_kv_transactions_.empty() ? text_kv_transactions_.front() : mixed_prefill_transaction_;
+    const bool tq =
+        format_source != nullptr && format_source->cache_format() == KvCacheFormat::TqK4V3;
 
     const auto projection = workspace_recipe::text_attention_projection<TextConfig>(work_, T);
     Tensor h              = projection.hidden;
@@ -1059,6 +1078,7 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
     const Tensor& rope_positions =
         active_rope_positions_ != nullptr ? *active_rope_positions_ : io_.rope_pos;
     Tensor rope_for_op = active_sequence_batch_ != 0 ? rope_positions.view({T}) : rope_positions;
+    bool query_rotated = false;
     if constexpr (requires {
                       tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
                   }) {
@@ -1068,11 +1088,20 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
         ops::rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, qn, kn, s);
     } else {
+        // A traced RoPE stage publishes model-basis Q, so only an unobserved Q is rotated by the
+        // producer itself.
+        constexpr bool traced_rope =
+            requires { tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s); };
+        query_rotated = tq && !traced_rope;
         ops::qk_norm_rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, q, k, *w.q_norm, *w.k_norm,
-                          kCfg.rms_eps, qn, kn, s);
+                          kCfg.rms_eps, qn, kn, s, query_rotated);
     }
     if constexpr (requires { tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s); }) {
         tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s);
+    }
+    if (tq && !query_rotated) {
+        HIP_CHECK(ops::r9700::kv::tq_rotate_query(static_cast<hip_bfloat16*>(qn.data),
+                                                  static_cast<std::size_t>(T) * kCfg.n_q, s));
     }
 
     Tensor attention_fp32     = results.attention_fp32.view({kCfg.head_dim, kCfg.n_q, T});
@@ -1148,14 +1177,15 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         }
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
         // Prompt panels only (plain prefill or a mixed round's owner); verify panels keep the
-        // production route.
-        if (ph == Phase::Prefill && (sequence < 0 || active_sequence_batch_ == 0)) {
+        // production route. The sparse route has no TQ basis contract, so TQ caches (whose Q this
+        // schedule has already rotated) keep the production leaf with the ownership flag.
+        if (!tq && ph == Phase::Prefill && (sequence < 0 || active_sequence_batch_ == 0)) {
             Variant::text_prefill_attention(queries, cache_read, positions, attention, work_, s);
         } else
 #endif
         {
             Variant::full_attention(queries, cache_read, positions, attention, work_, s,
-                                    ancestor_panel_ptr, prefix_panel_ptr, nullptr);
+                                    ancestor_panel_ptr, prefix_panel_ptr, nullptr, tq);
         }
     };
     if (mixed_columns != 0) { attend(*mixed_prefill_transaction_, 0, mixed_columns, -1); }
@@ -1208,12 +1238,13 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
             }
         }
         if (!Variant::full_attention_sequences(
-                std::span<const Variant::FullAttentionSequence>(sequences.data(), count), work_,
-                s)) {
+                std::span<const Variant::FullAttentionSequence>(sequences.data(), count), work_, s,
+                tq)) {
             for (std::size_t sequence = 0; sequence < count; ++sequence) {
                 Variant::full_attention(sequences[sequence].query, sequences[sequence].cache_read,
                                         sequences[sequence].cache_positions,
-                                        sequences[sequence].output, work_, s);
+                                        sequences[sequence].output, work_, s, nullptr, nullptr,
+                                        nullptr, tq);
             }
         }
     } else {
@@ -1222,17 +1253,34 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
                    sequence_width, sequence);
         }
     }
-    if constexpr (requires {
-                      tap.capture_attention_stage(text_layer, "attention_fp32", attention_fp32, s);
-                  }) {
-        tap.capture_attention_stage(text_layer, "attention_fp32", attention_fp32, s);
-    }
     Tensor a = results.attention.view({kCfg.head_dim, kCfg.n_q, T});
     // Tracing publishes the gated attention rows, so it keeps the separate output gate.
     constexpr bool traced_gate =
         requires { tap.capture_attention_stage(text_layer, "gated_attention", a, s); };
+    constexpr bool traced_attention =
+        requires { tap.capture_attention_stage(text_layer, "attention_fp32", attention_fp32, s); };
+    // The LQ4 gated consumer rotates TQ attention back itself; every other consumer (and a
+    // traced stage) takes it after one standalone rotation of the whole panel. Padded columns
+    // are +0 and stay +0.
+    bool attention_rotated        = tq;
+    const auto unrotate_attention = [&] {
+        if (!attention_rotated) return;
+        HIP_CHECK(ops::r9700::kv::tq_unrotate_output(static_cast<float*>(attention_fp32.data),
+                                                     static_cast<std::size_t>(T) * kCfg.n_q, s));
+        attention_rotated = false;
+    };
+    if constexpr (traced_attention || traced_gate) unrotate_attention();
+    if constexpr (traced_attention) {
+        tap.capture_attention_stage(text_layer, "attention_fp32", attention_fp32, s);
+    }
     if constexpr (!traced_gate) {
-        if (Variant::attention_gated_output_projection(gate_flat, attention_fp32, *w.o_proj, x, s,
+        const bool fused_unrotate =
+            attention_rotated &&
+            Variant::attention_gated_output_projection(gate_flat, attention_fp32, *w.o_proj, x, s,
+                                                       linear_execution_, text_layer, true);
+        if (!fused_unrotate) unrotate_attention();
+        if (fused_unrotate ||
+            Variant::attention_gated_output_projection(gate_flat, attention_fp32, *w.o_proj, x, s,
                                                        linear_execution_, text_layer)) {
             if constexpr (requires {
                               tap.capture_attention_stage(text_layer, "residual_x", x, s);

@@ -53,7 +53,7 @@ public:
     }
 
     void commit() {
-        committed_ = std::move(*preview_);
+        committed_ = std::move(preview_.value());
         preview_.reset();
     }
 
@@ -93,7 +93,7 @@ public:
                           .shape       = &shape,
                           .strides     = nullptr,
                           .byte_offset = 0};
-            (void)nodes[node]->FillNextTokenBitmask(&mask);
+            (void)nodes[node].value().FillNextTokenBitmask(&mask);
             const auto close_bit = [&] {
                 output[static_cast<std::size_t>(replay_close) / 32] |=
                     std::uint32_t{1} << (static_cast<unsigned>(replay_close) % 32);
@@ -562,8 +562,12 @@ GeneratedCall generate_call(std::mt19937& random) {
             value = std::vector<std::string>{"12", "true", "a", "b", "abc"}[random() % 5];
         const auto& opening = openings[random() % openings.size()];
         const auto body     = value + "\n</parameter>\n";
-        call.text += "<parameter=" + key + ">" + opening + body;
-        call.canonical += "<parameter=" + key + ">" + opening.substr(opening.find('\n')) + body;
+        call.text.append("<parameter=").append(key).append(">").append(opening).append(body);
+        call.canonical.append("<parameter=")
+            .append(key)
+            .append(">")
+            .append(opening.substr(opening.find('\n')))
+            .append(body);
     }
     call.text += "</function>\n</tool_call>";
     call.canonical += "</function>\n</tool_call>";
@@ -707,10 +711,16 @@ Session make_session(const std::string& directory) {
             {"grep",
              R"("pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"})",
              R"("pattern")"}}) {
-        input.options.tool_jsons.push_back(R"({"type":"function","function":{"name":")" + name +
-                                           R"(","parameters":{"type":"object","properties":{)" +
-                                           properties + "},\"required\":[" + required + "]," +
-                                           schema + "}}}");
+        std::string tool = R"({"type":"function","function":{"name":")";
+        tool.append(name)
+            .append(R"(","parameters":{"type":"object","properties":{)")
+            .append(properties)
+            .append("},\"required\":[")
+            .append(required)
+            .append("],")
+            .append(schema)
+            .append("}}}");
+        input.options.tool_jsons.push_back(std::move(tool));
     }
     auto prompt = frontend.prepare(std::move(input));
     return Session{std::move(frontend), std::move(prompt)};
@@ -760,13 +770,13 @@ int check_tool_stream(const Session& session, const Fixture& fixture) {
 
 int main() {
     if (skip_without_official_tokenizer("token grammar rounds")) { return 0; }
-    const auto fixture = make_fixture(*official_tokenizer_dir());
+    const auto fixture = make_fixture(official_tokenizer_dir().value());
     int failures       = check_equivalence(fixture, false);
     failures += check_equivalence(fixture, true);
     failures += check_reasoning_close(fixture);
     failures += check_budget_grammar(fixture);
     failures += check_decode(fixture);
-    failures += check_tool_stream(make_session(*official_tokenizer_dir()), fixture);
+    failures += check_tool_stream(make_session(official_tokenizer_dir().value()), fixture);
     if (failures != 0) {
         std::cerr << failures << " failures\n";
         return 1;

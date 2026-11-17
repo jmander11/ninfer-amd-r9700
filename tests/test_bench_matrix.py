@@ -84,7 +84,7 @@ class BenchMatrixTest(unittest.TestCase):
                         "concurrency": 4,
                         "pending_timeout_ms": 0xFFFFFFFF,
                         "pending_deadline": "unbounded",
-                        "kv_cache_format": "fp8-k-int4-v",
+                        "kv_cache_format": "nvfp4",
                         "kv_value_group": 16,
                         "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
                         "q4_activation_bits": 8,

@@ -1,4 +1,7 @@
-"""Bounded fixed-recipe search against the immutable local 5090 NVFP4 reference."""
+"""Bounded fixed-recipe search against the immutable local 5090 NVFP4 reference.
+
+This historical protocol pins AMD --kv-cache fp8-int4, not the production NVFP4 default.
+"""
 
 from __future__ import annotations
 

@@ -28,7 +28,7 @@ struct DecoderStateSpec {
     std::int32_t kv_heads               = 0;
     std::int32_t attention_head_dim     = 0;
     std::int32_t value_group            = 0;
-    KvCacheFormat kv_cache_format       = KvCacheFormat::Fp8KInt4V;
+    KvCacheFormat kv_cache_format       = KvCacheFormat::Nvfp4;
     Fp8KInt4VPlaneLayouts text_plane_layouts;
     Fp8KInt4VPlaneLayouts mtp_plane_layouts;
     bool enable_mtp                         = false;
@@ -274,6 +274,9 @@ public:
     // For device-prefix transactions this is the conservative launch maximum; the committed
     // count remains device-owned until commit() resolves it.
     [[nodiscard]] std::size_t position_count() const noexcept { return position_count_; }
+
+    // The cache's startup-fixed codec (selects, e.g., the TQ-K4-V3 basis-change ownership).
+    [[nodiscard]] KvCacheFormat cache_format() const noexcept { return cache_->spec().format; }
 
     [[nodiscard]] PagedKVLayerRead pending_layer_read(std::uint32_t layer) const;
     [[nodiscard]] std::uint32_t commit();

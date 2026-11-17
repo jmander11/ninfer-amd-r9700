@@ -22,18 +22,23 @@ Every floating-point route is checked directly against an independent naive FP64
 
 | Consumer | Geometry and visible set | Persistent representation | Current owner |
 |---|---|---|---|
-| Text and MTP | `D256/Hq24/Hkv4`; causal prefix or explicit packed-tree ancestry | typed FP8-K/INT4-V growing cache, or opt-in NVFP4 | Qwen3.8 R9700 full-attention leaf |
+| Text and MTP | `D256/Hq24/Hkv4`; causal prefix or explicit packed-tree ancestry | default NVFP4 growing cache, or opt-in FP8-K/INT4-V or TQ-K4-V3 | Qwen3.8 R9700 full-attention leaf |
 | DFlash Full | `D128/Hq32/Hkv8`; read-only context plus the complete live query segment | independent BF16 paged context | native bidirectional GQA Op |
 
 Vision packed attention and DFlash Local sliding-window attention have different represented inputs and visibility rules. They do not borrow the Text/MTP cache codec or publication state.
 
-## Text and MTP: typed FP8-K/INT4-V cache
+## Text and MTP: startup-selected typed cache
 
-Text and MTP have no homogeneous cache-dtype selector. Their only growing-cache representation is:
+Text and MTP default to NVFP4 E2M1 K/V with E4M3 scales per 16 features in four planes;
+NVFP4 is the KV-cache comparison baseline. Opt-in TQ-K4-V3 uses rotated 4-bit K / 3-bit V
+and FP16 head-vector scales in four planes. See `paged-kv-cache.md` for both codecs.
+Both require G16; G32 evaluation and historical FP8-K/INT4-V admission commands must
+explicitly pass `--kv-cache fp8-int4`. There is no per-request or homogeneous cache-dtype
+selector. The retained opt-in FP8-K/INT4-V representation is:
 
 - one OCP E4M3FN byte per K feature;
 - two canonical signed INT4 V codes per byte;
-- one IEEE binary16 V scale per feature group (provisionally 16 features; G16 versus G32 remains a real-model gate);
+- one IEEE binary16 V scale per feature group (production G16 or evaluation G32);
 - a 64-token paged block table and an explicit physical plane-layout identity.
 
 `src/core/fp8_int4_paged_kv_cache.{h,cpp}` owns the physical storage plan, semantic fingerprint, typed per-layer view, and allocation validation. `qwen3::PagedKVCache` owns per-sequence allocation and publication state. A cache view cannot be reconstructed from arbitrary homogeneous planes or selected by dtype at runtime.
@@ -55,7 +60,7 @@ Accepted speculative paths use `PagedKVCache::begin_compact`, launch every layer
 
 The selected production implementation routes by row count, context and metadata. Host-fixed decode widths of 1..6 rows without tree or device-active-row metadata (ordinary T=1, MTP target verification, DFlash chain verification) at context 64..262,144 use the packed decode route: the (row, query head) pairs of each KV head are packed into sixteen-lane tiles and run the dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K, online FP32 Softmax with FP16 probabilities, FP16 V/8 PV) over context chunks, followed by a stable FP32 merge of caller-owned partials. At context 8,192 and above, fixed-width T=4 with packed-tree or device-active-row metadata uses the admitted split-512 score, partial Softmax/PV, and merge stages. Remaining shapes stream FP8 K and signed-INT4-times-FP16-scale V through online FP32 Softmax without materializing scores; workspace sizing and launch share this metadata-aware decision. The FP8-Q/FP8-K WMMA score Op and split-512's T=1 form remain qualified Ops without a production selection. Output is FP32; the family schedule performs the explicit BF16 cast where the next semantic boundary requires it. Inactive fixed-width rows are exact positive zero. Invalid represented position/tree/count/table-row metadata remains conspicuous as NaN in the affected contract-defined rows.
 
-Every route takes the opt-in NVFP4 planes except the qualification-only P129 tail and XAttention. The dense routes share their arithmetic through a codec policy: NVFP4 stages exact FP16 K and V/8, represented Q as FP16 (round toward zero, poisoning a query head with |Q| >= 2^16), and FP16 QK WMMA; fused and split-512 keep represented Q and exact K. Its costlier keys make the production K+K loader wave the critical path, so packed decode runs five loader waves, or six while a launch has at most 128 groups. The oracle is `tests/ops/nvfp4_kv_oracle.h`, and `tools/r9700/nvfp4_kv_qual.hip` qualifies every route, append form and state transition.
+Every route takes the default NVFP4 planes except the qualification-only P129 tail and XAttention. The dense routes share their arithmetic through a codec policy: NVFP4 stages exact FP16 K and V/8, represented Q as FP16 (round toward zero, poisoning a query head with |Q| >= 2^16), and FP16 QK WMMA; fused and split-512 keep represented Q and exact K. Its costlier keys make the production K+K loader wave the critical path, so packed decode runs five loader waves, or six while a launch has at most 128 groups. The oracle is `tests/ops/nvfp4_kv_oracle.h`, and `tools/r9700/nvfp4_kv_qual.hip` qualifies every route, append form and state transition.
 
 The split-512 PV producer remains query-head-owned. A T=1 grouped-KV-head challenger that reused each decoded V value across six query heads passed exact direct numerical, rejection, and Device Graph qualification, but its C1/P8192+G32 whole screen regressed decode (`1.0038023342` ratio; `-0.141697625 ms/token` saving). It was rejected without a full gate and removed together with its selector; it is not a dormant production route or queued alternative.
 

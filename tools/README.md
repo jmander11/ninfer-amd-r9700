@@ -50,7 +50,7 @@ Commands are in `bench/README.md`.
 
 ## Serving smoke
 
-After starting `build-r9700/apps/ninfer-serve`, run the protocol smoke client against the local endpoint. The resident server and every product application use the fixed FP8-K/INT4-V cache.
+After starting `build-r9700/apps/ninfer-serve`, run the protocol smoke client against the local endpoint. The resident server and product applications default to NVFP4; startup `--kv-cache fp8-int4` and `--kv-cache tq-k4-v3` select the opt-in codecs. NVFP4 and TQ require G16; G32 evaluation requires explicit `--kv-cache fp8-int4`.
 
 ```bash
 python3 -m tools.smoke.serve_contract \

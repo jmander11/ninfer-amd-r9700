@@ -376,10 +376,9 @@ void qualify_host_hybrid_allocation_bound() {
             inputs.kv_disk_capacity_bytes = 1024ULL * 1024ULL * 1024ULL;
             const auto with_disk =
                 runtime::build_sequence_candidate_for_qualification(inputs, 4096U);
-            // Independently derive packed page geometry from the represented codec:
-            // 256 FP8 keys, 128 packed INT4 value bytes, FP16 scales per KV head.
-            constexpr std::size_t head_bytes =
-                256U + 128U + 2U * (256U / ninfer::targets::qwen3::detail::kR9700TextKVValueGroup);
+            // Default NVFP4: two packed E2M1 vectors plus one E4M3 scale per 16
+            // features of each K/V head vector.
+            constexpr std::size_t head_bytes    = std::size_t{2U} * (256U / 2U + 256U / 16U);
             constexpr std::size_t page_bytes    = std::size_t{16U} * 4U * head_bytes * 64U;
             constexpr std::size_t physical_unit = 2ULL * 1024ULL * 1024ULL;
             const std::size_t expected_disk =
@@ -463,6 +462,8 @@ void qualify_host_dflash_graph_allowance() {
                        : std::span<const std::size_t>(graph_mib);
     constexpr std::array<std::size_t, ninfer::kMaximumConcurrency> main_driver_mib{
         6, 6, 4, 4, 2, 4, 4, 6, 32, 32, 32, 34, 34, 34, 34, 34};
+    constexpr std::array<std::size_t, ninfer::kMaximumConcurrency> nvfp4_driver_mib{
+        0, 0, 0, 12, 12, 10, 10, 8, 0, 0, 0, 0, 0, 0, 0, 0};
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
     constexpr bool production_attention = false;
 #else
@@ -511,15 +512,14 @@ void qualify_host_dflash_graph_allowance() {
                 require(plan->graph_allowance_bytes ==
                             (measured_graph_mib[c - 1U] + 20U) * (1ULL << 20U),
                         "production C-specific graph reservation differs from measurement");
-            const auto logical = plan->persistent.bytes + plan->workspace.capacity +
-                                 plan->request_transient_capacity_bytes +
-                                 plan->graph_allowance_bytes;
-            constexpr std::size_t head_bytes =
-                256U + 128U + 2U * (256U / ninfer::targets::qwen3::detail::kR9700TextKVValueGroup);
+            const auto logical               = plan->persistent.bytes + plan->workspace.capacity +
+                                               plan->request_transient_capacity_bytes +
+                                               plan->graph_allowance_bytes;
+            constexpr std::size_t head_bytes = std::size_t{2U} * (256U / 2U + 256U / 16U);
             constexpr std::size_t staging_bytes = std::size_t{16U} * 4U * head_bytes * 64U * 32U;
             const std::size_t disk_mib = (staging_bytes + (2U << 20U) - 1U) / (2U << 20U) * 2U + 2U;
-            const std::size_t internal_mib =
-                4U + 2U + main_driver_mib[c - 1U] + (disk ? disk_mib + 2U : 0U);
+            const std::size_t internal_mib = 4U + 2U + main_driver_mib[c - 1U] +
+                                             nvfp4_driver_mib[c - 1U] + (disk ? disk_mib + 2U : 0U);
             require(plan->device_reservation_bytes == logical + internal_mib * (1ULL << 20U),
                     "NInfer-owned driver or SSD storage escaped the internal capacity budget");
         }
@@ -551,7 +551,8 @@ void qualify_host_dflash_graph_allowance() {
                                  plan->request_transient_capacity_bytes +
                                  plan->graph_allowance_bytes;
             require(plan->device_reservation_bytes ==
-                        logical + (4U + 2U + main_driver_mib[c - 1U]) * (1ULL << 20U),
+                        logical + (4U + 2U + main_driver_mib[c - 1U] + nvfp4_driver_mib[c - 1U]) *
+                                      (1ULL << 20U),
                     "MTP/ordinary driver reservation differs from the measured C-specific bound");
         }
     }

@@ -1,3 +1,4 @@
+#include "ops/r9700/kv/tq_k4v3_codec.h"
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
 
@@ -375,7 +376,15 @@ float time_decode(hipStream_t stream, int tokens) {
 // Fused Q/K RMSNorm + RoPE against an FP64 oracle with the BF16 normalization seam. Q and K are
 // planes of a token-interleaved [7168,T] projection image, as in production. Criterion per element:
 // the seam and output roundings allow one BF16 step (2^-7 relative) of each contributing operand.
-void check_qk_norm_rope(hipStream_t stream, int tokens, int axes, Result& total) {
+// With tq, query heads are compared with the FP64 TQ-K4-V3 rotation R e of the RoPE oracle e: R is
+// orthonormal with entries +/-1/16, so each element allows the model-basis bounds summed over
+// the vector / 16 plus one BF16 output step; keys must be unchanged.
+// tq: the fused TQ-K4-V3 query rotation (qn = BF16(R RoPE(...)), R = H diag(s) / 16 orthonormal).
+// poison: token 0 carries a NaN in query head 5 and key head 1 (whole head NaN) and +Inf at
+// feature 200 of query head 9 (an Inf norm: that feature NaN and the rest exactly zero, or with
+// tq the whole rotated head NaN); every other head must meet the oracle.
+void check_qk_norm_rope(hipStream_t stream, int tokens, int axes, Result& total, bool tq = false,
+                        bool poison = false) {
     constexpr int d = 256, qh = 24, kh = 4, row = 7168, r = 64, half = 32;
     constexpr float eps = 1.0e-6F;
     const Case c{"qk-norm-rope", d, r, qh, kh, axes, tokens, 0, 1.0e7F};
@@ -390,8 +399,15 @@ void check_qk_norm_rope(hipStream_t stream, int tokens, int axes, Result& total)
         const double scale = 1.0 + static_cast<double>((i / d) % 5) * 7.0; // per-head magnitude
         image[i]           = bf16(static_cast<float>(code / 1000.0 * scale));
     }
+    // A zero query head (with tq: the fused rotation of a zero vector, required exactly zero).
     for (int f = 0; f < d; ++f)
         image[static_cast<std::size_t>(tokens - 1) * row + 3 * d + f] = bf16(0.0F);
+    constexpr int poisoned_query = 5, poisoned_key = qh + 1, infinite_query = 9, infinite = 200;
+    if (poison) {
+        image[static_cast<std::size_t>(poisoned_query) * d + 17]       = bf16(NAN);
+        image[static_cast<std::size_t>(poisoned_key) * d + 40]         = bf16(NAN);
+        image[static_cast<std::size_t>(infinite_query) * d + infinite] = bf16(INFINITY);
+    }
     std::vector<hip_bfloat16> q_gain(d), k_gain(d);
     for (int f = 0; f < d; ++f) {
         q_gain[f] = bf16(static_cast<float>(((f * 37) % 101) - 50) / 80.0F);
@@ -414,7 +430,7 @@ void check_qk_norm_rope(hipStream_t stream, int tokens, int axes, Result& total)
     ninfer::Tensor kw(d_kw.get(), ninfer::DType::BF16, {d});
     ninfer::Tensor qn(d_qn.get(), ninfer::DType::BF16, {d, qh, tokens});
     ninfer::Tensor kn(d_kn.get(), ninfer::DType::BF16, {d, kh, tokens});
-    ninfer::ops::qk_norm_rope(p, r, 1.0e7F, q, k, qw, kw, eps, qn, kn, stream);
+    ninfer::ops::qk_norm_rope(p, r, 1.0e7F, q, k, qw, kw, eps, qn, kn, stream, tq);
     HIP_CHECK(hipStreamSynchronize(stream));
     std::vector<hip_bfloat16> qo(static_cast<std::size_t>(tokens) * qh * d),
         ko(static_cast<std::size_t>(tokens) * kh * d);
@@ -430,6 +446,17 @@ void check_qk_norm_rope(hipStream_t stream, int tokens, int axes, Result& total)
             const hip_bfloat16* out =
                 query ? qo.data() + (static_cast<std::size_t>(token) * qh + head) * d
                       : ko.data() + (static_cast<std::size_t>(token) * kh + head - qh) * d;
+            if (poison && token == 0 &&
+                (head == poisoned_query || head == poisoned_key || head == infinite_query)) {
+                const bool whole = head != infinite_query || tq;
+                for (int f = 0; f < d; ++f) {
+                    const double got = fp32(out[f]);
+                    if (whole || f == infinite ? !std::isnan(got) : got != 0.0)
+                        fail("qk_norm_rope nonfinite head " + std::to_string(head) + " feature " +
+                             std::to_string(f) + " is " + std::to_string(got));
+                }
+                continue;
+            }
             double sumsq = 0.0;
             for (int f = 0; f < d; ++f) {
                 const double x = fp32(image[in + f]);
@@ -440,6 +467,7 @@ void check_qk_norm_rope(hipStream_t stream, int tokens, int axes, Result& total)
             for (int f = 0; f < d; ++f)
                 n[f] = fp32(bf16(
                     static_cast<float>(fp32(image[in + f]) * inverse * (fp32(gain[f]) + 1.0))));
+            std::vector<double> model(d), bound(d);
             for (int f = 0; f < d; ++f) {
                 double expected = n[f], operands = std::abs(n[f]);
                 if (f < r) {
@@ -452,16 +480,58 @@ void check_qk_norm_rope(hipStream_t stream, int tokens, int axes, Result& total)
                                         : second * std::cos(angle) + first * std::sin(angle);
                     operands = std::abs(first) + std::abs(second);
                 }
-                const double got   = fp32(out[f]);
-                const double error = std::abs(got - expected);
-                if (!(error <= step * (operands + std::abs(expected)) + 1.0e-30))
+                model[f] = expected;
+                bound[f] = step * (operands + std::abs(expected));
+            }
+            // With tq, e (|e_f| <= step * operands_f: the normalization seam and FP32 RoPE)
+            // reaches every rotated feature as at most sum |e_f| / 16, and the head as ||e||_2
+            // (R orthonormal); the store adds one BF16 rounding of each rotated feature.
+            double head_bound = 0.0, head_error = 0.0;
+            if (tq && query) {
+                namespace tqc = ninfer::ops::r9700::kv::tq;
+                double spread = 0.0, pre_l2 = 0.0;
+                for (int f = 0; f < d; ++f) {
+                    const double e = bound[f] - step * std::abs(model[f]);
+                    spread += e;
+                    pre_l2 += e * e;
+                }
+                std::vector<double> rotated(d);
+                for (int i = 0; i < d; ++i) {
+                    double sum = 0.0;
+                    for (int j = 0; j < d; ++j) {
+                        const double h = (__builtin_popcount(i & j) & 1) != 0 ? -1.0 : 1.0;
+                        sum += h *
+                               (tqc::negative_sign(static_cast<std::uint32_t>(j)) ? -1.0 : 1.0) *
+                               model[j];
+                    }
+                    rotated[i] = sum / 16.0;
+                }
+                double rotated_l2 = 0.0;
+                for (int f = 0; f < d; ++f) {
+                    model[f] = rotated[f];
+                    bound[f] = spread / 16.0 + step * std::abs(rotated[f]);
+                    rotated_l2 += rotated[f] * rotated[f];
+                }
+                head_bound = std::sqrt(pre_l2) * (1.0 + 0.5 * step) +
+                             (0.5 * step + std::ldexp(1.0, -20)) * std::sqrt(rotated_l2);
+            }
+            for (int f = 0; f < d; ++f) {
+                const double expected = model[f];
+                const double got      = fp32(out[f]);
+                const double error    = std::abs(got - expected);
+                if (!(error <= bound[f] + 1.0e-30))
                     fail("qk_norm_rope oracle mismatch at token " + std::to_string(token) +
                          " head " + std::to_string(head) + " feature " + std::to_string(f));
                 total.max_abs = std::max(total.max_abs, error / std::max(1.0, std::abs(expected)));
                 total.squared_error += error * error;
                 total.squared_oracle += expected * expected;
+                head_error += error * error;
                 ++total.checked;
             }
+            if (tq && query && !(std::sqrt(head_error) <= head_bound + 1.0e-30))
+                fail("qk_norm_rope tq head L2 error " + std::to_string(std::sqrt(head_error)) +
+                     " exceeds " + std::to_string(head_bound) + " at token " +
+                     std::to_string(token) + " head " + std::to_string(head));
         }
     }
     // Rejections: unsupported geometry and overlapping output.
@@ -491,11 +561,23 @@ int main() {
         const Case single{"text-mrope-single-k", 256, 64, 24, 4, 3, 5, 8, 1.0e7F};
         merge(total, run_single(single, 4, device.stream));
         check_rejection(device.stream);
-        Result fused;
+        Result fused, fused_tq;
         for (const int tokens : {1, 6, 130})
-            for (const int axes : {1, 3}) check_qk_norm_rope(device.stream, tokens, axes, fused);
+            for (const int axes : {1, 3}) {
+                check_qk_norm_rope(device.stream, tokens, axes, fused);
+                check_qk_norm_rope(device.stream, tokens, axes, fused_tq, true);
+            }
+        for (const int axes : {1, 3}) {
+            check_qk_norm_rope(device.stream, 6, axes, fused, false, true);
+            check_qk_norm_rope(device.stream, 6, axes, fused_tq, true, true);
+        }
+        const double tq_rel_l2 = std::sqrt(fused_tq.squared_error / fused_tq.squared_oracle);
+        // One BF16 store rounding dominates (rms ~2^-8 / sqrt(3)); a wrong sign or stage gives
+        // O(1/8) per feature.
+        if (!(tq_rel_l2 <= std::ldexp(1.0, -8))) fail("qk_norm_rope tq rel_l2 gate");
         std::cout << "qk-norm-rope FP64 seam criterion PASS checked=" << fused.checked
-                  << " rel_l2=" << std::sqrt(fused.squared_error / fused.squared_oracle) << '\n';
+                  << " rel_l2=" << std::sqrt(fused.squared_error / fused.squared_oracle)
+                  << "; tq checked=" << fused_tq.checked << " rel_l2=" << tq_rel_l2 << '\n';
         for (int tokens : {5, 255, 256, 257, 1536, 8256})
             merge(total, check_interleaved_vision(device.stream, tokens));
         merge(total, check_interleaved_vision(device.stream, 256, 1));

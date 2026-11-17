@@ -90,7 +90,8 @@ std::size_t parse_kv_disk_capacity_bytes(const char* text) {
 KvCacheFormat parse_kv_cache(const char* text) {
     if (std::string_view(text) == "fp8-int4") { return KvCacheFormat::Fp8KInt4V; }
     if (std::string_view(text) == "nvfp4") { return KvCacheFormat::Nvfp4; }
-    throw std::invalid_argument("--kv-cache must be fp8-int4 or nvfp4");
+    if (std::string_view(text) == "tq-k4-v3") { return KvCacheFormat::TqK4V3; }
+    throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
 }
 
 KvDiskCompress parse_kv_disk_compress(const char* text) {
@@ -104,7 +105,8 @@ KvDiskCompress parse_kv_disk_compress(const char* text) {
 std::string serve_usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> [--host H] [--port N] [--api-key KEY] "
-           "[--model-id ID] [--max-context N] [--kv-cache fp8-int4|nvfp4] [--kv-capacity N|auto] "
+           "[--model-id ID] [--max-context N] [--kv-cache fp8-int4|nvfp4|tq-k4-v3] [--kv-capacity "
+           "N|auto] "
            "[--kv-capacity-headroom MiB] "
            "[--kv-ram-capacity off|N] [--kv-ram-system-prompts N] "
            "[--kv-disk-capacity off|N] [--kv-disk-location PATH] [--kv-disk-compress off|zstd] "
@@ -141,8 +143,9 @@ std::string serve_usage_text(const char* argv0) {
            "       --max-concurrency accepts 1..16 with --spec none or mtp; DFlash: 1..12\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
-           "       --kv-cache selects the growing Text/MTP KV codec: fp8-int4 (default) or nvfp4,\n"
-           "       which stores about 1.44x the context at somewhat higher key error.\n"
+           "       --kv-cache selects the growing Text/MTP KV codec: nvfp4 (default), fp8-int4\n"
+           "       (opt-in), or tq-k4-v3 (opt-in rotated 4-bit K / 3-bit V). NVFP4 and TQ require\n"
+           "       a G16 build; with G32 select --kv-cache fp8-int4 explicitly.\n"
            "       --kv-capacity defaults to auto: sizes KV from all free GPU memory except "
            "--kv-capacity-headroom "
            "MiB (default " +

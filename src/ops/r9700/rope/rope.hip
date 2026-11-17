@@ -439,7 +439,7 @@ void rope(const Tensor& positions, int rotary_dim, float theta, Tensor& q, Tenso
 
 void qk_norm_rope(const Tensor& positions, int rotary_dim, float theta, const Tensor& q,
                   const Tensor& k, const Tensor& q_norm, const Tensor& k_norm, float eps,
-                  Tensor& qn, Tensor& kn, hipStream_t stream) {
+                  Tensor& qn, Tensor& kn, hipStream_t stream, bool tq_rotate_query) {
     require_common(positions, rotary_dim, theta);
     const int tokens      = q.ne[2];
     const int axes        = axes_for(positions, tokens);
@@ -491,12 +491,20 @@ void qk_norm_rope(const Tensor& positions, int rotary_dim, float theta, const Te
     const auto* kw     = static_cast<const hip_bfloat16*>(k_norm.data);
     auto* qo           = static_cast<hip_bfloat16*>(qn.data);
     auto* ko           = static_cast<hip_bfloat16*>(kn.data);
+    const auto launch  = [&]<Profile P, bool Tq>() {
+        qk_norm_rope_kernel<P, Tq><<<grid, kQkNormRopeWaves * 32, 0, stream>>>(
+            pos, q_data, k_data, qs, ks, qw, kw, eps, qo, ko, tokens);
+    };
     if (profile == Profile::Text1D) {
-        qk_norm_rope_kernel<Profile::Text1D><<<grid, kQkNormRopeWaves * 32, 0, stream>>>(
-            pos, q_data, k_data, qs, ks, qw, kw, eps, qo, ko, tokens);
+        if (tq_rotate_query) {
+            launch.template operator()<Profile::Text1D, true>();
+        } else {
+            launch.template operator()<Profile::Text1D, false>();
+        }
+    } else if (tq_rotate_query) {
+        launch.template operator()<Profile::TextMrope, true>();
     } else {
-        qk_norm_rope_kernel<Profile::TextMrope><<<grid, kQkNormRopeWaves * 32, 0, stream>>>(
-            pos, q_data, k_data, qs, ks, qw, kw, eps, qo, ko, tokens);
+        launch.template operator()<Profile::TextMrope, false>();
     }
     HIP_CHECK(hipGetLastError());
 }

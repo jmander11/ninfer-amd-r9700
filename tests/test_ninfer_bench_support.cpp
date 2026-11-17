@@ -575,8 +575,8 @@ int test_report_contract() {
     failures += expect(report.at("load").at("weights_id") == "fixture-weights", "load weights id");
     failures +=
         expect(report.at("load").at("host_to_device_bytes") == 17400000000ULL, "load H2D bytes");
-    failures += expect(report.at("memory").at("kv_cache_format") == "fp8-k-int4-v",
-                       "fixed memory KV format");
+    failures +=
+        expect(report.at("memory").at("kv_cache_format") == "nvfp4", "fixed memory KV format");
     failures += expect(report.at("memory").at("kv_capacity") == 8192, "memory KV capacity");
     failures += expect(report.at("memory").at("workspace").at("capacity_bytes") == 100000000ULL,
                        "workspace capacity");

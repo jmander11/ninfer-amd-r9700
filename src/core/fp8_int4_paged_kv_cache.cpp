@@ -20,12 +20,53 @@ void validate_spec(const Fp8KInt4VPagedKVSpec& spec) {
         throw std::invalid_argument(
             "FP8-K/INT4-V cache dimension must be even and divisible by V group");
     }
-    if (spec.format == KvCacheFormat::Nvfp4 && spec.value_group != 16) {
-        throw std::invalid_argument("NVFP4 cache requires G16");
+    if ((spec.format == KvCacheFormat::Nvfp4 || spec.format == KvCacheFormat::TqK4V3) &&
+        spec.value_group != 16) {
+        throw std::invalid_argument(
+            "NVFP4 and TQ-K4-V3 caches require NINFER_R9700_KV_VALUE_GROUP=16; "
+            "rebuild with G16 or explicitly select --kv-cache fp8-int4 for G32 evaluation");
     }
-    if (spec.format != KvCacheFormat::Fp8KInt4V && spec.format != KvCacheFormat::Nvfp4) {
+    if (spec.format != KvCacheFormat::Fp8KInt4V && spec.format != KvCacheFormat::Nvfp4 &&
+        spec.format != KvCacheFormat::TqK4V3) {
         throw std::invalid_argument("KV cache has an invalid format");
     }
+    if (spec.format == KvCacheFormat::TqK4V3 && spec.head_dim % 32 != 0) {
+        throw std::invalid_argument("TQ-K4-V3 cache dimension must be a multiple of 32");
+    }
+}
+
+// Per-layer plane geometry of each codec, in the fixed plane order K, V, V scale, K scale.
+struct PlaneShape {
+    DType dtype;
+    std::int32_t leading_extent;
+};
+
+struct LayerPlanes {
+    PlaneShape key, value, value_scale, key_scale;
+};
+
+LayerPlanes layer_planes(const Fp8KInt4VPagedKVSpec& spec) {
+    const std::int32_t groups = spec.head_dim / spec.value_group;
+    switch (spec.format) {
+    case KvCacheFormat::Nvfp4:
+        return {{DType::U8, spec.head_dim / 2},
+                {DType::U8, spec.head_dim / 2},
+                {DType::FP8_E4M3FN, groups},
+                {DType::FP8_E4M3FN, groups}};
+    case KvCacheFormat::TqK4V3:
+        // 4-bit K nibbles; 3-bit V as a 2-bit magnitude plane and a sign plane per 32 features;
+        // one binary16 scale per head vector of each.
+        return {{DType::U8, spec.head_dim / 2},
+                {DType::U8, spec.head_dim * 3 / 8},
+                {DType::FP16, 1},
+                {DType::FP16, 1}};
+    case KvCacheFormat::Fp8KInt4V:
+        break;
+    }
+    return {{DType::FP8_E4M3FN, spec.head_dim},
+            {DType::U8, spec.head_dim / 2},
+            {DType::FP16, groups},
+            {DType::FP16, 0}};
 }
 
 PagedKVPlaneOrder slab_order(Fp8KInt4VPlaneLayout layout) {
@@ -92,22 +133,21 @@ void require_fp8_k_int4_v_semantic_fingerprint(const Fp8KInt4VSemanticFingerprin
 Fp8KInt4VPagedKVPoolLayout plan_fp8_k_int4_v_paged_kv_pool(LayoutBuilder& builder,
                                                            const Fp8KInt4VPagedKVSpec& spec) {
     validate_spec(spec);
-    const bool nvfp4 = spec.format == KvCacheFormat::Nvfp4;
+    const LayerPlanes shape = layer_planes(spec);
     std::vector<PagedKVPlaneSpec> planes;
     planes.reserve(static_cast<std::size_t>(spec.layer_count) * kv_planes_per_layer(spec.format));
     for (std::int32_t layer = 0; layer < spec.layer_count; ++layer) {
-        planes.push_back({nvfp4 ? DType::U8 : DType::FP8_E4M3FN,
-                          nvfp4 ? spec.head_dim / 2 : spec.head_dim, spec.num_kv_heads, 256,
+        planes.push_back({shape.key.dtype, shape.key.leading_extent, spec.num_kv_heads, 256,
                           slab_order(spec.plane_layouts.key),
                           intra_page_order(spec.plane_layouts.key)});
-        planes.push_back({DType::U8, spec.head_dim / 2, spec.num_kv_heads, 256,
+        planes.push_back({shape.value.dtype, shape.value.leading_extent, spec.num_kv_heads, 256,
                           slab_order(spec.plane_layouts.value),
                           intra_page_order(spec.plane_layouts.value)});
-        planes.push_back({nvfp4 ? DType::FP8_E4M3FN : DType::FP16, spec.head_dim / spec.value_group,
+        planes.push_back({shape.value_scale.dtype, shape.value_scale.leading_extent,
                           spec.num_kv_heads, 256, slab_order(spec.plane_layouts.value_scale),
                           intra_page_order(spec.plane_layouts.value_scale)});
-        if (nvfp4) {
-            planes.push_back({DType::FP8_E4M3FN, spec.head_dim / spec.value_group,
+        if (kv_planes_per_layer(spec.format) == 4U) {
+            planes.push_back({shape.key_scale.dtype, shape.key_scale.leading_extent,
                               spec.num_kv_heads, 256, slab_order(spec.plane_layouts.key),
                               intra_page_order(spec.plane_layouts.key)});
         }
@@ -137,23 +177,25 @@ Fp8KInt4VPagedKVLayerView fp8_k_int4_v_paged_kv_layer_view(const PagedKVPool& po
             static_cast<std::size_t>(spec.layer_count) * kv_planes_per_layer(spec.format)) {
         throw std::logic_error("FP8-K/INT4-V pool does not match its typed specification");
     }
-    const bool nvfp4 = spec.format == KvCacheFormat::Nvfp4;
+    const LayerPlanes shape = layer_planes(spec);
+    const bool key_scale    = kv_planes_per_layer(spec.format) == 4U;
     const std::size_t base =
         static_cast<std::size_t>(layer_index) * kv_planes_per_layer(spec.format);
-    check_plane(pool, base, nvfp4 ? DType::U8 : DType::FP8_E4M3FN,
-                nvfp4 ? spec.head_dim / 2 : spec.head_dim, spec.plane_layouts.key, spec, "K");
-    check_plane(pool, base + 1U, DType::U8, spec.head_dim / 2, spec.plane_layouts.value, spec, "V");
-    check_plane(pool, base + 2U, nvfp4 ? DType::FP8_E4M3FN : DType::FP16,
-                spec.head_dim / spec.value_group, spec.plane_layouts.value_scale, spec, "V scale");
-    if (nvfp4) {
-        check_plane(pool, base + 3U, DType::FP8_E4M3FN, spec.head_dim / spec.value_group,
+    check_plane(pool, base, shape.key.dtype, shape.key.leading_extent, spec.plane_layouts.key, spec,
+                "K");
+    check_plane(pool, base + 1U, shape.value.dtype, shape.value.leading_extent,
+                spec.plane_layouts.value, spec, "V");
+    check_plane(pool, base + 2U, shape.value_scale.dtype, shape.value_scale.leading_extent,
+                spec.plane_layouts.value_scale, spec, "V scale");
+    if (key_scale) {
+        check_plane(pool, base + 3U, shape.key_scale.dtype, shape.key_scale.leading_extent,
                     spec.plane_layouts.key, spec, "K scale");
     }
     return {.format            = spec.format,
             .key_pages         = pool.plane(base),
             .value_pages       = pool.plane(base + 1U),
             .value_scale_pages = pool.plane(base + 2U),
-            .key_scale_pages   = nvfp4 ? pool.plane(base + 3U) : Tensor{},
+            .key_scale_pages   = key_scale ? pool.plane(base + 3U) : Tensor{},
             .block_table       = pool.block_table_row(table_row),
             .head_dim          = spec.head_dim,
             .num_kv_heads      = spec.num_kv_heads,

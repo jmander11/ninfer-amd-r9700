@@ -211,13 +211,13 @@ int main(int argc, char** argv) {
         std::string ids_path;
         std::string messages_path;
         std::string text_path;
-        std::string scheme = "r9700-fp8k-int4v";
+        std::string scheme = "r9700";
         std::string out_json;
         ninfer::ScoreOptions score_options;
         ninfer::SpeculativeOptions speculative;
         std::uint32_t tokens                  = 0;
         std::uint32_t max_context             = 4096;
-        ninfer::KvCacheFormat kv_cache_format = ninfer::KvCacheFormat::Fp8KInt4V;
+        ninfer::KvCacheFormat kv_cache_format = ninfer::KvCacheFormat::Nvfp4;
         std::uint32_t prefill_chunk           = ninfer::kDefaultPrefillChunk;
         int device                            = 0;
         bool help                             = false;
@@ -272,8 +272,12 @@ int main(int argc, char** argv) {
                 const std::string selected = value("--kv-cache");
                 if (selected == "nvfp4") {
                     kv_cache_format = ninfer::KvCacheFormat::Nvfp4;
-                } else if (selected != "fp8-int4") {
-                    throw std::invalid_argument("--kv-cache must be fp8-int4 or nvfp4");
+                } else if (selected == "tq-k4-v3") {
+                    kv_cache_format = ninfer::KvCacheFormat::TqK4V3;
+                } else if (selected == "fp8-int4") {
+                    kv_cache_format = ninfer::KvCacheFormat::Fp8KInt4V;
+                } else {
+                    throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
                 }
             } else if (arg == "--max-context") {
                 max_context = static_cast<std::uint32_t>(std::stoul(value("--max-context")));
@@ -302,7 +306,7 @@ int main(int argc, char** argv) {
                    "[--vision] [options]\n"
                 << "       ninfer-ppl --encode --weights <artifact.ninfer> --text <file> --ids "
                    "<out.ids>\n"
-                << "  --scheme <name>             cell name (default: r9700-fp8k-int4v)\n"
+                << "  --scheme <name>             cell name (default: r9700)\n"
                 << "  --schedule <prefill|decode> default prefill (causal Text attention)\n"
                 << "  --skip <half|n>             warmup tokens not scored (default: half)\n"
                 << "  --spec <none|mtp|dflash>    select a speculative backend (decode score: "
@@ -312,7 +316,7 @@ int main(int argc, char** argv) {
                 << "  --dflash-verify-width <n>   optional DFlash chain width K+1\n"
                 << "  --device-graph / --no-device-graph  default: graphs on (production decode)\n"
                 << "  --tokens <n>                score/encode the first n ids (default: all)\n"
-                << "  --kv-cache <fp8-int4|nvfp4> growing KV codec (default: fp8-int4)\n"
+                << "  --kv-cache <fp8-int4|nvfp4|tq-k4-v3> growing KV codec (default: nvfp4)\n"
                 << "  --max-context <n>           message-input context ceiling (default: 4096)\n"
                 << "  --prefill-chunk <n>         default " << ninfer::kDefaultPrefillChunk << "\n"
                 << "  --device <id>\n"

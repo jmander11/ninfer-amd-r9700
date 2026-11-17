@@ -1,4 +1,5 @@
 #include "fp8_int4_kv_append.h"
+#include "tq_k4v3_device.h"
 
 #include <hip/hip_fp8.h>
 
@@ -90,6 +91,102 @@ __device__ __forceinline__ float nvfp4_group_maximum(float magnitude) {
     return __shfl(magnitude, 0, 16);
 }
 
+// Block-wide FP32 sum of one value per thread (256 threads, eight wave32 partials).
+__device__ __forceinline__ float tq_block_sum(float value, float* partials) {
+    for (std::uint32_t delta = 16U; delta != 0U; delta >>= 1U)
+        value += __shfl_xor(value, delta, 32);
+    if ((threadIdx.x & 31U) == 0U) partials[threadIdx.x / 32U] = value;
+    __syncthreads();
+    float total = 0.0F;
+#pragma unroll
+    for (std::uint32_t wave = 0U; wave < kHeadDim / 32U; ++wave) total += partials[wave];
+    __syncthreads();
+    return total;
+}
+
+__device__ __forceinline__ std::uint32_t tq_wave_or(std::uint32_t bits) {
+    for (std::uint32_t delta = 16U; delta != 0U; delta >>= 1U) bits |= __shfl_xor(bits, delta, 32);
+    return bits;
+}
+
+// One rotated, norm-corrected TQ-K4-V3 head vector of K and of V (see tq_k4v3_codec.h). Thread t
+// owns feature t; wave w owns the 32-feature V chunk w.
+__device__ void tq_append_vector(const Fp8Int4KvAppendArgs& args, float key, float value,
+                                 std::size_t destination, std::uint32_t head) {
+    __shared__ float rotated[2][kHeadDim];
+    __shared__ float partials[kHeadDim / 32U];
+    const std::uint32_t feature = threadIdx.x;
+    const float sign            = tq::negative_sign(feature) ? -1.0F : 1.0F;
+    rotated[0][feature]         = key * sign;
+    rotated[1][feature]         = value * sign;
+    // Unnormalized Sylvester FWHT; the 1/16 is applied exactly afterwards.
+    for (std::uint32_t h = 1U; h < kHeadDim; h <<= 1U) {
+        __syncthreads();
+        const float k0 = rotated[0][feature], k1 = rotated[0][feature ^ h];
+        const float v0 = rotated[1][feature], v1 = rotated[1][feature ^ h];
+        __syncthreads();
+        rotated[0][feature] = (feature & h) != 0U ? k1 - k0 : k0 + k1;
+        rotated[1][feature] = (feature & h) != 0U ? v1 - v0 : v0 + v1;
+    }
+    __syncthreads();
+    const float key_rotated   = rotated[0][feature] * 0.0625F;
+    const float value_rotated = rotated[1][feature] * 0.0625F;
+    const float key_norm      = sqrtf(tq_block_sum(key * key, partials));
+    const float value_norm    = sqrtf(tq_block_sum(value * value, partials));
+    const float key_factor    = key_norm > 0.0F ? 16.0F * tq::kKeyAlpha / key_norm : 0.0F;
+    const float value_factor  = value_norm > 0.0F ? 16.0F * tq::kValueAlpha / value_norm : 0.0F;
+    const float key_r         = fabsf(key_rotated) * key_factor;
+    const float value_r       = fabsf(value_rotated) * value_factor;
+    std::uint32_t key_index = 0U, value_index = 0U;
+#pragma unroll
+    for (std::uint32_t i = 0U; i < 7U; ++i) key_index += key_r > tq::kKeyThresholds[i] ? 1U : 0U;
+#pragma unroll
+    for (std::uint32_t i = 0U; i < 3U; ++i)
+        value_index += value_r > tq::kValueThresholds[i] ? 1U : 0U;
+    const float key_level       = tq::key_level(key_index);
+    const float value_level     = tq::value_level(value_index, 0U);
+    const float key_code_norm   = sqrtf(tq_block_sum(key_level * key_level, partials));
+    const float value_code_norm = sqrtf(tq_block_sum(value_level * value_level, partials));
+    const __half key_scale      = __float2half_rn(key_norm / key_code_norm);
+    const __half value_scale    = __float2half_rn(value_norm / value_code_norm);
+    // Attention stages level * scale in binary16 (largest K level 2, V levels staged / 8), so a K
+    // scale above 32752 would overflow on the staged routes: reject it like an infinite scale.
+    if (!(__half2float(key_scale) <= 32752.0F) || !isfinite(__half2float(value_scale))) {
+        if (feature == 0U) atomicOr(args.status, Fp8Int4KvAppendScaleOverflow);
+        return;
+    }
+    const std::uint32_t key_code       = key_index | (key_rotated < 0.0F ? 8U : 0U);
+    const std::uint32_t value_negative = value_rotated < 0.0F ? 1U : 0U;
+
+    const std::size_t page           = destination / kPageSize;
+    const std::size_t in_page        = destination % kPageSize;
+    const std::size_t pages          = args.physical_tokens / kPageSize;
+    const std::size_t head_page      = page + pages * head;
+    const std::size_t value_row      = in_page + kPageSize * (head + args.kv_heads * page);
+    const std::uint32_t key_adjacent = __shfl(key_code, (feature & 31U) ^ 1U, 32);
+    if ((feature & 1U) == 0U) {
+        args.key_codes[in_page + kPageSize * (feature / 2U + tq::kKeyBytes * head_page)] =
+            static_cast<std::uint8_t>(key_code | (key_adjacent << 4U));
+    }
+    const std::uint32_t lane      = feature % 32U;
+    const std::uint32_t lane_byte = 8U * (lane % 4U);
+    const std::uint32_t magnitude = value_index << (lane_byte + 2U * ((lane % 16U) / 4U));
+    const std::uint32_t word_a0   = tq_wave_or(lane < 16U ? magnitude : 0U);
+    const std::uint32_t word_a1   = tq_wave_or(lane < 16U ? 0U : magnitude);
+    const std::uint32_t word_b    = tq_wave_or(value_negative << (lane_byte + lane / 4U));
+    if (lane == 0U) {
+        auto* chunk = reinterpret_cast<std::uint32_t*>(
+            args.value_codes + value_row * tq::kValueBytes + (feature / 32U) * tq::kValueChunk);
+        chunk[0] = word_a0;
+        chunk[1] = word_a1;
+        chunk[2] = word_b;
+    }
+    if (feature == 0U) {
+        args.key_scale_bits[in_page + kPageSize * head_page] = __half_as_ushort(key_scale);
+        args.value_scale_bits[value_row]                     = __half_as_ushort(value_scale);
+    }
+}
+
 // Kernel arguments of one append launch over the sequences of a compact decode batch. Grid y is
 // the sequence, whose own arguments come from this kernarg array; slots at and above gridDim.y are
 // never read.
@@ -159,6 +256,15 @@ __global__ void append_kernel(AppendSequences sequences) {
     const std::uint32_t group         = feature / Group;
     const float value                 = static_cast<float>(values[source]);
     const float key                   = static_cast<float>(keys[source]);
+    if constexpr (Codec == KvCodec::TqK4V3) {
+        // Every exit above is uniform over the block; this one must be too (the codec syncs).
+        if (__syncthreads_or(!isfinite(value) || !isfinite(key)) != 0) {
+            if (feature == 0U) atomicOr(status, Fp8Int4KvAppendNonfiniteInput);
+            return;
+        }
+        tq_append_vector(args, key, value, destination, head);
+        return;
+    }
     if (__ballot(!isfinite(value) || !isfinite(key)) != 0) {
         if (lane_in_group == 0) { atomicOr(status, Fp8Int4KvAppendNonfiniteInput); }
         return;
@@ -277,6 +383,11 @@ hipError_t dispatch_layouts(const Fp8Int4KvAppendArgs& args, const AppendSequenc
           args.value_group != 16 || args.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
           args.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
           args.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest)) ||
+        (args.codec == KvCodec::TqK4V3 &&
+         (args.key_scale_bits == nullptr || args.value_scale_bits == nullptr ||
+          args.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
+          args.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+          args.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest)) ||
         args.tokens > static_cast<std::size_t>(UINT32_MAX) / args.kv_heads ||
         (args.first_position_device == nullptr &&
          args.tokens - 1U > static_cast<std::size_t>(UINT32_MAX - args.first_position)) ||
@@ -313,6 +424,9 @@ hipError_t fp8_int4_kv_append(std::span<const Fp8Int4KvAppendArgs> sequences,
     const auto count = static_cast<std::uint32_t>(sequences.size());
     if (first.codec == KvCodec::Nvfp4) {
         return launch<16U, true, false, false, KvCodec::Nvfp4>(batch, count, grid_items, stream);
+    }
+    if (first.codec == KvCodec::TqK4V3) {
+        return launch<16U, true, false, false, KvCodec::TqK4V3>(batch, count, grid_items, stream);
     }
     return first.value_group == 16 ? dispatch_layouts<16>(first, batch, count, grid_items, stream)
                                    : dispatch_layouts<32>(first, batch, count, grid_items, stream);

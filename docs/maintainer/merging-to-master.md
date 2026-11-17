@@ -19,14 +19,14 @@ scripts/master-gates.sh /path/to/models/qwen3.8-27b-r9700-lq4/qwen3.8-27b-r9700-
 | 1. Whole-tree pre-commit | All pinned formatters, linters, spelling and hygiene pass; no rewrites |
 | 2. Release build | Tests, apps and benchmarks enabled, warnings as errors, no host sanitizers |
 | 3. Whole-tree clang-tidy | Zero diagnostics, including HIP translation units |
-| 4. All non-real CTest and retained Python contracts | Every host and physical qualifier and Python codec check passes; no skips or slow-test exclusion |
-| 5. Real-artifact Engine integration | Every real CTest runs, plus cache/cancellation and MTP/DFlash recovery qualifiers |
+| 4. All non-real CTest and retained Python contracts | Every host and physical qualifier (including NVFP4 and TQ KV oracles) and Python codec check passes; no skips or slow-test exclusion |
+| 5. Real-artifact Engine integration | Every real CTest runs with default NVFP4, plus cache/cancellation, system prompts and eager/graph recovery for none/MTP/DFlash on NVFP4 and both opt-ins (`fp8-int4`, `tq-k4-v3`) |
 | 6. Device memcheck | Every registered gpucheck qualifier passes guarded device allocations |
 | 7. Device racecheck | Every registered gpucheck qualifier passes native gfx1201 LDS instrumentation |
 | 8. Device initcheck | Every registered gpucheck qualifier passes poisoned device allocations and its oracle |
 | 9. Host ASan/UBSan | Separate instrumented build and every host CTest pass without sanitizer reports |
 
-See `code-quality.md` for device-check coverage and limitations. These are R9700 checks; NVIDIA compute-sanitizer does not run here. Use the production artifact and fixed FP8-K/INT4-V/FP16-scale cache. Existing artifact-quality and performance requirements still apply; promotion adds no conversion or benchmark campaigns.
+See `code-quality.md` for device-check coverage and limitations. These are R9700 checks; NVIDIA compute-sanitizer does not run here. Use the production artifact and default NVFP4 cache (G16 build). Gate 5 repeats the same Engine-level checks with explicit opt-in FP8-K/INT4-V/FP16-scale and TQ-K4-V3 codecs, with codec-suffixed gate names. Gates 4 and 6–8 include both NVFP4 and TQ KV qualifiers. Existing artifact-quality and performance requirements still apply; promotion adds no conversion or benchmark campaigns.
 
 The selected Python 3.11 interpreter must provide pytest, Torch and safetensors. Set `NINFER_PYTHON` to its explicit path when needed. Dependencies are not installed by this runner. Builds use at most eight jobs; `NINFER_DEV_JOBS` may lower the count. All GPU execution holds the shared coordination lock; device-check tools acquire it per qualifier. Coordinate resident workloads with their owner before testing. Do not delete the lock or stop another owner's job.
 

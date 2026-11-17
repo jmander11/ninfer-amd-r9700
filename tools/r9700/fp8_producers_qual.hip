@@ -7,6 +7,7 @@
 #include "ops/r9700/linear/fp8_activation.h"
 #include "qualification_device_guard.h"
 #include "../../tests/ops/fp8_int4_kv_oracle.h"
+#include "../../tests/ops/tq_kv_oracle.h"
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
@@ -25,8 +26,9 @@
 
 namespace {
 
-namespace linear = ninfer::ops::r9700::linear;
-namespace oracle = ninfer::test::fp8_int4_kv_oracle;
+namespace linear       = ninfer::ops::r9700::linear;
+namespace oracle       = ninfer::test::fp8_int4_kv_oracle;
+namespace tq_kv_oracle = ninfer::test::tq_kv_oracle;
 
 void check(hipError_t error, const char* what) {
     if (error != hipSuccess)
@@ -278,6 +280,45 @@ void run(std::uint32_t tokens, bool poison, Rng& rng, hipStream_t stream) {
                                                              stream);
             },
             stream, "attention gate" + suffix);
+        // TQ-K4-V3: attention in the rotated basis is rotated back inside the quantizer. Oracle:
+        // the FP64 inverse rotation of each 256-feature head, then the same gate formula; a
+        // poisoned run also places a NaN in one attention head, which the rotation spreads over
+        // that head (the token's row is nonfinite).
+        std::vector<float> tq_attention = attention;
+        if (poison) tq_attention[static_cast<std::size_t>(bad_token) * K + 2U * K / 3U] = NAN;
+        Device<float> dta(tq_attention.size());
+        dta.upload(tq_attention);
+        Image tq_image(tokens, K);
+        check(linear::fp8_quantize_gated_activation({.gate        = dg.data,
+                                                     .attention   = dta.data,
+                                                     .workspace   = tq_image.workspace,
+                                                     .tq_unrotate = true},
+                                                    stream),
+              "gated tq");
+        check(hipStreamSynchronize(stream), "sync");
+        constexpr std::size_t head = tq_kv_oracle::kDim;
+        std::vector<double> tq_v(gate.size());
+        for (std::size_t h = 0; h < tq_v.size() / head; ++h) {
+            std::vector<double> rotated(head);
+            for (std::size_t i = 0; i < head; ++i) rotated[i] = tq_attention[h * head + i];
+            const auto model = tq_kv_oracle::unrotate(rotated);
+            for (std::size_t i = 0; i < head; ++i) {
+                const double g     = static_cast<float>(gate[h * head + i]);
+                tq_v[h * head + i] = bf16(bf16(model[i]) / (1.0 + std::exp(-g)));
+            }
+        }
+        check_image(tq_image.workspace, tq_v, tokens, K, "attention gate tq" + suffix);
+        require_warm_identical(
+            tq_image, tokens, K,
+            [&](const auto& workspace, const auto& warm) {
+                return linear::fp8_quantize_gated_activation({.gate        = dg.data,
+                                                              .attention   = dta.data,
+                                                              .workspace   = workspace,
+                                                              .warm        = warm,
+                                                              .tq_unrotate = true},
+                                                             stream);
+            },
+            stream, "attention gate tq" + suffix);
     }
     { // GDN gated per-head RMSNorm (48 x 128).
         constexpr std::uint32_t K = 6144, head = 128;

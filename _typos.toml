@@ -8,7 +8,6 @@ extend-exclude = [
     ".gitattributes",
     # Verbatim long-context prompt corpora and request fixtures: their text is data.
     "examples/cli/messages/",
-    "plans/fixtures/",
     "tests/fixtures/",
 ]
 

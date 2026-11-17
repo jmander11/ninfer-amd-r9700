@@ -77,6 +77,7 @@ void test_fp8_k_int4_v_decoder_layout() {
         .kv_heads              = 4,
         .attention_head_dim    = 256,
         .value_group           = 32,
+        .kv_cache_format       = ninfer::KvCacheFormat::Fp8KInt4V,
         .text_plane_layouts =
             {
                 .key         = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
@@ -157,6 +158,31 @@ void test_fp8_k_int4_v_decoder_layout() {
             (void)q3::plan_decoder_state(invalid_builder, invalid);
         },
         "typed MTP decoder rejects insufficient physical pages");
+
+    for (const auto codec :
+         {ninfer::EngineOptions{}.kv_cache_format, ninfer::KvCacheFormat::TqK4V3}) {
+        auto four_plane            = spec;
+        four_plane.kv_cache_format = codec;
+        four_plane.value_group     = 16;
+        ninfer::LayoutBuilder codec_builder;
+        const auto codec_layout = q3::plan_decoder_state(codec_builder, four_plane);
+        expect(codec_layout.text_kv.storage.storage.planes.size() == 8 &&
+                   codec_layout.mtp_kv.has_value() &&
+                   codec_layout.mtp_kv.value().storage.storage.planes.size() == 4,
+               "default NVFP4 and opt-in TQ retain four planes per Text/MTP layer");
+        four_plane.value_group = 32;
+        try {
+            ninfer::LayoutBuilder invalid_builder;
+            (void)q3::plan_decoder_state(invalid_builder, four_plane);
+            expect(false, "four-plane codec silently accepted G32");
+        } catch (const std::invalid_argument& error) {
+            expect(std::string_view(error.what()).find("--kv-cache fp8-int4") !=
+                           std::string_view::npos &&
+                       std::string_view(error.what()).find("NINFER_R9700_KV_VALUE_GROUP=16") !=
+                           std::string_view::npos,
+                   "G32 codec rejection must name explicit FP8/INT4 selection and G16 rebuild");
+        }
+    }
 }
 
 void test_round_layout() {

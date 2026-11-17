@@ -132,6 +132,7 @@ int main() {
             .kv_heads              = 1,
             .attention_head_dim    = 256,
             .value_group           = ninfer::targets::qwen3::detail::kR9700TextKVValueGroup,
+            .kv_cache_format       = ninfer::KvCacheFormat::Fp8KInt4V,
             .text_plane_layouts    = ninfer::targets::qwen3::detail::kR9700TextKVPlaneLayouts,
             .mtp_plane_layouts =
                 {
@@ -160,7 +161,7 @@ int main() {
         q3::DecoderState decoder({decoder_backing.data(), decoder_backing.size()}, decoder_layout);
         require(decoder.text_kv.pool().plane_count() == 6 && decoder.mtp_cache() != nullptr &&
                     decoder.mtp_cache()->pool().plane_count() == 3,
-                "canonical Qwen decoder state is not exactly three planes per layer");
+                "opt-in FP8-K/INT4-V decoder state is not exactly three planes per layer");
         require(decoder.text_kv.spec().value_group ==
                         ninfer::targets::qwen3::detail::kR9700TextKVValueGroup &&
                     decoder.text_kv.spec().plane_layouts ==

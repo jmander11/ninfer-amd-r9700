@@ -113,13 +113,16 @@ class ServeCorpusTest(unittest.TestCase):
             parse_concurrency_args(common)
         parsed = parse_concurrency_args([*common, "--prefill-chunk", "2048"])
         self.assertEqual(parsed.prefill_chunk, 2048)
-        self.assertEqual(parsed.kv_cache, "fp8-int4")
-        nvfp4 = parse_concurrency_args([*common, "--prefill-chunk", "2048", "--kv-cache", "nvfp4"])
-        point = build_points((("qwen3_8_27b_r9700", Path("/tmp/model.ninfer")),), nvfp4)[0]
-        command = concurrency_server_command(
-            Path("/tmp/ninfer-serve"), point, Path("/tmp/server.jsonl"), nvfp4
-        )
-        self.assertEqual(command[command.index("--kv-cache") + 1], "nvfp4")
+        self.assertEqual(parsed.kv_cache, "nvfp4")
+        for codec in ("nvfp4", "fp8-int4", "tq-k4-v3"):
+            selected = parse_concurrency_args(
+                [*common, "--prefill-chunk", "2048", "--kv-cache", codec]
+            )
+            point = build_points((("qwen3_8_27b_r9700", Path("/tmp/model.ninfer")),), selected)[0]
+            command = concurrency_server_command(
+                Path("/tmp/ninfer-serve"), point, Path("/tmp/server.jsonl"), selected
+            )
+            self.assertEqual(command[command.index("--kv-cache") + 1], codec)
 
     def test_selected_prefill_chunk_is_launched_and_binds_resume(self) -> None:
         fixture = Fixture("fixture", [], False, 1, "suite")

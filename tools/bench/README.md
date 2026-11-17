@@ -21,7 +21,7 @@ flock --exclusive "$NINFER_GPU_LOCK" \
     --output profiles/bench/readme-workloads
 ```
 
-The server defaults to adaptive DFlash up to K7. Select `--spec mtp` for adaptive MTP up to K3; `--draft-tokens N` changes the adaptive maximum (MTP: 1–5, DFlash: 1–7). DFlash accepts C1..12; MTP accepts C1..16. For the MTP matrix use `--spec mtp --concurrency 1 6 8 12 16` and a separate output directory. Both backends use the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. `--kv-cache nvfp4` (G16 build only) launches the opt-in cache instead of the default `fp8-int4`; startup must report the matching `kv_cache_format`, which `provenance.json` and every summary row record. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
+The server defaults to adaptive DFlash up to K7. Select `--spec mtp` for adaptive MTP up to K3; `--draft-tokens N` changes the adaptive maximum (MTP: 1–5, DFlash: 1–7). DFlash accepts C1..12; MTP accepts C1..16. For the MTP matrix use `--spec mtp --concurrency 1 6 8 12 16` and a separate output directory. Both backends use the optimized draft head, Device Graphs, prefill chunk 2048, automatic KV sizing, and p-less sampling at temperature 1.5. NVFP4 is the default cache and KV comparison baseline (G16 build only); `--kv-cache fp8-int4` and `--kv-cache tq-k4-v3` select the opt-in codecs (TQ also requires G16); startup must report the matching `kv_cache_format`, which `provenance.json` and every summary row record. The script requires a new output directory. Change `--manifest` for other workloads; `--serve`, `--concurrency`, `--tokens`, and `--port` select the executable and workload shape. `--workload "Python package"` runs just that named cell at each concurrency. It needs the existing benchmark Python environment and a local tokenizer; it does not download weights or dependencies.
 
 Each lane first runs a one-token request to seed its prompt cache. A synchronized wave then generates up to the output budget per lane; natural stop tokens remain enabled. One warmup wave precedes three measured waves per cell. Only complete 100-ms server intervals with no prefill and exactly C active decode lanes count. The reported rate is total committed decode tokens divided by those intervals' wall time, including host scheduling between rounds. It excludes prefill, startup, and intervals where some lanes have finished. Missing full-batch intervals fail the run rather than substitute an end-to-end or per-request rate. C>1 is aggregate; divide by the concurrency for the average rate per active request in those intervals.
 
@@ -112,11 +112,13 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset full \
   --weights /absolute/path/to/selected.ninfer \
   --expected-kv-value-group 16
 
-# Opt-in NVFP4 cache (G16 build only): every bench command gets --kv-cache nvfp4 and every
-# report must name kv_cache_format=nvfp4 (recorded as the manifest's expected_kv_cache_format).
-# The default fp8-int4 commands carry no --kv-cache; fixed admission protocols stay default-only.
+# Opt-in FP8-K/INT4-V cache: commands explicitly pass --kv-cache fp8-int4.
+# Default NVFP4 commands need no selector; every report must name its actual codec.
+# Fixed historical admission protocols pin fp8-int4 explicitly, not the production default:
+# low-context-prefill, ordinary-diagnostic, --require-fp8-hybrid, --require-post-chunk-capacity.
+# TQ is selectable with --kv-cache tq-k4-v3; NVFP4 and TQ require the G16 build.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset core \
-  --weights /absolute/path/to/selected.ninfer --kv-cache nvfp4
+  --weights /absolute/path/to/selected.ninfer --kv-cache fp8-int4
 
 # Longer run that adds 32k/64k prompt and context-decode points.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset full \
@@ -993,7 +995,7 @@ The recipe above is illustrative, not a selected winner. Admission reopens the c
 
 The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its prefill cases submit `C` Engine requests concurrently. Pure and context decode cases exclude their seed prefills and report aggregate batched-decode throughput. Use the serving benchmark below for the end-to-end request makespan and request throughput claim.
 
-`run_serve_corpus.py` runs the selected target and published MTP0/MTP3 suites. Pass the sole Qwen3.8 R9700 `--artifact` and `--mode mtp0` or `--mode mtp3` to run only that suite. The existing `--mode dflash7` is retained historical regression support and is not an active production-selection command; the replacement DFlash campaign uses K4/W5 and K5/W6. Add `--sampling greedy` to force exact argmax while retaining the same fixtures and repetition count. Its schema-v7 result and flattened summaries retain the canonical `weights_id` received from the schema-v20 serving startup record and the validated `kv_cache_format`; `--kv-cache nvfp4` (G16 build only) selects the opt-in cache instead of the default `fp8-int4`. The stochastic route pins its complete temperature/top-p/top-k/min-p/presence/frequency profile explicitly, so model-default changes do not alter the measurement method.
+`run_serve_corpus.py` runs the selected target and published MTP0/MTP3 suites. Pass the sole Qwen3.8 R9700 `--artifact` and `--mode mtp0` or `--mode mtp3` to run only that suite. The existing `--mode dflash7` is retained historical regression support and is not an active production-selection command; the replacement DFlash campaign uses K4/W5 and K5/W6. Add `--sampling greedy` to force exact argmax while retaining the same fixtures and repetition count. Its schema-v7 result and flattened summaries retain the canonical `weights_id` received from the schema-v20 serving startup record and the validated `kv_cache_format`; NVFP4 is the default; `--kv-cache fp8-int4` or `--kv-cache tq-k4-v3` selects an opt-in codec. NVFP4 and TQ require G16; G32 evaluation requires explicit `--kv-cache fp8-int4`. The stochastic route pins its complete temperature/top-p/top-k/min-p/presence/frequency profile explicitly, so model-default changes do not alter the measurement method.
 
 The serving-corpus runner has no chunk default: pass the value from the validated schema-v2 selection explicitly. Schema-v7 request records retain it and the KV cache format, and resume rejects records produced with another chunk or cache. This corpus-quality workflow explicitly launches and validates `--max-concurrency 1`; concurrency evidence belongs to the separate C=1..4 runner below.
 
@@ -1120,5 +1122,32 @@ The preparer resolves the terminal winner rather than mapping filenames: it reop
 **Gate semantics (read before interpreting matrix results).** The default check is the *exact-format* needle `ORCHID=493817; COLOR=COBALT` — it passes only if the model both retrieves the needle AND emits the exact answer form. Two levers: `run_niah_check.py --needle 493817` is a *recall-only* gate (the value must appear in the answer, format ignored — the pure recall signal), and `--runs N` repeats each cell for a per-cell pass rate (e.g. 5/5). The console prints a `[FAIL] <case>: n/N runs failed to retrieve the needle` line per failing case plus a total failure count on the final verdict; per-cell retrieved/total and answer snippets are also in the JSON record. The default gate is the light **mid-spine** (8k + 64k, fast); the matrix runs on demand.
 
 The checked NIAH cases are behavioral gates, not numerical attention oracles. The 8k and 200k ladders and the complete 6-length x 5-position matrix are optional broader coverage for the current XAttention admission. Run the full matrix as a post-change regression after a production attention change and preserve the per-cell outputs with the corresponding hardware, artifact, and server-build provenance.
+
+### Structured needle suites
+
+RULER-style tasks generated by the same `make_niah_positions.py` (`--suite`) and scored by the same `run_niah_check.py`; they are not the official RULER dataset.
+
+| `--suite` | Task | Exact answer contract |
+|---|---|---|
+| `multi-value` | Six values for one key among 24 registry entries spread across the essay | JSON array of all six distinct value strings |
+| `multi-query` | Four queried keys among 24 distributed registry entries | JSON object with all four correct string bindings |
+| `variable-tracking` | Four interleaved six-variable assignment chains | JSON array of every variable whose final value equals the queried number |
+| `aggregation` | Three most frequent words across 16 distributed fragments | JSON array of exactly the three winners |
+| `in-distribution` | One archive-code anecdote inserted into the essay's prose | JSON array containing the code string |
+
+For the distributed suites the five position names select deterministic layouts, not one needle's depth; `in-distribution` keeps the ordinary depth meaning. Every fixture stores `messages` plus `niah` answer metadata; only `messages` go to the server.
+
+```bash
+for suite in multi-value multi-query aggregation in-distribution; do
+  for length in 32k 128k 260k; do
+    python3 tools/bench/make_niah_positions.py --suite "$suite" --length "$length" \
+      --position all --out-dir out/needle/prompts
+  done
+  python3 -m tools.bench.run_niah_check --suite "$suite" --lengths 32k,128k,260k \
+    --fixture-dir out/needle/prompts --max-tokens 192 --label "$suite"
+done
+```
+
+Scoring is automatic from the fixture metadata: arrays are order-independent, but missing values, extras, duplicates, non-string values, Markdown wrappers and wrong key/value bindings fail. Records keep each answer and its score. Exit 0 means every trial passed, 1 a wrong answer, 2 a request error. `python3 -m unittest tests.test_niah` checks generated answers against the prompt data and the scoring contract.
 
 Benchmark HTTP credentials come only from explicit CLI options or the documented `NINFER_API_KEY` / `LLAMA_CPP_LOCAL_API_KEY` environment variables. The runners do not search personal Docker directories or parent-directory `.env` files.

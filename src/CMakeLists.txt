@@ -65,6 +65,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/schedule/scalar_schedule_ops.hip
   ops/r9700/kv/fp8_int4_kv_append.hip
   ops/r9700/kv/fp8_int4_kv_compact.hip
+  ops/r9700/kv/tq_rotation.hip
   ops/r9700/kv/fp8_int4_kv_trace.hip
   ops/r9700/kv/fp8_int4_kv_attention.hip
   ops/r9700/linear/linear_tensor_op.cpp
@@ -654,6 +655,15 @@ target_include_directories(ninfer_r9700_nvfp4_kv_qual PRIVATE ${PROJECT_SOURCE_D
 set_target_properties(ninfer_r9700_nvfp4_kv_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_nvfp4_kv_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Opt-in TQ-K4-V3 cache: rotation, codec, transactions and attention routes against its oracle.
+add_executable(ninfer_r9700_tq_kv_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/tq_kv_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_tq_kv_qual)
+target_include_directories(ninfer_r9700_tq_kv_qual PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+set_target_properties(ninfer_r9700_tq_kv_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_tq_kv_qual PRIVATE ninfer_r9700_core hip::host)
 
 # Standalone arithmetic discriminator for ordinary W1 versus DFlash-chain W5 attention. It calls
 # the two raw leaves directly and cannot alter the production row/context classifier.

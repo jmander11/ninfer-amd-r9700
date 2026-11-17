@@ -24,11 +24,14 @@ enum class Fp8Int4KvPlaneLayout : std::uint8_t {
 // V-group scales. Nvfp4 stores K and V as E2M1 with one E4M3FN scale per 16 features of each,
 // encoded E4M3_satfinite_rn(FP32_rn(max|x| / 6)) and E2M1_rn(FP32_rn(x / decoded scale)); a zero
 // scale produces zero codes. Its planes have one fixed order (the fastest measured): K codes and
-// K scales TokenFastest, V codes and V scales FeatureFastest. No caller may reinterpret one
-// codec's bytes as the other's.
+// K scales TokenFastest, V codes and V scales FeatureFastest. TqK4V3 is the rotated TurboQuant
+// codec of tq_k4v3_codec.h: 4-bit K and 3-bit V codes in the rotated basis with one binary16
+// scale per head vector of each, in the same plane order as Nvfp4. No caller may reinterpret one
+// codec's bytes as another's.
 enum class KvCodec : std::uint8_t {
     Fp8Int4,
     Nvfp4,
+    TqK4V3,
 };
 
 enum Fp8Int4KvAppendStatus : std::uint32_t {
@@ -83,6 +86,10 @@ struct Fp8Int4KvAppendArgs {
     KvCodec codec                   = KvCodec::Fp8Int4;
     std::uint8_t* key_scale_codes   = nullptr;
     std::uint8_t* value_scale_codes = nullptr;
+    // TqK4V3 only: key_codes hold rotated 4-bit K nibbles, value_codes the 96-byte rotated 3-bit V
+    // vectors, value_scale_bits the V scale and this plane the K scale (one binary16 each per head
+    // vector). The kernel rotates the represented K and V itself.
+    std::uint16_t* key_scale_bits = nullptr;
 };
 
 // Launches the exact stored-format A2 append codec. physical_tokens must be a positive multiple

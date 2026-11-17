@@ -177,8 +177,8 @@ def main() -> None:
     parser.add_argument(
         "--kv-cache",
         choices=tuple(corpus.KV_CACHE_FORMATS),
-        default="fp8-int4",
-        help="ninfer-serve KV cache codec (default: fp8-int4)",
+        default="nvfp4",
+        help="ninfer-serve KV cache codec (default: nvfp4)",
     )
     parser.add_argument(
         "--workload", action="append", help="workload name to run; repeat to select several"

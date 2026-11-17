@@ -74,6 +74,8 @@ def _expected_raw_command(
         str(prefill_chunk),
         "--device",
         "0",
+        "--kv-cache",
+        "fp8-int4",
         "--out-json",
         str(output),
     ]
@@ -89,6 +91,8 @@ def _expected_plan_command(plan: dict, *, hybrid: bool) -> list[str]:
     command = [
         plan["python"]["launcher_path"],
         str(RUNNER),
+        "--kv-cache",
+        "fp8-int4",
         "--bf16-reference-ppl-bin",
         plan["bf16_scorer"]["path"],
         "--bf16-reference-weights",

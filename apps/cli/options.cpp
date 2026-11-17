@@ -95,7 +95,8 @@ std::size_t parse_kv_disk_capacity_bytes(const char* text) {
 KvCacheFormat parse_kv_cache(const char* text) {
     if (std::string_view(text) == "fp8-int4") { return KvCacheFormat::Fp8KInt4V; }
     if (std::string_view(text) == "nvfp4") { return KvCacheFormat::Nvfp4; }
-    throw std::invalid_argument("--kv-cache must be fp8-int4 or nvfp4");
+    if (std::string_view(text) == "tq-k4-v3") { return KvCacheFormat::TqK4V3; }
+    throw std::invalid_argument("--kv-cache must be fp8-int4, nvfp4 or tq-k4-v3");
 }
 
 KvDiskCompress parse_kv_disk_compress(const char* text) {
@@ -116,7 +117,7 @@ ReasoningEffort parse_reasoning_effort(std::string_view text) {
 std::string usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> (--prompt <text>|--messages <messages.json>)\n"
-           "       [--max-context N] [--kv-cache fp8-int4|nvfp4] [--kv-capacity N|auto]\n"
+           "       [--max-context N] [--kv-cache fp8-int4|nvfp4|tq-k4-v3] [--kv-capacity N|auto]\n"
            "       [--kv-capacity-headroom MiB]\n"
            "       [--kv-ram-capacity off|N] [--kv-ram-system-prompts N] [--kv-disk-capacity "
            "off|N] [--kv-disk-location PATH]\n"
@@ -141,8 +142,9 @@ std::string usage_text(const char* argv0) {
            "Structured message content accepts text, image/image_url, and video/video_url parts;\n"
            "media sources may be local paths, HTTP(S) URLs, or base64 data URIs.\n"
            "--vision enables image/video input and loads the fixed Vision GPU allocations.\n"
-           "--kv-cache selects the growing Text/MTP KV codec: fp8-int4 (default) or nvfp4, which\n"
-           "stores about 1.44x the context in the same memory at somewhat higher key error.\n"
+           "--kv-cache selects the growing Text/MTP KV codec: nvfp4 (default), fp8-int4\n"
+           "(opt-in), or tq-k4-v3 (opt-in rotated 4-bit K / 3-bit V). NVFP4 and TQ require\n"
+           "a G16 build; with a G32 evaluation build select --kv-cache fp8-int4 explicitly.\n"
            "--kv-capacity auto sizes the KV pool from all free GPU memory except\n"
            "--kv-capacity-headroom MiB (default " +
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +

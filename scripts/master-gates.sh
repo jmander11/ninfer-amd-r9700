@@ -32,6 +32,8 @@ mkdir -p "$report_dir"
 export NINFER_R9700_WEIGHTS="$artifact"
 export NINFER_DEV_JOBS="$jobs"
 export NINFER_BUILD_DIR="$build_dir"
+# Default gates must exercise the production default, not an inherited qualifier override.
+unset NINFER_QUAL_KV_CACHE
 export ASAN_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer
 {
   printf 'candidate=%s\nmaster=%s\nartifact=%s\n' "$candidate" "$master" "$artifact"
@@ -88,31 +90,31 @@ gate 04-python flock --exclusive "$gpu_lock" env NINFER_RUN_R9700_CODEC_TESTS=1 
   tools/convert/qwen3_8_27b_r9700/test_vectorized_codec.py
 require_no_skips "$report_dir/04-python.xml"
 ctest_gate 05-real "$build_dir" -L real
-gate 05-cache-cancel flock --exclusive "$gpu_lock" \
+gate 05-cache-cancel-nvfp4 flock --exclusive "$gpu_lock" \
   "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
 for backend in none mtp dflash; do
-  gate "05-system-prompts-$backend" flock --exclusive "$gpu_lock" \
+  gate "05-system-prompts-$backend-nvfp4" flock --exclusive "$gpu_lock" \
     "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact" --system-prompts "$backend"
 done
-gate 05-recovery-mtp flock --exclusive "$gpu_lock" \
-  "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" mtp
-gate 05-recovery-dflash flock --exclusive "$gpu_lock" \
-  "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" dflash
 for backend in none mtp dflash; do
-  gate "05-graph-recovery-$backend" flock --exclusive "$gpu_lock" \
+  gate "05-recovery-$backend-nvfp4" flock --exclusive "$gpu_lock" \
+    "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" "$backend"
+  gate "05-graph-recovery-$backend-nvfp4" flock --exclusive "$gpu_lock" \
     "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" "$backend" --device-graph
 done
-# The opt-in NVFP4 cache keeps the same Engine-level contracts.
-gate 05-cache-cancel-nvfp4 flock --exclusive "$gpu_lock" \
-  env NINFER_QUAL_KV_CACHE=nvfp4 "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
-for backend in none mtp dflash; do
-  gate "05-system-prompts-$backend-nvfp4" flock --exclusive "$gpu_lock" \
-    env NINFER_QUAL_KV_CACHE=nvfp4 "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact" \
-    --system-prompts "$backend"
-  gate "05-recovery-$backend-nvfp4" flock --exclusive "$gpu_lock" \
-    env NINFER_QUAL_KV_CACHE=nvfp4 "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" "$backend"
-  gate "05-graph-recovery-$backend-nvfp4" flock --exclusive "$gpu_lock" \
-    env NINFER_QUAL_KV_CACHE=nvfp4 "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" "$backend" --device-graph
+# Both opt-in codecs keep the same Engine-level contracts as default NVFP4.
+for codec in fp8-int4 tq-k4-v3; do
+  gate "05-cache-cancel-$codec" flock --exclusive "$gpu_lock" \
+    env NINFER_QUAL_KV_CACHE="$codec" "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
+  for backend in none mtp dflash; do
+    gate "05-system-prompts-$backend-$codec" flock --exclusive "$gpu_lock" \
+      env NINFER_QUAL_KV_CACHE="$codec" "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact" \
+      --system-prompts "$backend"
+    gate "05-recovery-$backend-$codec" flock --exclusive "$gpu_lock" \
+      env NINFER_QUAL_KV_CACHE="$codec" "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" "$backend"
+    gate "05-graph-recovery-$backend-$codec" flock --exclusive "$gpu_lock" \
+      env NINFER_QUAL_KV_CACHE="$codec" "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" "$backend" --device-graph
+  done
 done
 gate 06-memcheck bash scripts/gpu-check.sh memcheck
 gate 07-racecheck bash scripts/gpu-check.sh racecheck
