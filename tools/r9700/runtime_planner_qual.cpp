@@ -41,8 +41,9 @@ namespace {
 
 using Variant = ninfer::targets::qwen3_8_27b::detail::Variant;
 
-// Each single-sequence (B=1) Device Graph definition is lowered to persistent decode kernels and
-// charged this allowance (layouts_impl.h kR9700PersistentDecodeDefinitionBytes).
+// Each single-sequence (B=1) ordinary/DFlash Device Graph definition is lowered to persistent
+// decode kernels and charged this allowance (layouts_impl.h kR9700PersistentDecodeDefinitionBytes);
+// MTP reserves its measured inventory instead (Variant::mtp_graph_allowance_bytes).
 constexpr std::size_t kLoweredDefinitionBytes = 6ULL * 1024ULL * 1024ULL;
 
 void require(bool condition, const char* message);
@@ -650,16 +651,22 @@ void qualify_host_mtp_graph_allowance() {
         std::uint32_t context, concurrency, drafts;
         bool adaptive;
         std::size_t definitions, allowance_mib;
+        ninfer::KvCacheFormat cache = ninfer::KvCacheFormat::Nvfp4;
     };
 
-    // Includes singleton, the reproduced short-context failure, full
-    // context profiles/split topologies, and all three independently captured Ks.
+    // Includes singleton, the reproduced short-context failure, full context profiles/split
+    // topologies, all three independently captured Ks, and each codec's 6-MiB executable
+    // thresholds. Startup measured 870/600/728/2182..2198 MiB (NVFP4; FP8-INT4 identical) and
+    // 894/586/2206 MiB (TQ) for the C16 and C14/K4 cases (2026-11-16).
+    constexpr auto tq = ninfer::KvCacheFormat::TqK4V3;
     for (const auto c :
          {Case{64, 1, 3, false, 1, 88}, Case{1024, 1, 3, false, 3, 96},
           Case{1024, 4, 5, false, 12, 132}, Case{262144, 1, 3, false, 11, 128},
           Case{262144, 4, 5, false, 32, 212}, Case{262144, 4, 5, true, 108, 516},
-          Case{65536, 14, 3, false, 154, 766}, Case{65536, 14, 4, false, 112, 628},
-          Case{65536, 16, 5, false, 128, 740}, Case{262144, 16, 5, true, 432, 2194}}) {
+          Case{65536, 16, 3, false, 176, 898}, Case{65536, 14, 4, false, 112, 628},
+          Case{65536, 16, 5, false, 128, 756}, Case{262144, 16, 5, true, 432, 2210},
+          Case{65536, 16, 3, false, 176, 920, tq}, Case{65536, 16, 2, false, 128, 612, tq},
+          Case{262144, 16, 5, true, 432, 2232, tq}}) {
         runtime::SequencePlanningInputs inputs{
             .weights_profile     = Variant::WeightsProfile::R9700Q4G64Evaluation,
             .capacity            = c.context,
@@ -673,6 +680,7 @@ void qualify_host_mtp_graph_allowance() {
                                     .speculative   = ninfer::SpeculativeBackend::Mtp,
                                     .proposal_head = ninfer::ProposalHead::Full},
             .use_device_graph    = true,
+            .kv_cache_format     = c.cache,
         };
         const auto plan = runtime::build_sequence_candidate_for_qualification(
             inputs, c.concurrency * ((c.context + 63U) / 64U));
@@ -816,7 +824,8 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
                 "immutable graph inventory omitted a reachable exact-B profile");
         require(plan.impl_->graph_allowance_bytes ==
                     (backend == ninfer::SpeculativeBackend::Mtp
-                         ? Variant::mtp_graph_allowance_bytes(max_context, captured_ks, concurrency)
+                         ? Variant::mtp_graph_allowance_bytes(max_context, captured_ks, concurrency,
+                                                              options.kv_cache_format)
                          : (family_mib + 20U + 4U * definitions) * 1024U * 1024U +
                                lowered * kLoweredDefinitionBytes),
                 "immutable graph allowance differs from its complete profile inventory");

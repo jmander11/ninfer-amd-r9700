@@ -957,7 +957,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         impl->graph_executable_count = definitions;
         if (impl->speculative_backend == SpeculativeBackend::Mtp) {
             impl->graph_allowance_bytes = Variant::mtp_graph_allowance_bytes(
-                impl->capacity, impl->captured_ks, impl->max_concurrency);
+                impl->capacity, impl->captured_ks, impl->max_concurrency, impl->kv_cache_format);
         } else {
             // Ordinary C1/capacity256 preparation measured 44 MiB on gfx1201 with eligible-logit
             // reporting (2026-10-18). Its two profiles reserve 20 MiB below; the remaining 24 MiB
