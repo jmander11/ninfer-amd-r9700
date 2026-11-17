@@ -956,7 +956,6 @@ private:
             std::erase(suspended_, request);
             std::erase(pressure_victims_, request);
             std::erase(recovery_queue_, request);
-            if (replacement_ == request) replacement_.reset();
             if (growth_priority_ == request->id) growth_priority_ = 0;
             request->decode_ready               = false;
             request->recovery_pending           = false;
@@ -2098,8 +2097,7 @@ private:
     // Window growth is committed before decode membership is built. Live transfer plans hold
     // released capacity exclusively: peers may spend their existing windows, but cannot grow.
     void refresh_execution_windows() {
-        if (!chunked_execution_ || live_transfer_ || !pressure_victims_.empty() || replacement_)
-            return;
+        if (!chunked_execution_ || live_transfer_ || !pressure_victims_.empty()) return;
         select_completion_cohort();
         if (growth_priority_ != 0 &&
             std::any_of(slots_.begin(), slots_.end(), [&](const auto& request) {
@@ -2162,27 +2160,42 @@ private:
         if (changed) { publish_runtime_stats(); }
     }
 
-    [[nodiscard]] bool
-    post_release_fits(const AdmissionResources& desired, const Request* replaced,
-                      std::span<const std::shared_ptr<Request>> victims,
-                      const Request* adjusted                      = nullptr,
-                      const AdmissionResources* adjusted_resources = nullptr) const {
-        std::uint64_t main    = desired.main_kv_pages;
-        std::uint64_t backend = desired.backend_kv_pages;
-        std::uint32_t lanes   = desired.active_lanes;
+    struct ResourceTotals {
+        std::uint64_t main    = 0;
+        std::uint64_t backend = 0;
+        std::uint32_t lanes   = 0;
+    };
+
+    [[nodiscard]] ResourceTotals
+    post_release_totals(const AdmissionResources& desired, const Request* replaced,
+                        std::span<const std::shared_ptr<Request>> victims,
+                        const Request* adjusted                      = nullptr,
+                        const AdmissionResources* adjusted_resources = nullptr) const {
+        ResourceTotals totals{desired.main_kv_pages, desired.backend_kv_pages,
+                              desired.active_lanes};
         for (const auto& request : slots_) {
             if (!request || request.get() == replaced ||
                 std::find(victims.begin(), victims.end(), request) != victims.end())
                 continue;
             const auto& held =
                 request.get() == adjusted ? *adjusted_resources : request->admission_resources;
-            main += held.main_kv_pages;
-            backend += held.backend_kv_pages;
-            ++lanes;
+            totals.main += held.main_kv_pages;
+            totals.backend += held.backend_kv_pages;
+            ++totals.lanes;
         }
-        return main <= admission_capacity_.main_kv_pages &&
-               backend <= admission_capacity_.backend_kv_pages &&
-               lanes <= admission_capacity_.active_lanes;
+        return totals;
+    }
+
+    [[nodiscard]] bool
+    post_release_fits(const AdmissionResources& desired, const Request* replaced,
+                      std::span<const std::shared_ptr<Request>> victims,
+                      const Request* adjusted                      = nullptr,
+                      const AdmissionResources* adjusted_resources = nullptr) const {
+        const auto totals =
+            post_release_totals(desired, replaced, victims, adjusted, adjusted_resources);
+        return totals.main <= admission_capacity_.main_kv_pages &&
+               totals.backend <= admission_capacity_.backend_kv_pages &&
+               totals.lanes <= admission_capacity_.active_lanes;
     }
 
     bool reclaim_unused_windows(const AdmissionResources& desired, const Request* replaced,
@@ -2213,6 +2226,23 @@ private:
                                                           minimum.admission.main_kv_pages) +
                                current.backend_kv_pages - minimum.admission.backend_kv_pages;
             if (slack != 0) donors[count++] = {request, minimum, slack};
+        }
+        // Shrink nothing unless every donor at its floor proves the whole transaction: a
+        // partial reclaim would strip peers' windows without serving the requester.
+        {
+            const auto totals           = post_release_totals(desired, replaced, victims);
+            std::uint64_t main_slack    = 0;
+            std::uint64_t backend_slack = 0;
+            for (std::size_t index = 0; index < count; ++index) {
+                const auto& current = donors[index].request->admission_resources;
+                const auto& floor   = donors[index].minimum.admission;
+                main_slack += current.main_kv_pages - floor.main_kv_pages;
+                backend_slack += current.backend_kv_pages - floor.backend_kv_pages;
+            }
+            if (totals.lanes > admission_capacity_.active_lanes ||
+                totals.main > admission_capacity_.main_kv_pages + main_slack ||
+                totals.backend > admission_capacity_.backend_kv_pages + backend_slack)
+                return false;
         }
         const auto precedes = [](const auto& a, const auto& b) {
             if (a.slack != b.slack) return a.slack > b.slack;
@@ -2337,10 +2367,21 @@ private:
                                      : std::max(request->window_output_tokens, consumed + grant);
             const auto window  = instance_.program->plan_suspended_window(request->id, desired);
             // Beside other residents, a resume must also leave room for its next growth grant,
-            // up to its lifetime output, or that grant suspends it again at once.
+            // up to its lifetime output, or that grant suspends it again at once. When no
+            // resident can decode or start a queued retry, the margin would only stall the
+            // worker, so the resume then needs just its window. A retry still waiting on its
+            // own resources only starts once it fits and needs no new RAM credit.
+            const auto retry_startable = [&](const std::shared_ptr<Request>& queued) {
+                return queued->lane &&
+                       (!queued->recovery_waiting_resources ||
+                        (queued->completion_member &&
+                         post_release_fits(queued->recovery_window.admission, queued.get(), {})));
+            };
             const bool others_resident =
                 std::any_of(slots_.begin(), slots_.begin() + max_concurrency_,
-                            [](const auto& slot) { return slot != nullptr; });
+                            [](const auto& slot) { return slot != nullptr; }) &&
+                (!kv_pressure_.no_executable_work() ||
+                 std::any_of(recovery_queue_.begin(), recovery_queue_.end(), retry_startable));
             const std::uint32_t headroom_end =
                 std::max(desired, std::min(desired + kResumeMarginTokens,
                                            consumed + request->budget->remaining()));
@@ -2378,16 +2419,14 @@ private:
     AdmissionProgress try_admit_windowed() {
         if (growth_priority_ != 0) return AdmissionProgress::None;
         const auto admitted = pressure_snapshot();
-        if (!replacement_ && !kv_pressure_.allows_ingress(admitted.size(), !suspended_.empty()))
-            return AdmissionProgress::None;
+        if (!kv_pressure_.allows_ingress(admitted)) return AdmissionProgress::None;
         const auto queued = pending_snapshot();
         if (!queued.empty() && window_head_id_ != queued.front()->id) {
             window_head_id_     = queued.front()->id;
             window_head_bypass_ = max_concurrency_ - 1;
         }
         for (const auto& request : queued) {
-            if (replacement_ && request != replacement_) continue;
-            if (!replacement_ && request->id != window_head_id_ && window_head_bypass_ == 0) break;
+            if (request->id != window_head_id_ && window_head_bypass_ == 0) break;
             try {
                 ensure_base_plan(request);
                 if (!admission_resources_fit(request->completion_resources, admission_capacity_)) {
@@ -2395,7 +2434,6 @@ private:
                         request, std::make_exception_ptr(
                                      RequestError(RequestErrorKind::ContextLengthExceeded,
                                                   "request exceeds Engine exclusive KV capacity")));
-                    replacement_.reset();
                     return AdmissionProgress::ControlProgress;
                 }
                 const bool joins_cohort = completion_fits(request);
@@ -2443,19 +2481,15 @@ private:
                     choice = find_admission_lane(request);
                 }
                 if (!funded || !choice) {
-                    // A selected replacement owns its credit across the held capture and
-                    // retries. Other unsuccessful probes must not pin live-image capacity.
-                    if (replacement_ == request) break;
+                    // An unsuccessful probe must not pin live-image capacity.
                     instance_.program->release_suspension_credit(request->id);
                     continue;
                 }
-                const bool replacement_admission = replacement_ == request;
                 if (joins_cohort) {
                     if (!claim_completion(request)) {
                         throw std::logic_error("completion cohort changed during admission claim");
                     }
-                    // A selected replacement may have secured an empty credit before a
-                    // completion departure made this request eligible for the cohort.
+                    // A reclaim probe may have secured credit; a member needs no own image.
                     instance_.program->release_suspension_credit(request->id);
                 }
                 const auto progress =
@@ -2468,15 +2502,9 @@ private:
                 if (was_admitted) {
                     if (request->id != window_head_id_ && window_head_bypass_ != 0)
                         --window_head_bypass_;
-                    if (replacement_ == request) replacement_.reset();
                 } else {
-                    if (!replacement_admission || progress != AdmissionProgress::None)
-                        instance_.program->release_suspension_credit(request->id);
-                    if (!replacement_admission || progress != AdmissionProgress::None)
-                        release_completion_claim(request);
-                    if (replacement_admission && progress != AdmissionProgress::None &&
-                        replacement_ == request)
-                        replacement_.reset();
+                    instance_.program->release_suspension_credit(request->id);
+                    release_completion_claim(request);
                 }
                 return progress;
             } catch (...) {
@@ -2487,14 +2515,8 @@ private:
                 instance_.program->release_suspension_credit(request->id);
                 release_completion_claim(request);
                 (void)remove_pending_error(request, error);
-                if (replacement_ == request) replacement_.reset();
                 return AdmissionProgress::ControlProgress;
             }
-        }
-        if (replacement_ && std::find(queued.begin(), queued.end(), replacement_) == queued.end()) {
-            instance_.program->release_suspension_credit(replacement_->id);
-            release_completion_claim(replacement_);
-            replacement_.reset();
         }
         return AdmissionProgress::None;
     }
@@ -2502,38 +2524,23 @@ private:
     bool plan_kv_pressure() {
         if (!chunked_execution_ || live_transfer_ || copy_hold_ || prefill_lane_) return false;
         while (!pressure_victims_.empty()) {
+            // A cancelled recipient or a peer completion can make the remaining captures
+            // unnecessary; drop them and re-plan from the current residents.
+            const auto recipient =
+                std::find_if(slots_.begin(), slots_.end(), [&](const auto& request) {
+                    return request && request->id == growth_priority_;
+                });
+            if (growth_priority_ == 0 || recipient == slots_.end() ||
+                post_release_fits(pressure_growth_, recipient->get(), {})) {
+                pressure_victims_.clear();
+                break;
+            }
             const auto victim = pressure_victims_.front();
             pressure_victims_.pop_front();
             if (begin_live_suspension(victim)) return true;
         }
-        // A blocked cohort member may be a useful queued-replacement victim. Exchange its
-        // claim only after funding it and proving a progressing backed successor's envelope.
-        if (suspended_.empty() && !pending_snapshot().empty()) {
-            for (const auto& member : slots_) {
-                if (!member || !member->completion_member || !member->growth_blocked) continue;
-                std::shared_ptr<Request> successor;
-                for (const auto& candidate : slots_) {
-                    if (candidate && !candidate->completion_member && candidate->decode_ready &&
-                        !candidate->growth_blocked && !candidate->recovery_pending &&
-                        completion_fits(candidate, member.get()) &&
-                        (!successor || candidate->queue_order < successor->queue_order)) {
-                        successor = candidate;
-                    }
-                }
-                if (successor && instance_.program->reserve_suspension_credit(
-                                     member->id, member->suspension_bytes)) {
-                    release_completion_claim(member);
-                    if (!claim_completion(successor)) {
-                        throw std::logic_error("completion handoff lost its future capacity claim");
-                    }
-                    instance_.program->release_suspension_credit(successor->id);
-                    break;
-                }
-            }
-        }
-        const auto all = pressure_snapshot();
-        kv_pressure_.observe(all, !build_round_membership().empty());
-        if (replacement_) return false;
+        kv_pressure_.observe(pressure_snapshot(), !build_round_membership().empty());
+        if (!kv_pressure_.pressure_needed()) return false;
         std::vector<KvPressureRequest> resident;
         std::vector<std::shared_ptr<Request>> requests;
         for (const auto& request : slots_) {
@@ -2542,142 +2549,86 @@ private:
                 requests.push_back(request);
             }
         }
-        std::shared_ptr<Request> recipient;
-        ExecutionWindow growth;
-        for (const auto& request : requests) {
-            if (request->growth_blocked && request->completion_member) recipient = request;
+        // A blocked completion member grows first; otherwise the oldest blocked resident.
+        std::size_t recipient_index = requests.size();
+        for (std::size_t i = 0; i < requests.size(); ++i) {
+            const auto& request = requests[i];
+            if (!request->growth_blocked) continue;
+            if (recipient_index == requests.size()) {
+                recipient_index = i;
+                continue;
+            }
+            const auto& chosen = requests[recipient_index];
+            if (request->completion_member != chosen->completion_member
+                    ? request->completion_member
+                    : request->queue_order < chosen->queue_order)
+                recipient_index = i;
         }
-        if (!recipient) {
-            for (const auto& request : requests) {
-                if (request->growth_blocked &&
-                    (!recipient || request->queue_order < recipient->queue_order))
-                    recipient = request;
-            }
-        }
-        std::shared_ptr<Request> replacement;
-        std::vector<std::shared_ptr<Request>> replacement_options;
-        AdmissionResources needed;
-        auto reason = KvPressureReason::Growth;
-        if (recipient && kv_pressure_.pressure_needed()) {
-            growth = recipient->recovery_waiting_resources
-                         ? recipient->recovery_window
-                         : instance_.program->plan_window(
-                               *recipient->lane,
-                               window_consumed(*recipient) +
-                                   std::min<std::uint32_t>(8192, recipient->budget->remaining()));
-            needed = growth.admission;
-            if (!recipient->completion_member && !instance_.program->reserve_suspension_credit(
-                                                     recipient->id, growth.suspension_bytes)) {
-                bool funded = false;
-                if (!recipient->recovery_waiting_resources) {
-                    for (auto grant =
-                             std::min<std::uint32_t>(8192, recipient->budget->remaining()) / 2;
-                         grant != 0; grant /= 2) {
-                        growth = instance_.program->plan_window(
-                            *recipient->lane, window_consumed(*recipient) + grant);
-                        if (instance_.program->reserve_suspension_credit(recipient->id,
-                                                                         growth.suspension_bytes)) {
-                            needed = growth.admission;
-                            funded = true;
-                            break;
-                        }
-                    }
-                }
-                if (!funded) return false;
-            }
-        } else if (kv_pressure_.allows_ingress(all.size(), !suspended_.empty())) {
-            for (const auto& pending : pending_snapshot()) {
-                if (window_head_id_ != 0 && pending->id != window_head_id_ &&
-                    window_head_bypass_ == 0)
-                    break;
-                if (pending->cancelled.load(std::memory_order_acquire)) continue;
-                try {
-                    ensure_base_plan(pending);
-                } catch (...) {
-                    (void)remove_pending_error(pending, std::current_exception());
-                    continue;
-                }
-                if (!admission_resources_fit(pending->completion_resources, admission_capacity_))
-                    continue;
-                replacement_options.push_back(pending);
-            }
-            if (replacement_options.empty()) return false;
-            reason = KvPressureReason::WaitingReplacement;
-            recipient.reset();
-        } else
-            return false;
-
-        reclaim_completed_gpu_cache();
-        if (recipient && reclaim_unused_windows(needed, recipient.get())) {
-            growth_priority_ = recipient->id;
-            return true;
-        }
-        const auto victim_order = kv_pressure_.ranked_victims(resident, reason);
-        if (recipient) replacement_options.push_back(nullptr);
-        for (const auto& option : replacement_options) {
-            replacement              = option;
-            bool replacement_claimed = false;
-            if (replacement) {
-                needed = replacement->base_plan->summary().admission;
-                // Hold completion capacity through capture and physical admission. A queued
-                // member does not need RAM backing, but its future must remain exclusive.
-                replacement_claimed = claim_completion(replacement);
-                if (replacement_claimed) {
-                    instance_.program->release_suspension_credit(replacement->id);
-                } else if (!instance_.program->reserve_suspension_credit(
-                               replacement->id,
-                               replacement->base_plan->summary().suspension_bytes)) {
-                    continue;
-                }
-            }
-            for (const std::size_t index : victim_order) {
-                if (requests[index] == recipient) continue;
-                const std::vector<std::shared_ptr<Request>> victims{requests[index]};
-                bool fits = post_release_fits(needed, recipient.get(), victims);
-                if (!fits && !recipient) {
-                    fits = reclaim_unused_windows(needed, nullptr, victims);
-                }
-                if (!fits && recipient && !recipient->recovery_waiting_resources) {
-                    for (auto grant =
-                             std::min<std::uint32_t>(8192, recipient->budget->remaining()) / 2;
-                         grant != 0; grant /= 2) {
-                        const auto smaller = instance_.program->plan_window(
-                            *recipient->lane, window_consumed(*recipient) + grant);
-                        if (!post_release_fits(smaller.admission, recipient.get(), victims))
-                            continue;
-                        if (!recipient->completion_member &&
-                            !instance_.program->reserve_suspension_credit(recipient->id,
-                                                                          smaller.suspension_bytes))
-                            continue;
-                        needed = smaller.admission;
-                        fits   = true;
+        if (recipient_index == requests.size()) return false;
+        const auto recipient      = requests[recipient_index];
+        auto growth               = recipient->recovery_waiting_resources
+                                        ? recipient->recovery_window
+                                        : instance_.program->plan_window(
+                                              *recipient->lane,
+                                              window_consumed(*recipient) +
+                                                  std::min<std::uint32_t>(8192, recipient->budget->remaining()));
+        AdmissionResources needed = growth.admission;
+        if (!recipient->completion_member &&
+            !instance_.program->reserve_suspension_credit(recipient->id, growth.suspension_bytes)) {
+            bool funded = false;
+            if (!recipient->recovery_waiting_resources) {
+                for (auto grant = std::min<std::uint32_t>(8192, recipient->budget->remaining()) / 2;
+                     grant != 0; grant /= 2) {
+                    growth = instance_.program->plan_window(*recipient->lane,
+                                                            window_consumed(*recipient) + grant);
+                    if (instance_.program->reserve_suspension_credit(recipient->id,
+                                                                     growth.suspension_bytes)) {
+                        needed = growth.admission;
+                        funded = true;
                         break;
                     }
                 }
-                if (!fits) continue;
-                for (const auto& victim : victims) pressure_victims_.push_back(victim);
-                if (replacement)
-                    replacement_ = std::move(replacement);
-                else
-                    growth_priority_ = recipient->id;
-                const auto victim = pressure_victims_.front();
-                pressure_victims_.pop_front();
-                if (begin_live_suspension(victim)) return true;
-                pressure_victims_.clear();
-                if (replacement_) {
-                    instance_.program->release_suspension_credit(replacement_->id);
-                    release_completion_claim(replacement_);
-                    replacement_.reset();
-                }
-                growth_priority_ = 0;
-                return false;
             }
-            if (replacement) {
-                instance_.program->release_suspension_credit(replacement->id);
-                if (replacement_claimed) release_completion_claim(replacement);
-            }
+            if (!funded) return false;
         }
-        if (recipient && !recipient->completion_member) {
+
+        reclaim_completed_gpu_cache();
+        if (reclaim_unused_windows(needed, recipient.get())) {
+            growth_priority_ = recipient->id;
+            return true;
+        }
+        // Suspend the shortest latest-first prefix whose release fits the growth, preferring a
+        // smaller useful grant to another capture. Captures run one at a time; the released
+        // capacity stays held for this recipient until the last capture completes.
+        std::vector<std::shared_ptr<Request>> victims;
+        for (const std::size_t index : kv_pressure_.ranked_victims(resident, recipient_index)) {
+            victims.push_back(requests[index]);
+            bool fits = post_release_fits(needed, recipient.get(), victims);
+            if (!fits && !recipient->recovery_waiting_resources) {
+                for (auto grant = std::min<std::uint32_t>(8192, recipient->budget->remaining()) / 2;
+                     grant != 0; grant /= 2) {
+                    const auto smaller = instance_.program->plan_window(
+                        *recipient->lane, window_consumed(*recipient) + grant);
+                    if (!post_release_fits(smaller.admission, recipient.get(), victims)) continue;
+                    if (!recipient->completion_member &&
+                        !instance_.program->reserve_suspension_credit(recipient->id,
+                                                                      smaller.suspension_bytes))
+                        continue;
+                    needed = smaller.admission;
+                    fits   = true;
+                    break;
+                }
+            }
+            if (!fits) continue;
+            pressure_victims_.assign(victims.begin() + 1, victims.end());
+            pressure_growth_ = needed;
+            growth_priority_ = recipient->id;
+            if (begin_live_suspension(victims.front())) return true;
+            pressure_victims_.clear();
+            growth_priority_ = 0;
+            break;
+        }
+        if (!recipient->completion_member) {
             (void)instance_.program->reserve_suspension_credit(recipient->id,
                                                                recipient->suspension_bytes);
         }
@@ -4173,11 +4124,6 @@ private:
         const auto parked = suspended_;
         for (const auto& request : parked) { complete_error(request, error); }
         pressure_victims_.clear();
-        if (replacement_) {
-            detail::run_secondary_cleanup(
-                [&] { instance_.program->release_suspension_credit(replacement_->id); });
-            replacement_.reset();
-        }
         if (prefill_lane_) {
             instance_.request_memory.deactivate();
             prefill_lane_.reset();
@@ -4317,9 +4263,7 @@ private:
                     if (!live_transfer_ && !copy_hold_ && !prefill_lane_) {
                         const auto snapshot = pressure_snapshot();
                         kv_pressure_.observe(snapshot, !build_round_membership().empty());
-                        if (!replacement_ && growth_priority_ == 0 && try_resume_live_request()) {
-                            continue;
-                        }
+                        if (growth_priority_ == 0 && try_resume_live_request()) { continue; }
                     }
                 }
                 const RoundMembership membership = build_round_membership();
@@ -4398,8 +4342,7 @@ private:
                     continue;
                 }
 
-                if (!live_transfer_ && pressure_victims_.empty() && !replacement_ &&
-                    start_generation_recovery()) {
+                if (!live_transfer_ && pressure_victims_.empty() && start_generation_recovery()) {
                     continue;
                 }
 
@@ -4483,7 +4426,7 @@ private:
     std::deque<std::shared_ptr<Request>> suspended_;
     std::optional<LiveTransfer> live_transfer_;
     std::deque<std::shared_ptr<Request>> pressure_victims_;
-    std::shared_ptr<Request> replacement_;
+    AdmissionResources pressure_growth_{};
     std::uint64_t growth_priority_    = 0;
     std::uint64_t window_head_id_     = 0;
     std::uint32_t window_head_bypass_ = 0;

@@ -24,10 +24,8 @@ struct KvPressureRequest {
     bool useful_chunk_since_resume = true;
 };
 
-enum class KvPressureReason : std::uint8_t { WaitingReplacement, Growth };
-
 // Worker-local RAM-on policy. Resource geometry, image reservations, transfer ownership and
-// the atomic completion-cohort handoff belong to the executor/target transaction.
+// completion-cohort claims belong to the executor/target transaction.
 class KvPressurePolicy {
 public:
     KvPressurePolicy(std::uint32_t concurrency, std::size_t max_outstanding)
@@ -55,12 +53,18 @@ public:
     }
 
     // Suspended requests hold older queue order, so they resume before any fresh admission.
-    [[nodiscard]] bool allows_ingress(std::size_t admitted_count,
-                                      bool has_suspended) const noexcept {
-        return admitted_count < max_outstanding_ && !has_suspended;
+    // A fresh request admitted beside a growth-blocked resident would take the pages that
+    // resident needs and become its first victim, so ingress also waits for that growth.
+    [[nodiscard]] bool allows_ingress(std::span<const KvPressureRequest> admitted) const noexcept {
+        return admitted.size() < max_outstanding_ &&
+               std::none_of(
+                   admitted.begin(), admitted.end(),
+                   [](const auto& r) { return !r.resident || r.growth_blocked; });
     }
 
     [[nodiscard]] bool pressure_needed() const noexcept { return pressure_needed_; }
+
+    [[nodiscard]] bool no_executable_work() const noexcept { return no_executable_work_; }
 
     [[nodiscard]] static std::optional<std::uint64_t>
     oldest_suspended(std::span<const KvPressureRequest> admitted) noexcept {
@@ -71,20 +75,24 @@ public:
         return oldest ? std::optional(oldest->id) : std::nullopt;
     }
 
-    // Indices into resident of the single-request victims, latest admitted first. The caller
-    // proves the post-transition fit for one victim at a time and re-plans after each capture.
+    // Indices into resident of the victims that may make room for resident[recipient], latest
+    // admitted first. An ordinary recipient never displaces an older resident: with no newer
+    // eligible victim it waits for peers to complete or block. A completion-cohort recipient
+    // may displace any eligible resident. The caller suspends the shortest latest-first prefix
+    // whose release proves the exact post-transition fit, one capture at a time.
     [[nodiscard]] std::vector<std::size_t>
-    ranked_victims(std::span<const KvPressureRequest> resident, KvPressureReason reason) const {
-        if (resident.size() > concurrency_) {
+    ranked_victims(std::span<const KvPressureRequest> resident, std::size_t recipient) const {
+        if (resident.size() > concurrency_ || recipient >= resident.size()) {
             throw std::logic_error("KV pressure resident bound exceeded");
         }
         std::vector<std::size_t> result;
-        if (reason == KvPressureReason::Growth && !pressure_needed_) { return result; }
+        if (!pressure_needed_) { return result; }
+        const auto& owner = resident[recipient];
         for (std::size_t i = 0; i < resident.size(); ++i) {
             const auto& r = resident[i];
-            if (r.resident && !r.completion_member && r.suspend_ready &&
+            if (i != recipient && r.resident && !r.completion_member && r.suspend_ready &&
                 (r.useful_chunk_since_resume || no_executable_work_) &&
-                (reason != KvPressureReason::WaitingReplacement || r.growth_blocked)) {
+                (owner.completion_member || older(owner, r))) {
                 result.push_back(i);
             }
         }
