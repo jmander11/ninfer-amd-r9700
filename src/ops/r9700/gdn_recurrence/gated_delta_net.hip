@@ -286,6 +286,8 @@ void require_selector(const Tensor& tensor, int batch, const char* label, bool a
 
 } // namespace
 
+static_assert(kMaximumPrefillWidth <= r9700::gdn_recurrence::kChunkedMaximumWidth);
+
 std::size_t gated_delta_net_workspace_capacity_bytes(std::int32_t width, bool normalize_qk) {
     if (width < 1 || width > kMaximumPrefillWidth) {
         throw std::invalid_argument("gated_delta_net: invalid workspace width");

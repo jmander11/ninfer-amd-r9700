@@ -741,12 +741,14 @@ int main() {
         qualify_ordinary(3, true, false, 17, device.stream);
         qualify_ordinary(64, true, false, 19, device.stream);
         qualify_ordinary(128, false, true, 23, device.stream);
-        // Chunked widths with a partial final chunk, including in-place state aliasing.
-        qualify_ordinary(65, true, true, 29, device.stream);
-        qualify_ordinary(100, false, true, 31, device.stream);
+        // Chunked widths with a partial final chunk, including in-place state aliasing. One
+        // chunk (T<=64) stays direct; prepared chunk work begins at T65.
         qualify_ordinary(16, false, true, 41, device.stream);
         qualify_ordinary(33, true, true, 43, device.stream);
-        // Prepared chunk work begins at T256; protect both sides and its masked final chunk.
+        qualify_ordinary(64, false, true, 47, device.stream);
+        qualify_ordinary(65, true, true, 29, device.stream);
+        qualify_ordinary(100, false, true, 31, device.stream);
+        // Multi-chunk prepared widths with full and masked final chunks.
         qualify_ordinary(255, true, true, 97, device.stream);
         qualify_ordinary(256, false, true, 101, device.stream);
         qualify_ordinary(257, true, true, 103, device.stream);
