@@ -6,6 +6,29 @@ Upstream is the RTX 5090/CUDA `dylanbrodiefafard/ninfer` repository’s `experim
 
 Reconciled through upstream `4d5c4f22bf146eeadbfb7d42ed3f141f5bf6131b` (2026-11-07), with the 2026-11-08 AMD ports below. The next sync reviews upstream changes after `4d5c4f22` against current AMD behavior. The fetched `experimental` history was force-updated after the previous `c88d194f` baseline, which remains its ancestor. Upstream previously rewrote the history containing the former `7142d4280123d9df507f863c1ae3d16f50e6476e` baseline; the 2026-10-28 reconciliation below maps its dispositions onto the current history without an ancestry merge.
 
+## Secondary-source review: SlyBase/vllm-sly-Radiance (2026-11-17)
+
+Reviewed the last 300 non-merge commits (276 after dependency bumps) of `SlyBase/vllm-sly-Radiance` `main` through
+`54df4b0` (2026-11-16): the subjects, `docs/NOT-ADOPTED.md`, `PERFORMANCE.md`, the GDN
+chunk-scan notes, and the candidate commits. This is an ideas-only review of a vLLM/MXFP4 stack for
+the same card and model. Neither it nor its sources ggz14/radiance-vllm-mxfp4 and
+StillDeadcode/libr4d is merged ancestry. libr4d carries no license, so only its ideas are reused.
+Its September 2026 prefill ideas (epilogue scaling, register-budget occupancy, A-from-global
+GEMM) were adopted earlier through native kernels.
+
+| Source | AMD disposition |
+|---|---|
+| libr4d `kkt_solve` + `chunk_scan` split | Ported as a native design. Above one chunk, the chunk-parallel preparation now also emits each value head's decayed A/P tiles, the diagonal inverses and the decay scalars. The recurrence stages a chunk with one load round and two barriers and prefetches the next chunk's values. Output and state are bit-identical. The Op takes 0.604 → 0.326 ms at T2048; whole prefill gains +3.2% at 8K and +1.9% at 32K (`docs/performance.md`, 2026-11-17). |
+| `0d1d9de` / `e956efd` drafter prefill-window skip (#187 row form) | Ported as a native design, with whole chunks only. A DFlash prefill chunk that ends at least 2048 positions before the next ring read (prompt end, rewrite or system-prompt capture, next ladder mark) skips its `fc` projection and context K/V append. Unlike Radiance it stays active with prefix reuse, because every capture point is covered. Ring bits at every read point are unchanged. Whole prefill gains about +0.8% at 32K. The row-granular trim is not adopted: changing the GEMM width could change rounding for its small gain. |
+| `7ec680f` GDN exact decay past a 160 span (libr4d#4) | Not applicable. The AMD chunk kernel computes each decay as `exp(b_i − b_j)` with a non-positive exponent and never splits it about the chunk midpoint. |
+| `b37a2e8` split-K fence on every thread | Already equivalent. Persistent decode fences on every thread before its agent-scope barrier. Sampling and speculative completion counters use release add with an acquiring last arriver. |
+| `af92869` embedding host offload | Already equivalent: `text/token_embedding` is `MappedHost` with staged prompt rows. |
+| `7fa507b`, `9f9747b` hot-row and int4 drafter heads | Already covered by the optimized proposal head. |
+| `3ca9f35` newest-turn-only reasoning template | Not adopted. With `preserve_thinking` off, AMD already drops reasoning at or before the last real user query. Their evidence compares against replaying every turn, not against that rule. Dropping loop-turn reasoning would also add a re-prefill on every tool step. |
+| prefill chunk 4096, FP8 query/PV attention, double-buffered attention staging, heaviest-first attention order | Previously measured out or excluded by the precision policy (`docs/performance.md`). At depth, chunked prefill rows see nearly equal context, so the order matters little. Their published prefill advantage includes a −50 mV undervolt and BetterBench nominal depths about 25% above real prompt tokens. |
+| Cactus (`06ce04b`, `30708ab`), Nucleus Speculative Decoding (`c173c7f`) | Excluded: lossy speculative acceptance that changes the output distribution. Cactus also caused repetition loops for them. |
+| BCQ/H128 MXFP4 codecs, PSW/SKIPPAD/tall tiles, TetraAttention KV4, vLLM scheduling/Inductor/launcher, multi-GPU, other models | Excluded: tied to the MXFP4 weight format or the vLLM stack, unmeasured, or outside the single-model contract. |
+
 ## Batch-sized attention partitions, headroom and documentation (2026-11-08)
 
 The fetched `experimental` tip is `4d5c4f22bf146eeadbfb7d42ed3f141f5bf6131b`. Every commit after `c88d194f` is dispositioned:

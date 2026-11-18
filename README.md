@@ -57,17 +57,17 @@ Shared cache capacity in tokens, measured 2026-11-16 (MTP columns 2026-11-17). S
 
 ## Performance and quality
 
-Measured 2026-11-16 on one R9700, using the same build for both caches. Settings: Release build, Device Graphs, power `auto`, chunk 2048 and optimized proposal heads. Each cell shows NVFP4 / TQ.
+Measured 2026-11-16 on one R9700, using the same build for both caches. The prompt-processing table was remeasured on 2026-11-17 after the GDN chunk-record and DFlash prefill changes; the answer-generation tables are unaffected. Settings: Release build, Device Graphs, power `auto`, chunk 2048 and optimized proposal heads. Each cell shows NVFP4 / TQ.
 
 **Prompt processing (prefill), one request:**
 
 | Prompt tokens | Average tokens/s |
 |---:|---:|
-| 8,192 | 3,456 / 3,444 |
-| 32,768 | 2,959 / 2,953 |
-| 65,536 | 2,506 / 2,486 |
-| 131,072 | 1,923 / 1,897 |
-| 245,760 | 1,364 / 1,339 |
+| 8,192 | 3,581 / 3,541 |
+| 32,768 | 3,053 / 3,038 |
+| 65,536 | 2,572 / 2,545 |
+| 131,072 | 1,960 / 1,931 |
+| 245,760 | 1,382 / 1,357 |
 
 **Answer generation.** Both tables use p-less sampling at the default temperature of 1.5 and 512 output tokens per request, including reasoning. Runs use a 65,536-token request limit, with RAM/SSD and Vision off. Rates exclude prompt processing. C>1 rates are totals across requests while all are generating; divide by C for the per-request rate. Each cell is the mean of three measured waves after a warmup; DFlash C1 uses twelve.
 

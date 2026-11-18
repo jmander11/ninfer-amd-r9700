@@ -33,6 +33,59 @@ The latest measurements use:
 
 The GPU must otherwise be idle. Kernel and service timings use HIP events around the claimed physical work after warmup; serving throughput below uses explicitly identified wall intervals. Operators are checked against independent exact/FP64 reference calculations before their timings are used.
 
+### GDN chunked prefill: prepared chunk records (2026-11-17)
+
+The idea comes from the libr4d `kkt_solve`/`chunk_scan` split, found in the Radiance review (`maintainer/upstream-sync.md`). Phase timestamps of the previous recurrence at T2048 showed about 18 µs per 64-token chunk, mostly serialized load latency:
+- value loads for `Z`: 6.1 µs;
+- query loads for `O`: 4.2 µs;
+- decayed A/P from the FP32 products: 2.4 µs;
+- key loads: 1.4 µs;
+- gate scan: 0.8 µs;
+- diagonal solve and four barriers: about 1 µs.
+
+The WMMA arithmetic is a small part of that time.
+
+Above one chunk (T>=65), the chunk-parallel preparation now produces each value head's complete state-independent chunk record:
+- decayed FP16 A and P tiles;
+- the FP32-solved diagonal inverses;
+- the decay scalars.
+
+The recurrence stages a chunk with one load round. Keys, transposed keys and queries carry their per-token factors, which are applied once per CTA instead of once per wave. Two barriers remain per chunk, and the next chunk's values are prefetched during the current one. 16-byte-aligned LDS views make every fragment one `ds_load_b128` and remove the per-WMMA `s_wait_dscnt 0` serialization.
+
+Every formula, operand order and rounding site is unchanged. The prepared products are formed with swapped WMMA operands, so each lane owns a contiguous tile row; their bit equality depends on the instruction's per-element reduction being symmetric. A scratch comparison against the previous kernels found zero differing output and state bits at T16..8192, including partial chunks and steep-decay heads. Resources:
+- preparation: 68 VGPRs, 31,488 B LDS;
+- prepared recurrence: 231 VGPRs, 64,512 B LDS;
+- no scratch in either.
+
+One masked chunk (T<=64) keeps the direct kernel, because the extra launch made the prepared route up to 10% slower there. Workspace grows from 593,920 to 806,912 bytes per chunk (24.625 MiB at T2048). This is still below the planned workspace peak: production `workspace_capacity_bytes` and the auto KV payload are unchanged at `max_context=262144`.
+
+| Op latency (old → new, ms) | T65 | T128 | T256 | T512 | T1024 | T2048 | T4096 | T8192 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| public recurrence, ABBA | 0.044 → 0.036 | 0.047 → 0.036 | 0.088 → 0.058 | 0.163 → 0.087 | 0.302 → 0.157 | 0.604 → 0.326 | 1.293 → 0.721 | 2.674 → 1.550 |
+
+`gdn_recurrence_qual` passes the independent FP64 oracle with max output error 1.146e-5, relative L2 0.00186 and state error 1.67e-5, the same as before. It now also covers both sides of the 64/65 crossover. Greedy DFlash K7 output for P8192+G128 is token-identical to the previous build.
+
+Whole prefill (`ninfer_bench -p 8192,32768 --max-ctx 262144 --kv-capacity auto --spec dflash --draft-tokens 7 --lm-head-draft`, one warmup and three repetitions, HEAD/new/new/HEAD processes): 8K 3,410–3,450 → 3,539–3,540 tok/s (+3.2%); 32K 2,967–2,983 → 3,029–3,031 tok/s (+1.9%).
+
+### DFlash drafter prefill skip (2026-11-17)
+
+DFlash prefill costs about 0.95% of 32K prefill relative to no speculation: 2,958–2,984 against 2,998–3,001 tok/s, the HEAD binary run in A/B/A/B order. Most of that cost is the drafter's per-chunk `fc` projection and SWA-2048 context K/V append. A chunk that ends at least 2048 positions before the next ring read now skips that work. The next ring read is the prompt end, a pending rewrite or system-prompt capture, or the next ladder mark when capture is enabled (`qwen3.8-27b-model.md`, DFlash). Only whole chunks are skipped, so every read point sees the same ring bits.
+
+A greedy serving comparison between skip and forced no-skip builds covered a 23.9K fresh prompt, a ladder-head restore at 16,341, a RAM turn-checkpoint continuation and a RAM append, with custom marks 8192/14336 and system-prompt RAM capture on. Content, token counts, accepted/rejected draft counts and reuse paths were identical; only timing fields differed.
+
+Whole prefill (same command as the GDN entry above, GDN-only/skip/skip/GDN-only): 8K 3,519–3,562 → 3,562–3,566 tok/s (within noise); 32K 3,031–3,034 → 3,056–3,058 tok/s (+0.8%).
+
+The README prefill ladder (command below, adaptive DFlash K7) was remeasured on the build with both changes:
+
+| Codec | 8,192 | 32,768 | 65,536 | 131,072 | 245,760 |
+|---|---:|---:|---:|---:|---:|
+| NVFP4 (tok/s) | 3,580.7 | 3,053.1 | 2,571.8 | 1,959.8 | 1,382.4 |
+| NVFP4 vs 2026-11-16 | +3.6% | +3.2% | +2.6% | +1.9% | +1.4% |
+| TQ (tok/s) | 3,540.8 | 3,037.9 | 2,545.4 | 1,931.2 | 1,356.8 |
+| TQ vs 2026-11-16 | +2.8% | +2.9% | +2.4% | +1.8% | +1.3% |
+
+Standard deviations are ≤6 tok/s except TQ 8K (23). The gain shrinks with length because attention dominates long prefill.
+
 ### NVFP4 default and opt-in TQ-K4-V3 cache (2026-11-16)
 
 NVFP4 is now the production default growing cache and the KV-cache comparison baseline; `--kv-cache fp8-int4` stays selectable. `--kv-cache tq-k4-v3` stores each K/V head vector after a fixed signed Walsh-Hadamard rotation as 4-bit keys and 3-bit values with one FP16 norm-corrected scale each (228 bytes per head-token, NVFP4 288). The query rotation is fused into QK-norm/RoPE and the inverse output rotation into the LQ4 gated FP8 quantizer; both are compile-time template parameters with separate persistent-decode entries, so the NVFP4 and FP8/INT4 kernels are instruction-identical to the code before TQ. Same production LQ4 artifact, one R9700, HIP 7.15.26333, Linux 7.0.0-43, power `auto`, Compose graph environment, chunk 2048.
@@ -1292,6 +1345,8 @@ The alternative MLP codebook lookup interleaved nibble selectors before table lo
 Numerical evidence includes the existing independent FP64 producer oracle and complete exact code/scale/status checks against the independent E4M3FN encoder at both plain widths. The latter cover zero, NaN, positive/negative infinity and T255/256/257 dispatch boundaries. Temporary baseline comparisons also matched complete fused producer images, with/without cache warming, and persistent-decode qualification passed. Evidence and exact commands are under `profiles/bench/r9700-prefill-followup-20261016/`.
 
 ## Shared GDN chunk preparation (2026-10-16)
+
+Superseded on 2026-11-17 by the per-value-head chunk records above; this section records the earlier step.
 
 The follow-up optimization above targets state-independent work inside GDN rather than changing precision, clocks, scheduling or graph submission. For normalized ordinary T>=256, a separate chunk-parallel kernel computes normalized FP16 keys, FP32 query scales and FP32 QK/KK products once per Q/K head, shared by its three value heads. Per-value-head controls, FP16 A/P casts, diagonal solves and FP32 recurrent state stay in the existing recurrence. T16..255 keeps the direct chunk route. Caller-owned transient workspace is explicit in the Op and runtime plan: 18.125 MiB at T2048, reused below the existing MLP workspace peak. This is GDN scratch, not an attention KV-cache plane.
 
