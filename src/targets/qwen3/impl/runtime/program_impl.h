@@ -5204,6 +5204,26 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
             if (speculative_backend == SpeculativeBackend::DFlash) {
                 mark_workspace_usage(workspace_plan.dflash_context);
             }
+            if (speculative_backend == SpeculativeBackend::DFlash) {
+                // Drafter context is read at the prompt end and wherever this prefill captures
+                // lane state: its rewrite checkpoint, system-prompt boundary, or a ladder freeze
+                // at the first chunk end at or past the next mark. Each reads only the last
+                // local_capacity positions before it.
+                std::uint32_t next_read = staged.prompt_tokens;
+                if (staged.rewrite_checkpoint_capture &&
+                    staged.rewrite_checkpoint_capture->frontier > staged.cursor) {
+                    next_read = std::min(next_read, staged.rewrite_checkpoint_capture->frontier);
+                }
+                if (staged.system_prompt_capture && *staged.system_prompt_capture > staged.cursor) {
+                    next_read = std::min(next_read, *staged.system_prompt_capture);
+                }
+                if (staged.capture_context_checkpoints && captures_context_checkpoints() &&
+                    staging_hidden.data != nullptr && sequence.next_context_mark != 0) {
+                    next_read = std::min(next_read, sequence.next_context_mark);
+                }
+                schedule_state.dflash_context_keep_from =
+                    static_cast<std::int64_t>(next_read) - DFlashConfig::local_capacity;
+            }
             schedule::PrefillChunkResult result;
             const std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier =
                 staged.rewrite_checkpoint_capture

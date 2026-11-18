@@ -16,6 +16,12 @@ DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state) {
         throw std::logic_error("DFlash prefill controls are unavailable");
     }
     return dflash_feature_sink(state, [&state](const Tensor& features, const Tensor& positions) {
+        // The drafter's layers are sliding-window: every slot this chunk would write is
+        // overwritten before any capture point or the prompt end reads the ring.
+        if (static_cast<std::int64_t>(state.text_kv_base) + features.ne[1] <=
+            state.dflash_context_keep_from) {
+            return;
+        }
         auto& frame     = *state.execution.io.dflash_decode;
         const auto slot = frame.lanes.ne[0] - 1;
         Tensor count    = frame.append_counts.slice(0, slot, 1);

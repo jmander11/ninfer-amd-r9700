@@ -70,6 +70,9 @@ struct PrefillContext {
     qwen3::PagedKVPublication* mtp_kv_publication         = nullptr;
     std::uint32_t* mtp_kv_status                          = nullptr;
     PromptEmbeddingStaging* prompt_embedding              = nullptr;
+    // DFlash prefill: no drafter state at a capture point or the prompt end reads context rows
+    // below this absolute position, so a chunk ending at or below it skips its context append.
+    std::int64_t dflash_context_keep_from = 0;
 };
 
 struct OrdinaryBatchContext {
